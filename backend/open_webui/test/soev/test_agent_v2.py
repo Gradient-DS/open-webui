@@ -3079,6 +3079,11 @@ TEMPORARY = 'temporary:sid-1:chat'
 @pytest.fixture
 def temporary(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
     """Connected sockets sid-1 and sid-2, and no temporary chat bookmarks yet."""
+    from open_webui import env
+
+    monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
+    monkeypatch.setattr('open_webui.soev.acting.requester_ref', lambda: 'owui:user:alice')
+    monkeypatch.setattr('open_webui.soev.acting.user_token', AsyncMock(return_value='fictional-user-token'))
     monkeypatch.setattr(socket_main, 'SESSION_POOL', {'sid-1': {}, 'sid-2': {}})
     monkeypatch.setattr(socket_main, 'TEMPORARY_AGENT_THREADS', {})
     return chat
@@ -3090,28 +3095,35 @@ async def test_a_temporary_chat_continues_its_thread_without_storing_messages(te
     chunks = await temporary.turn('second', 'a2', 'a1', chat_id=TEMPORARY)
 
     assert content(chunks) == 'Answer: second'
-    assert [path for path, _ in temporary.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    assert temporary.mutations()[0][1]['temporary'] is True
+    await temporary.turn('third', 'a3', 'a2', chat_id=TEMPORARY)
+    await temporary.turn('forked second', 'a2b', 'a1', chat_id=TEMPORARY)
+    assert temporary.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
+    assert socket_main.TEMPORARY_AGENT_THREADS[TEMPORARY]['bookmarks']['a2b']['thread_id'] == 'thr-2'
+    assert [path for path, _ in temporary.mutations()[:2]] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     assert not temporary.messages
     assert socket_main.TEMPORARY_AGENT_THREADS[TEMPORARY]['bookmarks']['a2'] == {'thread_id': 'thr-1', 'position': 5}
 
 
 @pytest.mark.asyncio
-async def test_a_closed_socket_deletes_its_temporary_chats_threads(temporary: Chat) -> None:
+async def test_a_closed_socket_forgets_only_its_temporary_bookmarks(temporary: Chat) -> None:
     await temporary.turn('first', 'a1', chat_id=TEMPORARY)
     await temporary.turn('regenerated', 'a1b', chat_id=TEMPORARY)
     await temporary.turn('other tab', 'b1', chat_id='temporary:sid-2:chat')
 
     await socket_main._release_temporary_agent_threads(['sid-1'])
 
-    assert sorted(temporary.api.chat.threads) == ['thr-3']
+    assert sorted(temporary.api.chat.threads) == ['thr-1', 'thr-2', 'thr-3']
+    assert not [request for request in temporary.api.chat.requests if request.method == 'DELETE']
     assert list(socket_main.TEMPORARY_AGENT_THREADS) == ['temporary:sid-2:chat']
 
 
 @pytest.mark.asyncio
-async def test_a_temporary_turn_ending_after_its_socket_closed_deletes_its_thread(temporary: Chat) -> None:
+async def test_a_temporary_turn_ending_after_its_socket_closed_keeps_remote_thread(temporary: Chat) -> None:
     await temporary.turn('first', 'a1', chat_id='temporary:sid-gone:chat')
 
-    assert temporary.api.chat.threads == {}
+    assert list(temporary.api.chat.threads) == ['thr-1']
+    assert not [request for request in temporary.api.chat.requests if request.method == 'DELETE']
     assert socket_main.TEMPORARY_AGENT_THREADS == {}
 
 

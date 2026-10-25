@@ -38,7 +38,7 @@ async def _login_token(user) -> str:
     """The requesting user's own platform login token; nothing else may act for them."""
     token = await user_token(f'owui:user:{user.id}')
     if not token:
-        raise SoevApiError(403, 'scope_insufficient', 'Platform login required', 'identity:platform_login')
+        raise SoevApiError(401, 'sign_in', 'Platform login required', 'identity:platform_login')
     return token
 
 

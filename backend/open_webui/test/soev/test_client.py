@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -16,7 +15,7 @@ from open_webui.soev.client import SoevApiError, SoevClient
 
 
 @pytest_asyncio.fixture
-async def recorded_http(monkeypatch):
+async def recorded_http(monkeypatch, login_tokens):
     """Record requests without opening a network connection."""
     requests = []
     responses = []
@@ -44,20 +43,18 @@ async def recorded_http(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_bearer_key_and_subject_assertion_are_both_sent(recorded_http):
-    """The client mints an assertion for the external ref only when acting as a user."""
+async def test_the_product_key_and_login_token_are_sent_without_a_subject(recorded_http):
+    """The client sends the login token as its only person authority."""
     requests, responses = recorded_http
     responses.extend([httpx.Response(200, json={'key': 'kb'}) for _ in range(2)])
-    minter = Mock(return_value='test-assertion')
-    client = SoevClient('https://soev.invalid/', 'test-api-key', subject_minter=minter, timeout=7.0)
+    client = SoevClient('https://soev.invalid/', 'test-api-key', timeout=7.0)
 
     assert await client.get('/v1/collections/kb', as_user='owui:user:alice', params={'limit': 2}) == {'key': 'kb'}
     await client.get('/v1/collections/kb')
 
-    minter.assert_called_once_with('owui:user:alice')
     assert str(requests[0].url) == 'https://soev.invalid/v1/collections/kb?limit=2'
     assert requests[0].headers['Authorization'] == 'Bearer test-api-key'
-    assert requests[0].headers['X-Soev-Subject'] == 'test-assertion'
+    assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert 'X-Soev-Subject' not in requests[1].headers
     assert 'Idempotency-Key' not in requests[0].headers
     assert requests[0].extensions['timeout']['read'] == 7.0
@@ -67,8 +64,7 @@ async def test_the_bearer_key_and_subject_assertion_are_both_sent(recorded_http)
 async def test_upload_document_sends_chunks_with_the_callers_admission(recorded_http):
     requests, responses = recorded_http
     responses.append(httpx.Response(204))
-    minter = Mock(return_value='fictional-assertion')
-    client = SoevClient('https://soev.invalid', 'fictional-key', subject_minter=minter, timeout=7.0)
+    client = SoevClient('https://soev.invalid', 'fictional-key', timeout=7.0)
 
     async def chunks():
         yield b'fictional-'
@@ -87,10 +83,10 @@ async def test_upload_document_sends_chunks_with_the_callers_admission(recorded_
     assert request.headers['Content-Length'] == '16'
     assert request.headers['Content-Type'] == 'text/plain'
     assert request.headers['Authorization'] == 'Bearer fictional-key'
-    assert request.headers['X-Soev-Subject'] == 'fictional-assertion'
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
+    assert 'X-Soev-Subject' not in request.headers
     assert 'Idempotency-Key' not in request.headers
     assert request.extensions['timeout']['read'] == 7.0
-    minter.assert_called_once_with('owui:user:fern')
 
 
 @pytest.mark.asyncio
@@ -128,7 +124,7 @@ async def test_get_text_returns_markdown_without_json_parsing(recorded_http):
 
 
 @pytest.mark.asyncio
-async def test_get_text_carries_the_subject_assertion(recorded_http):
+async def test_get_text_carries_the_login_token(recorded_http):
     """Text reads carry user authority and preserve API problem errors."""
     requests, responses = recorded_http
     problem = {'code': 'file_not_found', 'detail': 'The file does not exist.'}
@@ -138,16 +134,13 @@ async def test_get_text_carries_the_subject_assertion(recorded_http):
             httpx.Response(404, json=problem, headers={'Content-Type': 'application/problem+json'}),
         ]
     )
-    minter = Mock(return_value='test-assertion')
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter)
+    client = SoevClient('https://soev.invalid', 'test-api-key')
 
     assert await client.get_text('/v1/files/file/text', as_user='owui:user:alice') == '# Title\n'
     with pytest.raises(SoevApiError) as caught:
         await client.get_text('/v1/files/missing/text', as_user='owui:user:alice')
 
-    assert minter.call_count == 2
-    minter.assert_called_with('owui:user:alice')
-    assert all(request.headers['X-Soev-Subject'] == 'test-assertion' for request in requests)
+    assert all(request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in requests)
     assert all(request.headers['Authorization'] == 'Bearer test-api-key' for request in requests)
     assert caught.value.status == 404
     assert caught.value.code == problem['code']
@@ -159,26 +152,23 @@ async def test_get_text_carries_the_subject_assertion(recorded_http):
 async def test_a_mutation_requires_an_idempotency_key(recorded_http, method):
     """Every mutation requires a nonempty caller-owned key before any I/O."""
     requests, responses = recorded_http
-    minter = Mock(return_value='test-assertion')
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter)
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     with pytest.raises(TypeError):
         await client.send(method, '/v1/collections/kb', {})  # pylint: disable=missing-kwoa
     for invalid in ('', '   ', None):
         with pytest.raises(ValueError, match='idempotency'):
             await client.send(method, '/v1/collections/kb', {}, idempotency_key=invalid)
     assert requests == []
-    minter.assert_not_called()
 
     responses.append(httpx.Response(202, json={'id': 'job-1'}))
     result = await client.send(
         method, '/v1/collections/kb', {'name': 'Renamed'}, as_user='owui:user:alice', idempotency_key='operation-1'
     )
-    minter.assert_called_once_with('owui:user:alice')
     assert result == {'id': 'job-1'}
     assert requests[0].method == method
     assert requests[0].headers['Idempotency-Key'] == 'operation-1'
     assert requests[0].headers['Authorization'] == 'Bearer test-api-key'
-    assert requests[0].headers['X-Soev-Subject'] == 'test-assertion'
+    assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert json.loads(requests[0].content) == {'name': 'Renamed'}
 
 
@@ -232,9 +222,7 @@ async def test_an_upstream_502_never_leaks_its_body(recorded_http, caplog, statu
         )
     )
     with caplog.at_level(logging.DEBUG), pytest.raises(SoevApiError) as caught:
-        await SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion').get(
-            '/v1/collections', as_user='owui:user:alice'
-        )
+        await SoevClient('https://soev.invalid', 'test-api-key').get('/v1/collections', as_user='owui:user:alice')
 
     assert caught.value.status == status
     is_problem = content_type.startswith('application/problem+json')
@@ -287,51 +275,95 @@ async def test_pages_walks_every_cursor(recorded_http):
 
 
 @pytest.mark.asyncio
-async def test_every_page_carries_a_fresh_assertion(recorded_http, caplog):
-    """Each cursor request mints a distinct assertion for the same external ref."""
+async def test_every_page_carries_the_login_token(recorded_http, caplog):
+    """Each cursor request keeps the same person without a subject assertion."""
     requests, responses = recorded_http
     responses.extend(
         httpx.Response(200, json={'data': [{'key': index}], 'next_cursor': cursor})
         for index, cursor in enumerate(['cursor-1', 'cursor-2', None])
     )
-    minted_for = []
-
-    def mint(user_ref):
-        minted_for.append(user_ref)
-        return f'test-assertion-{len(minted_for)}'
-
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=mint)
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     with caplog.at_level(logging.DEBUG):
         assert [item async for item in client.pages('/v1/collections', as_user='owui:user:alice')] == [
             {'key': 0},
             {'key': 1},
             {'key': 2},
         ]
-    assert minted_for == ['owui:user:alice'] * 3
-    assert [request.headers['X-Soev-Subject'] for request in requests] == [
-        'test-assertion-1',
-        'test-assertion-2',
-        'test-assertion-3',
-    ]
-    assert 'test-assertion-' not in caplog.text
+    assert [request.headers['X-Soev-User-Token'] for request in requests] == [
+        'fictional-login:owui:user:alice',
+    ] * 3
+    assert all('X-Soev-Subject' not in request.headers for request in requests)
+    assert 'fictional-login:' not in caplog.text
     assert 'test-api-key' not in caplog.text
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('method', ['get', 'pages', 'send', 'post_bytes'])
-async def test_as_user_without_a_minter_is_refused(recorded_http, method):
-    """Acting as a user requires a configured minter before any HTTP request."""
+@pytest.mark.parametrize(
+    'method',
+    [
+        'get',
+        'get_text',
+        'pages',
+        'send',
+        'post_bytes',
+        'stream',
+        'stream_task',
+        'chat_stream',
+        'chat_post',
+        'chat_delete',
+        'complete_task',
+    ],
+)
+async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeypatch):
+    """Missing login proof fails closed before any transport is opened."""
     requests, _ = recorded_http
     client = SoevClient('https://soev.invalid', 'test-api-key')
-    with pytest.raises(ValueError, match='minter'):
-        if method == 'pages':
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr('open_webui.soev.client.user_token', AsyncMock(return_value=None))
+    with pytest.raises(SoevApiError) as caught:
+        if method in {'stream', 'stream_task', 'chat_stream'}:
+            if method == 'stream':
+                stream = client.stream('/v1/original', as_user='owui:user:alice')
+            elif method == 'stream_task':
+                stream = client.stream_task({}, as_user='owui:user:alice')
+            else:
+                stream = client.chat_stream('/v1/chat/threads', {}, as_user='owui:user:alice')
+            await anext(stream)
+        elif method == 'chat_post':
+            await client.chat_post('/v1/chat/threads', {}, as_user='owui:user:alice')
+        elif method == 'chat_delete':
+            await client.chat_delete('/v1/chat/threads/fictional', as_user='owui:user:alice')
+        elif method == 'complete_task':
+            await client.complete_task({}, as_user='owui:user:alice')
+        elif method == 'pages':
             _ = [item async for item in client.pages('/v1/collections', as_user='owui:user:alice')]
         elif method == 'send':
             await client.send('POST', '/v1/collections', {}, as_user='owui:user:alice', idempotency_key='operation-1')
         elif method == 'post_bytes':
             await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
         else:
-            await client.get('/v1/collections', as_user='owui:user:alice')
+            await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
+    assert (caught.value.status, caught.value.code) == (401, 'sign_in')
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_upload_without_a_token_is_refused_before_reading(recorded_http, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    requests, _ = recorded_http
+    monkeypatch.setattr('open_webui.soev.client.user_token', AsyncMock(return_value=None))
+
+    async def chunks():
+        pytest.fail('A refused upload must not read its source')
+        yield b'fictional-upload'
+
+    with pytest.raises(SoevApiError) as caught:
+        await SoevClient('https://soev.invalid', 'fictional-key').upload_document(
+            'job', 'source', chunks(), size=16, content_type='text/plain', as_user='owui:user:fern'
+        )
+    assert (caught.value.status, caught.value.code) == (401, 'sign_in')
     assert requests == []
 
 
@@ -369,7 +401,7 @@ async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, ca
     requests, responses = recorded_http
     responses.append(error_type('private-transport-detail test-api-key test-assertion'))
     with caplog.at_level(logging.DEBUG), pytest.raises(SoevApiError) as caught:
-        client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion')
+        client = SoevClient('https://soev.invalid', 'test-api-key')
         if method == 'upload_document':
 
             async def chunks():
@@ -395,9 +427,7 @@ async def test_a_redirect_is_not_followed(recorded_http):
     requests, responses = recorded_http
     responses.append(httpx.Response(302, headers={'Location': 'https://other.invalid/'}))
     with pytest.raises(SoevApiError):
-        await SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion').get(
-            '/v1/collections', as_user='owui:user:alice'
-        )
+        await SoevClient('https://soev.invalid', 'test-api-key').get('/v1/collections', as_user='owui:user:alice')
     assert len(requests) == 1
 
 
@@ -487,15 +517,16 @@ async def test_original_stream_is_incremental_and_closes_on_disconnect(recorded_
             httpx.Response(200, stream=body),
         ]
     )
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     stream = client.stream('/v1/collections/kb/documents/file/original', as_user='owui:user:alice')
     assert await anext(stream) == b'first'
     assert body.delivered == 1 and not body.closed
     await stream.aclose()
     assert body.closed and body.delivered == 1
-    assert requests[0].headers['X-Soev-Subject'] == 'assertion'
-    assert requests[1].headers['X-Soev-Subject'] == 'assertion'
-    assert requests[1].headers['Authorization'] == 'Bearer test-api-key'
+    for request in requests:
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+        assert 'X-Soev-Subject' not in request.headers
+        assert request.headers['Authorization'] == 'Bearer test-api-key'
 
 
 @pytest.mark.asyncio
@@ -507,7 +538,7 @@ async def test_original_stream_follows_only_one_redirect(recorded_http):
             httpx.Response(303, headers={'Location': 'https://elsewhere.invalid/original'}),
         ]
     )
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     with pytest.raises(SoevApiError) as error:
         await anext(client.stream('/original', as_user='owui:user:alice'))
     assert error.value.status == 502
@@ -523,7 +554,7 @@ async def test_get_memo_is_scoped_to_request_subject_and_parameters(recorded_htt
 
     requests, responses = recorded_http
     responses.extend(httpx.Response(200, json={'value': index}) for index in range(5))
-    client = SoevClient('https://soev.invalid', 'test-key', subject_minter=lambda ref: 'assertion')
+    client = SoevClient('https://soev.invalid', 'test-key')
     with request_cache():
         first, second = await asyncio.gather(
             client.get('/v1/collections', as_user='alice'), client.get('/v1/collections', as_user='alice')
@@ -583,7 +614,7 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
             httpx.Response(200),
         ]
     )
-    alice = SoevClient('https://soev.invalid', 'alice-key', subject_minter=lambda ref: ref, timeout=7)
+    alice = SoevClient('https://soev.invalid', 'alice-key', timeout=7)
     bob = SoevClient('https://soev.invalid', 'bob-key', timeout=11)
     await alice.get('/v1/collections', as_user='alice')
     transport = _shared_client()
@@ -602,7 +633,8 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
     assert [request.extensions['timeout']['read'] for request in requests] == [7, 11, 7, 7, 11]
     assert all('cookie' not in request.headers for request in requests)
     assert requests[3].headers['Authorization'] == 'Bearer alice-key'
-    assert requests[3].headers['X-Soev-Subject'] == 'alice'
+    assert requests[3].headers['X-Soev-User-Token'] == 'fictional-login:alice'
+    assert 'X-Soev-Subject' not in requests[3].headers
     assert requests[4].headers['Authorization'] == 'Bearer bob-key'
     assert 'X-Soev-Subject' not in requests[4].headers
     await close_client()
@@ -648,8 +680,7 @@ async def test_post_bytes_uploads_as_user_without_content_type(recorded_http):
     requests, responses = recorded_http
     reference = {'id': 'a' * 32, 'sha256': 'b' * 64, 'size': 5, 'media_type': 'image/png', 'name': 'photo +#.png'}
     responses.append(httpx.Response(201, json=reference))
-    minter = Mock(return_value='test-assertion')
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter)
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     assert (
         await client.post_bytes(
             '/v1/chat/images', b'image', as_user='owui:user:alice', params={'name': reference['name']}
@@ -661,10 +692,9 @@ async def test_post_bytes_uploads_as_user_without_content_type(recorded_http):
     assert request.url.params['name'] == reference['name']
     assert request.content == b'image'
     assert request.headers['Authorization'] == 'Bearer test-api-key'
-    assert request.headers['X-Soev-Subject'] == 'test-assertion'
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert 'Content-Type' not in request.headers
     assert 'Idempotency-Key' not in request.headers
-    minter.assert_called_once_with('owui:user:alice')
 
 
 @pytest.mark.asyncio
@@ -678,7 +708,7 @@ async def test_post_bytes_uses_shared_problem_handling(recorded_http, status):
             headers={'Content-Type': 'application/problem+json'},
         )
     )
-    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key')
     with pytest.raises(SoevApiError) as caught:
         await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
     assert caught.value.status == status
@@ -708,7 +738,7 @@ async def test_post_bytes_uses_shared_problem_handling(recorded_http, status):
 async def test_download_redirect_refuses_unsafe_destinations_without_sending_credentials(recorded_http, location):
     requests, responses = recorded_http
     responses.append(httpx.Response(303, headers={'Location': location}))
-    client = SoevClient('https://soev.invalid', 'fictional-key', subject_minter=lambda _: 'fictional-assertion')
+    client = SoevClient('https://soev.invalid', 'fictional-key')
     with pytest.raises(SoevApiError) as error:
         await anext(client.stream('/original', as_user='owui:user:fern'))
     assert error.value.status == 502
@@ -723,12 +753,12 @@ async def test_markdown_redemption_keeps_the_same_admission(recorded_http, locat
     responses.extend(
         [httpx.Response(303, headers={'Location': location}), httpx.Response(200, text='# Fictional café')]
     )
-    minter = Mock(return_value='fictional-assertion')
-    client = SoevClient('https://soev.invalid', 'fictional-key', subject_minter=minter)
+    client = SoevClient('https://soev.invalid', 'fictional-key')
     assert await client.get_text('/content', as_user='owui:user:fern') == '# Fictional café'
-    assert minter.call_count == 1
     assert requests[0].headers['Authorization'] == requests[1].headers['Authorization']
-    assert requests[0].headers['X-Soev-Subject'] == requests[1].headers['X-Soev-Subject']
+    for request in requests:
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
+        assert 'X-Soev-Subject' not in request.headers
 
 
 @pytest.mark.asyncio

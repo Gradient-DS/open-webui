@@ -33,13 +33,9 @@ def _client(monkeypatch, fake: FakeSoev, *, role='admin', url='http://soev-api',
     from open_webui.soev.availability import SoevNotConfigured
     from open_webui.utils.auth import get_current_user
 
-    async def acting_ref(user, client):
-        return f'owui:user:{user.id}'
-
     monkeypatch.setattr(config, 'SOEV_API_URL', url)
     monkeypatch.setattr(config, 'ENABLE_AGENT_TRACE_DOWNLOAD', enabled)
     monkeypatch.setattr(agent_threads.identity, 'build_client', lambda **kwargs: fake)
-    monkeypatch.setattr(agent_threads.identity, 'acting_ref', acting_ref)
     app = FastAPI(
         exception_handlers={SoevNotConfigured: soev_not_configured_handler, SoevApiError: soev_api_error_handler}
     )

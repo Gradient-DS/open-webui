@@ -27,7 +27,7 @@ async def download_trace(thread_id: ThreadId, user=Depends(get_admin_user)) -> S
     if not config.ENABLE_AGENT_TRACE_DOWNLOAD:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     client = identity.build_client(timeout=120.0)
-    ref = await identity.acting_ref(user, client)
+    ref = identity.external_ref(user)
     stream = client.stream(f'/v1/chat/threads/{quote(thread_id, safe="")}/export', as_user=ref)
     try:
         first = await anext(stream, b'')

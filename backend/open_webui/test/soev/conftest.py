@@ -54,12 +54,11 @@ def identity_config(monkeypatch, tmp_path):
     }.items():
         monkeypatch.setattr(identity.config, f'SOEV_API_{name}', value)
     monkeypatch.setattr(identity, '_linked_refs', set())
-    monkeypatch.setattr(identity, '_pending_links', {})
     return identity, key
 
 
 @pytest.fixture
-def fake_api(identity_config, eligible_identity):
+def fake_api(identity_config, eligible_identity, login_tokens):
     """Register the declared credential and its public key under the JWK thumbprint."""
     from open_webui.test.soev.fake_api import FakeSoevApi
 
@@ -77,7 +76,7 @@ def fake_api(identity_config, eligible_identity):
 
 
 @pytest.fixture
-def identity_http(monkeypatch, eligible_identity):
+def identity_http(monkeypatch, eligible_identity, login_tokens):
     """Record requests and allow asynchronous responses without network access."""
     requests, responses = [], []
     original_client = httpx.AsyncClient
@@ -134,3 +133,17 @@ async def role_store(identity_config, monkeypatch, platform_capabilities):
         await Users.insert_new_user('fern', 'Fern', 'fern@example.invalid', db=db)
         yield SimpleNamespace(db=db, users=Users, identity=identity)
     await engine.dispose()
+
+
+@pytest.fixture
+def login_tokens(monkeypatch):
+    """Contract transports stand in for verified logins; request-context tests use the real resolver."""
+    from open_webui.soev import acting, client
+
+    async def resolve(ref):
+        if acting._token_resolver.get() is not None:
+            return await acting.user_token(ref)
+        return f'fictional-login:{ref}' if ref else None
+
+    monkeypatch.setattr(client, 'user_token', resolve)
+    return resolve

@@ -3,6 +3,26 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('invalid_field', 'retention:rules'): (
+        'Choose valid retention periods or leave them empty to disable deletion.',
+        'Kies geldige bewaartermijnen of laat ze leeg om verwijdering uit te schakelen.',
+    ),
+    ('policy_forbids', 'offboarding:console'): (
+        'Offboarding happens in the soev console',
+        'Uitdiensttreding gebeurt in de soev-console',
+    ),
+    ('policy_forbids', 'suspension:console'): (
+        'Suspending a user happens in the soev console',
+        'Het opschorten van een gebruiker gebeurt in de soev-console',
+    ),
+    ('policy_forbids', 'automations:unavailable'): (
+        'Automations are not available yet',
+        'Automatiseringen zijn nog niet beschikbaar',
+    ),
+    ('policy_forbids', 'thread:owner_request'): (
+        'Delete this conversation in the soev console or sign in as its owner.',
+        'Verwijder dit gesprek in de soev-console of meld je aan als de eigenaar.',
+    ),
     ('policy_forbids', 'offboarding:in_progress'): (
         'Resume the existing offboarding operation before changing its mode or target.',
         'Hervat de bestaande uitdiensttreding voordat je de modus of het overdrachtsdoel wijzigt.',
@@ -15,7 +35,7 @@ _MESSAGES = {
         'User archival is not enabled.',
         'Het archiveren van gebruikers is niet ingeschakeld.',
     ),
-    ('scope_insufficient', 'identity:platform_login'): (
+    ('sign_in', 'identity:platform_login'): (
         'Sign in with your organisation account to use this feature.',
         'Log in met je organisatieaccount om deze functie te gebruiken.',
     ),

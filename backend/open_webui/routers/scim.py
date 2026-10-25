@@ -7,6 +7,7 @@ NOTE: This is an experimental implementation and may not fully comply with SCIM 
 
 import hmac
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,13 +22,14 @@ from open_webui.env import SCIM_AUTH_PROVIDER
 from open_webui.internal.db import get_async_session
 from open_webui.models.groups import GroupModel, Groups
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.identity import check_role_change
 from open_webui.utils.auth import (
     decode_token,
     get_admin_user,
     get_current_user,
     get_verified_user,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -140,7 +142,43 @@ class SCIMUser(BaseModel):
     meta: SCIMMeta
 
 
-class SCIMUserCreateRequest(BaseModel):
+def normalize_scim_path(path: str) -> str:
+    # Attribute names are case-insensitive; quoted filter values retain their case.
+    return re.sub(
+        r'"(?:\\.|[^"\\])*"|[A-Za-z_$][\w$]*',
+        lambda match: _SCIM_ATTRIBUTE_NAMES.get(match[0].casefold(), match[0]),
+        path,
+    )
+
+
+def normalize_scim_attributes(data: Any) -> Any:
+    if isinstance(data, list):
+        return [normalize_scim_attributes(value) for value in data]
+    if not isinstance(data, dict):
+        return data
+    normalized: dict[str, Any] = {}
+    seen: dict[str, Any] = {}
+    for name, value in data.items():
+        folded = name.casefold()
+        canonical_name: str = _SCIM_ATTRIBUTE_NAMES.get(folded) or name
+        value = normalize_scim_attributes(value)
+        if folded in seen and (seen[folded] != value or type(seen[folded]) is not type(value)):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Conflicting SCIM attribute names')
+        seen[folded] = value
+        normalized[canonical_name] = (
+            normalize_scim_path(value) if canonical_name == 'path' and isinstance(value, str) else value
+        )
+    return normalized
+
+
+class SCIMRequest(BaseModel):
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_attributes(cls, data: Any) -> Any:
+        return normalize_scim_attributes(data)
+
+
+class SCIMUserCreateRequest(SCIMRequest):
     """SCIM User Create Request"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -156,7 +194,7 @@ class SCIMUserCreateRequest(BaseModel):
     photos: Optional[List[SCIMPhoto]] = None
 
 
-class SCIMUserUpdateRequest(BaseModel):
+class SCIMUserUpdateRequest(SCIMRequest):
     """SCIM User Update Request"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -184,7 +222,7 @@ class SCIMGroup(BaseModel):
     meta: SCIMMeta
 
 
-class SCIMGroupCreateRequest(BaseModel):
+class SCIMGroupCreateRequest(SCIMRequest):
     """SCIM Group Create Request"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -194,7 +232,7 @@ class SCIMGroupCreateRequest(BaseModel):
     members: Optional[List[SCIMGroupMember]] = []
 
 
-class SCIMGroupUpdateRequest(BaseModel):
+class SCIMGroupUpdateRequest(SCIMRequest):
     """SCIM Group Update Request"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -214,7 +252,7 @@ class SCIMListResponse(BaseModel):
     Resources: List[Any]
 
 
-class SCIMPatchOperation(BaseModel):
+class SCIMPatchOperation(SCIMRequest):
     """SCIM Patch Operation"""
 
     op: str  # "add", "replace", "remove"
@@ -222,11 +260,31 @@ class SCIMPatchOperation(BaseModel):
     value: Optional[Any] = None
 
 
-class SCIMPatchRequest(BaseModel):
+class SCIMPatchRequest(SCIMRequest):
     """SCIM Patch Request"""
 
     schemas: List[str] = ['urn:ietf:params:scim:api:messages:2.0:PatchOp']
     Operations: List[SCIMPatchOperation]
+
+
+_SCIM_ATTRIBUTE_NAMES: dict[str, str] = {
+    name.casefold(): field.alias or field_name
+    for model in (
+        SCIMUserCreateRequest,
+        SCIMUserUpdateRequest,
+        SCIMGroupCreateRequest,
+        SCIMGroupUpdateRequest,
+        SCIMPatchRequest,
+        SCIMPatchOperation,
+        SCIMName,
+        SCIMEmail,
+        SCIMPhoto,
+        SCIMGroupMember,
+    )
+    for field_name, field in model.model_fields.items()
+    for name in (field_name, field.alias)
+    if name is not None
+}
 
 
 def get_scim_auth(request: Request, authorization: Optional[str] = Header(None)) -> bool:
@@ -514,6 +572,7 @@ async def get_users(
 
     # Get users from database
     if filter:
+        filter = normalize_scim_path(filter)
         # Simple filter parsing - supports userName eq, externalId eq
         if 'userName eq' in filter:
             email = filter.split('"')[1]
@@ -672,6 +731,9 @@ async def update_user(
             detail=f'User {user_id} not found',
         )
 
+    if user_data.active is False:
+        check_role_change(user, 'pending')
+
     # Build update dict
     update_data = {}
 
@@ -736,6 +798,37 @@ async def update_user(
     return await user_to_scim(updated_user, request, db=db)
 
 
+def normalize_user_patch(operations: list[SCIMPatchOperation]) -> list[tuple[str, Any]]:
+    supported_paths = {
+        'active',
+        'username',
+        'displayname',
+        'emails[primary eq true].value',
+        'name.formatted',
+        'externalid',
+    }
+    normalized = []
+    for operation in operations:
+        if operation.op.lower() not in {'add', 'replace'}:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Unsupported SCIM patch operation')
+        if operation.path is not None:
+            values = {operation.path: operation.value}
+        elif isinstance(operation.value, dict) and operation.value:
+            values = operation.value
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Pathless SCIM patch requires an attribute object')
+
+        for path, value in values.items():
+            path = path.lower()
+            if path not in supported_paths:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Unsupported SCIM patch attribute')
+            expected_type = bool if path == 'active' else str
+            if not isinstance(value, expected_type):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Invalid SCIM patch value')
+            normalized.append((path, value))
+    return normalized
+
+
 @router.patch('/Users/{user_id}', response_model=SCIMUser)
 async def patch_user(
     user_id: str,
@@ -752,29 +845,25 @@ async def patch_user(
             detail=f'User {user_id} not found',
         )
 
+    operations = normalize_user_patch(patch_data.Operations)
     update_data = {}
-
-    for operation in patch_data.Operations:
-        op = operation.op.lower()
-        path = operation.path
-        value = operation.value
-
-        if op == 'replace':
-            if path == 'active':
-                # Same guard as update_user: never demote an existing admin via SCIM.
-                if user.role != 'admin':
-                    update_data['role'] = 'user' if value else 'pending'
-            elif path == 'userName':
-                update_data['email'] = value
-            elif path == 'displayName':
-                update_data['name'] = value
-            elif path == 'emails[primary eq true].value':
-                update_data['email'] = value
-            elif path == 'name.formatted':
-                update_data['name'] = value
-            elif path == 'externalId':
-                provider = get_scim_provider()
-                await Users.update_user_scim_by_id(user_id, provider, value, db=db)
+    user_fields = {
+        'username': 'email',
+        'displayname': 'name',
+        'emails[primary eq true].value': 'email',
+        'name.formatted': 'name',
+    }
+    external_ids = []
+    for path, value in operations:
+        if path == 'active':
+            check_role_change(user, 'user' if value else 'pending')
+            # Same guard as update_user: never demote an existing admin via SCIM.
+            if user.role != 'admin':
+                update_data['role'] = 'user' if value else 'pending'
+        elif path == 'externalid':
+            external_ids.append(value)
+        else:
+            update_data[user_fields[path]] = value
 
     # Update user
     if update_data:
@@ -786,6 +875,10 @@ async def patch_user(
             )
     else:
         updated_user = user
+
+    for external_id in external_ids:
+        provider = get_scim_provider()
+        await Users.update_user_scim_by_id(user_id, provider, external_id, db=db)
 
     role_changed = updated_user.role != user.role
     user_updated_fields = [field for field in update_data.keys() if field != 'role']
@@ -862,6 +955,7 @@ async def get_groups(
 
     # Get groups, applying filter if provided
     if filter:
+        filter = normalize_scim_path(filter)
         if 'displayName eq' in filter:
             display_name = filter.split('"')[1]
             group = await Groups.get_group_by_name(display_name, db=db)

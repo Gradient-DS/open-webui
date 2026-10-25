@@ -357,7 +357,7 @@ async def test_v2_task_goes_to_the_task_route_as_the_acting_user(v2: FakeSoevApi
         'max_tokens': 50,
     }
     task = next(request for request in v2.requests if request.url.path == '/v1/completions/task')
-    assert 'X-Soev-Subject' in task.headers and 'Idempotency-Key' not in task.headers
+    assert 'X-Soev-User-Token' in task.headers and 'Idempotency-Key' not in task.headers
 
 
 @pytest.mark.asyncio

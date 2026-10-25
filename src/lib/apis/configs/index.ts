@@ -1115,6 +1115,7 @@ export const setDataRetentionConfig = async (token: string, config: object) => {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
+			'Idempotency-Key': crypto.randomUUID(),
 			Authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify(config)

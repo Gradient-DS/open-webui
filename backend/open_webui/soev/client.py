@@ -1,7 +1,4 @@
-"""HTTP boundary for soev-api, with fresh assertions and caller-owned mutation keys.
-
-No retries: subject assertions are single-use and mutations belong to the caller.
-"""
+"""HTTP boundary for soev-api, with request-local login tokens and caller-owned mutation keys."""
 
 import asyncio
 import json
@@ -16,7 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
-from open_webui.soev.acting import user_token
+from open_webui.soev.acting import acting_ref, requester_ref, user_token
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
@@ -174,13 +171,11 @@ class SoevClient:
         base_url: str,
         api_key: str,
         *,
-        subject_minter: Callable[[str], str] | None = None,
         timeout: float = 30.0,
         service: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip('/')
         self._api_key = api_key
-        self._subject_minter = subject_minter
         self._timeout = timeout
         self.is_service = service
 
@@ -192,13 +187,12 @@ class SoevClient:
         headers = {'Authorization': f'Bearer {self._api_key}'}
         if self.is_service:
             return headers
-        if as_user is not None:
-            if self._subject_minter is None:
-                raise ValueError('Acting as a user requires a subject minter')
-            headers['X-Soev-Subject'] = self._subject_minter(as_user)
-        access_token = user_access_token if user_access_token is not None else await user_token(as_user)
+        ref = as_user if as_user is not None else acting_ref() or requester_ref()
+        access_token = user_access_token if user_access_token is not None else await user_token(ref)
         if access_token:
             headers['X-Soev-User-Token'] = access_token
+        elif ref is not None or user_access_token is not None:
+            raise SoevApiError(401, 'sign_in', 'Platform login required', 'identity:platform_login')
         return headers
 
     async def me(self, access_token: str) -> dict:
@@ -280,8 +274,8 @@ class SoevClient:
 
     async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
         """Pass a streamed task completion's SSE bytes through unchanged."""
-        if not as_user or self._subject_minter is None:
-            raise ValueError('A task completion requires an acting user and subject minter')
+        if not as_user:
+            raise ValueError('A task completion requires an acting user')
         headers = await self._headers(as_user)
         headers['Accept'] = 'text/event-stream'
         try:
@@ -305,7 +299,11 @@ class SoevClient:
         """Delete a thread once; the chat contract has no mutation replay key."""
         if not as_user:
             raise ValueError('Chat requires an acting user')
-        await self._request('DELETE', path, as_user=as_user)
+        from open_webui.soev.policy_jobs import v2_enabled
+
+        response = await self._request('DELETE', path, as_user=as_user)
+        if v2_enabled() and response.status_code != 204:
+            raise SoevApiError(502, 'upstream_error', 'Thread deletion did not complete')
 
     async def chat_stream(
         self,
@@ -319,8 +317,8 @@ class SoevClient:
         """Reconnect capped streams through events, never by replaying the POST."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        if not as_user or self._subject_minter is None:
-            raise ValueError('Chat requires an acting user and subject minter')
+        if not as_user:
+            raise ValueError('Chat requires an acting user')
         method = 'POST'
         try:
             while True:
@@ -368,8 +366,26 @@ class SoevClient:
                         return
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
-        key = (self._base_url, self._api_key, as_user, path, tuple(sorted((params or {}).items())))
-        response = await memoized(key, lambda: self._request('GET', path, as_user=as_user, params=params))
+        await self._require_thread_request(path, as_user)
+        headers = await self._headers(as_user)
+        key = (
+            self._base_url,
+            self._api_key,
+            type(self),
+            self.is_service,
+            tuple(sorted(headers.items())),
+            path,
+            tuple(sorted((params or {}).items())),
+        )
+        response = await memoized(
+            key, lambda: self._request('GET', path, as_user=as_user, params=params, admission_headers=headers)
+        )
+        return self._json_object(response)
+
+    async def get_retention_policy(self, *, as_user: str) -> dict | None:
+        response = await self._request('GET', '/v1/retention-policy', as_user=as_user)
+        if response.json() is None:
+            return None
         return self._json_object(response)
 
     async def get_text(self, path: str, *, as_user: str | None = None) -> str:
@@ -380,8 +396,8 @@ class SoevClient:
 
     async def stream(self, path: str, *, as_user: str) -> AsyncIterator[bytes]:
         """Stream bytes with the caller's admission on one download redemption."""
-        if self._subject_minter is None or not as_user:
-            raise ValueError('Acting as a user requires a subject minter and user')
+        if not as_user:
+            raise ValueError('Acting as a user requires an acting user')
         async with self.stream_response(path, as_user=as_user) as response:
             async for chunk in response.aiter_bytes():
                 yield chunk
@@ -410,6 +426,7 @@ class SoevClient:
         """Expose download status and headers while keeping the upstream open."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
+        await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
         if range_header is not None:
             headers['Range'] = range_header
@@ -453,7 +470,7 @@ class SoevClient:
             )
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
-        """Yield each page's data items, minting a fresh assertion for every cursor request."""
+        """Yield each page's data items with fresh admission for every cursor request."""
         query = dict(params or {})
         while True:
             page = await self.get(path, as_user=as_user, params=query)
@@ -480,6 +497,14 @@ class SoevClient:
             return None
         return self._json_object(response)
 
+    async def _require_thread_request(self, path: str, as_user: str | None) -> None:
+        from open_webui.soev.policy_jobs import require_thread_owner, v2_enabled
+
+        if v2_enabled() and path.startswith('/v1/chat/threads/'):
+            if self.is_service or not as_user:
+                raise SoevApiError(403, 'policy_forbids', 'Owner request required', constraint='thread:owner_request')
+            await require_thread_owner(as_user.removeprefix('owui:user:'))
+
     async def _request(
         self,
         method: str,
@@ -495,10 +520,17 @@ class SoevClient:
         params: dict | None = None,
         idempotency_key: str | None = None,
         user_access_token: str | None = None,
+        admission_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        headers = await self._headers(as_user, user_access_token=user_access_token)
+        if method in {'GET', 'DELETE'}:
+            await self._require_thread_request(path, as_user)
+        headers = (
+            admission_headers
+            if admission_headers is not None
+            else await self._headers(as_user, user_access_token=user_access_token)
+        )
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_length is not None:
@@ -576,3 +608,26 @@ def build_service_client(*, timeout: float = 30.0) -> SoevClient:
 
     ensure_configured()
     return SoevClient(config.SOEV_API_URL, config.SOEV_API_KEY, timeout=timeout, service=True)
+
+
+class BackgroundSoevClient(SoevClient):
+    """Legacy subject authority for tokenless background work until the coordinated cut."""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        subject_minter: Callable[[str], str],
+        timeout: float = 30.0,
+    ) -> None:
+        super().__init__(base_url, api_key, timeout=timeout)
+        self._subject_minter = subject_minter
+
+    async def _headers(self, as_user: str | None = None, *, user_access_token: str | None = None) -> dict[str, str]:
+        if requester_ref() is not None or acting_ref() is not None or user_access_token is not None:
+            raise SoevApiError(401, 'sign_in', 'Background authority cannot serve a user request')
+        headers = {'Authorization': f'Bearer {self._api_key}'}
+        if as_user is not None:
+            headers['X-Soev-Subject'] = self._subject_minter(as_user)
+        return headers

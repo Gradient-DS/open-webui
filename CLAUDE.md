@@ -125,7 +125,7 @@ picker registers through the same function with `attached_by: 'user'`. One attac
 documents are merged into the message files and `chat:message:files` is emitted once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
-routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
+routes stream platform originals with the requesting user's login token. Every v2 turn ensures
 and sends the user's chat attachments collection; stored reference metadata is sent next turn.
 The platform binds that collection into its live ticket; a missing or changed target
 refuses collection_mismatch. Provider identity and Retry-After remain structured client
@@ -316,16 +316,19 @@ Migration directory reports count the six original grant mappings, dropped cloud
 principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
 and no grants; reconciliation reads them as their owners because the service is not a cloud reader.
 Role writes in `models/users.py` serialize with group reconciliation. Pending demotions first revoke
-cloud schedules/connections as the still-linked person, then unlink before committing. Approvals queue
-failed links for backoff retry. `ensure_link` checks the current local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
-the supplied platform contract has no link listing to discover otherwise unknown deleted users.
+cloud schedules/connections with the departing person's own login token, then unlink before committing.
+User platform calls require that person's token and never mint a subject or publish a link.
+`SoevClient.as_service()` explicitly selects product authority; `BackgroundSoevClient` alone retains
+tokenless legacy subjects for migrations and reference-job MIME completion, and refuses user request context.
+The complete remaining caller list is in `docs/agent-api-deployment.md`. Approval link retries are removed.
+`ensure_link` remains only for those background callers and checks the current local role even for cached refs.
 
 `owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
 narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.
 
 Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
 `confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
-`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the linked departing person,
+`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody with the departing person's own login token,
 narrows groups, disposes resources, unlinks, then commits local erasure/reassignment together.
 Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
 resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,

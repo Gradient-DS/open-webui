@@ -9,13 +9,34 @@ from httpx import AsyncClient
 from open_webui.test.soev.test_knowledge_store import env, seed  # noqa: F401
 
 # A scripted SVG must never render inline under the OWUI origin.
-CONTENT_TYPES = {'text': 'text/plain', 'svg': 'image/svg+xml'}
+CONTENT_TYPES = {
+    'text': 'text/plain',
+    'svg': 'image/svg+xml',
+    'png': 'image/png',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('named', [False, True])
 @pytest.mark.parametrize(
-    'case', ['pdf', 'attachment', 'text', 'svg', 'missing', 'unreadable', 'document_hidden', 'revoked']
+    'case',
+    [
+        'pdf',
+        'png',
+        'jpeg',
+        'gif',
+        'webp',
+        'attachment',
+        'text',
+        'svg',
+        'missing',
+        'unreadable',
+        'document_hidden',
+        'revoked',
+    ],
 )
 async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F811
     from open_webui.models import knowledge
@@ -38,11 +59,14 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
         requests.append(request)
         if request.url.path == '/v1/downloads/fictional-code':
             assert request.headers['Authorization'] == requests[-2].headers['Authorization']
-            assert request.headers['X-Soev-Subject'] == requests[-2].headers['X-Soev-Subject']
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+            assert request.headers['X-Soev-User-Token'] == requests[-2].headers['X-Soev-User-Token']
+            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-Subject' not in requests[-2].headers
             assert 'cookie' not in request.headers
             return httpx.Response(200, content=b'original\x00bytes', headers={'Content-Type': 'wrong/type'})
         if request.url.path.endswith('/original'):
-            assert request.headers['X-Soev-Subject']
+            assert request.headers['X-Soev-User-Token']
             if case == 'revoked':
                 return httpx.Response(
                     404,
@@ -77,7 +101,7 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
         assert b''.join([chunk async for chunk in response.body_iterator]) == b'original\x00bytes'
         assert response.headers['content-type'].split(';')[0] == CONTENT_TYPES.get(case, 'application/pdf')
         assert response.headers['x-content-type-options'] == 'nosniff'
-        disposition = 'inline' if not named and case == 'pdf' else 'attachment'
+        disposition = 'inline' if not named and case in {'pdf', 'png', 'jpeg', 'gif', 'webp'} else 'attachment'
         assert response.headers['content-disposition'] == f"{disposition}; filename*=UTF-8''Caf%C3%A9.pdf"
         assert 'location' not in response.headers
         assert requests[-2].url.path == '/v1/collections/kb/documents/cloud/original'
@@ -109,7 +133,7 @@ async def test_get_file_by_id_serves_a_catalog_only_document(env, monkeypatch, r
     assert await files.Files.get_file_by_id('cloud') is None
     assert any(request.url.path == '/v1/collections/kb/documents/cloud/content' for request in env.api.requests)
     assert not any(request.url.path.endswith('/original') for request in env.api.requests)
-    assert all(request.headers.get('X-Soev-Subject') for request in env.api.requests if request.method == 'GET')
+    assert all(request.headers.get('X-Soev-User-Token') for request in env.api.requests if request.method == 'GET')
 
 
 @pytest.mark.asyncio
@@ -177,6 +201,8 @@ async def test_file_previews_relay_ranges_and_status(
         if request.url.path.endswith('/original') or request.url.path.startswith('/v1/downloads/'):
             requests.append(request)
             assert request.headers['Range'] == range_header
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+            assert 'X-Soev-Subject' not in request.headers
             if request.url.path.endswith('/original'):
                 return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
             return httpx.Response(

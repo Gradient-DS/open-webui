@@ -28,7 +28,7 @@ def subscribed_store(monkeypatch, identity_config, identity_http):
             'path': 'shared/budget.csv',
         },
     ]
-    client = SoevClient('https://soev.invalid', 'test-key', subject_minter=lambda ref: 'test-assertion')
+    client = SoevClient('https://soev.invalid', 'test-key')
     return SimpleNamespace(
         store=SoevKnowledgeTable(client=client, service_principal='owui:service:webui'),
         requests=requests,
@@ -55,7 +55,7 @@ async def test_members_list_reached_documents_under_the_kb(subscribed_store):
     assert members == {doc['source_id']: (doc, doc['path']) for doc in env.documents}
     assert [request.url.path for request in env.requests[:2]] == ['/v1/collections/kb/documents'] * 2
     assert env.requests[1].url.params['cursor'] == cursor
-    assert all(request.headers['X-Soev-Subject'] == 'test-assertion' for request in env.requests)
+    assert all(request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in env.requests)
     assert not env.responses
 
 
@@ -70,12 +70,12 @@ async def test_counts_include_reached_documents(subscribed_store):
     assert await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice') == {'kb': 3}
     assert len(env.requests) == 1
     assert env.requests[0].url.path == '/v1/collections'
-    assert env.requests[0].headers['X-Soev-Subject'] == 'test-assertion'
+    assert env.requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert not env.responses
 
 
 @pytest.fixture
-def folder_store(monkeypatch, identity_config):
+def folder_store(monkeypatch, identity_config, login_tokens):
     """Serve subscribed folders, a single file and owned content through a counted HTTP stub."""
     from open_webui.models.files import Files
     from open_webui.soev.knowledge_store import _catalog_file_row
@@ -143,7 +143,7 @@ def folder_store(monkeypatch, identity_config):
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
-    client = SoevClient('https://soev.invalid', 'test-key', subject_minter=lambda ref: 'test-assertion')
+    client = SoevClient('https://soev.invalid', 'test-key')
     store = SoevKnowledgeTable(client=client, service_principal='owui:service:webui')
 
     async def file_rows(ids, *, catalog=None, **kwargs):

@@ -32,7 +32,15 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.shared_chats import SharedChatResponse, SharedChats
 from open_webui.models.tags import TagModel, Tags
-from open_webui.soev.agent_threads import chat_thread_ids, delete_released_threads, without_bookmarks
+from open_webui.soev.agent_threads import (
+    chat_thread_ids,
+    delete_chats_threads,
+    delete_message_threads,
+    delete_released_threads,
+    deletion_chat_ids,
+    without_bookmarks,
+)
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import get_event_emitter
 from open_webui.tasks import get_response_streams_by_chat_id, has_active_tasks, stop_item_tasks
@@ -724,6 +732,9 @@ async def delete_all_user_chats(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    if v2_enabled():
+        await delete_chats_threads(user.id, await deletion_chat_ids(user.id, db=db), db=db)
 
     # Soft-delete so the cleanup worker can remove associated files,
     # vector embeddings, and storage before hard-deleting the records.
@@ -1440,6 +1451,7 @@ async def delete_chat_message_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    await delete_message_threads(chat.user_id, id, message_id, db=db)
     threads = await chat_thread_ids(id)
     chat = await Chats.delete_message_from_chat_by_id_and_message_id(id, message_id)
     if not chat:
@@ -1450,7 +1462,8 @@ async def delete_chat_message_by_id(
 
     # [Gradient] The agent threads only the deleted messages bookmarked
     try:
-        await delete_released_threads(chat.user_id, threads)
+        if not v2_enabled():
+            await delete_released_threads(chat.user_id, threads)
     except Exception:
         log.exception('Failed to delete the agent threads of chat %s', id)
 
@@ -1547,13 +1560,19 @@ async def delete_chat_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
+    if v2_enabled():
+        child_ids = await Chats.get_internal_chat_ids_by_parent_id(id, chat.user_id)
+        await delete_chats_threads(chat.user_id, [id, *child_ids], db=db)
+
     # Cancel any in-flight LLM tasks (streaming, title/tags generation) before
     # deleting the chat to prevent orphaned requests.
     await stop_item_tasks(request.app.state.redis, id)
     await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
 
     # [Gradient] Soft-delete internal children so retention cleanup owns the cascade.
-    for child_id in await Chats.get_internal_chat_ids_by_parent_id(id, chat.user_id):
+    if not v2_enabled():
+        child_ids = await Chats.get_internal_chat_ids_by_parent_id(id, chat.user_id)
+    for child_id in child_ids:
         await stop_item_tasks(request.app.state.redis, child_id)
         await Chats.soft_delete_by_id(child_id, db=db)
 
