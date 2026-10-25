@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
+from open_webui.soev.chat_routes import TaskRoute
 from open_webui.config import (
     DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE,
@@ -36,7 +37,7 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=TaskRoute)
 
 TASK_CONFIG_KEYS = {
     'TASK_MODEL': 'task.model.default',

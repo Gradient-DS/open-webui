@@ -58,11 +58,35 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'retry_schedule',
         'meeting',
         'agent_thread',
+        'platform_thread',
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
     assert {'file', 'task'} <= selected_keys
     assert all(set(seeds._dependencies(p)) <= selected_keys for p in selected)
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_platform_thread_seed_reuses_the_admin_owned_meeting(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    surface = {'parameter': [p for p in seeds.SURFACE['parameter'] if p['key'] in {'meeting', 'platform_thread'}]}
+    paths = {path for path in seeds.SPEC['paths'] if path.startswith('/api/v1/threads/')}
+    spec = {'paths': {path: seeds.SPEC['paths'][path] for path in paths}}
+    client, admin = Mock(), Mock()
+    request = Mock(return_value={'id': 'fictional-meeting-thread'})
+    monkeypatch.setattr(seeds.SeedContext, 'request', request)
+
+    resolved = seeds.resolve_parameters(client, admin=admin, surface=surface, spec=spec)
+
+    assert not resolved.failures and not resolved.blocked
+    if mode == 'waive':
+        request.assert_not_called()
+        assert resolved == {}
+    else:
+        request.assert_called_once()
+        assert request.call_args.args == ('POST', '/api/v1/meetings')
+        assert request.call_args.kwargs['actor'] is admin
+        assert resolved == {(path, 'thread_id'): 'fictional-meeting-thread' for path in paths}
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])

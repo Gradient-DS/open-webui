@@ -129,6 +129,13 @@ reason = "Not entered: routers/retrieval.py:reset_vector_db answers 403 unless u
 id = "POST /api/v1/retrieval/reset/uploads"
 reason = "Not entered: routers/retrieval.py:reset_upload_dir answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
 
+# --- Platform speech: local users have no platform login ---------------------
+
+[[waived]]
+id = "POST /api/v1/audio/speech"
+runtime_soev_backed = "waive"
+reason = "Observed in the actual-handler HTTP control: a verified local user with read_aloud enabled and a valid SpeechForm receives 403 scope_insufficient, constraint identity:platform_login, from soev/primitives.py:_login_token before upstream I/O. The public sealed stack has no platform login or soev-api speech role. Keep owner and cross-user probes enabled; private drive mode requires a successful handler hit. Closes when the public stack supplies a platform login and speech role."
+
 # --- Backed by soev-solutions: security tested there -------------------------
 # soev-api, soev-sync and soev-agents-api are closed source and never run in this
 # open-source repository's CI, not even as a stub. The plane skips every route
@@ -386,6 +393,26 @@ reason = "Backed by soev-solutions; security tested there. routers/agent_threads
 id = "POST /api/v1/files/onedrive/attach"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/threads"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "GET /api/v1/threads/{thread_id}"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "GET /api/v1/threads/{thread_id}/forks"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "POST /api/v1/threads/{thread_id}/fork"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
 
 # --- v2 custom functions: refused by the router dependency ----------------------
 # Keep every route in the passes. A successful handler entry invalidates its waiver.

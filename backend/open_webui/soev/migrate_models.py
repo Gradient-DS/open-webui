@@ -33,6 +33,7 @@ from open_webui.models.models import Model
 from open_webui.models.users import User
 from open_webui.soev.migrate_state import MigrationError, state
 from open_webui.soev.system_prompt import KEY as SYSTEM_PROMPT_KEY
+from open_webui.soev.thread_content import refuse_local_content
 
 BATCH = 200
 USER_SETTING_LISTS = (('ui', 'models'), ('ui', 'pinnedModels'))
@@ -444,6 +445,7 @@ async def rewrite(
 
     clear_selection drops each user's settings.ui.models instead of mapping it; prompts moves the base-model
     system prompts to the global one, the candidate prompt_choice names (choose_prompt)."""
+    refuse_local_content()
     known = await _assistant_ids(db) | set(catalog)
     run = _Rewrite(db, mapping, migration_id, dry_run, known, default, clear_selection)
     # Chosen before the renames, which merge and deactivate rows; the choice names a v1 id.
@@ -612,6 +614,7 @@ async def _restore_json(db: AsyncSession, site: str, row_id: str, entries, repor
 
 async def restore(db: AsyncSession, migration_id: str) -> Report:
     """Put back each recorded reference that still holds the value written; then forget the records."""
+    refuse_local_content()
     report = Report()
     backup = (await state(db)).model_id_backup
     records = (await db.execute(sa.select(backup).where(backup.c.migration_id == migration_id))).all()

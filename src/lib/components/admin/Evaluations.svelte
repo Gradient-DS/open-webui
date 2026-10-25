@@ -1,16 +1,24 @@
 <script>
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { adminFeedbackCount, adminLeaderboardCount, models as _models } from '$lib/stores';
+	import {
+		config,
+		adminFeedbackCount,
+		adminLeaderboardCount,
+		models as _models
+	} from '$lib/stores';
 	import { getFeedbackItems, getLeaderboard } from '$lib/apis/evaluations';
 	import { formatNumber } from '$lib/utils';
 
 	import Leaderboard from './Evaluations/Leaderboard.svelte';
 	import Feedbacks from './Evaluations/Feedbacks.svelte';
+	import ThreadFeedback from './Evaluations/ThreadFeedback.svelte';
 
+	/** @type {import('svelte/store').Readable<import('i18next').i18n>} */
 	const i18n = getContext('i18n');
 
-	let selectedTab;
+	/** @type {string} */
+	let selectedTab = 'leaderboard';
 	$: {
 		const pathParts = $page.url.pathname.split('/');
 		const tabFromPath = pathParts[pathParts.length - 1];
@@ -57,6 +65,7 @@
 	};
 
 	onMount(async () => {
+		if ($config?.features?.enable_v2_threads) return;
 		await loadCounts();
 		loaded = true;
 
@@ -76,7 +85,13 @@
 	});
 </script>
 
-{#if loaded}
+{#if $config?.features?.enable_v2_threads}
+	<nav class="flex gap-4 px-4">
+		<a href="/admin/evaluations/leaderboard">{$i18n.t('Leaderboard')}</a>
+		<a href="/admin/evaluations/feedback">{$i18n.t('Feedback')}</a>
+	</nav>
+	<ThreadFeedback token={localStorage.token} summary={selectedTab === 'leaderboard'} />
+{:else if loaded}
 	<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 		<div
 			id="users-tabs-container"

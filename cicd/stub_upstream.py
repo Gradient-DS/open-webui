@@ -81,6 +81,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send({'requests': snapshot, **({'cleared': True} if path.endswith('/reset') else {})})
         return True
 
+    def _send_audio(self, path):
+        if path == '/v1/audio/transcriptions':
+            # Multipart upstream; the speech-to-text handler reads `text`.
+            self._send({'text': 'stub transcription'})
+            return
+        body = b'ID3\x04\x00\x00\x00\x00\x00\x00stub audio'
+        self.send_response(200)
+        self.send_header('Content-Type', 'audio/mpeg')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if self._capture_control(path):
@@ -291,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
             '/extract',
             '/v1/rerank',
             '/v1/images/generations',
+            '/v1/audio/speech',
         } and not isinstance(payload, dict):
             self._send({'error': 'expected a JSON object'}, 400)
             return
@@ -361,9 +374,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/v1/images/edits':
             # Multipart upstream, so the body never parses as JSON; only the answer's shape matters.
             self._send({'created': 0, 'data': [{'b64_json': PNG_BASE64}]})
-        elif path == '/v1/audio/transcriptions':
-            # Multipart upstream too; the speech-to-text handler reads `text`.
-            self._send({'text': 'stub transcription'})
+        elif path in {'/v1/audio/transcriptions', '/v1/audio/speech'}:
+            self._send_audio(path)
         elif path == '/api/show':
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
         else:

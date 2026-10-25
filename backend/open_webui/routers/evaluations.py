@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
+from open_webui.soev.chat_routes import EvaluationRoute
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
@@ -27,7 +28,7 @@ from open_webui.utils.access_control import can_access_admin_feedback
 log = logging.getLogger(__name__)
 
 
-router = APIRouter()
+router = APIRouter(route_class=EvaluationRoute)
 
 EVALUATION_CONFIG_KEYS = {
     'ENABLE_EVALUATION_ARENA_MODELS': 'evaluation.arena.enable',
