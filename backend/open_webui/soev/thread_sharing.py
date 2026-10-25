@@ -99,7 +99,15 @@ async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
     while True:
         page = await service.client.index(limit=200, cursor=cursor)
         for item in page.items:
-            if item.thread_id in owned and await all_shares(service.client, item.thread_id):
+            if item.thread_id not in owned:
+                continue
+            try:
+                shares = await all_shares(service.client, item.thread_id)
+            except ThreadError as error:
+                if error.state == 'unavailable':
+                    continue
+                raise
+            if shares:
                 # A shared old branch needs its own stable id in this list so
                 # unsharing it cannot accidentally address the current branch.
                 items.append({**item.model_dump(), 'id': item.thread_id, 'share_id': item.thread_id})
@@ -115,6 +123,16 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
     from open_webui.soev.chat_routes import integer
 
     await require_login()
+    if (request.method, route) not in {
+        ('GET', '/share/{share_id}'),
+        ('POST', '/{id}/clone/shared'),
+        ('GET', '/shared'),
+        ('DELETE', '/share/all'),
+        ('GET', '/shared/{id}/access'),
+        ('POST', '/{id}/share'),
+        ('DELETE', '/{id}/share'),
+    }:
+        raise ThreadError(409, 'unavailable')
     if route == '/share/{share_id}':
         result = await projection(
             service,
@@ -144,7 +162,11 @@ async def shared_listing(service: ChatPaths, request: Request, user: UserModel) 
     items = await owned_shared(service, user.id)
     if request.method == 'DELETE':
         for item in items:
-            await revoke_all(service, item['thread_id'])
+            try:
+                await revoke_all(service, item['thread_id'])
+            except ThreadError as error:
+                if error.state != 'unavailable':
+                    raise
         return True
     query = request.query_params.get('query', '').casefold()
     items = [item for item in items if query in (item['title'] or '').casefold()]

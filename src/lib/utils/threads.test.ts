@@ -423,3 +423,34 @@ describe('live thread sharing', () => {
 		}
 	});
 });
+
+it('refreshes sidebar authority on resume without blanking the current rows', async () => {
+	const backend = api();
+	vi.mocked(backend.index).mockResolvedValueOnce({
+		items: [sidebarItem('fictional-old')],
+		next_cursor: null
+	});
+	const controller = new ThreadSidebar(backend);
+	await controller.search('Fictional query');
+	const pending = deferred<Awaited<ReturnType<ThreadAPI['index']>>>();
+	vi.mocked(backend.index).mockReturnValueOnce(pending.promise);
+	const refreshing = controller.refresh();
+	expect(controller.snapshot.items.map((item) => item.thread_id)).toEqual(['fictional-old']);
+	pending.resolve({ items: [sidebarItem('fictional-current')], next_cursor: null });
+	await refreshing;
+	expect(backend.index).toHaveBeenLastCalledWith('Fictional query', '');
+	expect(controller.snapshot.items.map((item) => item.thread_id)).toEqual(['fictional-current']);
+	vi.mocked(backend.index).mockRejectedValueOnce(new ThreadError('sign_in'));
+	await controller.refresh();
+	expect(controller.snapshot.items).toEqual([]);
+	expect(controller.snapshot.state).toBe('sign_in');
+});
+
+it('wires retry to a fresh cache and loads shared older messages on click', () => {
+	expect(windowSource).not.toContain('location.reload()');
+	expect(windowSource).toContain('retry = reopen');
+	expect(windowSource).toMatch(
+		/const reopen = \(\) => \{\s*cache.dispose\(\);[\s\S]*?cache = browserThreadCache/
+	);
+	expect(sharedSource).toMatch(/onclick=\{\(\) => \{\s*older = true;\s*void refresh\(\);/);
+});

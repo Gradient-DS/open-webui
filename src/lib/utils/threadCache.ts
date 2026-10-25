@@ -22,6 +22,7 @@ type StoredWindow = {
 	versions: string[];
 	cursor: string | null;
 	etag: string | null;
+	fallback: boolean;
 };
 export type CacheRecord = { page: ProjectionPage; before: string; etag: string | null };
 export interface ThreadCacheStorage {
@@ -31,7 +32,10 @@ export interface ThreadCacheStorage {
 	clear(): Promise<void>;
 }
 
-// Metadata contains only window references, never titles, preferences or unfinished content.
+const fallback = (page: ProjectionPage) =>
+	(page.preferences as { fallback?: boolean } | null)?.fallback === true;
+
+// Metadata contains window references and the owner-only marker, never titles or unfinished content.
 export class IndexedThreadStorage implements ThreadCacheStorage {
 	private databases = new Map<string, Promise<IDBPDatabase>>();
 	private database(partition: string) {
@@ -68,7 +72,7 @@ export class IndexedThreadStorage implements ThreadCacheStorage {
 				thread_id: thread,
 				generation: window.generation,
 				title: null,
-				preferences: null,
+				preferences: { fallback: window.fallback === true },
 				messages,
 				next_cursor: window.cursor
 			}
@@ -110,6 +114,7 @@ export class IndexedThreadStorage implements ThreadCacheStorage {
 				thread: page.thread_id,
 				before,
 				generation: page.generation,
+				fallback: fallback(page),
 				versions: finished.map((message) => message.version!),
 				cursor: page.next_cursor,
 				etag: finished.length === page.messages.length ? etag : null
@@ -135,8 +140,7 @@ export class IndexedThreadStorage implements ThreadCacheStorage {
 		const names = new Set([
 			...registered,
 			...this.databases.keys(),
-			...discovered.map((db) => db.name ?? '').filter((name) => name.startsWith(prefix)),
-			'Chats'
+			...discovered.map((db) => db.name ?? '').filter((name) => name.startsWith(prefix))
 		]);
 		const pending = [...this.databases.values()];
 		this.databases.clear();
@@ -397,7 +401,12 @@ export class ThreadCache {
 			{
 				...record,
 				etag: finished.length === record.page.messages.length ? record.etag : null,
-				page: { ...record.page, title: null, preferences: null, messages: finished }
+				page: {
+					...record.page,
+					title: null,
+					preferences: { fallback: fallback(record.page) },
+					messages: finished
+				}
 			},
 			proof.valid
 		);
@@ -411,24 +420,18 @@ export const browserThreadCache = (api: ThreadAPI, contextEpoch: string) => {
 
 export const watchThreadVisibility = (
 	clear: (state?: ThreadState) => void,
-	reopen: () => void,
+	revalidate: () => void,
 	origin = threadCacheOrigin()
 ) => {
 	const resume = () => {
-		clear();
-		if (document.visibilityState === 'visible') reopen();
+		if (document.visibilityState === 'visible') revalidate();
 	};
 	const unsubscribe = origin.subscribe(() => clear('sign_in'));
-	const hide = () => clear();
 	document.addEventListener('visibilitychange', resume);
-	window.addEventListener('pagehide', hide);
 	window.addEventListener('pageshow', resume);
-	window.addEventListener('focus', resume);
 	return () => {
 		unsubscribe();
 		document.removeEventListener('visibilitychange', resume);
-		window.removeEventListener('pagehide', hide);
 		window.removeEventListener('pageshow', resume);
-		window.removeEventListener('focus', resume);
 	};
 };

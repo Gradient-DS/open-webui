@@ -53,9 +53,10 @@
 			if (value.state === 'sign_in') void threadCacheOrigin().clear();
 		});
 		controller = next;
+		const current = threadCacheOrigin().stamp();
 		const unwatch = watchThreadVisibility(
 			(state) => next.clear(state),
-			() => void next.search(search)
+			() => void (current() ? next.refresh() : next.search(search))
 		);
 		void next.search(search);
 		return () => {

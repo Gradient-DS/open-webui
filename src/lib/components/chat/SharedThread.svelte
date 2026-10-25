@@ -18,6 +18,7 @@
 	let older = $state(false);
 	let boundId = $state('');
 	let boundUser = $state('');
+	let refresh = async () => {};
 	const noop = () => {};
 	const clear = () => {
 		page = null;
@@ -40,7 +41,7 @@
 			void goto(`/auth?redirect=${encodeURIComponent(`/s/${id}`)}`);
 			return;
 		}
-		const refresh = async () => {
+		const read = async () => {
 			if (pending) return;
 			pending = true;
 			try {
@@ -66,11 +67,12 @@
 				pending = false;
 			}
 		};
-		void refresh();
-		const timer = setInterval(refresh, 3000);
+		refresh = read;
+		void read();
+		const timer = setInterval(read, 3000);
 		const revalidate = () => {
 			clear();
-			void refresh();
+			void read();
 		};
 		const offline = () => {
 			clear();
@@ -115,8 +117,11 @@
 		{#if error}<p role="alert">{$i18n.t(error)}</p>{/if}
 		{#if page}
 			<h1 class="text-2xl">{page.title ?? ''}</h1>
-			{#if page.next_cursor}<button onclick={() => (older = true)}
-					>{$i18n.t('Load older messages')}</button
+			{#if page.next_cursor}<button
+					onclick={() => {
+						older = true;
+						void refresh();
+					}}>{$i18n.t('Load older messages')}</button
 				>{/if}
 			{#each Object.values(history.messages) as message, idx (message.id)}
 				<Message

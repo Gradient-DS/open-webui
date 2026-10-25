@@ -198,7 +198,7 @@ class ChatPaths:
         for item in items:
             org = item['organization'] or {}
             updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
-            if org.get('archived') or updated <= (org.get('last_read_at') or 0):
+            if item.get('readonly') or org.get('archived') or updated <= (org.get('last_read_at') or 0):
                 continue
             folder, seen = org.get('folder_id'), set()
             while folder and folder not in seen:

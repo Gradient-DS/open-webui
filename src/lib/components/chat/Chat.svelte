@@ -4661,9 +4661,7 @@
 		if (draft.prompt !== null && draft.prompt.length < MAX_DRAFT_LENGTH) {
 			const key = `chat-input${chatId ? `-${chatId}` : ''}`;
 			const write = () => {
-				if (!$config?.features?.enable_v2_threads) {
-					sessionStorage.setItem(key, JSON.stringify(draft));
-				}
+				sessionStorage.setItem(key, JSON.stringify(draft));
 			};
 			if (debounce) {
 				saveDraftTimeout = setTimeout(write, 500);

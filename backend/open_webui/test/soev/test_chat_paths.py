@@ -681,6 +681,11 @@ async def test_retired_share_owner_only_and_fallback_share_refused(dark_api):
     assert not dark_api.calls
     dark_api.records.legacy['fictional-retired'] = ('fictional-fern', 'fictional-chat', 'fictional-thread')
     assert (await dark_api.browser.get('/api/v1/chats/share/fictional-retired')).json()['messages']
+    dark_api.records.legacy['fictional-unmapped'] = ('fictional-fern', 'fictional-chat', None)
+    calls = len(dark_api.calls)
+    unmapped = await dark_api.browser.get('/api/v1/chats/share/fictional-unmapped')
+    assert unmapped.status_code == 404 and unmapped.json() == {'state': 'legacy_share'}
+    assert len(dark_api.calls) == calls
     dark_api.state['fallback'] = True
     response = await dark_api.browser.post(
         '/api/v1/chats/fictional-chat/share',
@@ -703,7 +708,7 @@ async def test_shared_folder_joins_only_authorized_threads_before_counting_and_s
     assert await service.listing('fictional-fern', folder_id='fictional-folder') == before
     assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == counts
     assert len(before) == 1 and before[0]['readonly'] is True
-    assert counts == {'fictional-folder': 1}
+    assert counts == {'fictional-folder': 0}
 
 
 @pytest.mark.asyncio
@@ -797,3 +802,67 @@ async def test_flag_off_preserves_legacy_public_snapshot(dark_api, monkeypatch):
     result = await dark_api.browser.get('/api/v1/chats/share/fictional-retired')
     assert result.status_code == 200 and result.json()['chat'] == legacy['chat']
     assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+async def test_readonly_folder_rows_do_not_stay_unread_after_reading(dark_api):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    dark_api.records.folders = {
+        'fictional-folder': {
+            'fictional-thread': 'fictional-fern',
+            'fictional-shared': 'fictional-owner',
+        }
+    }
+    dark_api.visible.append(index_item('fictional-shared'))
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 1}
+    await service.organize('fictional-fern', 'fictional-chat', {'last_read_at': 2_000_000_000})
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
+    rows = await service.listing('fictional-fern', folder_id='fictional-folder')
+    assert len(rows) == 2
+    assert next(row for row in rows if row['readonly'])['last_read_at'] is None
+
+
+@pytest.mark.asyncio
+async def test_unavailable_owned_share_does_not_block_listing_or_unshare_all(dark_api, monkeypatch):
+    dark_api.records.records[0].branch_thread_ids = ['fictional-unavailable']
+    dark_api.visible.insert(0, index_item('fictional-unavailable'))
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    original = dark_api.client.shares
+
+    async def shares(thread_id, **kwargs):
+        if thread_id == 'fictional-unavailable':
+            raise ThreadError(404, 'unavailable')
+        return await original(thread_id, **kwargs)
+
+    monkeypatch.setattr(dark_api.client, 'shares', shares)
+    listed = await dark_api.browser.get('/api/v1/chats/shared')
+    assert listed.status_code == 200
+    assert [item['thread_id'] for item in listed.json()] == ['fictional-thread']
+    deleted = await dark_api.browser.delete('/api/v1/chats/share/all')
+    assert deleted.status_code == 200 and deleted.json() is True
+    assert not dark_api.state['shares']
+
+
+@pytest.mark.asyncio
+async def test_share_listing_still_refuses_transient_platform_failures(dark_api, monkeypatch):
+    monkeypatch.setattr(dark_api.client, 'shares', AsyncMock(side_effect=ThreadError(503, 'reconnect')))
+    response = await dark_api.browser.get('/api/v1/chats/shared')
+    assert response.status_code == 503 and response.json() == {'state': 'reconnect'}
+
+
+@pytest.mark.asyncio
+async def test_unshare_all_tolerates_a_thread_disappearing_after_listing(dark_api, monkeypatch):
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    monkeypatch.setattr(dark_api.client, 'unshare', AsyncMock(side_effect=ThreadError(404, 'unavailable')))
+    response = await dark_api.browser.delete('/api/v1/chats/share/all')
+    assert response.status_code == 200 and response.json() is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_access_update_cannot_create_a_live_share(dark_api):
+    response = await dark_api.browser.post(
+        '/api/v1/chats/shared/fictional-chat/access/update',
+        json={'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2},
+    )
+    assert response.status_code == 409 and response.json() == {'state': 'unavailable'}
+    assert not dark_api.calls and not dark_api.state.get('shares')

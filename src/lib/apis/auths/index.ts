@@ -384,33 +384,37 @@ export const userSignUp = async (
 };
 
 export const userSignOut = async () => {
-	if (get(config)?.features?.enable_v2_threads) await threadCacheOrigin().clear();
-	let error = null;
+	let res;
+	try {
+		if (get(config)?.features?.enable_v2_threads) await threadCacheOrigin().clear();
+	} finally {
+		let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		credentials: 'include'
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
+		res = await fetch(`${WEBUI_API_BASE_URL}/auths/signout`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			credentials: 'include'
 		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
+			.then(async (res) => {
+				if (!res.ok) throw await res.json();
+				return res.json();
+			})
+			.catch((err) => {
+				console.error(err);
+				error = err.detail;
+				return null;
+			});
 
-	if (error) {
-		throw error;
+		if (error) {
+			throw error;
+		}
+
+		sessionStorage.clear();
+		// [Gradient] Vergadering: recovery copies of recordings are per device, not per account.
+		await partStore().clear();
 	}
-
-	sessionStorage.clear();
-	// [Gradient] Vergadering: recovery copies of recordings are per device, not per account.
-	await partStore().clear();
 	return res;
 };
 

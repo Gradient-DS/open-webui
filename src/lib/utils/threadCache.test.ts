@@ -8,12 +8,18 @@ import {
 import {
 	ThreadCache,
 	ThreadCacheOrigin,
+	IndexedThreadStorage,
+	observeThreadAccount,
+	threadCacheOrigin,
 	clearThreadDrafts,
 	watchThreadVisibility,
 	type CacheRecord,
 	type ThreadCacheStorage
 } from './threadCache';
 import { ThreadWindow } from './threads';
+import { openDB } from 'idb';
+
+vi.mock('idb', () => ({ openDB: vi.fn(), deleteDB: vi.fn() }));
 
 class MemoryStorage implements ThreadCacheStorage {
 	partitions = new Map<string, Map<string, CacheRecord>>();
@@ -53,10 +59,12 @@ class MemoryStorage implements ThreadCacheStorage {
 }
 const deferred = <T>() => {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((yes) => {
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((yes, no) => {
 		resolve = yes;
+		reject = no;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 };
 const page = (): ProjectionPage => ({
 	thread_id: 'fictional-thread',
@@ -224,37 +232,36 @@ it('drops a delayed authorization after a context switch', async () => {
 	expect(api.projection).not.toHaveBeenCalled();
 });
 
-it('expires visible content and reauthorizes after a suspended tab wakes up', async () => {
+it('reopens an expired page after a suspended tab wakes up', async () => {
 	const { api, cache, origin } = setup();
 	const window = new ThreadWindow(api, undefined, cache);
 	await window.open('fictional-thread');
-	expect(window.snapshot.page).not.toBeNull();
 	const documentEvents = Object.assign(new EventTarget(), { visibilityState: 'visible' });
 	const windowEvents = new EventTarget();
 	vi.stubGlobal('document', documentEvents);
 	vi.stubGlobal('window', windowEvents);
+	const reopen = vi.fn(() => void window.open('fictional-thread'));
 	const unwatch = watchThreadVisibility(
 		() => window.clear(),
-		() => void window.open('fictional-thread'),
+		() => window.resume(reopen),
 		origin
 	);
 	documentEvents.visibilityState = 'hidden';
 	documentEvents.dispatchEvent(new Event('visibilitychange'));
-	expect(window.snapshot.page).toBeNull();
-	vi.advanceTimersByTime(60_000);
+	expect(window.snapshot.page).not.toBeNull();
+	// A suspended browser does not run the renewal or expiry timers.
+	vi.setSystemTime(Date.now() + 60_000);
 	vi.mocked(api.authorize).mockRejectedValueOnce(new TypeError('Fictional offline tab'));
 	documentEvents.visibilityState = 'visible';
 	documentEvents.dispatchEvent(new Event('visibilitychange'));
-	await vi.waitFor(() => expect(window.snapshot.state).toBe('reconnect'));
-	expect(window.snapshot.history.messages).toEqual({});
-	unwatch();
-	await window.open('fictional-thread');
-	vi.advanceTimersByTime(30_001);
 	expect(window.snapshot.page).toBeNull();
-	expect(window.snapshot.state).toBe('reconnect');
+	await vi.waitFor(() => expect(window.snapshot.state).toBe('reconnect'));
+	expect(reopen).toHaveBeenCalledOnce();
+	unwatch();
+	window.clear();
 });
 
-it('rechecks authorization after a slow fork listing before rendering', async () => {
+it('refuses an expired read proof after a slow fork listing before rendering', async () => {
 	const { api, cache, grant } = setup();
 	vi.mocked(api.forks).mockImplementationOnce(async () => {
 		vi.setSystemTime(Date.now() + 60_000);
@@ -267,7 +274,7 @@ it('rechecks authorization after a slow fork listing before rendering', async ()
 	const window = new ThreadWindow(api, undefined, cache);
 	await window.open('fictional-thread');
 	expect(window.snapshot.page).toBeNull();
-	expect(window.snapshot.state).toBe('unavailable');
+	expect(window.snapshot.state).toBe('reconnect');
 });
 
 it('invalidates every old-generation window after a restore', async () => {
@@ -437,4 +444,246 @@ it('ignores a late login refusal from a disposed context without clearing the ne
 	await expect(reading).rejects.toEqual(new ThreadError('sign_in'));
 	expect(clear).not.toHaveBeenCalled();
 	expect(storage.all()).toHaveLength(1);
+});
+
+it('keeps only the fallback marker through storage and a 304 reopen', async () => {
+	const { api, cache, storage } = setup();
+	vi.mocked(api.projection).mockResolvedValueOnce({
+		page: {
+			...page(),
+			title: 'Fictional private title',
+			preferences: { fallback: true, secret: 'Fictional' }
+		},
+		etag: '"fictional-etag"',
+		notModified: false
+	});
+	await cache.read('fictional-thread');
+	expect(storage.all()[0].page.preferences).toEqual({ fallback: true });
+	expect(storage.all()[0].page.title).toBeNull();
+	vi.mocked(api.projection).mockResolvedValueOnce({ page: null, etag: null, notModified: true });
+	expect((await cache.read('fictional-thread')).page?.preferences).toEqual({ fallback: true });
+});
+
+it('round trips the non-content fallback flag in IndexedDB window metadata', async () => {
+	const data = new Map<string, Map<string, unknown>>();
+	const objectStore = (name: string) => {
+		const items = data.get(name) ?? new Map<string, unknown>();
+		data.set(name, items);
+		return {
+			get: async (key: unknown) => items.get(JSON.stringify(key)),
+			getAll: async () => [...items.values()],
+			put: (value: unknown, key: unknown) => items.set(JSON.stringify(key), structuredClone(value))
+		};
+	};
+	vi.mocked(openDB).mockResolvedValue({
+		transaction: () => ({ objectStore, done: Promise.resolve() })
+	} as unknown as Awaited<ReturnType<typeof openDB>>);
+	const local = new Map<string, string>();
+	vi.stubGlobal('localStorage', {
+		getItem: (key: string) => local.get(key) ?? null,
+		setItem: (key: string, value: string) => local.set(key, value)
+	});
+	const storage = new IndexedThreadStorage();
+	await storage.write(
+		'fictional-partition',
+		{
+			page: { ...page(), preferences: { fallback: true } },
+			before: '',
+			etag: 'fictional-etag'
+		},
+		() => true
+	);
+	const record = await storage.read('fictional-partition', 'fictional-thread', '');
+	expect(record?.page.preferences).toEqual({ fallback: true });
+	expect(record?.page.messages).toEqual(page().messages);
+});
+
+it('uses the read proof without a second window approval', async () => {
+	const { api, cache } = setup();
+	const window = new ThreadWindow(api, undefined, cache);
+	await window.open('fictional-thread');
+	expect(api.authorize).toHaveBeenCalledTimes(2); // Session binding and the displayed page.
+	expect(window.snapshot.page).not.toBeNull();
+	window.clear();
+});
+
+it('renews visible authorization before the deadline without blanking or reloading', async () => {
+	const { api, cache } = setup();
+	const changed = vi.fn();
+	const window = new ThreadWindow(api, changed, cache);
+	await window.open('fictional-thread');
+	const visible = window.snapshot.page;
+	changed.mockClear();
+	await vi.advanceTimersByTimeAsync(60_000);
+	expect(window.snapshot.page).toBe(visible);
+	expect(api.authorize).toHaveBeenCalledTimes(4);
+	expect(api.projection).toHaveBeenCalledOnce();
+	expect(changed).not.toHaveBeenCalled();
+	window.clear();
+});
+
+it.each(['reconnect', 'unavailable'] as const)(
+	'fails closed when proof renewal returns %s',
+	async (state) => {
+		const { api, cache, grant, storage } = setup();
+		const window = new ThreadWindow(api, undefined, cache);
+		await window.open('fictional-thread');
+		vi.mocked(api.authorize).mockImplementation(async (body) => {
+			if (state === 'reconnect') throw new TypeError('Fictional offline network');
+			return {
+				...grant(body),
+				items: body.threads.map((thread) => ({ ...thread, status: 'gone' }))
+			};
+		});
+		await vi.advanceTimersByTimeAsync(29_000);
+		expect(window.snapshot.page).toBeNull();
+		expect(window.snapshot.state).toBe(state);
+		if (state === 'unavailable') expect(storage.all()).toEqual([]);
+	}
+);
+
+it('clears at the hard deadline when renewal is still pending and ignores its late reply', async () => {
+	const { api, cache, grant } = setup();
+	const window = new ThreadWindow(api, undefined, cache);
+	await window.open('fictional-thread');
+	const delayed = deferred<CacheAuthorization>();
+	vi.mocked(api.authorize).mockReturnValueOnce(delayed.promise);
+	await vi.advanceTimersByTimeAsync(30_001);
+	expect(window.snapshot.page).toBeNull();
+	expect(window.snapshot.state).toBe('reconnect');
+	const body = vi.mocked(api.authorize).mock.calls.at(-1)![0];
+	delayed.resolve(grant(body));
+	await vi.advanceTimersByTimeAsync(0);
+	expect(window.snapshot.page).toBeNull();
+});
+
+it('reapproves a valid resumed page without clearing and ignores plain focus events', async () => {
+	const { api, cache, origin } = setup();
+	const window = new ThreadWindow(api, undefined, cache);
+	await window.open('fictional-thread');
+	const visible = window.snapshot.page;
+	const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+	const win = new EventTarget();
+	vi.stubGlobal('document', doc);
+	vi.stubGlobal('window', win);
+	const clear = vi.spyOn(window, 'clear');
+	const reopen = vi.fn();
+	const unwatch = watchThreadVisibility(
+		(state) => window.clear(state),
+		() => window.resume(reopen),
+		origin
+	);
+	vi.mocked(api.authorize).mockClear();
+	win.dispatchEvent(new Event('focus'));
+	expect(api.authorize).not.toHaveBeenCalled();
+	win.dispatchEvent(new Event('pageshow'));
+	await vi.waitFor(() => expect(api.authorize).toHaveBeenCalledOnce());
+	expect(window.snapshot.page).toBe(visible);
+	expect(clear).not.toHaveBeenCalled();
+	expect(reopen).not.toHaveBeenCalled();
+	unwatch();
+	window.clear();
+});
+
+it('reopens on resume when the origin revision changed before a broadcast arrives', async () => {
+	const { api, storage } = setup();
+	let revision = 'fictional-before';
+	const origin = new ThreadCacheOrigin(storage, undefined, undefined, () => revision);
+	const cache = new ThreadCache(api, origin, 'fictional-tenant', 'fictional-epoch');
+	const window = new ThreadWindow(api, undefined, cache);
+	await window.open('fictional-thread');
+	revision = 'fictional-after';
+	const reopen = vi.fn();
+	window.resume(reopen);
+	expect(window.snapshot.page).toBeNull();
+	expect(reopen).toHaveBeenCalledOnce();
+});
+
+it.each(['reconnect', 'unavailable'] as const)(
+	'renders completed stream text immediately when background caching returns %s',
+	async (state) => {
+		const { api, cache } = setup();
+		const window = new ThreadWindow(api, undefined, cache);
+		await window.open('fictional-thread');
+		const pending = deferred<CacheAuthorization>();
+		vi.mocked(api.authorize).mockReturnValueOnce(pending.promise);
+		const final = {
+			position: 2,
+			content: 'Fictional final answer',
+			finished: true,
+			version: 'fictional-final'
+		};
+		window.stream('fictional-thread', 'fictional-generation', final);
+		expect(window.snapshot.page?.messages.at(-1)).toEqual(final);
+		await vi.waitFor(() => expect(api.authorize).toHaveBeenCalledTimes(3));
+		// Resolve the background request as a transient error or an explicit revocation.
+		if (state === 'reconnect') pending.reject(new TypeError('Fictional network interruption'));
+		else
+			pending.resolve({
+				principal: 'platform:user:fictional-fern',
+				session: 'fictional-session',
+				context_epoch: 'fictional-epoch',
+				authorization_context: 'fictional-door',
+				valid_until: new Date(Date.now() + 30_000).toISOString(),
+				items: [
+					{
+						thread_id: 'fictional-thread',
+						generation: 'fictional-generation',
+						versions: ['fictional-version', 'fictional-final'],
+						status: state === 'unavailable' ? 'gone' : 'ok'
+					}
+				]
+			});
+		await vi.advanceTimersByTimeAsync(0);
+		if (state === 'unavailable') expect(window.snapshot.page).toBeNull();
+		else expect(window.snapshot.page?.messages.at(-1)).toEqual(final);
+		window.clear();
+	}
+);
+
+it('clears and broadcasts an observed account switch, but keeps the same account', async () => {
+	const values = new Map<string, string>();
+	vi.stubGlobal('localStorage', {
+		getItem: (key: string) => values.get(key) ?? null,
+		setItem: (key: string, value: string) => values.set(key, value),
+		removeItem: (key: string) => values.delete(key)
+	});
+	vi.stubGlobal('sessionStorage', {});
+	vi.stubGlobal('window', new EventTarget());
+	const reload = vi.fn();
+	vi.stubGlobal('location', { reload });
+	const postMessage = vi.fn();
+	vi.stubGlobal(
+		'BroadcastChannel',
+		class {
+			onmessage = null;
+			postMessage = postMessage;
+		}
+	);
+	const origin = threadCacheOrigin();
+	const clearStorage = vi.spyOn(origin.storage, 'clear').mockResolvedValue();
+	observeThreadAccount('fictional-fern');
+	const valid = origin.stamp();
+	observeThreadAccount('fictional-fern');
+	expect(valid()).toBe(true);
+	expect(postMessage).not.toHaveBeenCalled();
+	observeThreadAccount('fictional-moss');
+	expect(valid()).toBe(false);
+	await origin.ready();
+	expect(clearStorage).toHaveBeenCalledOnce();
+	expect(postMessage).toHaveBeenCalledWith('clear');
+	expect(reload).toHaveBeenCalledOnce();
+});
+
+it('broadcasts and invalidates visible proofs even if origin storage clearing fails', async () => {
+	const { api, storage } = setup();
+	const channel = { onmessage: null as BroadcastChannel['onmessage'], postMessage: vi.fn() };
+	const origin = new ThreadCacheOrigin(storage, channel);
+	const cache = new ThreadCache(api, origin, 'fictional-tenant', 'fictional-epoch');
+	const proof = await cache.read('fictional-thread');
+	const failure = new Error('Fictional storage clear failure');
+	vi.spyOn(storage, 'clear').mockRejectedValueOnce(failure);
+	await expect(origin.clear()).rejects.toBe(failure);
+	expect(channel.postMessage).toHaveBeenCalledWith('clear');
+	expect(proof.valid()).toBe(false);
 });
