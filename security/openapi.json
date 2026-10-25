@@ -5227,24 +5227,6 @@
         "title": "ConnectionVerificationForm",
         "type": "object"
       },
-      "ConnectionsConfigForm": {
-        "properties": {
-          "ENABLE_BASE_MODELS_CACHE": {
-            "title": "Enable Base Models Cache",
-            "type": "boolean"
-          },
-          "ENABLE_DIRECT_CONNECTIONS": {
-            "title": "Enable Direct Connections",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ENABLE_DIRECT_CONNECTIONS",
-          "ENABLE_BASE_MODELS_CACHE"
-        ],
-        "title": "ConnectionsConfigForm",
-        "type": "object"
-      },
       "ContentBlock": {
         "additionalProperties": true,
         "properties": {
@@ -31031,76 +31013,6 @@
           }
         ],
         "summary": "Set Code Execution Config",
-        "tags": [
-          "configs"
-        ]
-      }
-    },
-    "/api/v1/configs/connections": {
-      "get": {
-        "operationId": "get_connections_config_api_v1_configs_connections_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectionsConfigForm"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Connections Config",
-        "tags": [
-          "configs"
-        ]
-      },
-      "post": {
-        "operationId": "set_connections_config_api_v1_configs_connections_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectionsConfigForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectionsConfigForm"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Set Connections Config",
         "tags": [
           "configs"
         ]

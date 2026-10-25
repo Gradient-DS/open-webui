@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 579 operations. Audit bodies across all
-# OpenAPI methods (583 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 577 operations. Audit bodies across all
+# OpenAPI methods (581 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (579, 583), (
-        f'Expected 579 five-method operations / 583 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (577, 581), (
+        f'Expected 577 five-method operations / 581 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -72,8 +72,8 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 23 and media == {'application/json': 19, 'multipart/form-data': 4}, (
-        'Expected 23 blind body operations (19 JSON: 18 write + 1 read; 4 multipart); '
+    assert len(blind) == 22 and media == {'application/json': 18, 'multipart/form-data': 4}, (
+        'Expected 22 blind body operations (18 JSON: 17 write + 1 read; 4 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
