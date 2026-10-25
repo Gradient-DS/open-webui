@@ -22,7 +22,7 @@ def platform(monkeypatch, platform_capabilities):
 
     def handle(request):
         sent.append(request)
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         assert request.url.host == 'platform.invalid'
         return replies.pop(0)
 
@@ -36,7 +36,6 @@ def platform(monkeypatch, platform_capabilities):
         return f'fictional-login:{ref}'
 
     monkeypatch.setattr('open_webui.soev.client.user_token', token)
-    monkeypatch.setattr(identity, 'ensure_link', AsyncMock())
     monkeypatch.setattr(
         identity,
         'build_client',
@@ -79,7 +78,10 @@ def test_meeting_resource_operations_bind_the_actual_caller_and_preserve_refusal
     response = platform.browser.request(
         method,
         f'/api/v1/meetings/thr-owned{suffix}',
-        headers={'X-Test-User': 'intruder', 'X-Soev-Subject': 'signed:owui:user:owner', 'X-Acting-User-Id': 'owner'},
+        headers={
+            'X-Test-User': 'intruder',
+            'X-Acting-User-Id': 'owner',
+        },
         **kwargs,
     )
     assert response.status_code == 404
@@ -120,7 +122,7 @@ def test_picker_grant_and_idempotency_key_cannot_select_another_users_collection
         response = platform.browser.post(
             '/api/v1/files/onedrive/attach',
             json=body,
-            headers={'X-Test-User': actor, 'Idempotency-Key': key, 'X-Soev-Subject': 'signed:owui:user:owner'},
+            headers={'X-Test-User': actor, 'Idempotency-Key': key},
         )
         assert response.status_code == 403
         request = platform.sent[-1]

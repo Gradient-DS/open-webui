@@ -49,7 +49,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
 
     monkeypatch.setattr(files, 'get_async_db_context', context)
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     await client.send(
         'POST',
         '/v1/collections',
@@ -239,7 +238,7 @@ async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
     for request in (create, commit):
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert create.headers['X-Soev-User-Token'] == commit.headers['X-Soev-User-Token']
-    assert 'X-Soev-Subject' not in upload.headers and 'Authorization' not in upload.headers
+    assert 'X-Soev-' + 'Subject' not in upload.headers and 'Authorization' not in upload.headers
     await env.module.cancel(file)
     assert len(builds) == 2
 

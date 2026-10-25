@@ -93,8 +93,7 @@ async def offboard_user(
     refuse_offboarding()
     async with get_async_db_context(db) as session:
         async with group_sync.membership_lock(session):
-            async with identity.link_lock(f'owui:user:{user_id}'):
-                return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
+            return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
 
 
 async def _offboard(
@@ -114,8 +113,6 @@ async def _offboard(
     await store.narrow_owned_groups(user_id, db=db)
     await apply_collections(owned, options=options, archive=archive, as_user=as_user)
     await delete_external_user_data(user_id, options=options, db=db)
-    if configured():
-        await identity.unlink(identity.external_ref(user), identity.build_client())
     try:
         count = await finalize_local(user_id, options=options, archive=archive, db=db)
         await db.commit()

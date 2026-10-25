@@ -15,7 +15,6 @@ def subscribed_store(monkeypatch, identity_config, identity_http):
     from open_webui.models.files import Files
 
     identity, _ = identity_config
-    monkeypatch.setattr(identity, 'ensure_link', AsyncMock())
     monkeypatch.setattr(Files, 'get_unlanded_files_for_collection', AsyncMock(return_value=[]))
     requests, responses = identity_http
     documents = [
@@ -81,7 +80,6 @@ def folder_store(monkeypatch, identity_config, login_tokens):
     from open_webui.soev.knowledge_store import _catalog_file_row
 
     identity, _ = identity_config
-    monkeypatch.setattr(identity, 'ensure_link', AsyncMock())
     monkeypatch.setattr(Files, 'get_unlanded_files_for_collection', AsyncMock(return_value=[]))
     collection = {
         'key': 'kb',

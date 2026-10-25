@@ -81,7 +81,7 @@ def world(monkeypatch):
     async def set_grants(resource_type, resource_id, grants, db=None):
         if state.fail_writes:
             raise SoevApiError(503, 'injected_failure', 'injected_failure')
-        state.writes.append((resource_type, resource_id, acting.acting_ref()))
+        state.writes.append((resource_type, resource_id, acting.requester_ref()))
         state.grants[(resource_type, resource_id)] = list(grants)
 
     async def knowledge_by_id(key):

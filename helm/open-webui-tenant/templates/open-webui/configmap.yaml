@@ -23,9 +23,6 @@ data:
   {{- with .Values.soevApi.url }}
   SOEV_API_URL: {{ . | quote }}
   {{- end }}
-  {{- with .Values.soevApi.audience }}
-  SOEV_API_AUDIENCE: {{ . | quote }}
-  {{- end }}
   {{- with .Values.soevApi.servicePrincipal }}
   SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
   {{- end }}

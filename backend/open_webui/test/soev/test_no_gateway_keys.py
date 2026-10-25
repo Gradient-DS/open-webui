@@ -23,9 +23,6 @@ EXCEPTIONS = {
     'backend/open_webui/migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py': (
         'Historical Alembic migration reads legacy config to preserve upgrade history; no runtime defaults.'
     ),
-    'backend/open_webui/soev/migrate_config.py': (
-        'Offline v1 migration snapshots and restores legacy connection rows byte for byte.'
-    ),
 }
 
 

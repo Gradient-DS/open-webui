@@ -659,52 +659,7 @@ openWebui:
 # secretStoreRef to the platform's existing SecretStore/ClusterSecretStore.
 soevApi:
   url: ""
-  audience: ""
   servicePrincipal: ""
-  # One-shot v1 -> v2 migration (python -m open_webui.soev.migrate). A plain Job named
-  # <release>-v2-migrate-<hash of these values and extraEnv>: changing them starts a new
-  # run (every step is idempotent); an app image bump does not. Needs soevApi.url and Redis.
-  migrate:
-    enabled: false
-    # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
-    image:
-      tag: ""
-    # apply | plan (the apply's dry run: prints what it would do, including every distinct
-    # base-model system prompt in full, and writes nothing) | restore (puts back the config
-    # snapshot and model ids) | models (only rewrites stored model ids by modelMap, e.g. after
-    # catalog ids are renamed; restore with the same id) | uploads (only ingests the uploads
-    # stored chats attach, for tenants applied before that step)
-    mode: apply
-    id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
-    # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
-    config: {}
-    #   agent_api.selected_agent: soev
-    #   document_writer.enable: true
-    #   live_documents.enable: true
-    #   live_mail.enable: false
-    #   notes.enable: true
-    #   web.search.enable: true
-    #   webui.url: https://client.soev.ai
-    #   user.permissions.features: {web_search: true, notes: true}
-    # SOEV_V2_MODEL_MAP: stored model id -> soev-api catalog id. For apply, the LiteLLM model
-    # names (take the pairs from the catalog); for models, the old catalog ids.
-    modelMap: {}
-    #   zai-org/GLM-5.3: zai-org/glm-5.3
-    # SOEV_V2_SYSTEM_PROMPT: the apply moves the v1 per-base-model system prompts to one global
-    # prompt (Admin > Settings > System prompt) and clears them on the models. With one distinct
-    # prompt it is kept; with several, name the v1 base model id whose prompt to keep (mode plan
-    # lists them in full), or none. Unset with several stops the apply before any write (exit 2).
-    systemPrompt: ""
-    ingestConcurrency: 4
-    # Keep polling running ingest this long before exiting 75 (retry).
-    waitSeconds: 600
-    # Kubernetes retries exit 1 (soev-api unreachable) and 75 (ingest running) with
-    # exponential backoff capped at 6 min; exit 2 (invalid input) fails the Job at once.
-    backoffLimit: 60
-    # Unset keeps the finished Job; once a TTL removes it, the next Helm upgrade
-    # recreates it and the migration runs again (harmless, but not free).
-    ttlSecondsAfterFinished: null
-    resources: {}
 liveDocuments:
   enabled: null  # Application default false; explicit false is rendered too.
 liveMail:
@@ -989,7 +944,6 @@ secrets:
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   # Required when soevApi.url is set and externalSecrets.enabled is false.
   soevApiKey: ""
-  soevApiSigningKey: ""  # Literal multi-line Ed25519 PEM; use a YAML | block.
 
   # Google Drive / OAuth (leave empty to disable)
   googleClientSecret: ""
@@ -1068,7 +1022,7 @@ externalSecrets:
     cache: true                                  # Set to false if ESO version doesn't support cache
     cacheTTL: "5m"
     cacheMaxSize: 100
-    # soevApiKey and soevApiSigningKey are always fetched when soevApi.url is set.
+    # soevApiKey is always fetched when soevApi.url is set.
     # Toggle optional fields (set to true if the 1P item contains these)
     fields:
       s3AccessKeyId: false

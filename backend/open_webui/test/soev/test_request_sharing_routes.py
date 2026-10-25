@@ -49,11 +49,11 @@ def api(monkeypatch):
     async def requester():
         ref = f'owui:user:{state.user.id}'
         request_token = acting._requester_ref.set(ref)
-        acting_token = acting._acting_ref.set(ref)
+        acting_token = acting._requester_ref.set(ref)
         try:
             yield
         finally:
-            acting._acting_ref.reset(acting_token)
+            acting._requester_ref.reset(acting_token)
             acting._requester_ref.reset(request_token)
 
     app.include_router(models.router, prefix='/models', dependencies=[Depends(requester)])
@@ -194,7 +194,6 @@ def test_nonowner_folder_delete_checks_subtree_without_acting_as_owner(api, monk
     )
     client = SoevClient('https://soev.invalid', 'fictional-key')
     monkeypatch.setattr(identity, 'build_client', lambda: client)
-    monkeypatch.setattr(identity, 'ensure_link', AsyncMock())
 
     async def guarded(self, method, path, **kwargs):
         assert kwargs.get('as_user') in (None, 'owui:user:lark')

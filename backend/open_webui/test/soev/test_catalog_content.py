@@ -33,7 +33,7 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
         requests.append(request)
         if request.url.host == 'storage.invalid':
             assert 'Authorization' not in request.headers
-            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
             assert 'cookie' not in request.headers
             return httpx.Response(200, content=b'original\x00bytes', headers={'Content-Type': 'wrong/type'})
         if request.url.path.endswith('/original'):

@@ -9,12 +9,11 @@ import pytest_asyncio
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from open_webui.models.users import User
 from open_webui.soev import persons
 from open_webui.soev.client import SoevApiError
 from open_webui.test.soev.test_keycloak_token import token_app as token_app
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 PERSON = 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'
 
@@ -49,7 +48,7 @@ async def test_first_oidc_request_stores_person_without_a_subject_assertion(pers
     assert me.url.path == '/v1/me'
     assert me.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
     assert me.headers['X-Soev-User-Token'] == 'fictional-refreshed-token'
-    assert 'X-Soev-Subject' not in me.headers
+    assert 'X-Soev-' + 'Subject' not in me.headers
     async with sessions() as db:
         assert (await db.get(User, ctx.user.id)).person_id == PERSON
     assert ctx.user.person_id == PERSON

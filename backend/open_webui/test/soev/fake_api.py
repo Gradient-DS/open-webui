@@ -1,4 +1,4 @@
-"""Inspectable in-memory HTTP contract with signature, identity, and replay checks."""
+"""Inspectable in-memory HTTP contract with login-token, identity, and replay checks."""
 
 import base64
 import copy
@@ -10,8 +10,6 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 import httpx
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from open_webui.test.soev.fake_chat import FakeChatApi
 
 
@@ -28,16 +26,13 @@ class FakeSoevApi:
         self.user_tokens: dict[str, str] = {}
         self.capabilities = {'soev_test_cred-runtime_test-secret': {'*'}}
         self.credential_id = 'cred-runtime'
-        self.audience = None
-        self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
-        self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
-        self.seen_jtis = set()
+        self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
         self.models: list[dict] = []
@@ -46,9 +41,6 @@ class FakeSoevApi:
 
     def handle(self, request):
         self.requests.append(request)
-        assert not ('X-Soev-User-Token' in request.headers and 'X-Soev-Subject' in request.headers), (
-            'A login token must never be accompanied by a subject assertion'
-        )
         try:
             if self.failures:
                 raise Problem(self.failures.pop(0), 'injected_failure')
@@ -82,7 +74,7 @@ class FakeSoevApi:
             self._admit_ingest(body, credential, subject)
         if request.method == 'POST' and len(parts) == 4 and parts[:2] == ['v1', 'jobs']:
             return self._route(request, body, credential, subject)
-        if (request.method == 'POST' and parts == ['v1', 'identity', 'links']) or (
+        if (
             request.method == 'PUT'
             and len(parts) == 5
             and parts[:3] == ['v1', 'directory', 'groups']
@@ -98,7 +90,7 @@ class FakeSoevApi:
         return response
 
     def _subject(self, request):
-        subject = self._assertion(request.headers['X-Soev-Subject']) if 'X-Soev-Subject' in request.headers else None
+        subject = None
         access_token = request.headers.get('X-Soev-User-Token')
         if access_token:
             if access_token in self.user_tokens:
@@ -107,8 +99,6 @@ class FakeSoevApi:
                 subject = access_token.removeprefix('fictional-login:')
             else:
                 raise Problem(401, 'sign_in')
-        if subject and not access_token and subject not in self.links:
-            raise Problem(401, 'identity_not_linked')
         return subject
 
     def _replay(self, key, fingerprint, ingest_create):
@@ -146,27 +136,6 @@ class FakeSoevApi:
         for job_id, document in targets:
             self.uploads[job_id, document['source_id']] = request.content
         return httpx.Response(200)
-
-    def _assertion(self, token):
-        try:
-            header_part, encoded, signature_part = token.split('.')
-            header = json.loads(base64.urlsafe_b64decode(header_part + '=' * (-len(header_part) % 4)))
-            if header['alg'] != 'Ed25519' or header.get('typ') != 'subject+jwt':
-                raise Problem(401, 'credential_invalid')
-            jwk = self.signing_keys[header['kid']]
-            key = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(jwk['x'] + '=' * (-len(jwk['x']) % 4)))
-            signature = base64.urlsafe_b64decode(signature_part + '=' * (-len(signature_part) % 4))
-            key.verify(signature, f'{header_part}.{encoded}'.encode())
-            payload = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
-            if payload['iss'] != self.credential_id or (self.audience is not None and payload['aud'] != self.audience):
-                raise Problem(401, 'credential_invalid')
-            ref, jti = payload['sub'], payload['jti']
-        except (ValueError, KeyError, TypeError, InvalidSignature):
-            raise Problem(401, 'credential_invalid') from None
-        if jti in self.seen_jtis:
-            raise Problem(401, 'assertion_replayed')
-        self.seen_jtis.add(jti)
-        return ref
 
     def _closure(self, ref):
         return {ref} | {group for group, members in self.groups.items() if ref in members}
@@ -256,7 +225,7 @@ class FakeSoevApi:
             return httpx.Response(
                 200, json={'groups': rows[start:end], 'next_cursor': str(end) if end < len(rows) else None}
             )
-        if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
+        if parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
             return self._jobs(request, parts, body, credential, subject)
@@ -386,17 +355,6 @@ class FakeSoevApi:
         return httpx.Response(200, json={'data': rows, 'next_cursor': None})
 
     def _identity(self, method, parts, body):
-        if len(parts) == 4 and parts[:3] == ['v1', 'identity', 'links'] and method == 'DELETE':
-            self.links = {
-                ref: uid for ref, uid in self.links.items() if uid != parts[3] or not ref.startswith('owui:user:')
-            }
-            return httpx.Response(204)
-        if parts == ['v1', 'identity', 'links'] and method == 'POST':
-            ref = self._assertion(body['assertion'])
-            if not ref.startswith('owui:user:'):
-                raise Problem(422, 'invalid_field')
-            self.links[ref] = body['platform_user_id']
-            return httpx.Response(204)
         if len(parts) == 5 and parts[1:3] == ['directory', 'groups'] and parts[-1] == 'members' and method == 'PUT':
             if not parts[3].startswith('owui:group:') or any(
                 not ref.startswith(('owui:user:', 'platform:user:')) for ref in body['members']
