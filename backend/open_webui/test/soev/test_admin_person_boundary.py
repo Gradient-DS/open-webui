@@ -195,26 +195,127 @@ async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('role', ['user', 'admin'])
-async def test_scim_cannot_hide_deactivation_with_a_later_reactivation(admin_app, role):
+@pytest.mark.parametrize('op', ['replace', 'add', 'RePlAcE', 'ADD'])
+@pytest.mark.parametrize(
+    'path,value', [('active', False), ('Active', False), (None, {'active': False}), (None, {'Active': False})]
+)
+async def test_scim_cannot_hide_deactivation_with_a_later_reactivation(admin_app, monkeypatch, role, op, path, value):
+    from open_webui.routers import scim
+
     store = admin_app
     target = await store.db.get(store.user_table, 'elm')
     target.role = role
     await store.db.commit()
+    update = AsyncMock(wraps=scim.Users.update_user_by_id)
+    stamp = AsyncMock(wraps=scim.Users.update_user_scim_by_id)
+    publish = AsyncMock()
+    monkeypatch.setattr(scim.Users, 'update_user_by_id', update)
+    monkeypatch.setattr(scim.Users, 'update_user_scim_by_id', stamp)
+    monkeypatch.setattr(scim, 'publish_event', publish)
+    deactivation = {'op': op, 'path': path, 'value': value} if path else {'op': op, 'value': value}
     response = await store.ctx.browser.patch(
         '/scim/v2/Users/elm',
         json={
             'Operations': [
-                {'op': 'replace', 'path': 'active', 'value': False},
-                {'op': 'replace', 'path': 'active', 'value': True},
                 {'op': 'replace', 'path': 'externalId', 'value': 'changed'},
+                {'op': 'replace', 'path': 'displayName', 'value': 'Changed'},
+                deactivation,
+                {'op': 'replace', 'path': 'active', 'value': True},
             ]
         },
     )
     assert response.status_code == 403, response.text
     assert response.json()['detail']['constraint'] == 'suspension:console'
     await store.db.refresh(target)
-    assert (target.role, target.scim) == (role, None)
+    assert (target.role, target.name, target.scim) == (role, 'Elm', None)
+    update.assert_not_awaited()
+    stamp.assert_not_awaited()
+    publish.assert_not_awaited()
     assert store.ctx.requests == []
+    store.resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+@pytest.mark.parametrize(
+    'operation',
+    [
+        {'op': 'remove', 'path': 'active'},
+        {'op': 'unknown', 'path': 'displayName', 'value': 'Changed'},
+        {'op': 'replace', 'path': 'unknown', 'value': 'Changed'},
+        {'op': 'replace', 'value': {'unknown': 'Changed'}},
+        {'op': 'replace', 'value': {'displayName': 'Changed', 'unknown': 'Changed'}},
+        {'op': 'replace', 'value': False},
+        {'op': 'add', 'value': []},
+        {'op': 'replace', 'value': {}},
+        {'op': 'replace', 'path': '', 'value': False},
+        {'op': 'replace', 'path': 'active', 'value': 'false'},
+        {'op': 'add', 'path': 'Active', 'value': 0},
+        {'op': 'replace', 'value': {'active': None}},
+        {'op': 'replace', 'path': 'displayName', 'value': {'formatted': 'Changed'}},
+    ],
+)
+async def test_scim_invalid_patch_refuses_before_companion_writes(admin_app, monkeypatch, role, operation):
+    from open_webui.routers import scim
+
+    store = admin_app
+    target = await store.db.get(store.user_table, 'elm')
+    target.role = role
+    await store.db.commit()
+    update = AsyncMock(wraps=scim.Users.update_user_by_id)
+    stamp = AsyncMock(wraps=scim.Users.update_user_scim_by_id)
+    publish = AsyncMock()
+    monkeypatch.setattr(scim.Users, 'update_user_by_id', update)
+    monkeypatch.setattr(scim.Users, 'update_user_scim_by_id', stamp)
+    monkeypatch.setattr(scim, 'publish_event', publish)
+    response = await store.ctx.browser.patch(
+        '/scim/v2/Users/elm',
+        json={
+            'Operations': [
+                {'op': 'replace', 'path': 'externalId', 'value': 'changed'},
+                {'op': 'replace', 'path': 'displayName', 'value': 'Changed'},
+                operation,
+            ]
+        },
+    )
+    assert response.status_code == 400, response.text
+    await store.db.refresh(target)
+    assert (target.role, target.name, target.scim) == (role, 'Elm', None)
+    update.assert_not_awaited()
+    stamp.assert_not_awaited()
+    publish.assert_not_awaited()
+    assert store.ctx.requests == []
+    store.resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin', 'pending'])
+@pytest.mark.parametrize('op', ['replace', 'add'])
+@pytest.mark.parametrize('pathless', [False, True])
+async def test_scim_normalized_patch_applies_supported_attributes(admin_app, role, op, pathless):
+    store = admin_app
+    target = await store.db.get(store.user_table, 'elm')
+    target.role = role
+    await store.db.commit()
+    attributes = {
+        'Active': True,
+        'UserName': 'changed@example.invalid',
+        'DisplayName': 'Changed',
+        'ExternalId': 'changed',
+    }
+    operations = (
+        [{'op': op, 'value': attributes}]
+        if pathless
+        else [{'op': op, 'path': path, 'value': value} for path, value in attributes.items()]
+    )
+    response = await store.ctx.browser.patch('/scim/v2/Users/elm', json={'Operations': operations})
+    assert response.status_code == 200, response.text
+    await store.db.refresh(target)
+    assert target.role == ('admin' if role == 'admin' else 'user')
+    assert (target.name, target.email) == ('Changed', 'changed@example.invalid')
+    assert target.scim == {'fictional-provider': {'external_id': 'changed'}}
+    assert store.ctx.requests == []
+    store.resolve.assert_not_awaited()
 
 
 @pytest.mark.asyncio

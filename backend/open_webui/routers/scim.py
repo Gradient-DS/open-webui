@@ -740,6 +740,37 @@ async def update_user(
     return await user_to_scim(updated_user, request, db=db)
 
 
+def normalize_user_patch(operations: list[SCIMPatchOperation]) -> list[tuple[str, Any]]:
+    supported_paths = {
+        'active',
+        'username',
+        'displayname',
+        'emails[primary eq true].value',
+        'name.formatted',
+        'externalid',
+    }
+    normalized = []
+    for operation in operations:
+        if operation.op.lower() not in {'add', 'replace'}:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Unsupported SCIM patch operation')
+        if operation.path is not None:
+            values = {operation.path: operation.value}
+        elif isinstance(operation.value, dict) and operation.value:
+            values = operation.value
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Pathless SCIM patch requires an attribute object')
+
+        for path, value in values.items():
+            path = path.lower()
+            if path not in supported_paths:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Unsupported SCIM patch attribute')
+            expected_type = bool if path == 'active' else str
+            if not isinstance(value, expected_type):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Invalid SCIM patch value')
+            normalized.append((path, value))
+    return normalized
+
+
 @router.patch('/Users/{user_id}', response_model=SCIMUser)
 async def patch_user(
     user_id: str,
@@ -756,30 +787,25 @@ async def patch_user(
             detail=f'User {user_id} not found',
         )
 
+    operations = normalize_user_patch(patch_data.Operations)
     update_data = {}
-
+    user_fields = {
+        'username': 'email',
+        'displayname': 'name',
+        'emails[primary eq true].value': 'email',
+        'name.formatted': 'name',
+    }
     external_ids = []
-    for operation in patch_data.Operations:
-        op = operation.op.lower()
-        path = operation.path
-        value = operation.value
-
-        if op == 'replace':
-            if path == 'active':
-                check_role_change(user, 'user' if value else 'pending')
-                # Same guard as update_user: never demote an existing admin via SCIM.
-                if user.role != 'admin':
-                    update_data['role'] = 'user' if value else 'pending'
-            elif path == 'userName':
-                update_data['email'] = value
-            elif path == 'displayName':
-                update_data['name'] = value
-            elif path == 'emails[primary eq true].value':
-                update_data['email'] = value
-            elif path == 'name.formatted':
-                update_data['name'] = value
-            elif path == 'externalId':
-                external_ids.append(value)
+    for path, value in operations:
+        if path == 'active':
+            check_role_change(user, 'user' if value else 'pending')
+            # Same guard as update_user: never demote an existing admin via SCIM.
+            if user.role != 'admin':
+                update_data['role'] = 'user' if value else 'pending'
+        elif path == 'externalid':
+            external_ids.append(value)
+        else:
+            update_data[user_fields[path]] = value
 
     # Update user
     if update_data:
