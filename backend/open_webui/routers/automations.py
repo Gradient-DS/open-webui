@@ -17,6 +17,7 @@ from open_webui.models.automations import (
 )
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
+from open_webui.soev.policy_jobs import refuse_automations
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.automations import (
@@ -172,6 +173,7 @@ async def create_new_automation(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     await check_automation_folder_access(form_data.folder_id, user, db)
     try:
@@ -228,6 +230,7 @@ async def update_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
@@ -268,6 +271,7 @@ async def toggle_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
@@ -296,6 +300,7 @@ async def run_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)

@@ -37,7 +37,7 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
             assert 'cookie' not in request.headers
             return httpx.Response(200, content=b'original\x00bytes', headers={'Content-Type': 'wrong/type'})
         if request.url.path.endswith('/original'):
-            assert request.headers['X-Soev-Subject']
+            assert request.headers['X-Soev-User-Token']
             if case == 'revoked':
                 return httpx.Response(
                     404,
@@ -103,7 +103,7 @@ async def test_get_file_by_id_serves_a_catalog_only_document(env, monkeypatch, r
     assert await files.Files.get_file_by_id('cloud') is None
     assert any(request.url.path == '/v1/collections/kb/documents/cloud/content' for request in env.api.requests)
     assert not any(request.url.path.endswith('/original') for request in env.api.requests)
-    assert all(request.headers.get('X-Soev-Subject') for request in env.api.requests if request.method == 'GET')
+    assert all(request.headers.get('X-Soev-User-Token') for request in env.api.requests if request.method == 'GET')
 
 
 @pytest.mark.asyncio

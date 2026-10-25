@@ -119,7 +119,6 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
             closed.append(True)
 
     monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
-    monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
     storage = Mock(side_effect=AssertionError('Reference originals must not use OWUI storage'))
     monkeypatch.setattr(files.Storage, 'get_file', storage)
     user = SimpleNamespace(id='alice', role='user')
@@ -156,7 +155,6 @@ async def test_missing_original_while_processing_is_a_conflict(env, monkeypatch)
         yield b''
 
     monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
-    monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
     user = SimpleNamespace(id='alice', role='user')
     with pytest.raises(HTTPException) as error:
         await files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)

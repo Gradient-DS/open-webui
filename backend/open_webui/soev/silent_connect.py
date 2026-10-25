@@ -67,7 +67,7 @@ async def next_hop(user: UserModel) -> str | None:
     }:
         return None
     client = identity.build_client(timeout=TIMEOUT_SECONDS)
-    sync = CloudSync(client, await identity.acting_ref(user, client))
+    sync = CloudSync(client, identity.external_ref(user))
     state = await _state(user.id)
     connections = await sync.connections()
     connections += await _open_missing(user, sync, connections, features, state['declined'])

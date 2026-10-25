@@ -27,7 +27,6 @@ def picker(env, monkeypatch, platform_capabilities):  # noqa: F811
         )
     )
     monkeypatch.setattr(routes.identity, 'build_client', lambda: client)
-    monkeypatch.setattr(routes.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
     monkeypatch.setattr(
         routes.ingest, 'ensure_attachments_collection', AsyncMock(return_value='owui-attachments-alice')
     )

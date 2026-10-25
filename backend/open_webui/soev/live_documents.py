@@ -96,7 +96,7 @@ ORIGINAL_PROCESSING = 'original_processing'
 
 async def stream_original(file: FileModel, user, *, attachment: bool):
     client = identity.build_client()
-    ref = await identity.acting_ref(user, client)
+    ref = identity.external_ref(user)
     collection = quote(file.meta['collection_name'], safe='')
     path = f'/v1/collections/{collection}/documents/{quote(file.id, safe="")}/original'
     stream = client.stream(path, as_user=ref)

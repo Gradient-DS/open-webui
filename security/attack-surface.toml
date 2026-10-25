@@ -1100,9 +1100,9 @@ reason = "A proxied completion is the upstream's answer, not an owner's resource
 [[control]]
 runtime_soev_backed = "waive"
 route = "POST /api/v1/audio/speech"
-status = 403
+status = 401
 detail = "identity:platform_login"
-reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 403 scope_insufficient, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
+reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
 
 [[control]]
 route = "POST /api/v1/invites/{token}/accept"

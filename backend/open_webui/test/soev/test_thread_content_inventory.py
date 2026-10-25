@@ -100,6 +100,8 @@ def test_v2_has_no_unguarded_local_content_writer():
         'services/deletion/offboarding_store.py': {'_delete_threads', 'finalize_local', 'delete_resource_dependents'},
         'soev/migrate_uploads.py': {'_referenced'},
         'soev/migrate_models.py': {'rewrite', 'restore'},
+        'soev/agent_threads.py': {'_user_messages', 'deletion_chat_ids'},
+        'soev/retention.py': {'poll_deletions'},
     }
     unguarded = []
     for file, names in direct.items():
@@ -114,6 +116,15 @@ def test_v2_has_no_unguarded_local_content_writer():
                 if isinstance(statements[0], ast.Expr) and isinstance(statements[0].value, ast.Constant)
                 else statements[0]
             )
+            # Sessionless workers return under v2 before reaching any local content.
+            # Delegation can refuse background work before the legacy-content guard.
+            preambles = {
+                'if v2_enabled():\n    return',
+                'if v2_enabled():\n    return []',
+                'if background:\n    refuse_automations()',
+            }
+            if ast.unparse(first) in preambles:
+                first = statements[statements.index(first) + 1]
             if ast.unparse(first) != 'refuse_local_content()':
                 unguarded.append(f'{file}:{name}')
     assert unguarded == []

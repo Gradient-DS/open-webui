@@ -192,7 +192,7 @@ def test_nonowner_folder_delete_checks_subtree_without_acting_as_owner(api, monk
             return_value=[SimpleNamespace(resource_type='note', resource_id='memo')] if remote == 'grant' else []
         ),
     )
-    client = SoevClient('https://soev.invalid', 'fictional-key', subject_minter=lambda _: 'fictional-subject')
+    client = SoevClient('https://soev.invalid', 'fictional-key')
     monkeypatch.setattr(identity, 'build_client', lambda: client)
     monkeypatch.setattr(identity, 'ensure_link', AsyncMock())
 

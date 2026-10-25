@@ -25,6 +25,7 @@ class FakeSoevApi:
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
         self.credentials = {'soev_test_cred-runtime_test-secret': 'owui:service:webui'}
+        self.user_tokens: dict[str, str] = {}
         self.capabilities = {'soev_test_cred-runtime_test-secret': {'*'}}
         self.credential_id = 'cred-runtime'
         self.audience = None
@@ -45,6 +46,9 @@ class FakeSoevApi:
 
     def handle(self, request):
         self.requests.append(request)
+        assert not ('X-Soev-User-Token' in request.headers and 'X-Soev-Subject' in request.headers), (
+            'A login token must never be accompanied by a subject assertion'
+        )
         try:
             if self.failures:
                 raise Problem(self.failures.pop(0), 'injected_failure')
@@ -61,9 +65,7 @@ class FakeSoevApi:
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
-        subject = self._assertion(request.headers['X-Soev-Subject']) if 'X-Soev-Subject' in request.headers else None
-        if subject and subject not in self.links:
-            raise Problem(401, 'identity_not_linked')
+        subject = self._subject(request)
         body = json.loads(request.content) if request.content else None
         if (
             request.method == 'GET'
@@ -94,6 +96,20 @@ class FakeSoevApi:
         response = self._route(request, body, credential, subject)
         self.replays[key] = (copy.deepcopy(fingerprint), response.status_code, response.content)
         return response
+
+    def _subject(self, request):
+        subject = self._assertion(request.headers['X-Soev-Subject']) if 'X-Soev-Subject' in request.headers else None
+        access_token = request.headers.get('X-Soev-User-Token')
+        if access_token:
+            if access_token in self.user_tokens:
+                subject = self.user_tokens[access_token]
+            elif access_token.startswith('fictional-login:'):
+                subject = access_token.removeprefix('fictional-login:')
+            else:
+                raise Problem(401, 'sign_in')
+        if subject and not access_token and subject not in self.links:
+            raise Problem(401, 'identity_not_linked')
+        return subject
 
     def _replay(self, key, fingerprint, ingest_create):
         previous, status, content = self.replays[key]
