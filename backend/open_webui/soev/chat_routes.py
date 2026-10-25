@@ -11,6 +11,7 @@ from starlette.responses import JSONResponse, Response
 from open_webui.soev import threads
 from open_webui.soev.chat_paths import ChatPaths, FeedbackForm, refused
 from open_webui.soev.thread_routes import NO_STORE
+from open_webui.soev.thread_sharing import require_header_mutation
 from open_webui.soev.threads import ThreadError
 
 
@@ -153,6 +154,7 @@ async def chat_write(service, request, user, identifier, route):
             raise ThreadError(422, 'invalid_request')
         return (await service.fork(user.id, identifier, form['at'])).model_dump()
     if route == '/{id}/clone':
+        require_header_mutation(request)
         # The newest projection supplies the last committed position; never
         # accept the caller's message tree or a chosen destination id.
         projection = await service.projection(user.id, identifier, window=200)

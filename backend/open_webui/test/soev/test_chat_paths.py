@@ -649,6 +649,7 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
         ('DELETE', '/fictional-chat/share'),
         ('DELETE', '/share/all'),
         ('POST', '/fictional-thread/clone/shared'),
+        ('POST', '/fictional-chat/clone'),
     ],
 )
 @pytest.mark.parametrize(

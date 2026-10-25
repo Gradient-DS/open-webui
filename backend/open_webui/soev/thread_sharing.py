@@ -17,6 +17,17 @@ if TYPE_CHECKING:
     from open_webui.soev.threads import ProjectionResult, ThreadClient
 
 
+def require_header_mutation(request: Request) -> None:
+    """Refuse cookie-only or non-JSON mutations, so a cross-site form cannot share or clone."""
+    if request.headers.get('Content-Type', '').split(';', 1)[0].strip().lower() != 'application/json':
+        raise ThreadError(415, 'invalid_request')
+    # get_verified_user validates this credential before dispatch; never
+    # allow its cookie fallback to authorize the mutation.
+    scheme, credential = get_authorization_scheme_param(request.headers.get('Authorization'))
+    if scheme.lower() != 'bearer' or not credential.strip():
+        raise ThreadError(401, 'sign_in')
+
+
 async def require_login() -> None:
     if not await acting.user_token(acting.requester_ref()):
         raise ThreadError(401, 'sign_in')
@@ -136,13 +147,7 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
     }:
         raise ThreadError(409, 'unavailable')
     if request.method in {'POST', 'DELETE'}:
-        if request.headers.get('Content-Type', '').split(';', 1)[0].strip().lower() != 'application/json':
-            raise ThreadError(415, 'invalid_request')
-        # get_verified_user validates this credential before dispatch; never
-        # allow its cookie fallback to authorize a share or clone mutation.
-        scheme, credential = get_authorization_scheme_param(request.headers.get('Authorization'))
-        if scheme.lower() != 'bearer' or not credential.strip():
-            raise ThreadError(401, 'sign_in')
+        require_header_mutation(request)
     if route == '/share/{share_id}':
         result = await projection(
             service,
