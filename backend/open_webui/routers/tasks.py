@@ -18,7 +18,6 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import task_completion_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.models.config import Config
-from open_webui.routers.pipelines import process_pipeline_inlet_filter
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.payload import apply_params_to_form_data
@@ -149,13 +148,7 @@ async def generate_title(
             content={'detail': 'Title generation is disabled'},
         )
 
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if not model_id:
@@ -196,12 +189,6 @@ async def generate_title(
         },
     }
 
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
-
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
     try:
@@ -224,13 +211,7 @@ async def generate_follow_ups(
             content={'detail': 'Follow-up generation is disabled'},
         )
 
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -263,12 +244,6 @@ async def generate_follow_ups(
         },
     }
 
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
-
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
     try:
@@ -291,13 +266,7 @@ async def generate_chat_tags(
             content={'detail': 'Tags generation is disabled'},
         )
 
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -330,12 +299,6 @@ async def generate_chat_tags(
         },
     }
 
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
-
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
     try:
@@ -352,13 +315,7 @@ async def generate_chat_tags(
 async def generate_image_prompt(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -390,12 +347,6 @@ async def generate_image_prompt(
             'chat_id': form_data.get('chat_id', None),
         },
     }
-
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
 
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
@@ -431,13 +382,7 @@ async def generate_queries(
         log.info('Reusing cached queries: %s', request.state.cached_queries)
         return request.state.cached_queries
 
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -469,12 +414,6 @@ async def generate_queries(
             'chat_id': form_data.get('chat_id', None),
         },
     }
-
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
 
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
@@ -513,13 +452,7 @@ async def generate_autocompletion(
                 detail=ERROR_MESSAGES.INPUT_TOO_LONG(autocomplete_input_max_length),
             )
 
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -552,12 +485,6 @@ async def generate_autocompletion(
         },
     }
 
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
-
     payload = apply_task_model_params(payload, models, task_model_id, task_model_params)
 
     try:
@@ -574,13 +501,7 @@ async def generate_autocompletion(
 async def generate_emoji(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
     if model_id not in models:
@@ -609,12 +530,6 @@ async def generate_emoji(
         },
     }
 
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
-
     payload = apply_task_model_params(payload, models, task_model_id, {'max_tokens': 4})
 
     try:
@@ -630,13 +545,7 @@ async def generate_emoji(
 async def generate_moa_response(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            **dict(request.app.state.MODELS.items()),
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     model_id = form_data.get('model')
 
@@ -665,12 +574,6 @@ async def generate_moa_response(
             'task_body': form_data,
         },
     }
-
-    # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)

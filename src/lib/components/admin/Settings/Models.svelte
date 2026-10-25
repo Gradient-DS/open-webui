@@ -309,12 +309,7 @@
 		];
 		modelOrderDirty = false;
 
-		_models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		_models.set(await getModels(localStorage.token, null));
 	};
 
 	const saveModelOrder = async (orderedModelIds: string[]) => {
@@ -335,12 +330,7 @@
 			modelsConfig = res;
 			modelOrderDirty = false;
 			toast.success($i18n.t('Model order saved successfully'));
-			_models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			_models.set(await getModels(localStorage.token, null));
 		}
 
 		savingModelOrder = false;
@@ -514,12 +504,7 @@
 		}
 
 		// await init();
-		_models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		_models.set(await getModels(localStorage.token, null));
 	};
 
 	const hideModelHandler = async (model) => {
@@ -533,12 +518,7 @@
 
 		await upsertModelHandler(updatedModel, { meta: updatedModel.meta }, false);
 		models = models.map((model) => (model.id === updatedModel.id ? updatedModel : model));
-		_models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		_models.set(await getModels(localStorage.token, null));
 
 		toast.success(
 			updatedModel.meta.hidden
@@ -574,12 +554,7 @@
 			models = models.map((m) =>
 				m.id === model.id ? { ...m, access_grants: res.access_grants ?? nextAccessGrants } : m
 			);
-			_models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			_models.set(await getModels(localStorage.token, null));
 			toast.success(
 				isPublicModel({ access_grants: nextAccessGrants })
 					? $i18n.t('Model is now public')

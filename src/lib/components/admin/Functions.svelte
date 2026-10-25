@@ -222,14 +222,7 @@
 			functions = functions.filter((f) => f.id !== func.id);
 
 			_functions.set(await getFunctions(localStorage.token));
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null),
-					false,
-					true
-				)
-			);
+			models.set(await getModels(localStorage.token, null, false, true));
 		}
 	};
 
@@ -250,14 +243,7 @@
 			}
 
 			_functions.set(await getFunctions(localStorage.token));
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null),
-					false,
-					true
-				)
-			);
+			models.set(await getModels(localStorage.token, null, false, true));
 		}
 	};
 
@@ -700,15 +686,7 @@
 													bind:state={func.is_active}
 													on:change={async () => {
 														toggleFunctionById(localStorage.token, func.id);
-														models.set(
-															await getModels(
-																localStorage.token,
-																$config?.features?.enable_direct_connections &&
-																	($settings?.directConnections ?? null),
-																false,
-																true
-															)
-														);
+														models.set(await getModels(localStorage.token, null, false, true));
 													}}
 												/>
 											</Tooltip>
@@ -765,14 +743,7 @@
 		id={selectedFunction?.id ?? null}
 		on:save={async () => {
 			await tick();
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null),
-					false,
-					true
-				)
-			);
+			models.set(await getModels(localStorage.token, null, false, true));
 		}}
 	/>
 
@@ -799,14 +770,7 @@
 				toast.success($i18n.t('Functions imported successfully'));
 				functions = await getFunctionList(localStorage.token);
 				_functions.set(await getFunctions(localStorage.token));
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null),
-						false,
-						true
-					)
-				);
+				models.set(await getModels(localStorage.token, null, false, true));
 				importFiles = null;
 				functionsImportInputElement.value = '';
 			};

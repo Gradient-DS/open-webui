@@ -39,7 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class UserSettings(BaseModel):
     ui: dict | None = {}
     model_config = ConfigDict(extra='allow')
-    pass
+
+    @field_validator('ui', mode='before')
+    @classmethod
+    def discard_direct_connections(cls, value):
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != 'directConnections'}
+        return value
 
 
 class User(Base):  # identity & profile

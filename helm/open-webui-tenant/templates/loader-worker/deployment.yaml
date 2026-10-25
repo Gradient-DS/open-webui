@@ -89,11 +89,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: loader-ingest-api-key
-            - name: LITELLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: openai-api-key
           resources:
             {{- toYaml .Values.loaderWorker.resources | nindent 12 }}
           livenessProbe:

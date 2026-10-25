@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 615 operations. Audit bodies across all
-# OpenAPI methods (619 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 579 operations. Audit bodies across all
+# OpenAPI methods (583 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (615, 619), (
-        f'Expected 615 five-method operations / 619 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (579, 583), (
+        f'Expected 579 five-method operations / 583 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -44,22 +44,22 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        231,
-        2663,
-    ), f'Expected 231 routes / 2663 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        214,
+        2260,
+    ), f'Expected 214 routes / 2260 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
-        50,
-        106,
-    ), f'Expected 50 routes / 106 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        49,
+        105,
+    ), f'Expected 49 routes / 105 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
-    # Keep independent floors even when a future schema change updates exact counts.
+    # Preserve the previous guard margin after retiring 17 routes and 403 fields.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 and strings >= 2400, (
+    assert routes >= 225 - 17 and strings >= 2400 - 403, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
-        'floor 225 / 2400, baseline 230 / 2525. A partial or empty derivation cannot claim coverage.'
+        'Original floor 225 / 2400, less the retired 17 routes / 403 fields. '
     )
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
     assert routes >= 40 and strings >= 90, (
@@ -72,13 +72,13 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 25 and media == {'application/json': 20, 'multipart/form-data': 5}, (
-        'Expected 25 blind body operations (20 JSON: 19 write + 1 read; 5 multipart); '
+    assert len(blind) == 23 and media == {'application/json': 19, 'multipart/form-data': 4}, (
+        'Expected 23 blind body operations (19 JSON: 18 write + 1 read; 4 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == {'GET /ollama/api/ps'}, (
-        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 19 JSON write bodies; '
+        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 18 JSON write bodies; '
         f'measured read bodies: {sorted(read_bodies)}.'
     )
 

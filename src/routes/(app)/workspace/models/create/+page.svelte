@@ -64,12 +64,7 @@
 			});
 
 			if (res) {
-				await models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				await models.set(await getModels(localStorage.token, null));
 
 				// Auto-pin the newly created agent for the creator
 				const pinnedModels = $settings?.pinnedModels ?? [];

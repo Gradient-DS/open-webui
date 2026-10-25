@@ -19,9 +19,6 @@ async def remember(request, form_data, user, model):
 def memories(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(middleware, 'add_memory_context', remember)
     monkeypatch.setattr(middleware, 'get_system_oauth_token', AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        middleware, 'process_pipeline_inlet_filter', AsyncMock(side_effect=lambda r, form_data, *a: form_data)
-    )
     monkeypatch.setattr(middleware.Config, 'get', AsyncMock(return_value=True))
 
 

@@ -16,12 +16,7 @@
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
 	import { deleteModelById } from '$lib/apis/models';
 	import { unloadModel } from '$lib/apis';
-	import {
-		downloadProviderModel,
-		getErrorMessage,
-		getOpenAIConfig,
-		getProviderModelDownloadStatus
-	} from '$lib/apis/openai';
+	import { getErrorMessage } from '$lib/apis/chat';
 
 	import {
 		user,
@@ -201,7 +196,6 @@
 			listScrollTop = 0;
 			if (!selectionOnly) {
 				setOllamaVersion();
-				setProviderDownloadConnections();
 			}
 			resetView();
 			updatePosition();
@@ -265,26 +259,7 @@
 	let modelFilterItems = [];
 
 	let ollamaVersion = null;
-	let providerDownloadConnections = [];
 	let selectedModelIdx = 0;
-
-	const MANAGEMENT_PROVIDERS = new Set(['llama.cpp', 'lmstudio']);
-
-	const normalizeProvider = (provider = '') => {
-		const value = provider.trim().toLowerCase();
-		if (value === 'lm studio' || value === 'lm-studio') return 'lmstudio';
-		return value;
-	};
-
-	const getProviderLabel = (provider = '') => {
-		const normalizedProvider = normalizeProvider(provider);
-		if (normalizedProvider === 'lmstudio') return $i18n.t('LM Studio');
-		if (normalizedProvider === 'llama.cpp') return $i18n.t('llama.cpp');
-		return provider;
-	};
-
-	const getProviderPoolKey = (connection, model: string) =>
-		`${connection.provider}:${connection.idx}:${model}`;
 
 	const fuse = new Fuse(
 		items.map((item) => {
@@ -345,8 +320,6 @@
 							return item.model?.connection_type === 'local';
 						} else if (selectedConnectionType === 'external') {
 							return item.model?.connection_type === 'external';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
 						}
 					})
 			: items
@@ -365,8 +338,6 @@
 							return item.model?.connection_type === 'local';
 						} else if (selectedConnectionType === 'external') {
 							return item.model?.connection_type === 'external';
-						} else if (selectedConnectionType === 'direct') {
-							return item.model?.direct;
 						}
 					})
 	).filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
@@ -388,22 +359,7 @@
 									type: 'ollama'
 								}
 							]
-						: []),
-					...providerDownloadConnections.map((connection) => {
-						const poolKey = getProviderPoolKey(connection, sanitizedSearchValue);
-						return {
-							...connection,
-							id: `${connection.provider}:${connection.idx}`,
-							label: getProviderLabel(connection.provider),
-							poolKey,
-							download: $MODEL_DOWNLOAD_POOL[poolKey],
-							actionLabel: $i18n.t(`Download "{{searchValue}}" from {{provider}}`, {
-								searchValue: searchValue,
-								provider: getProviderLabel(connection.provider)
-							}),
-							type: 'provider'
-						};
-					})
+						: [])
 				]
 			: [];
 	$: activeDownloadKeys = new Set(
@@ -424,9 +380,6 @@
 			: []),
 		...(items.find((item) => item.model?.connection_type === 'external')
 			? [{ value: 'connection:external', label: $i18n.t('External') }]
-			: []),
-		...(items.find((item) => item.model?.direct)
-			? [{ value: 'connection:direct', label: $i18n.t('Direct') }]
 			: []),
 		...tags.map((tag) => ({ value: `tag:${tag}`, label: tag }))
 	];
@@ -631,12 +584,7 @@
 					})
 				);
 
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token, null));
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -653,164 +601,11 @@
 		ollamaVersion = await getOllamaVersion(localStorage.token).catch((error) => false);
 	};
 
-	const downloadProviderModelHandler = async (connection) => {
-		const model = sanitizedSearchValue;
-		const poolKey = getProviderPoolKey(connection, model);
-
-		if ($MODEL_DOWNLOAD_POOL[poolKey]) {
-			toast.error(
-				$i18n.t(`Model '{{modelTag}}' is already in queue for downloading.`, {
-					modelTag: model
-				})
-			);
-			return;
-		}
-		if (Object.keys($MODEL_DOWNLOAD_POOL).length === 3) {
-			toast.error(
-				$i18n.t('Maximum of 3 models can be downloaded simultaneously. Please try again later.')
-			);
-			return;
-		}
-
-		const controller = new AbortController();
-		MODEL_DOWNLOAD_POOL.set({
-			...$MODEL_DOWNLOAD_POOL,
-			[poolKey]: {
-				abortController: controller,
-				model,
-				providerLabel: getProviderLabel(connection.provider),
-				done: false
-			}
-		});
-
-		try {
-			const res = await downloadProviderModel(
-				localStorage.token,
-				connection.idx,
-				model,
-				controller.signal
-			);
-			const jobId = res?.job_id;
-
-			if (res?.status) {
-				MODEL_DOWNLOAD_POOL.set({
-					...$MODEL_DOWNLOAD_POOL,
-					[poolKey]: {
-						...$MODEL_DOWNLOAD_POOL[poolKey],
-						digest: res.status,
-						done: ['completed', 'already_downloaded'].includes(res.status)
-					}
-				});
-			}
-
-			if (jobId) {
-				while (!controller.signal.aborted) {
-					await new Promise((resolve) => setTimeout(resolve, 1500));
-					if (controller.signal.aborted) break;
-
-					const status = await getProviderModelDownloadStatus(
-						localStorage.token,
-						connection.idx,
-						jobId,
-						controller.signal
-					);
-					const total = status?.total_size_bytes ?? 0;
-					const downloaded = status?.downloaded_bytes ?? 0;
-					const pullProgress = total ? Math.round((downloaded / total) * 1000) / 10 : undefined;
-
-					MODEL_DOWNLOAD_POOL.set({
-						...$MODEL_DOWNLOAD_POOL,
-						[poolKey]: {
-							...$MODEL_DOWNLOAD_POOL[poolKey],
-							...(pullProgress !== undefined ? { pullProgress } : {}),
-							digest: status?.status ?? ''
-						}
-					});
-
-					if (status?.status === 'completed') {
-						MODEL_DOWNLOAD_POOL.set({
-							...$MODEL_DOWNLOAD_POOL,
-							[poolKey]: {
-								...$MODEL_DOWNLOAD_POOL[poolKey],
-								pullProgress: 100,
-								done: true
-							}
-						});
-						break;
-					}
-					if (status?.status === 'failed') {
-						throw status?.error ?? 'Download failed';
-					}
-				}
-			} else if (!$MODEL_DOWNLOAD_POOL[poolKey]?.done) {
-				MODEL_DOWNLOAD_POOL.set({
-					...$MODEL_DOWNLOAD_POOL,
-					[poolKey]: {
-						...$MODEL_DOWNLOAD_POOL[poolKey],
-						pullProgress: 100,
-						done: true
-					}
-				});
-			}
-
-			if ($MODEL_DOWNLOAD_POOL[poolKey]?.done) {
-				toast.success(
-					$i18n.t(`Model '{{modelName}}' has been successfully downloaded.`, {
-						modelName: model
-					})
-				);
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
-			}
-		} catch (error) {
-			if (!controller.signal.aborted) {
-				toast.error(getErrorMessage(error));
-			}
-		}
-
-		delete $MODEL_DOWNLOAD_POOL[poolKey];
-		MODEL_DOWNLOAD_POOL.set({
-			...$MODEL_DOWNLOAD_POOL
-		});
-	};
-
 	const downloadModelHandler = (target) => {
 		if (target.type === 'ollama') {
 			pullModelHandler();
 			return;
 		}
-
-		downloadProviderModelHandler(target);
-	};
-
-	const setProviderDownloadConnections = async () => {
-		if ($user?.role !== 'admin') {
-			providerDownloadConnections = [];
-			return;
-		}
-
-		const openaiConfig = await getOpenAIConfig(localStorage.token).catch(() => null);
-		providerDownloadConnections = openaiConfig?.ENABLE_OPENAI_API
-			? (openaiConfig.OPENAI_API_BASE_URLS ?? [])
-					.map((url: string, idx: number) => {
-						const config =
-							openaiConfig.OPENAI_API_CONFIGS?.[idx] ??
-							openaiConfig.OPENAI_API_CONFIGS?.[String(idx)] ??
-							openaiConfig.OPENAI_API_CONFIGS?.[url] ??
-							{};
-
-						return {
-							idx,
-							url,
-							provider: normalizeProvider(config?.provider ?? '')
-						};
-					})
-					.filter((connection) => MANAGEMENT_PROVIDERS.has(connection.provider))
-			: [];
 	};
 
 	onMount(() => {
@@ -870,12 +665,7 @@
 
 		if (res) {
 			toast.success($i18n.t('Model unloaded successfully'));
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token, null));
 		}
 	};
 
@@ -919,12 +709,7 @@
 				value = '';
 			}
 
-			models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
+			models.set(await getModels(localStorage.token, null));
 		}
 
 		deleteModelTarget = null;
@@ -1004,12 +789,7 @@
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"
 			on:mouseenter={async () => {
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token, null));
 			}}
 		>
 			<span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
@@ -1140,18 +920,8 @@
 										{$i18n.t('No models available')}
 									</div>
 									<div class="w-full text-[0.6875rem] leading-3.5 text-gray-500 dark:text-gray-400">
-										{$i18n.t('Connect to an AI provider to start chatting')}
+										{$i18n.t('Ask an admin to make a model available.')}
 									</div>
-									<button
-										type="button"
-										class="focus-ring mt-3 rounded-lg px-0 py-1 text-[0.6875rem] font-normal leading-none text-gray-600 underline-offset-2 transition-colors duration-100 hover:text-gray-800 hover:underline focus:outline-hidden focus:underline dark:text-gray-300 dark:hover:text-gray-100"
-										on:click={() => {
-											show = false;
-											showSettings.set('admin:connections');
-										}}
-									>
-										{$i18n.t('Manage Connections')}
-									</button>
 								</div>
 							{:else}
 								<div class="">

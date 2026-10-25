@@ -169,19 +169,6 @@ def test_verifying_an_unreachable_ollama_connection_is_refused():
     assert 400 <= response.status_code < 500, (response.status_code, response.text)
 
 
-def test_verifying_an_unreachable_openai_connection_is_refused(monkeypatch):
-    # openai/verify turned the client error for an admin-supplied URL into a 500.
-    from open_webui.routers import openai
-
-    async def no_headers(*args, **kwargs):
-        return {}, {}
-
-    monkeypatch.setattr(openai, 'get_headers_and_cookies', no_headers)
-    path = '/verify'
-    response = _client(_endpoint(openai.router, path), path).post(path, json={'url': 'http://127.0.0.1:1', 'key': ''})
-    assert 400 <= response.status_code < 500, (response.status_code, response.text)
-
-
 def test_an_external_retrieval_test_that_cannot_reach_its_store_is_refused(monkeypatch):
     # knowledge/external/connections/{id}/retrieve-test: the Qdrant client raised
     # AssertionError on a store it could not use, and the connection test
@@ -349,49 +336,6 @@ def test_a_chat_list_sort_by_a_real_column_is_honoured():
 
     (clause,) = request_order(Chat, 'title', 'ASC', ())
     assert str(clause) == str(Chat.title.asc())
-
-
-def test_an_embedding_engine_the_app_cannot_build_is_refused_and_not_saved(monkeypatch):
-    # PLANE-001: retrieval/embedding/update saved the engine, then
-    # get_embedding_function raised ValueError('Unknown embedding engine'): a 500,
-    # and the poisoned engine stayed saved for every later request.
-    import asyncio
-
-    from fastapi import HTTPException
-    from open_webui.routers import retrieval
-
-    config = SimpleNamespace(
-        RAG_EMBEDDING_ENGINE='openai',
-        RAG_EMBEDDING_MODEL='model',
-        RAG_EMBEDDING_BATCH_SIZE=1,
-        ENABLE_ASYNC_EMBEDDING=True,
-        RAG_EMBEDDING_CONCURRENT_REQUESTS=0,
-        RAG_OPENAI_API_BASE_URL='',
-        RAG_OPENAI_API_KEY='',
-        RAG_OLLAMA_BASE_URL='',
-        RAG_OLLAMA_API_KEY='',
-        RAG_AZURE_OPENAI_BASE_URL='',
-        RAG_AZURE_OPENAI_API_KEY='',
-        RAG_AZURE_OPENAI_API_VERSION='',
-    )
-    saved = []
-
-    async def state():
-        return config
-
-    async def upsert(values):
-        saved.append(values)
-
-    monkeypatch.setattr(retrieval, 'get_rag_config_state', state)
-    monkeypatch.setattr(retrieval, 'unload_embedding_model', lambda request, config: None)
-    monkeypatch.setattr(retrieval, 'get_ef', lambda *args, **kwargs: None)
-    monkeypatch.setattr(retrieval.Config, 'upsert', upsert)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
-    form = retrieval.EmbeddingModelUpdateForm(RAG_EMBEDDING_ENGINE='<style>probe</style>', RAG_EMBEDDING_MODEL='model')
-    with pytest.raises(HTTPException) as refused:
-        asyncio.run(retrieval.update_embedding_config(request, form, user=SimpleNamespace(role='admin')))
-    assert refused.value.status_code == 400
-    assert not saved
 
 
 @pytest.mark.parametrize('field', ['FOLDER_MAX_FILE_COUNT', 'AUTOMATION_MAX_COUNT', 'AUTOMATION_MIN_INTERVAL'])

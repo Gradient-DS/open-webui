@@ -274,12 +274,7 @@
 					})
 				);
 
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				models.set(await getModels(localStorage.token, null));
 			} else {
 				toast.error($i18n.t('Download canceled'));
 			}
@@ -438,12 +433,7 @@
 		modelLoading = false;
 		uploadProgress = null;
 
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token, null));
 	};
 
 	const deleteModelHandler = async () => {
@@ -456,12 +446,7 @@
 		}
 
 		deleteModelTag = '';
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token, null));
 
 		ollamaModels = await getOllamaModels(localStorage.token, urlIdx).catch((error) => {
 			toast.error(`${error}`);
@@ -573,12 +558,7 @@
 			}
 		}
 
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		models.set(await getModels(localStorage.token, null));
 
 		createModelLoading = false;
 

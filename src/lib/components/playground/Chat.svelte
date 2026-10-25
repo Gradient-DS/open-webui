@@ -7,17 +7,12 @@
 	import { goto } from '$app/navigation';
 	import { onMount, tick, getContext } from 'svelte';
 
-	import {
-		OLLAMA_API_BASE_URL,
-		OPENAI_API_BASE_URL,
-		WEBUI_API_BASE_URL,
-		WEBUI_BASE_URL
-	} from '$lib/constants';
+	import { OLLAMA_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { chatCompletion } from '$lib/apis/openai';
+	import { chatCompletion } from '$lib/apis/chat';
 
 	import { splitStream } from '$lib/utils';
 	import Collapsible from '../common/Collapsible.svelte';

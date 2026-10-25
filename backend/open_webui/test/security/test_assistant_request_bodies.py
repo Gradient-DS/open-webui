@@ -311,55 +311,12 @@ def test_local_chat_skips_binding(split_harness):
     assert h.bindings == []
 
 
-def test_direct_body_discards_assistant_id(split_harness):
-    """Direct-mode compatibility ignores and strips the opt-in field."""
+def test_client_model_item_cannot_override_the_catalog_or_skip_assistant_resolution(split_harness):
     h = split_harness
-    response = send(h, model_item={'id': 'llm', 'direct': True, 'owned_by': 'openai'})
+    response = send(h, model_item={'id': 'fictional-provider-model', 'direct': True, 'owned_by': 'openai'})
     assert response.status_code == 200, response.text
-    assert 'assistant_id' not in h.seen[-1]
-    assert 'assistant_id' not in h.seen[-1]['metadata']['model']
-
-
-def test_openai_router_does_not_replace_picked_llm(split_harness, monkeypatch):
-    """The real OpenAI router keeps a base override's model ID in its provider body."""
-    from open_webui import main
-    from open_webui.routers import openai
-
-    h = split_harness
-    monkeypatch.setattr(main, 'AGENT_API_ENABLED', False)
-
-    async def connection(*args, **kwargs):
-        return 'http://provider.invalid/v1', '', {}
-
-    async def headers(*args, **kwargs):
-        return {}, {}
-
-    async def request(**kwargs):
-        import json
-
-        h.provider.append(json.loads(kwargs['data']))
-        return SimpleNamespace(status=200, headers={}, json=reply)
-
-    async def reply(**kwargs):
-        return {'choices': []}
-
-    async def session():
-        return SimpleNamespace(request=request)
-
-    async def cleanup(*args):
-        pass
-
-    h.app.state.OPENAI_MODELS = {'llm': {'id': 'llm', 'urlIdx': 0}}
-    monkeypatch.setattr(main, 'chat_completion_handler', openai.generate_chat_completion)
-    monkeypatch.setattr(openai, 'get_openai_connection', connection)
-    monkeypatch.setattr(openai, 'get_headers_and_cookies', headers)
-    monkeypatch.setattr(openai, 'get_session', session)
-    monkeypatch.setattr(openai, 'cleanup_response', cleanup)
-    response = send(h)
-    assert response.status_code == 200, response.text
-    assert h.provider[-1]['model'] == 'llm'
-    assert 'assistant_id' not in h.provider[-1]
-    assert 'metadata' not in h.provider[-1]
+    assert h.seen[-1]['model'] == 'llm'
+    assert h.seen[-1]['metadata']['assistant_id'] == 'assistant'
 
 
 def test_saved_chat_fanout_keeps_composition_and_message_identity(split_harness, caplog):

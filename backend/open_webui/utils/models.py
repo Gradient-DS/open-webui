@@ -17,7 +17,7 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
-from open_webui.routers import ollama, openai
+from open_webui.routers import ollama
 from open_webui.socket.utils import RedisDict
 from open_webui.soev import model_catalog
 from open_webui.utils.access_control import has_access, has_base_model_access
@@ -52,23 +52,17 @@ async def fetch_ollama_models(request: Request, user: UserModel = None):
     ]
 
 
-async def fetch_openai_models(request: Request, user: UserModel = None):
-    openai_response = await openai.get_all_models(request, user=user)
-    return openai_response['data']
-
-
 async def get_all_base_models(request: Request, user: UserModel = None):
     # [Gradient] In v2 mode the soev-api catalog is the only source of base models.
     if model_catalog.is_v2():
         return await model_catalog.base_models()
-    config = await Config.get_many('openai.enable', 'ollama.enable')
-    openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
+    config = await Config.get_many('ollama.enable')
     ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
     function_task = get_function_models(request)
 
-    openai_models, ollama_models, function_models = await asyncio.gather(openai_task, ollama_task, function_task)
+    ollama_models, function_models = await asyncio.gather(ollama_task, function_task)
 
-    return function_models + openai_models + ollama_models
+    return function_models + ollama_models
 
 
 async def get_all_models(request, refresh: bool = False, user: UserModel = None):
@@ -79,7 +73,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
         'models.default_metadata',
     )
     if refresh:
-        await openai.get_all_models.cache.clear()
         await ollama.get_all_models.cache.clear()
         redis = getattr(request.app.state, 'redis', None)
         if redis is not None:
@@ -96,7 +89,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             base_models = JSONCodec.loads(cached_base_models)
             request.app.state.BASE_MODELS = base_models
         else:
-            await openai.get_all_models.cache.clear()
             await ollama.get_all_models.cache.clear()
     elif use_cache and request.app.state.MODELS and request.app.state.BASE_MODELS:
         base_models = request.app.state.BASE_MODELS

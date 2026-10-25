@@ -142,12 +142,7 @@
 	};
 
 	const setModels = async () => {
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
-			)
-		);
+		models.set(await getModels(localStorage.token, null));
 	};
 
 	const setToolServers = async () => {
@@ -303,15 +298,10 @@
 						}
 					}
 				})().catch((e) => console.error('Failed to check 2FA status:', e)),
-				// [Gradient] Models wait for user settings only when direct connections need them.
-				$config?.features?.enable_direct_connections
-					? setUserSettings(async () => {
-							await setModels().catch((e) => console.error('Failed to load models:', e));
-						})
-					: Promise.all([
-							setUserSettings(),
-							setModels().catch((e) => console.error('Failed to load models:', e))
-						])
+				Promise.all([
+					setUserSettings(),
+					setModels().catch((e) => console.error('Failed to load models:', e))
+				])
 			]);
 		} catch (e) {
 			console.error('Failed to load user settings:', e);

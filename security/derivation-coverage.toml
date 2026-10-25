@@ -1,6 +1,6 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
 # Phase 4b audited all 27 previously labelled untyped JSON write bodies.
-# 27 blind body operations remain: 20 JSON writes, 1 JSON read, 6 multipart.
+# 23 blind body operations remain: 18 JSON writes, 1 JSON read, 4 multipart.
 # The writes include typed boolean/integer-only bodies, author-defined
 # valve bodies, an arbitrary config-import blob, and typed maps whose
 # dynamic keys the derivation deliberately does not traverse.
@@ -56,10 +56,6 @@ id = "POST /api/v1/functions/id/{id}/valves/user/update"
 reason = "Free-form key/value body defined by the function author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined UserValves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
-id = "POST /api/v1/pipelines/{pipeline_id}/valves/update"
-reason = "Free-form key/value body defined by the pipeline author, not a fixed shape the static derivation can enumerate. The handler forwards the body to the selected pipeline service unchanged. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
-
-[[waived]]
 id = "POST /api/v1/tools/id/{id}/valves/update"
 reason = "Free-form key/value body defined by the tool author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined Valves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
@@ -81,10 +77,6 @@ reason = "Multipart file upload: file contents are a different surface that the 
 
 [[waived]]
 id = "POST /api/v1/files/"
-reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
-
-[[waived]]
-id = "POST /api/v1/pipelines/upload"
 reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
 
 [[waived]]

@@ -230,7 +230,6 @@ if CUSTOM_NAME:
 # DIRECT CONNECTIONS
 ####################################
 
-ENABLE_DIRECT_CONNECTIONS = os.getenv('ENABLE_DIRECT_CONNECTIONS', 'False').lower() == 'true'
 
 ####################################
 # OLLAMA_BASE_URL
@@ -318,55 +317,25 @@ if _ollama_api_configs:
 ####################################
 
 
-ENABLE_OPENAI_API = os.getenv('ENABLE_OPENAI_API', 'True').lower() == 'true'
+# Image and audio providers still inherit the legacy public-OpenAI defaults.
+def _legacy_provider_defaults() -> tuple[str, str]:
+    public_url = 'https://api.openai.com/v1'
+    base_url = os.getenv('OPENAI_API_BASE_URL', '') or public_url
+    if base_url.endswith('/'):
+        base_url = base_url[:-1]
+    urls = os.getenv('OPENAI_API_BASE_URLS', '') or base_url
+    keys = os.getenv('OPENAI_API_KEYS', '') or os.getenv('OPENAI_API_KEY', '')
+    urls = [url.strip() if url != '' else public_url for url in urls.split(';')]
+    keys = [key.strip() for key in keys.split(';')]
+    try:
+        return public_url, keys[urls.index(public_url)]
+    except (ValueError, IndexError):
+        return public_url, ''
 
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-OPENAI_API_BASE_URL = os.getenv('OPENAI_API_BASE_URL', '')
-
+OPENAI_API_BASE_URL, OPENAI_API_KEY = _legacy_provider_defaults()
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_API_BASE_URL = os.getenv('GEMINI_API_BASE_URL', '')
-
-
-if OPENAI_API_BASE_URL == '':
-    OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
-else:
-    if OPENAI_API_BASE_URL.endswith('/'):
-        OPENAI_API_BASE_URL = OPENAI_API_BASE_URL[:-1]
-
-OPENAI_API_KEYS = os.getenv('OPENAI_API_KEYS', '')
-OPENAI_API_KEYS = OPENAI_API_KEYS if OPENAI_API_KEYS != '' else OPENAI_API_KEY
-
-OPENAI_API_KEYS = [url.strip() for url in OPENAI_API_KEYS.split(';')]
-OPENAI_API_KEYS = OPENAI_API_KEYS
-
-OPENAI_API_BASE_URLS = os.getenv('OPENAI_API_BASE_URLS', '')
-OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS if OPENAI_API_BASE_URLS != '' else OPENAI_API_BASE_URL
-
-OPENAI_API_BASE_URLS = [
-    url.strip() if url != '' else 'https://api.openai.com/v1' for url in OPENAI_API_BASE_URLS.split(';')
-]
-OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
-
-OPENAI_API_CONFIGS = {}
-_openai_api_configs = os.getenv('OPENAI_API_CONFIGS', '')
-if _openai_api_configs:
-    try:
-        parsed = JSONCodec.loads(_openai_api_configs)
-        if isinstance(parsed, dict):
-            OPENAI_API_CONFIGS = parsed
-        else:
-            log.warning('OPENAI_API_CONFIGS must be a JSON object, ignoring')
-    except (JSONCodec.JSONDecodeError, TypeError):
-        log.warning('OPENAI_API_CONFIGS is not valid JSON, ignoring')
-
-# Get the actual OpenAI API key based on the base URL
-OPENAI_API_KEY = ''
-try:
-    OPENAI_API_KEY = OPENAI_API_KEYS[OPENAI_API_BASE_URLS.index('https://api.openai.com/v1')]
-except Exception:
-    pass
-OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
 
 
 ####################################
@@ -1005,57 +974,20 @@ RAG_ALLOWED_FILE_EXTENSIONS = [
     ext.strip() for ext in os.getenv('RAG_ALLOWED_FILE_EXTENSIONS', '').split(',') if ext.strip()
 ] or DEFAULT_ALLOWED_EXTENSIONS.copy()
 
-RAG_EMBEDDING_ENGINE = os.getenv('RAG_EMBEDDING_ENGINE', '')
 
 PDF_EXTRACT_IMAGES = os.getenv('PDF_EXTRACT_IMAGES', 'False').lower() == 'true'
 
 PDF_LOADER_MODE = os.getenv('PDF_LOADER_MODE', 'page')
 
-RAG_EMBEDDING_MODEL = os.getenv('RAG_EMBEDDING_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
-log.info('Embedding model set: %s', RAG_EMBEDDING_MODEL)
 
 RAG_TOKENIZER_MODEL = os.getenv('RAG_TOKENIZER_MODEL', '')
 
-RAG_EMBEDDING_MODEL_AUTO_UPDATE = (
-    not OFFLINE_MODE and os.getenv('RAG_EMBEDDING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
-)
-
-RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-
-RAG_EMBEDDING_BATCH_SIZE = int(
-    os.getenv('RAG_EMBEDDING_BATCH_SIZE') or os.getenv('RAG_EMBEDDING_OPENAI_BATCH_SIZE', '1')
-)
-
-ENABLE_ASYNC_EMBEDDING = os.getenv('ENABLE_ASYNC_EMBEDDING', 'True').lower() == 'true'
-
-RAG_EMBEDDING_CONCURRENT_REQUESTS = int(os.getenv('RAG_EMBEDDING_CONCURRENT_REQUESTS', '0'))
 
 RAG_EMBEDDING_QUERY_PREFIX = os.getenv('RAG_EMBEDDING_QUERY_PREFIX', None)
 
 RAG_EMBEDDING_CONTENT_PREFIX = os.getenv('RAG_EMBEDDING_CONTENT_PREFIX', None)
 
 RAG_EMBEDDING_PREFIX_FIELD_NAME = os.getenv('RAG_EMBEDDING_PREFIX_FIELD_NAME', None)
-
-RAG_RERANKING_ENGINE = os.getenv('RAG_RERANKING_ENGINE', '')
-
-RAG_RERANKING_MODEL = os.getenv('RAG_RERANKING_MODEL', '')
-if RAG_RERANKING_MODEL != '':
-    log.info('Reranking model set: %s', RAG_RERANKING_MODEL)
-
-
-RAG_RERANKING_MODEL_AUTO_UPDATE = (
-    not OFFLINE_MODE and os.getenv('RAG_RERANKING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
-)
-
-RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_RERANKING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-
-RAG_RERANKING_BATCH_SIZE = int(os.getenv('RAG_RERANKING_BATCH_SIZE', '32'))
-
-RAG_EXTERNAL_RERANKER_URL = os.getenv('RAG_EXTERNAL_RERANKER_URL', '')
-
-RAG_EXTERNAL_RERANKER_API_KEY = os.getenv('RAG_EXTERNAL_RERANKER_API_KEY', '')
-
-RAG_EXTERNAL_RERANKER_TIMEOUT = os.getenv('RAG_EXTERNAL_RERANKER_TIMEOUT', '')
 
 
 RAG_TEXT_SPLITTER = os.getenv('RAG_TEXT_SPLITTER', '')
@@ -1100,17 +1032,6 @@ Provide a clear and direct response to the user's query, including inline citati
 """
 
 RAG_TEMPLATE = os.getenv('RAG_TEMPLATE', DEFAULT_RAG_TEMPLATE)
-
-RAG_OPENAI_API_BASE_URL = os.getenv('RAG_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-RAG_OPENAI_API_KEY = os.getenv('RAG_OPENAI_API_KEY', OPENAI_API_KEY)
-
-RAG_AZURE_OPENAI_BASE_URL = os.getenv('RAG_AZURE_OPENAI_BASE_URL', '')
-RAG_AZURE_OPENAI_API_KEY = os.getenv('RAG_AZURE_OPENAI_API_KEY', '')
-RAG_AZURE_OPENAI_API_VERSION = os.getenv('RAG_AZURE_OPENAI_API_VERSION', '')
-
-RAG_OLLAMA_BASE_URL = os.getenv('RAG_OLLAMA_BASE_URL', OLLAMA_BASE_URL)
-
-RAG_OLLAMA_API_KEY = os.getenv('RAG_OLLAMA_API_KEY', '')
 
 
 ENABLE_LOCAL_WEB_FETCH = (
@@ -3113,14 +3034,9 @@ AGENT_API_SELECTED_AGENT = _default_selected_agent
 
 
 DEFAULT_CONFIG = {
-    'direct.enable': ENABLE_DIRECT_CONNECTIONS,
     'ollama.enable': ENABLE_OLLAMA_API,
     'ollama.base_urls': OLLAMA_BASE_URLS,
     'ollama.api_configs': OLLAMA_API_CONFIGS,
-    'openai.enable': ENABLE_OPENAI_API,
-    'openai.api_keys': OPENAI_API_KEYS,
-    'openai.api_base_urls': OPENAI_API_BASE_URLS,
-    'openai.api_configs': OPENAI_API_CONFIGS,
     'models.base_models_cache': ENABLE_BASE_MODELS_CACHE,
     'tool_server.connections': TOOL_SERVER_CONNECTIONS,
     'oauth.client.timeout': OAUTH_CLIENT_TIMEOUT,
@@ -3203,20 +3119,9 @@ DEFAULT_CONFIG = {
     'file.image_compression_width': FILE_IMAGE_COMPRESSION_WIDTH,
     'file.image_compression_height': FILE_IMAGE_COMPRESSION_HEIGHT,
     'rag.file.allowed_extensions': RAG_ALLOWED_FILE_EXTENSIONS,
-    'rag.embedding_engine': RAG_EMBEDDING_ENGINE,
     'rag.pdf_extract_images': PDF_EXTRACT_IMAGES,
     'rag.pdf_loader_mode': PDF_LOADER_MODE,
-    'rag.embedding_model': RAG_EMBEDDING_MODEL,
     'rag.tokenizer_model': RAG_TOKENIZER_MODEL,
-    'rag.embedding_batch_size': RAG_EMBEDDING_BATCH_SIZE,
-    'rag.enable_async_embedding': ENABLE_ASYNC_EMBEDDING,
-    'rag.embedding_concurrent_requests': RAG_EMBEDDING_CONCURRENT_REQUESTS,
-    'rag.reranking_engine': RAG_RERANKING_ENGINE,
-    'rag.reranking_model': RAG_RERANKING_MODEL,
-    'rag.reranking_batch_size': RAG_RERANKING_BATCH_SIZE,
-    'rag.external_reranker_url': RAG_EXTERNAL_RERANKER_URL,
-    'rag.external_reranker_api_key': RAG_EXTERNAL_RERANKER_API_KEY,
-    'rag.external_reranker_timeout': RAG_EXTERNAL_RERANKER_TIMEOUT,
     'rag.text_splitter': RAG_TEXT_SPLITTER,
     'rag.enable_markdown_header_text_splitter': ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
     'rag.tiktoken_encoding_name': TIKTOKEN_ENCODING_NAME,
@@ -3224,13 +3129,6 @@ DEFAULT_CONFIG = {
     'rag.chunk_min_size_target': CHUNK_MIN_SIZE_TARGET,
     'rag.chunk_overlap': CHUNK_OVERLAP,
     'rag.template': RAG_TEMPLATE,
-    'rag.openai.api_base_url': RAG_OPENAI_API_BASE_URL,
-    'rag.openai.api_key': RAG_OPENAI_API_KEY,
-    'rag.azure_openai.base_url': RAG_AZURE_OPENAI_BASE_URL,
-    'rag.azure_openai.api_key': RAG_AZURE_OPENAI_API_KEY,
-    'rag.azure_openai.api_version': RAG_AZURE_OPENAI_API_VERSION,
-    'rag.ollama.base_url': RAG_OLLAMA_BASE_URL,
-    'rag.ollama.api_key': RAG_OLLAMA_API_KEY,
     'rag.youtube_loader_language': YOUTUBE_LOADER_LANGUAGE,
     'rag.youtube_loader_proxy_url': YOUTUBE_LOADER_PROXY_URL,
     'web.search.enable': ENABLE_WEB_SEARCH,

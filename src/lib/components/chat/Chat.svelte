@@ -124,7 +124,7 @@
 		updateChatById,
 		updateChatFolderIdById
 	} from '$lib/apis/chats';
-	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
+	import { generateOpenAIChatCompletion } from '$lib/apis/chat';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
 		getAndUpdateUserLocation,

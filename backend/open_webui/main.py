@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import Response
 from starlette_compress import CompressMiddleware
 from starsessions import (
     SessionAutoloadMiddleware,
@@ -120,7 +120,7 @@ from open_webui.config import (
     import_legacy_config_json,
     seed_registered_defaults,
 )
-from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
+from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
 from open_webui.soev import capabilities, model_catalog, system_prompt
@@ -227,8 +227,6 @@ from open_webui.routers import (
     notes,
     notifications,
     ollama,
-    openai,
-    pipelines,
     prompts,
     retrieval,
     scim,
@@ -240,12 +238,6 @@ from open_webui.routers import (
     totp,
     users,
     utils,
-)
-from open_webui.routers.retrieval import (
-    get_ef,
-    get_embedding_function,
-    get_reranking_function,
-    get_rf,
 )
 from open_webui.socket.main import (
     MODELS,
@@ -337,7 +329,7 @@ from open_webui.utils.oauth import (
 )
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.redis import clear_connection_cache, get_redis_client
-from open_webui.utils.session_pool import cleanup_response, get_client_timeout, get_session, stream_wrapper
+from open_webui.utils.session_pool import get_session
 from open_webui.utils.tool_approval import (
     ResolveToolCallForm,
     build_tool_approval_resume_payload,
@@ -798,8 +790,6 @@ app.state.OLLAMA_MODELS = {}
 ########################################
 
 
-app.state.OPENAI_MODELS = {}
-
 ########################################
 #
 # TOOL SERVERS
@@ -898,88 +888,6 @@ async def initialize_runtime_config(app: FastAPI):
     app.state.rf = None
     app.state.YOUTUBE_LOADER_TRANSLATION = None
 
-    try:
-        rag_config = await Config.get_many(
-            'rag.embedding_engine',
-            'rag.embedding_model',
-            'rag.enable_hybrid_search',
-            'rag.bypass_embedding_and_retrieval',
-            'rag.reranking_engine',
-            'rag.reranking_model',
-            'rag.external_reranker_url',
-            'rag.external_reranker_api_key',
-            'rag.external_reranker_timeout',
-        )
-        app.state.ef = get_ef(rag_config.get('rag.embedding_engine'), rag_config.get('rag.embedding_model'))
-        if rag_config.get('rag.enable_hybrid_search') and not rag_config.get('rag.bypass_embedding_and_retrieval'):
-            app.state.rf = get_rf(
-                rag_config.get('rag.reranking_engine'),
-                rag_config.get('rag.reranking_model'),
-                rag_config.get('rag.external_reranker_url'),
-                rag_config.get('rag.external_reranker_api_key'),
-                rag_config.get('rag.external_reranker_timeout'),
-            )
-        else:
-            app.state.rf = None
-    except Exception as e:
-        log.error(f'Error updating models: {e}')
-        app.state.rf = None
-
-    rag_config = await Config.get_many(
-        'rag.embedding_engine',
-        'rag.embedding_model',
-        'rag.openai.api_base_url',
-        'rag.ollama.base_url',
-        'rag.azure_openai.base_url',
-        'rag.openai.api_key',
-        'rag.ollama.api_key',
-        'rag.azure_openai.api_key',
-        'rag.embedding_batch_size',
-        'rag.azure_openai.api_version',
-        'rag.enable_async_embedding',
-        'rag.embedding_concurrent_requests',
-        'rag.reranking_engine',
-        'rag.reranking_model',
-        'rag.reranking_batch_size',
-    )
-    embedding_engine = rag_config.get('rag.embedding_engine')
-    app.state.EMBEDDING_FUNCTION = get_embedding_function(
-        embedding_engine,
-        rag_config.get('rag.embedding_model'),
-        embedding_function=app.state.ef,
-        url=(
-            rag_config.get('rag.openai.api_base_url')
-            if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.base_url')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.base_url')
-            )
-        ),
-        key=(
-            rag_config.get('rag.openai.api_key')
-            if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.api_key')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.api_key')
-            )
-        ),
-        embedding_batch_size=rag_config.get('rag.embedding_batch_size'),
-        azure_api_version=(
-            rag_config.get('rag.azure_openai.api_version') if embedding_engine == 'azure_openai' else None
-        ),
-        enable_async=rag_config.get('rag.enable_async_embedding'),
-        concurrent_requests=rag_config.get('rag.embedding_concurrent_requests'),
-    )
-
-    app.state.RERANKING_FUNCTION = get_reranking_function(
-        rag_config.get('rag.reranking_engine'),
-        rag_config.get('rag.reranking_model'),
-        reranking_function=app.state.rf,
-        reranking_batch_size=rag_config.get('rag.reranking_batch_size'),
-    )
-
 
 ########################################
 #
@@ -1070,10 +978,8 @@ app.mount('/ws', socket_app)
 
 
 app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
-app.include_router(openai.router, prefix='/openai', tags=['openai'])
 
 
-app.include_router(pipelines.router, prefix='/api/v1/pipelines', tags=['pipelines'])
 app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
 app.include_router(images.router, prefix='/api/v1/images', tags=['images'])
 
@@ -1152,10 +1058,7 @@ app.include_router(agent_threads.router, prefix='/api/v1/agent-threads', tags=['
 async def get_models(request: Request, refresh: bool = False, user=Depends(get_verified_user)):
     all_models = await get_all_models(request, refresh=refresh, user=user)
 
-    # Filter out filter pipelines
-    models = [
-        model for model in all_models if not ('pipeline' in model and model['pipeline'].get('type', None) == 'filter')
-    ]
+    models = all_models
 
     # Chat requests resolve models by ID from request.app.state.MODELS, where
     # duplicate IDs collapse to the last model. Return the same effective list.
@@ -1219,10 +1122,9 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
     model_id = form_data.model
 
     ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
-    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
 
     seen = set()
-    while model_id not in ollama_models and model_id not in openai_models and model_id not in seen:
+    while model_id not in ollama_models and model_id not in seen:
         seen.add(model_id)
         model_info = await Models.get_model_by_id(model_id)
         if not model_info or not model_info.base_model_id:
@@ -1274,49 +1176,6 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
             )
         return {'status': True}
 
-    # --- OpenAI-compatible providers ---
-    if model_id in openai_models:
-        openai_config = await Config.get_many('openai.api_configs', 'openai.api_base_urls', 'openai.api_keys')
-        openai_api_configs = openai_config.get('openai.api_configs') or {}
-        openai_base_urls = openai_config.get('openai.api_base_urls') or []
-        openai_api_keys = openai_config.get('openai.api_keys') or []
-        model_info = openai_models[model_id]
-        idx = model_info.get('urlIdx')
-        api_config = openai_api_configs.get(str(idx), {})
-        provider = api_config.get('provider', '')
-        base_url = openai_base_urls[idx]
-        key = openai_api_keys[idx] if idx < len(openai_api_keys) else ''
-
-        if provider == 'llama.cpp':
-            root_url = base_url.rstrip('/').removesuffix('/v1')
-            actual_model = strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
-            try:
-                timeout = aiohttp.ClientTimeout(total=30)
-                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-                    headers = {
-                        'Content-Type': 'application/json',
-                        **({'Authorization': f'Bearer {key}'} if key else {}),
-                    }
-                    async with session.post(
-                        f'{root_url}/models/unload',
-                        json={'model': actual_model},
-                        headers=headers,
-                    ) as r:
-                        if not r.ok:
-                            detail = await r.text()
-                            raise HTTPException(status_code=r.status, detail=detail)
-                        return await r.json()
-            except HTTPException:
-                raise
-            except Exception as e:
-                log.exception(f'Failed to unload model via llama.cpp: {e}')
-                raise HTTPException(status_code=500, detail=str(e))
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f'Provider "{provider or "default"}" does not support model unloading',
-            )
-
     raise HTTPException(status_code=404, detail=f'Model "{model_id}" not found')
 
 
@@ -1333,7 +1192,7 @@ async def embeddings(request: Request, form_data: dict = Depends(embeddings_body
 
     This handler:
       - Performs user/model checks and dispatches to the correct backend.
-      - Supports OpenAI, Ollama, arena models, pipelines, and any compatible provider.
+      - Supports Ollama embeddings.
 
     Args:
         request (Request): Request context.
@@ -1350,17 +1209,6 @@ async def embeddings(request: Request, form_data: dict = Depends(embeddings_body
     return await generate_embeddings(request, form_data, user)
 
 
-async def _set_direct_model(request: Request, model_item: dict, user) -> None:
-    model_meta = (model_item.get('info') or {}).get('meta') or {}
-    knowledge_items = model_meta.get('knowledge')
-    if knowledge_items:
-        from open_webui.utils.access_control.files import get_accessible_folder_files
-
-        model_meta['knowledge'] = await get_accessible_folder_files(knowledge_items, user)
-    request.state.direct = True
-    request.state.model = model_item
-
-
 @app.post('/api/chat/completions')
 @app.post('/api/v1/chat/completions')  # Experimental: Compatibility with OpenAI API
 async def chat_completion(
@@ -1372,7 +1220,7 @@ async def chat_completion(
         await get_all_models(request, user=user)
 
     model_id = form_data.get('model', None)
-    model_item = form_data.pop('model_item', {})
+    form_data.pop('model_item', None)
     tasks = form_data.pop('background_tasks', None)
 
     metadata = {}
@@ -1380,53 +1228,43 @@ async def chat_completion(
         model_info = None
         fallback_model = None
         missing_base_model = False
-        if not model_item.get('direct', False):
-            if model_id not in request.app.state.MODELS:
-                raise Exception('Model not found')
-
-            model = request.app.state.MODELS[model_id]
-            model_info = await Models.get_model_by_id(model_id)
-            missing_base_model = bool(
-                model_info and model_info.base_model_id and model_info.base_model_id not in request.app.state.MODELS
+        if model_id not in request.app.state.MODELS:
+            raise Exception('Model not found')
+        model = request.app.state.MODELS[model_id]
+        model_info = await Models.get_model_by_id(model_id)
+        missing_base_model = bool(
+            model_info and model_info.base_model_id and model_info.base_model_id not in request.app.state.MODELS
+        )
+        if missing_base_model and ENABLE_CUSTOM_MODEL_FALLBACK:
+            fallback_model_id = next(
+                (
+                    model_id.strip()
+                    for model_id in (
+                        (await model_catalog.default_models(await Config.get('ui.default_models'))) or ''
+                    ).split(',')
+                    if model_id.strip()
+                ),
+                None,
             )
-
-            if missing_base_model and ENABLE_CUSTOM_MODEL_FALLBACK:
-                fallback_model_id = next(
-                    (
-                        model_id.strip()
-                        for model_id in (
-                            (await model_catalog.default_models(await Config.get('ui.default_models'))) or ''
-                        ).split(',')
-                        if model_id.strip()
-                    ),
-                    None,
+            if fallback_model_id:
+                fallback_model = request.app.state.MODELS.get(fallback_model_id)
+        if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
+            try:
+                access_model_info = (
+                    model_info.model_copy(update={'base_model_id': None}) if fallback_model is not None else model_info
                 )
-                if fallback_model_id:
-                    fallback_model = request.app.state.MODELS.get(fallback_model_id)
-
-            # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
-                try:
-                    access_model_info = (
-                        model_info.model_copy(update={'base_model_id': None})
-                        if fallback_model is not None
-                        else model_info
-                    )
-                    await check_model_access(user, model, model_info=access_model_info)
-                    if fallback_model is not None:
-                        await check_model_access(user, fallback_model)
-                except Exception as e:
-                    raise e
-        else:
-            model = model_item
-            await _set_direct_model(request, model, user)
+                await check_model_access(user, model, model_info=access_model_info)
+                if fallback_model is not None:
+                    await check_model_access(user, fallback_model)
+            except Exception as e:
+                raise e
 
         # [Gradient] Opt-in assistant/LLM split; keep the selected LLM request-local.
         from open_webui.utils.assistant_requests import resolve_assistant_request
 
         split_assistant_id = form_data.pop('assistant_id', None)
         bind_assistant = False
-        if split_assistant_id and not model_item.get('direct', False):
+        if split_assistant_id:
             model, model_info, bind_assistant = await resolve_assistant_request(
                 split_assistant_id,
                 model,
@@ -1575,7 +1413,6 @@ async def chat_completion(
             # span is active — the background task that runs process_chat may
             # not carry it. Lets a chat-error feedback report deep-link to Tempo.
             'trace_id': get_current_trace_id(),
-            'direct': model_item.get('direct', False),
             'params': {
                 'stream_delta_chunk_size': stream_delta_chunk_size,
                 'reasoning_tags': reasoning_tags,
@@ -2276,152 +2113,6 @@ app.state.CHAT_COMPLETION_HANDLER = chat_completion
 ##################################
 
 
-from open_webui.utils.anthropic import (
-    convert_anthropic_to_openai_payload,
-    convert_openai_to_anthropic_response,
-    is_anthropic_messages_passthrough,
-    openai_stream_to_anthropic_stream,
-)
-
-
-@app.post('/api/message/count_tokens')
-@app.post('/api/v1/messages/count_tokens')  # Anthropic Messages token-count endpoint
-async def count_message_tokens(
-    request: Request,
-    form_data: dict = Depends(messages_body),
-    user=Depends(get_verified_user),
-):
-    return {'input_tokens': await openai.count_anthropic_tokens(request, form_data, user)}
-
-
-async def passthrough_anthropic_messages(request: Request, form_data: dict, user) -> Response | dict:
-    requested_model, payload, url, key, headers, cookies = await openai.get_anthropic_request_target(
-        request, form_data, user
-    )
-    request_url = f'{url.rstrip("/")}/messages'
-    response = None
-    streaming = False
-
-    try:
-        session = await get_session()
-        response = await session.request(
-            method='POST',
-            url=request_url,
-            data=JSONCodec.dumps(payload),
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=bool(payload.get('stream'))),
-        )
-
-        if 'text/event-stream' in response.headers.get('Content-Type', ''):
-            streaming = True
-            return StreamingResponse(
-                stream_wrapper(response),
-                status_code=response.status,
-                headers=openai._clean_proxy_headers(response.headers),
-            )
-
-        try:
-            response_data = await response.json()
-        except Exception:
-            response_data = await response.text()
-
-        if response.status >= 400:
-            await openai.publish_model_provider_request_failed(
-                request,
-                actor=user,
-                provider='openai-compatible',
-                base_url=url,
-                api_key=key,
-                status=response.status,
-                requested_model=requested_model,
-                upstream_error=response_data,
-            )
-            if isinstance(response_data, (dict, list)):
-                return JSONResponse(status_code=response.status, content=response_data)
-            return Response(status_code=response.status, content=response_data)
-
-        return response_data
-    except HTTPException:
-        raise
-    except Exception:
-        log.exception('Failed to passthrough Anthropic Messages request for model %s', requested_model)
-        raise HTTPException(status_code=502, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
-    finally:
-        if not streaming:
-            await cleanup_response(response)
-
-
-@app.post('/api/message')
-@app.post('/api/v1/messages')  # Anthropic Messages API compatible endpoint
-async def generate_messages(
-    request: Request,
-    form_data: dict = Depends(messages_body),
-    user=Depends(get_verified_user),
-):
-    """
-    Anthropic Messages API compatible endpoint.
-
-    Accepts the Anthropic Messages API format, converts internally to OpenAI
-    Chat Completions format, routes through the existing chat completion
-    pipeline, then converts the response back to Anthropic Messages format.
-
-    Supports both streaming and non-streaming requests.
-    All models configured in Open WebUI are accessible via this endpoint.
-
-    Authentication: Supports both standard Authorization header and
-    Anthropic's x-api-key header (via middleware translation).
-    """
-    requested_model = form_data.get('model', '')
-    input_tokens = None
-    try:
-        input_tokens = await openai.count_anthropic_tokens(request, form_data, user)
-    except Exception:
-        # Counting must not turn a compatible generation request into an outage.
-        log.warning('Unable to count Anthropic input tokens for model %s', requested_model, exc_info=True)
-
-    model_id = requested_model
-    model_info = await Models.get_model_by_id(model_id)
-    if model_info and model_info.base_model_id:
-        model_id = model_info.base_model_id
-
-    passthrough_params = []
-    models = request.app.state.OPENAI_MODELS
-    if not models or model_id not in models:
-        await openai.get_all_models(request, user=user)
-        models = request.app.state.OPENAI_MODELS
-    model = models.get(model_id)
-    if model:
-        url, _, api_config = await openai.get_openai_connection(model['urlIdx'])
-        if is_anthropic_messages_passthrough(url, api_config):
-            return await passthrough_anthropic_messages(request, form_data, user)
-        passthrough_params = api_config.get('passthrough_params') or []
-
-    # Convert Anthropic payload to OpenAI format
-    openai_payload = convert_anthropic_to_openai_payload(form_data, passthrough_params)
-
-    # Route through the existing chat_completion handler
-    response = await chat_completion(request, openai_payload, user)
-
-    # Convert response back to Anthropic format
-    if isinstance(response, StreamingResponse):
-        # Streaming response: wrap the generator to convert SSE format
-        return StreamingResponse(
-            openai_stream_to_anthropic_stream(response.body_iterator, model=requested_model, input_tokens=input_tokens),
-            media_type='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-            },
-        )
-    elif isinstance(response, dict):
-        return convert_openai_to_anthropic_response(response, model=requested_model, input_tokens=input_tokens)
-    else:
-        # Passthrough for error responses (JSONResponse, PlainTextResponse, etc.)
-        return response
-
-
 async def verify_chat_ownership(chat_id: str | None, user) -> None:
     """Temporary chats are per-socket and unsaved, so they have no owner to check."""
     if not chat_id or is_temporary_chat_id(chat_id):
@@ -2450,10 +2141,9 @@ async def chat_completed(
     await verify_chat_ownership(form_data.get('chat_id'), user)
 
     try:
-        model_item = form_data.pop('model_item', {})
+        form_data.pop('model_item', None)
 
-        if model_item.get('direct', False):
-            await _set_direct_model(request, model_item, user)
+        pass
 
         return await chat_completed_handler(request, form_data, user)
     except Exception as e:
@@ -2470,10 +2160,9 @@ async def chat_action(
     await verify_chat_ownership(form_data.get('chat_id'), user)
 
     try:
-        model_item = form_data.pop('model_item', {})
+        form_data.pop('model_item', None)
 
-        if model_item.get('direct', False):
-            await _set_direct_model(request, model_item, user)
+        pass
 
         return await chat_action_handler(request, action_id, form_data, user)
     except Exception as e:
@@ -2662,7 +2351,6 @@ async def get_app_config(request: Request):
         'ui.enable_login_form',
         'auth.enable_api_keys',
         'ui.enable_password_change_form',
-        'direct.enable',
         'folders.enable',
         'folders.max_file_count',
         'channels.enable',
@@ -2793,7 +2481,6 @@ async def get_app_config(request: Request):
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     # [Gradient] v2 mode keeps the picker to the soev-api catalog.
-                    'enable_direct_connections': config.get('direct.enable') and not model_catalog.is_v2(),
                     'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),

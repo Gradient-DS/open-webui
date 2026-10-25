@@ -69,12 +69,8 @@ data:
 
   # LLM Providers
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
-  OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
   ENABLE_FORWARD_USER_INFO_HEADERS: {{ .Values.openWebui.config.enableForwardUserInfoHeaders | quote }}
   FORWARD_USER_INFO_HEADER_USER_ID: {{ .Values.openWebui.config.forwardUserInfoHeaderUserId | quote }}
-  {{- if .Values.openWebui.config.openaiApiConfigs }}
-  OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
-  {{- end }}
 
   # Vector Database (Weaviate) - local to tenant namespace
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
@@ -110,13 +106,7 @@ data:
   DATABASE_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
   DATABASE_NAME: {{ .Values.openWebui.config.databaseName | quote }}
 
-  # RAG Embeddings
-  RAG_EMBEDDING_ENGINE: {{ .Values.openWebui.config.ragEmbeddingEngine | quote }}
-  RAG_EMBEDDING_MODEL: {{ .Values.openWebui.config.ragEmbeddingModel | quote }}
-  {{- if .Values.openWebui.config.ragOpenaiApiBaseUrl }}
-  RAG_OPENAI_API_BASE_URL: {{ .Values.openWebui.config.ragOpenaiApiBaseUrl | quote }}
-  {{- end }}
-  RAG_EMBEDDING_BATCH_SIZE: {{ .Values.openWebui.config.ragEmbeddingBatchSize | quote }}
+  # Upload and retrieval limits
   RAG_TOP_K: {{ .Values.openWebui.config.ragTopK | quote }}
   RAG_TOP_K_RERANKER: {{ .Values.openWebui.config.ragTopKReranker | quote }}
   RAG_RELEVANCE_THRESHOLD: {{ .Values.openWebui.config.ragRelevanceThreshold | quote }}
@@ -137,8 +127,6 @@ data:
 
   # Content Extraction & Reranking (via shared services)
   CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
-  RAG_RERANKING_ENGINE: {{ .Values.openWebui.config.ragRerankingEngine | quote }}
-  RAG_EXTERNAL_RERANKER_URL: "{{ include "open-webui-tenant.sharedServices.rerankerUrl" . }}/v1/rerank"
   # Defaults to the shared-services gateway in `sharedServices.namespace`.
   # Tenants on a split-namespace setup (e.g. octobox: LiteLLM/reranker on
   # prod shared-services but doc-loader on staging-shared-services) can

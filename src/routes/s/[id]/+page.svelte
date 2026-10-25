@@ -93,12 +93,7 @@
 
 		await models.set(
 			token
-				? await getModels(
-						token,
-						$config?.features?.enable_direct_connections
-							? ($settings?.directConnections ?? null)
-							: null
-					).catch((error) => {
+				? await getModels(token, null).catch((error) => {
 						console.error(error);
 						return [];
 					})

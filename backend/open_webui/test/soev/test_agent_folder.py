@@ -24,9 +24,6 @@ def folder(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(middleware.Folders, 'get_folder_by_id', AsyncMock(return_value=stored))
     monkeypatch.setattr(middleware, 'get_owner_accessible_folder_files', AsyncMock(return_value=FOLDER_FILES))
     monkeypatch.setattr(middleware, 'get_system_oauth_token', AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        middleware, 'process_pipeline_inlet_filter', AsyncMock(side_effect=lambda r, form_data, *a: form_data)
-    )
     monkeypatch.setattr(middleware.Config, 'get', AsyncMock(return_value=None))
     return stored
 

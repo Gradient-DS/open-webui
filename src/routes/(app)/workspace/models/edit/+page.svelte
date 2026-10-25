@@ -94,12 +94,7 @@
 			return false;
 		}
 
-		await models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		await models.set(await getModels(localStorage.token, null));
 		toast.success(
 			useSimpleBuilder
 				? $i18n.t('Assistant updated successfully')

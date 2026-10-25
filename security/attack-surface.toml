@@ -78,9 +78,9 @@ depends_on = ["namespace"]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "Select from the configured upstream registry so a previous task Pipe cannot become the base fixture. Register the selected CI model through models/model/access/update with public read access: listing an unconfigured model as admin does not make it chat-usable. Reuse the upstream selector and Models row across passes. The upstream's first id is also {upstream_model}, for routes that proxy to a connection directly. RUNTIME_SOEV_BACKED=drive runs v2, whose registry lists only soev-api's catalog, so there {model} is the catalog default."
+description = "Select the soev-api catalog default through /api/config and register a publicly readable model override for the security pass. The same catalog id is supplied as upstream_model for compatibility with request fixtures."
 seeded_by = "seed_model"
-depends_on = ["openai_index"]
+depends_on = []
 provides = ["upstream_model"]
 fresh = false
 actor = "admin"
@@ -539,30 +539,6 @@ probe = "/ollama/api/tags/0"
 fresh = false
 
 [[parameter]]
-key = "openai_index"
-name = "url_idx"
-prefix = "/openai"
-description = "routers/openai.py indexes the configured URL list; GET config and a real model-list probe establish index 0. It is a stable selector, not a resource row."
-seeded_by = "connection_index"
-depends_on = []
-actor = "admin"
-config_via = "/openai/config"
-urls_field = "OPENAI_API_BASE_URLS"
-probe = "/openai/models/0"
-fresh = false
-
-[[parameter]]
-key = "openai_path"
-name = "path"
-prefix = "/openai/{path}"
-description = "routers/openai.py:proxy appends path to the configured base URL. models is an actual upstream route, established by the model-list probe; no database id is required."
-seeded_by = "upstream_path"
-depends_on = ["openai_index"]
-probe = "/openai/models/{openai_index}"
-value = "models"
-fresh = false
-
-[[parameter]]
 key = "terminal"
 name = "server_id"
 prefix = "/api/v1/terminals/{server_id}"
@@ -629,13 +605,6 @@ name = "client_id"
 prefix = "/oauth/clients/{client_id}"
 description = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
-
-[[parameter]]
-key = "pipeline"
-name = "pipeline_id"
-prefix = "/api/v1/pipelines/{pipeline_id}"
-description = "pipelines.py:/upload and /add delegate creation to an external Pipelines server. The CI OpenAI stub has no pipeline registry or code-loading implementation; its catch-all 200 does not create a pipeline. A pipeline-capable upstream is required, not an invented id extracted from that 200."
-unseedable = "pipelines.py:/upload and /add delegate creation to an external Pipelines server. The CI OpenAI stub has no pipeline registry or code-loading implementation; its catch-all 200 does not create a pipeline. A pipeline-capable upstream is required, not an invented id extracted from that 200."
 
 [[parameter]]
 key = "task"
@@ -819,28 +788,6 @@ name = "target_id"
 prefix = "/api/v1/notifications/targets/{target_id}"
 unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, s3) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
 
-[[parameter]]
-key = "model_download_job"
-name = "job_id"
-prefix = "/openai/models/{url_idx}/download/status/{job_id}"
-unseedable = "routers/openai.py:get_provider_model_download_status reads a job created by an actual provider model download. The CI stub serves model metadata but cannot produce a real download job, and the sealed network has no provider to download from. Arrived with the v0.11.3 upstream merge; revisit only if the stub grows a download-job lifecycle."
-
-
-# Request fields -- body or query -- that must carry a real id for the handler to
-# get past its lookup. A random string reads 404 ("not found") and the route is
-# driven without being entered: 17 routes measured exactly that. Values name
-# seeded parameter keys ({file}, {knowledge}) or the pass token ({token}).
-#
-# The seeding pass plants `json` onto the all-fields body's skeleton and holds
-# those fields there, as it holds constrained ones: the body that earns coverage
-# carries the real id, and each held field is still probed alone with the
-# corpus. The drive pass sends `params`. `setup` is a list of non-destructive
-# requests made while resolving, for a fixture no path parameter owns.
-#
-# Multipart routes declare `files`, in the file seed's own format, and `form`
-# text parts; the drive pass sends them. The derivation models JSON bodies only,
-# so without these no pass sends a body and the route reads 422 in every pass.
-
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/files/onedrive/attach"
@@ -896,11 +843,6 @@ description = "Toggle resolves the actual registered model from the required id 
 params = { id = "{model}" }
 
 [[field]]
-route = "POST /api/v1/retrieval/query/doc"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read, admins included without the bypass. The seeded file's own collection is the caller's, so the handler is entered without soev-api."
-json = { collection_name = "file-{file}", query = "Attack knowledge" }
-
-[[field]]
 route = "POST /api/v1/retrieval/delete"
 description = "routers/retrieval.py:delete_entries_from_collection checks write access to the collection first (403 otherwise, admins included without the bypass). The seeded file's own collection is the caller's; file_id names that file."
 json = { collection_name = "file-{file}", file_id = "{file}" }
@@ -923,11 +865,6 @@ description = "routers/models.py reads the model by the id query parameter; the 
 params = { "id" = "{model}" }
 
 [[field]]
-route = "GET /api/v1/pipelines/"
-description = "routers/pipelines.py:get_pipelines indexes the OpenAI connection list with urlIdx; without it base_urls[None] raises and reads as 404 'Pipeline not found'. The query pass drives string parameters only."
-params = { "urlIdx" = "{openai_index}" }
-
-[[field]]
 route = "GET /api/v1/prompts/id/{prompt_id}/history/diff"
 description = "models/prompt_history.py:compute_diff returns None unless both ids are history rows of this prompt. The same row on both sides is a valid, empty diff. Reachable since PLANE-017: history/{history_id} was registered first and answered for diff."
 params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
@@ -935,11 +872,6 @@ params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
 [[field]]
 route = "POST /api/models/unload"
 description = "main.py:unload_model walks the model's base_model_id chain to an upstream model and answers 404 for an unknown id."
-json = { "model" = "{upstream_model}" }
-
-[[field]]
-route = "POST /openai/chat/completions"
-description = "routers/openai.py:generate_chat_completion answers 404 MODEL_NOT_FOUND unless the model resolves to a configured upstream model (404 x389 measured with sampled ids)."
 json = { "model" = "{upstream_model}" }
 
 [[field]]
@@ -989,11 +921,6 @@ description = "routers/retrieval.py:_validate_collection_access answers 403 for 
 json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
-route = "POST /api/v1/retrieval/query/collection"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api."
-json = { "collection_names[]" = "file-{file}" }
-
-[[field]]
 route = "POST /api/v1/auths/signin"
 description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
 json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
@@ -1011,7 +938,7 @@ setup = [
 
 [[field]]
 route = "POST /api/embeddings"
-description = "utils/embeddings.py:generate_embeddings answers 404 for a model outside the registry (PLANE-004); the seeded model is the CI upstream's, which embeds. In drive mode it is a soev catalog id, absent from OPENAI_MODELS, so routers/openai.py:embeddings keeps idx 0 and sends it to the first connection (the stub)."
+description = "The generic embedding dispatcher accepts Ollama models only; catalog models are refused rather than forwarded to a direct provider connection."
 json = { "model" = "{model}" }
 
 [[field]]
@@ -1152,12 +1079,6 @@ description = "Multipart: an audio part. routers/audio.py:transcription refuses 
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
 
 [[field]]
-route = "POST /api/v1/pipelines/upload"
-description = "Multipart: routers/pipelines.py:upload_pipeline accepts only a .py filename, and urlIdx is a required integer form part naming the OpenAI connection."
-files = [{ field = "file", filename = "attack_{token}.py", content = "# attack pipeline {token}\n", content_type = "text/x-python" }]
-form = { "urlIdx" = "{openai_index}" }
-
-[[field]]
 route = "POST /ollama/models/upload"
 description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
 files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
@@ -1252,11 +1173,6 @@ allow = ["same-object", "write"]
 reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
 
 [[shared]]
-route = "GET /openai/{path}"
-allow = ["same-object"]
-reason = "routers/openai.py:proxy forwards to the admin-configured upstream for any verified user; the answer is the upstream's, not the owner's."
-
-[[shared]]
 route = "POST /api/v1/invites/{token}/accept"
 allow = ["owner-marker", "write"]
 reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."
@@ -1286,23 +1202,6 @@ route = "POST /ollama/v1/messages/{url_idx}"
 allow = ["same-object", "write"]
 reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
 
-[[shared]]
-route = "POST /openai/{path}"
-allow = ["same-object", "write"]
-reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
-
-[[shared]]
-route = "PUT /openai/{path}"
-allow = ["same-object", "write"]
-reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
-
-[[shared]]
-route = "DELETE /openai/{path}"
-allow = ["same-object", "write"]
-reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
-
-# Owner refusals that are a guard working. A declared route that starts
-# succeeding fails the gate until its declaration is removed.
 [[control]]
 route = "POST /api/v1/invites/{token}/accept"
 status = 410
