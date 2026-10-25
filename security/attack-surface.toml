@@ -829,11 +829,6 @@ description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool
 json = { "call_id" = "call_{token}", "action" = "reject" }
 
 [[field]]
-route = "POST /api/v1/images/edit"
-description = "routers/images.py:image_edits resolves a non-URL image as a file id through get_file_content_by_id, which answers 404 for an unknown id."
-json = { "image" = "{file}" }
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/external/knowledge/create"
 description = "Creating an external KB needs an existing connection; the connection fixture exists."
