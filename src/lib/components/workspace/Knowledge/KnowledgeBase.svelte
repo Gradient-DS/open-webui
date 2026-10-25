@@ -31,8 +31,7 @@
 		createKnowledgeDirectory,
 		updateKnowledgeDirectory,
 		deleteKnowledgeDirectory,
-		moveFileInKnowledge,
-		testExternalKnowledgeRetrieval
+		moveFileInKnowledge
 	} from '$lib/apis/knowledge';
 	import { processUrl } from '$lib/apis/retrieval';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -216,10 +215,6 @@
 		write_access?: boolean;
 		type?: string;
 		user_id?: string;
-		meta?: {
-			source?: string;
-			external?: { connection_id?: string; provider?: string; source?: { name?: string } };
-		};
 	};
 
 	let id = null;
@@ -259,15 +254,6 @@
 	let showDeleteDirectoryConfirm = false;
 	let pendingDeleteDirectoryId: string | null = null;
 	let deleteDirectoryContents = true;
-
-	// External (query-only) KB panel
-	let externalTestQuery = '';
-	let externalTestResult: {
-		documents?: string[];
-		metadatas?: Record<string, unknown>[];
-		distances?: number[];
-	} | null = null;
-	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
 
 	let loaded = false;
 	let itemsInitialized = false;
@@ -1673,25 +1659,6 @@
 		}
 	};
 
-	const externalTestHandler = async () => {
-		if (!isExternalKnowledge || !externalTestQuery.trim()) return;
-
-		const external = knowledge?.meta?.external;
-		if (!external?.connection_id) return;
-		const res = await testExternalKnowledgeRetrieval(localStorage.token, external.connection_id, {
-			query: externalTestQuery,
-			source: external.source,
-			count: 5
-		}).catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
-
-		if (res) {
-			externalTestResult = res;
-		}
-	};
-
 	// Bulk remove: replays each selected item's own removal (file-remove,
 	// directory-delete or source-remove) without per-item toast/init, then
 	// refreshes once. Directories always delete their contents.
@@ -2302,369 +2269,293 @@
 				</p>
 			{/if}
 
-			{#if isExternalKnowledge}
-				<div class="p-5 flex flex-col gap-4">
-					<div class="flex flex-wrap gap-2 text-xs">
-						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
-							{$i18n.t('Connected')}
+			<div class="px-3 flex shrink-0 items-center w-full space-x-1.5">
+				<!-- [Gradient] On a narrow screen the buttons wrap below the search field. -->
+				<div class="flex flex-1 flex-wrap items-center gap-y-1">
+					<div class="flex min-w-[10rem] flex-1 items-center">
+						<div class=" self-center ml-1 mr-2">
+							<Search className="size-3.5" />
 						</div>
-						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
-							{$i18n.t('Read Only')}
-						</div>
-						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
-							{knowledge?.meta?.external?.provider ?? $i18n.t('Provider')}
-						</div>
-						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
-							{$i18n.t('Service Account')}
-						</div>
+						<input
+							class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+							bind:value={query}
+							aria-label={$i18n.t('Search Collection')}
+							placeholder={$i18n.t('Search Collection')}
+							on:input={() => {
+								queryDebounceActive = true;
+							}}
+							on:focus={() => {
+								selectedFileId = null;
+							}}
+						/>
 					</div>
 
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-						<div>
-							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Mapped Source')}</div>
-							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
-								{knowledge?.meta?.external?.source?.name ?? $i18n.t('Not configured')}
-							</div>
-						</div>
-						<div>
-							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Auth Mode')}</div>
-							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
-								{$i18n.t('Admin-managed service account')}
-							</div>
-						</div>
-					</div>
-
-					<div class="text-xs text-gray-500">
-						<!-- LICENSE covers this Open WebUI wordmark.
-						Do not alter, remove, obscure, or replace it except as LICENSE permits:
-						https://docs.openwebui.com/license. -->
-						{$i18n.t(
-							'This knowledge base retrieves from a connected source. Open WebUI can query it, but cannot upload, sync, edit, delete, reset, or reindex its source data.'
-						)}
-					</div>
-
-					<div class="flex flex-col gap-2">
-						<div class="text-xs">{$i18n.t('Test Query')}</div>
-						<div class="flex gap-2">
-							<input
-								class="w-full text-xs rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2 outline-hidden"
-								bind:value={externalTestQuery}
-								placeholder={$i18n.t('Ask this knowledge source a test question')}
-							/>
-							<button
-								class="px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black text-xs"
-								on:click={externalTestHandler}
-							>
-								{$i18n.t('Test')}
-							</button>
-						</div>
-					</div>
-
-					{#if externalTestResult}
-						<div class="rounded-xl bg-gray-50 dark:bg-gray-850 p-3 text-xs">
-							<div class="mb-2">{$i18n.t('Preview')}</div>
-							{#each externalTestResult.documents ?? [] as document, idx}
-								<div class="border-t border-gray-100 dark:border-gray-800 py-2">
-									<div class="line-clamp-4">{document}</div>
-									<div class="text-gray-500 mt-1">
-										{externalTestResult.metadatas?.[idx]?.source ?? ''}
-									</div>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{:else}
-				<div class="px-3 flex shrink-0 items-center w-full space-x-1.5">
-					<!-- [Gradient] On a narrow screen the buttons wrap below the search field. -->
-					<div class="flex flex-1 flex-wrap items-center gap-y-1">
-						<div class="flex min-w-[10rem] flex-1 items-center">
-							<div class=" self-center ml-1 mr-2">
-								<Search className="size-3.5" />
-							</div>
-							<input
-								class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-								bind:value={query}
-								aria-label={$i18n.t('Search Collection')}
-								placeholder={$i18n.t('Search Collection')}
-								on:input={() => {
-									queryDebounceActive = true;
-								}}
-								on:focus={() => {
-									selectedFileId = null;
-								}}
-							/>
-						</div>
-
-						{#if knowledge?.write_access && hasSyncableSources}
-							<!-- [Gradient] Keep the standard gap before "Add source". -->
-							<Tooltip
-								content={$i18n.t('Check every source of this knowledge base for changes now')}
-								className="flex mr-1.5"
-								touch={false}
-							>
-								<button
-									type="button"
-									class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap"
-									on:click={syncAllSources}>{$i18n.t('Sync all now')}</button
-								>
-							</Tooltip>
-						{/if}
-						{#if knowledge?.write_access}
-							<div>
-								{#if activeProviderEnabled}
-									<Tooltip
-										content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
-										touch={false}
-									>
-										<button
-											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-											disabled={isSyncBusy}
-											aria-label={$i18n.t('Add source')}
-											on:click={() => {
-												cloudSyncHandler(activeProvider);
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="w-4 h-4"
-											>
-												<path
-													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
-												/>
-											</svg>
-											<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
-											<span>{$i18n.t('Add source')}</span>
-										</button>
-									</Tooltip>
-								{:else if cloudBadge || $config?.integration_providers?.[knowledge?.type]}
-									<!-- Disabled sync providers and API-managed providers have no add button. -->
-								{:else}
-									<AddContentMenu
-										{structureEditable}
-										onUpload={(data) => {
-											if (data.type === 'directory') {
-												uploadDirectoryHandler();
-											} else if (data.type === 'new_directory') {
-												showNewDirectoryModal = true;
-											} else if (data.type === 'web') {
-												showAddWebpageModal = true;
-											} else if (data.type === 'text') {
-												showAddTextContentModal = true;
-											} else {
-												document.getElementById('files-input').click();
-											}
-										}}
-										onReset={structureEditable
-											? () => {
-													showResetConfirm = true;
-												}
-											: null}
-									/>
-								{/if}
-							</div>
-						{/if}
-					</div>
-				</div>
-
-				<div class="px-2.5 flex justify-between">
-					<div
-						class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
-						on:wheel={(e) => {
-							if (e.deltaY !== 0) {
-								e.preventDefault();
-								e.currentTarget.scrollLeft += e.deltaY;
-							}
-						}}
-					>
-						<div
-							class="flex gap-2 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
+					{#if knowledge?.write_access && hasSyncableSources}
+						<!-- [Gradient] Keep the standard gap before "Add source". -->
+						<Tooltip
+							content={$i18n.t('Check every source of this knowledge base for changes now')}
+							className="flex mr-1.5"
+							touch={false}
 						>
-							<DropdownOptions
-								align="end"
-								className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-xs text-gray-700 transition placeholder-gray-400 outline-hidden hover:text-gray-900 focus:outline-hidden dark:text-gray-200 dark:hover:text-gray-100"
-								bind:value={viewOption}
-								items={[
-									{ value: null, label: $i18n.t('All') },
-									{ value: 'created', label: $i18n.t('Created by you') },
-									{ value: 'shared', label: $i18n.t('Shared with you') }
-								]}
-								onChange={(value) => {
-									if (value) {
-										localStorage.workspaceViewOption = value;
-									} else {
-										delete localStorage.workspaceViewOption;
-									}
-									currentPage = 1;
-								}}
-							/>
-
-							<DropdownOptions
-								align="end"
-								bind:value={sortKey}
-								placeholder={$i18n.t('Sort')}
-								items={[
-									{ value: 'name', label: $i18n.t('Name') },
-									{ value: 'created_at', label: $i18n.t('Created') },
-									{ value: 'updated_at', label: $i18n.t('Updated') }
-								]}
-							/>
-
-							{#if sortKey}
-								<DropdownOptions
-									align="end"
-									bind:value={direction}
-									items={[
-										{ value: 'asc', label: $i18n.t('Asc') },
-										{ value: null, label: $i18n.t('Desc') }
-									]}
+							<button
+								type="button"
+								class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap"
+								on:click={syncAllSources}>{$i18n.t('Sync all now')}</button
+							>
+						</Tooltip>
+					{/if}
+					{#if knowledge?.write_access}
+						<div>
+							{#if activeProviderEnabled}
+								<Tooltip
+									content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
+									touch={false}
+								>
+									<button
+										class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+										disabled={isSyncBusy}
+										aria-label={$i18n.t('Add source')}
+										on:click={() => {
+											cloudSyncHandler(activeProvider);
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+											/>
+										</svg>
+										<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
+										<span>{$i18n.t('Add source')}</span>
+									</button>
+								</Tooltip>
+							{:else if cloudBadge || $config?.integration_providers?.[knowledge?.type]}
+								<!-- Disabled sync providers and API-managed providers have no add button. -->
+							{:else}
+								<AddContentMenu
+									{structureEditable}
+									onUpload={(data) => {
+										if (data.type === 'directory') {
+											uploadDirectoryHandler();
+										} else if (data.type === 'new_directory') {
+											showNewDirectoryModal = true;
+										} else if (data.type === 'web') {
+											showAddWebpageModal = true;
+										} else if (data.type === 'text') {
+											showAddTextContentModal = true;
+										} else {
+											document.getElementById('files-input').click();
+										}
+									}}
+									onReset={structureEditable
+										? () => {
+												showResetConfirm = true;
+											}
+										: null}
 								/>
 							{/if}
 						</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="px-2.5 flex justify-between">
+				<div
+					class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
+					on:wheel={(e) => {
+						if (e.deltaY !== 0) {
+							e.preventDefault();
+							e.currentTarget.scrollLeft += e.deltaY;
+						}
+					}}
+				>
+					<div
+						class="flex gap-2 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
+					>
+						<DropdownOptions
+							align="end"
+							className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-xs text-gray-700 transition placeholder-gray-400 outline-hidden hover:text-gray-900 focus:outline-hidden dark:text-gray-200 dark:hover:text-gray-100"
+							bind:value={viewOption}
+							items={[
+								{ value: null, label: $i18n.t('All') },
+								{ value: 'created', label: $i18n.t('Created by you') },
+								{ value: 'shared', label: $i18n.t('Shared with you') }
+							]}
+							onChange={(value) => {
+								if (value) {
+									localStorage.workspaceViewOption = value;
+								} else {
+									delete localStorage.workspaceViewOption;
+								}
+								currentPage = 1;
+							}}
+						/>
+
+						<DropdownOptions
+							align="end"
+							bind:value={sortKey}
+							placeholder={$i18n.t('Sort')}
+							items={[
+								{ value: 'name', label: $i18n.t('Name') },
+								{ value: 'created_at', label: $i18n.t('Created') },
+								{ value: 'updated_at', label: $i18n.t('Updated') }
+							]}
+						/>
+
+						{#if sortKey}
+							<DropdownOptions
+								align="end"
+								bind:value={direction}
+								items={[
+									{ value: 'asc', label: $i18n.t('Asc') },
+									{ value: null, label: $i18n.t('Desc') }
+								]}
+							/>
+						{/if}
 					</div>
 				</div>
+			</div>
 
-				<!-- Always rendered (not just inside a folder) so entering/leaving the
+			<!-- Always rendered (not just inside a folder) so entering/leaving the
 				     root doesn't insert/remove the row and shift the list (layout jump). -->
-				{#if !query}
-					<div class="px-4 mb-1 flex shrink-0">
-						<KnowledgeBreadcrumbs
-							rootLabel={knowledge.name}
-							{breadcrumbs}
-							onNavigate={(dirId) => navigateToDirectory(dirId)}
-							onMoveFiles={(fileIds, dirId) => moveFilesToDirectoryHandler(fileIds, dirId)}
-							onMoveDir={(dirId, targetId) => moveDirectoryHandler(dirId, targetId)}
-						/>
-					</div>
-				{/if}
+			{#if !query}
+				<div class="px-4 mb-1 flex shrink-0">
+					<KnowledgeBreadcrumbs
+						rootLabel={knowledge.name}
+						{breadcrumbs}
+						onNavigate={(dirId) => navigateToDirectory(dirId)}
+						onMoveFiles={(fileIds, dirId) => moveFilesToDirectoryHandler(fileIds, dirId)}
+						onMoveDir={(dirId, targetId) => moveDirectoryHandler(dirId, targetId)}
+					/>
+				</div>
+			{/if}
 
-				{#if fileItems !== null && fileItemsTotal !== null}
-					<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
-						<div class="flex-1 flex min-w-0">
-							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-								<div class="w-full h-full flex flex-col min-h-0">
-									<!-- Mirrors the row-list condition below so a level holding only
+			{#if fileItems !== null && fileItemsTotal !== null}
+				<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
+					<div class="flex-1 flex min-w-0">
+						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
+							<div class="w-full h-full flex flex-col min-h-0">
+								<!-- Mirrors the row-list condition below so a level holding only
 								     directories still renders the header. KbSelectionHeader is
 								     fixed-height by design ("the list never jumps") — gating it on
 								     fileItems alone defeated that, since entering a folder with
 								     files made the header appear and shift the rows down. -->
-									<!-- [Gradient] Hidden where nothing on the level can be selected
+								<!-- [Gradient] Hidden where nothing on the level can be selected
 									     (inside a synced folder) rather than shown as a dead control. -->
-									{#if knowledge?.write_access && fileItems && ($bulkAvailable.length > 0 || $bulkCount > 0) && (fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0))))}
-										<div class="pb-1.5 shrink-0">
-											<KbSelectionHeader
-												count={$bulkCount}
-												allSelected={$bulkAllSelected}
-												indeterminate={$bulkIndeterminate}
-												selectable={$bulkAvailable.length > 0}
-												onToggleSelectAll={() => selection.toggleSelectAll()}
-												onDelete={() => (showBulkRemoveConfirm = true)}
-											/>
-										</div>
-									{/if}
-									{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0) || (currentSourcePair && skippedItems.length > 0)))}
-										<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-											<Files
-												files={fileItems}
-												directories={query ? [] : directoryItems}
-												searchMode={!!query}
-												{structureEditable}
-												{sourcePairs}
-												looseSources={currentDirectoryId === null ? listedSources : []}
-												skippedItems={currentSourcePair ? skippedItems : []}
-												skippedSource={currentSourcePair?.content ?? null}
-												syncing={enclosingSyncing}
-												{enclosingProvider}
-												{uploadProgress}
-												skippedProvider={currentSourceProvider}
-												syncAccess={!!knowledge?.write_access}
-												syncBusy={cloudActionBusy || syncAllBusy}
-												isAdmin={$user?.role === 'admin'}
-												onSourceAction={(targets, action) => sourceAction(targets, action)}
-												onReconnect={(connection) => reconnect(connection)}
-												{knowledge}
-												{selectedFileId}
-												onClick={(fileId) => {
-													selectedFileId = fileId;
+								{#if knowledge?.write_access && fileItems && ($bulkAvailable.length > 0 || $bulkCount > 0) && (fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0))))}
+									<div class="pb-1.5 shrink-0">
+										<KbSelectionHeader
+											count={$bulkCount}
+											allSelected={$bulkAllSelected}
+											indeterminate={$bulkIndeterminate}
+											selectable={$bulkAvailable.length > 0}
+											onToggleSelectAll={() => selection.toggleSelectAll()}
+											onDelete={() => (showBulkRemoveConfirm = true)}
+										/>
+									</div>
+								{/if}
+								{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0) || (currentSourcePair && skippedItems.length > 0)))}
+									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+										<Files
+											files={fileItems}
+											directories={query ? [] : directoryItems}
+											searchMode={!!query}
+											{structureEditable}
+											{sourcePairs}
+											looseSources={currentDirectoryId === null ? listedSources : []}
+											skippedItems={currentSourcePair ? skippedItems : []}
+											skippedSource={currentSourcePair?.content ?? null}
+											syncing={enclosingSyncing}
+											{enclosingProvider}
+											{uploadProgress}
+											skippedProvider={currentSourceProvider}
+											syncAccess={!!knowledge?.write_access}
+											syncBusy={cloudActionBusy || syncAllBusy}
+											isAdmin={$user?.role === 'admin'}
+											onSourceAction={(targets, action) => sourceAction(targets, action)}
+											onReconnect={(connection) => reconnect(connection)}
+											{knowledge}
+											{selectedFileId}
+											onClick={(fileId) => {
+												selectedFileId = fileId;
 
-													if (fileItems) {
-														const file = fileItems.find((file) => file.id === selectedFileId);
-														if (file) {
-															openFilePreview(file);
-														} else {
-															selectedFile = null;
-														}
+												if (fileItems) {
+													const file = fileItems.find((file) => file.id === selectedFileId);
+													if (file) {
+														openFilePreview(file);
+													} else {
+														selectedFile = null;
 													}
-												}}
-												onDelete={(fileId) => {
-													selectedFileId = null;
-													selectedFile = null;
-
-													deleteFileHandler(fileId);
-												}}
-												onNavigateDirectory={(dirId) => navigateToDirectory(dirId)}
-												onRenameDirectory={(dirId, name) => renameDirectoryHandler(dirId, name)}
-												onDeleteDirectory={(dirId) => confirmDeleteDirectory(dirId)}
-												onMoveFilesToDirectory={(fileIds, dirId) =>
-													moveFilesToDirectoryHandler(fileIds, dirId)}
-												onMoveDirectoryToDirectory={(dirId, targetId) =>
-													moveDirectoryHandler(dirId, targetId)}
-												selection={knowledge?.write_access ? selection : null}
-											/>
-										</div>
-
-										{#if fileItemsTotal > 30}
-											<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
-										{/if}
-									{:else if isSyncBusy}
-										<div
-											class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8"
-										>
-											<Spinner className="size-5" />
-											<div class="text-xs text-gray-500">
-												{$i18n.t('Starting sync...')}
-											</div>
-										</div>
-									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled)}
-										<EmptyStateCards
-											knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
-											integrationProviders={$config?.integration_providers}
-											onAction={(type) => {
-												if (type === 'integration') {
-													// No-op: files are managed via API
-												} else if (providerFor(type)) {
-													cloudSyncHandler(providerFor(type)!);
-												} else if (type === 'directory') {
-													uploadDirectoryHandler();
-												} else if (type === 'web') {
-													showAddWebpageModal = true;
-												} else if (type === 'text') {
-													showAddTextContentModal = true;
-												} else {
-													document.getElementById('files-input')?.click();
 												}
 											}}
+											onDelete={(fileId) => {
+												selectedFileId = null;
+												selectedFile = null;
+
+												deleteFileHandler(fileId);
+											}}
+											onNavigateDirectory={(dirId) => navigateToDirectory(dirId)}
+											onRenameDirectory={(dirId, name) => renameDirectoryHandler(dirId, name)}
+											onDeleteDirectory={(dirId) => confirmDeleteDirectory(dirId)}
+											onMoveFilesToDirectory={(fileIds, dirId) =>
+												moveFilesToDirectoryHandler(fileIds, dirId)}
+											onMoveDirectoryToDirectory={(dirId, targetId) =>
+												moveDirectoryHandler(dirId, targetId)}
+											selection={knowledge?.write_access ? selection : null}
 										/>
-									{:else}
-										<div
-											class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs"
-										>
-											<div>
-												{$i18n.t('No content found')}
-											</div>
-										</div>
+									</div>
+
+									{#if fileItemsTotal > 30}
+										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
-								</div>
+								{:else if isSyncBusy}
+									<div
+										class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8"
+									>
+										<Spinner className="size-5" />
+										<div class="text-xs text-gray-500">
+											{$i18n.t('Starting sync...')}
+										</div>
+									</div>
+								{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled)}
+									<EmptyStateCards
+										knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
+										integrationProviders={$config?.integration_providers}
+										onAction={(type) => {
+											if (type === 'integration') {
+												// No-op: files are managed via API
+											} else if (providerFor(type)) {
+												cloudSyncHandler(providerFor(type)!);
+											} else if (type === 'directory') {
+												uploadDirectoryHandler();
+											} else if (type === 'web') {
+												showAddWebpageModal = true;
+											} else if (type === 'text') {
+												showAddTextContentModal = true;
+											} else {
+												document.getElementById('files-input')?.click();
+											}
+										}}
+									/>
+								{:else}
+									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
+										<div>
+											{$i18n.t('No content found')}
+										</div>
+									</div>
+								{/if}
 							</div>
 						</div>
-
-						<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
 					</div>
-				{:else}
-					<div class="my-10"><Spinner className="size-4" /></div>
-				{/if}
+
+					<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
+				</div>
+			{:else}
+				<div class="my-10"><Spinner className="size-4" /></div>
 			{/if}
 		</div>
 	{:else}

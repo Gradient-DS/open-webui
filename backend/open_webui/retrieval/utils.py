@@ -37,7 +37,6 @@ from open_webui.models.users import UserModel
 from open_webui.soev.availability import configured
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.retrieval.external import retrieve_external_knowledge
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.main import GetResult, SearchResult
 from open_webui.retrieval.web.utils import get_web_loader
@@ -1169,62 +1168,51 @@ async def get_sources_from_items(
                 )
                 or ('collection', item.get('id')) in folder_items
             ):
-                if (knowledge_base.meta or {}).get('source') == 'external':
-                    query_result = await retrieve_external_knowledge(
-                        request,
-                        knowledge_base,
-                        queries=queries,
-                        count=k,
-                        user=user,
-                    )
-                    extracted_collections.append(knowledge_base.id)
+                if item.get('context') == 'full' or bypass_embedding_and_retrieval:
+                    if knowledge_base and (
+                        can_bypass_access_control(user)
+                        or knowledge_base.user_id == user.id
+                        or await AccessGrants.has_access(
+                            user_id=user.id,
+                            resource_type='knowledge',
+                            resource_id=knowledge_base.id,
+                            permission='read',
+                        )
+                        or ('collection', item.get('id')) in folder_items
+                    ):
+                        files = await Knowledges.get_files_by_id(knowledge_base.id)
 
-                else:
-                    if item.get('context') == 'full' or bypass_embedding_and_retrieval:
-                        if knowledge_base and (
-                            can_bypass_access_control(user)
-                            or knowledge_base.user_id == user.id
-                            or await AccessGrants.has_access(
-                                user_id=user.id,
-                                resource_type='knowledge',
-                                resource_id=knowledge_base.id,
-                                permission='read',
+                        documents = []
+                        metadatas = []
+                        for file in files:
+                            documents.append(file.data.get('content', ''))
+                            metadatas.append(
+                                {
+                                    'file_id': file.id,
+                                    'name': file.filename,
+                                    'source': file.filename,
+                                }
                             )
-                            or ('collection', item.get('id')) in folder_items
-                        ):
-                            files = await Knowledges.get_files_by_id(knowledge_base.id)
 
-                            documents = []
-                            metadatas = []
-                            for file in files:
-                                documents.append(file.data.get('content', ''))
-                                metadatas.append(
-                                    {
-                                        'file_id': file.id,
-                                        'name': file.filename,
-                                        'source': file.filename,
-                                    }
-                                )
-
-                            query_result = {
-                                'documents': [documents],
-                                'metadatas': [metadatas],
-                            }
-                    else:
-                        if item.get('legacy'):
-                            if BYPASS_RETRIEVAL_ACCESS_CONTROL:
-                                collection_names = item.get('collection_names', [])
-                            else:
-                                # Legacy KB: item.collection_names is client-supplied.
-                                # Validate against the KB's actual files to prevent
-                                # cross-tenant collection name substitution.
-                                files = await Knowledges.get_files_by_id(knowledge_base.id)
-                                owned_names = {f'file-{f.id}' for f in files}
-                                owned_names.add(knowledge_base.id)
-                                valid_names = [n for n in (item.get('collection_names') or []) if n in owned_names]
-                                collection_names = valid_names if valid_names else [knowledge_base.id]
+                        query_result = {
+                            'documents': [documents],
+                            'metadatas': [metadatas],
+                        }
+                else:
+                    if item.get('legacy'):
+                        if BYPASS_RETRIEVAL_ACCESS_CONTROL:
+                            collection_names = item.get('collection_names', [])
                         else:
-                            collection_names.append(item['id'])
+                            # Legacy KB: item.collection_names is client-supplied.
+                            # Validate against the KB's actual files to prevent
+                            # cross-tenant collection name substitution.
+                            files = await Knowledges.get_files_by_id(knowledge_base.id)
+                            owned_names = {f'file-{f.id}' for f in files}
+                            owned_names.add(knowledge_base.id)
+                            valid_names = [n for n in (item.get('collection_names') or []) if n in owned_names]
+                            collection_names = valid_names if valid_names else [knowledge_base.id]
+                    else:
+                        collection_names.append(item['id'])
 
         elif item.get('docs'):
             # BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
