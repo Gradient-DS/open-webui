@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastapi import Request
 from fastapi.security.utils import get_authorization_scheme_param
 
 from open_webui.soev import acting
 from open_webui.soev.threads import Share, ThreadError
 
 if TYPE_CHECKING:
-    from fastapi import Request
-
     from open_webui.models.users import UserModel
     from open_webui.soev.chat_paths import ChatPaths
     from open_webui.soev.threads import ProjectionResult, ThreadClient

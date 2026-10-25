@@ -14,6 +14,13 @@ from open_webui.soev.threads import CreatedThread, Organization, ThreadError
 NO_STORE = {'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'}
 
 
+def projection_response(result: threads.ProjectionResult) -> Response:
+    headers = {'ETag': result.etag} if result.etag else {}
+    if result.not_modified:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(result.page.model_dump(), headers=headers)
+
+
 class ForkForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
     at: int = Field(gt=0)
@@ -96,9 +103,6 @@ def create_thread_router(
             before=before,
             etag=if_none_match,
         )
-        headers = {'ETag': result.etag} if result.etag else {}
-        if result.not_modified:
-            return Response(status_code=304, headers=headers)
-        return JSONResponse(result.page.model_dump(), headers=headers)
+        return projection_response(result)
 
     return router

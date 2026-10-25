@@ -62,6 +62,7 @@ class FakeSoevApi:
         if (
             request.method == 'GET'
             or request.url.path.startswith('/v1/chat/threads')
+            or request.url.path.startswith('/v1/threads/')
             or request.url.path == '/v1/completions/task'
         ):
             return self._route(request, body, credential, subject)

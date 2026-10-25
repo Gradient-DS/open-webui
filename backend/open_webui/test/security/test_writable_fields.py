@@ -47,6 +47,7 @@ def test_derived_counts(surface):
         194,
         2134,
     ), f'Expected 194 routes / 2134 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert 'POST /api/v1/threads/{thread_id}/context:import' not in fields
     assert fields['POST /api/v1/threads:authorize'] == [
         'context_epoch',
         'threads[].generation',
