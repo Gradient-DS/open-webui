@@ -7072,6 +7072,21 @@
         "title": "ImportConfigForm",
         "type": "object"
       },
+      "ImportContext": {
+        "additionalProperties": false,
+        "properties": {
+          "source_thread_id": {
+            "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+            "title": "Source Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_thread_id"
+        ],
+        "title": "ImportContext",
+        "type": "object"
+      },
       "ImportedModel": {
         "additionalProperties": true,
         "properties": {
@@ -38422,6 +38437,58 @@
           }
         ],
         "summary": "Projection"
+      }
+    },
+    "/api/v1/threads/{thread_id}/context:import": {
+      "post": {
+        "operationId": "import_context_api_v1_threads__thread_id__context_import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportContext"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Context"
       }
     },
     "/api/v1/threads/{thread_id}/fork": {

@@ -44,6 +44,8 @@ export function isFeatureEnabled(feature: Feature): boolean {
 	if (!$config?.features) {
 		return false; // Config not loaded yet — hide features until authenticated config arrives
 	}
+	// Context import requires platform turn admission before these chats can be used.
+	if (feature === 'reference_chats' && $config.features.enable_v2_threads) return false;
 	const key = `feature_${feature}` as keyof typeof $config.features;
 	const value = $config.features[key];
 	// If the key is explicitly set, use that value; otherwise default to true

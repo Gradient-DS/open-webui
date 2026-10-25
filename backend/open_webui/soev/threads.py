@@ -56,6 +56,18 @@ class IndexPage(WireModel):
     next_cursor: str | None
 
 
+class ImportContext(WireModel):
+    source_thread_id: str = Field(pattern=r'^[A-Za-z0-9_.-]{1,128}$')
+
+
+class ImportedContext(WireModel):
+    source_thread_id: str
+    generation: str
+    version: str
+    through: int = Field(ge=0)
+    messages: list[MessageView]
+
+
 class CreatedThread(WireModel):
     thread_id: str
 
@@ -269,6 +281,24 @@ class ThreadClient:
             await self._request('POST', '/v1/threads:authorize', body=form.model_dump()),
             CacheAuthorization,
         )
+
+    async def import_context(self, thread_id: str, form: ImportContext) -> ImportedContext:
+        result = self._parse(
+            await self._request(
+                'POST',
+                f'/v1/threads/{_identifier(thread_id)}/context:import',
+                body={'source_thread_id': _identifier(form.source_thread_id)},
+            ),
+            ImportedContext,
+        )
+        if (
+            result.source_thread_id != form.source_thread_id
+            or any(message.position > result.through for message in result.messages)
+            or [message.position for message in result.messages]
+            != sorted({message.position for message in result.messages})
+        ):
+            raise ThreadError(502, 'reconnect')
+        return result
 
     async def forks(
         self,

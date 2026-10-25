@@ -1367,6 +1367,10 @@ async def search_chats(
     :param end_timestamp: Only include chats updated before this Unix timestamp (seconds)
     :return: JSON with matching chats containing id, title, updated_at, and content snippet
     """
+    from open_webui.soev import threads
+
+    if threads.enabled():
+        return JSONCodec.dumps({'error': 'Chat not found or access denied'})
     if __request__ is None:
         return JSONCodec.dumps({'error': 'Request context not available'})
 
@@ -1455,6 +1459,10 @@ async def view_chat(
     :param chat_id: The ID of the chat to retrieve
     :return: JSON with the chat's id, title, and messages
     """
+    from open_webui.soev import threads
+
+    if threads.enabled():
+        return JSONCodec.dumps({'error': 'Chat not found or access denied'})
     if __request__ is None:
         return JSONCodec.dumps({'error': 'Request context not available'})
 

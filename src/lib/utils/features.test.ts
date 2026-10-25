@@ -26,6 +26,17 @@ describe('isFeatureEnabled', () => {
 		vi.clearAllMocks();
 	});
 
+	it('keeps chat references disabled until v2 turn admission is available', () => {
+		vi.mocked(get).mockReturnValue({
+			features: { enable_v2_threads: true, feature_reference_chats: true }
+		});
+		expect(isFeatureEnabled('reference_chats')).toBe(false);
+		vi.mocked(get).mockReturnValue({
+			features: { enable_v2_threads: false, feature_reference_chats: true }
+		});
+		expect(isFeatureEnabled('reference_chats')).toBe(true);
+	});
+
 	it('returns true when voice feature is enabled', () => {
 		vi.mocked(get).mockReturnValue({
 			features: {

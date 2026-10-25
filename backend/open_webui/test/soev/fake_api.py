@@ -35,6 +35,9 @@ class FakeSoevApi:
         self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
+        # Entries represent already authorized, committed platform imports.
+        # The fake does not mint turn grants from a user's login token.
+        self.thread_contexts: dict[tuple[str, str, str], dict] = {}
         self.models: list[dict] = []
         self.task_bodies: list[tuple[str | None, dict]] = []
         self.task_model = 'task-model'
@@ -62,6 +65,7 @@ class FakeSoevApi:
         if (
             request.method == 'GET'
             or request.url.path.startswith('/v1/chat/threads')
+            or request.url.path.startswith('/v1/threads/')
             or request.url.path == '/v1/completions/task'
         ):
             return self._route(request, body, credential, subject)
@@ -186,7 +190,20 @@ class FakeSoevApi:
         data, cursor = self._slice(rows, request)
         return httpx.Response(200, json={'data': data, 'next_cursor': cursor})
 
+    def _import_context(self, request, body, subject):
+        if request.method != 'POST' or not subject:
+            raise Problem(401, 'sign_in')
+        if not isinstance(body, dict) or set(body) != {'source_thread_id'}:
+            raise Problem(422, 'invalid_field')
+        destination = request.url.path.split('/')[3]
+        result = self.thread_contexts.get((subject, destination, body['source_thread_id']))
+        if result is None:
+            raise Problem(404, 'not_found')
+        return httpx.Response(200, json=copy.deepcopy(result))
+
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
+        if request.url.path.startswith('/v1/threads/') and request.url.path.endswith('/context:import'):
+            return self._import_context(request, body, subject)
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
         if request.url.path == '/v1/connections' and request.method == 'GET':
