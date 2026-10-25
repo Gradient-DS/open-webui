@@ -20,6 +20,8 @@ from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
+from open_webui.soev import threads
+from open_webui.soev.chat_paths import Organizations
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
@@ -658,6 +660,8 @@ async def _texts(
                 }
             )
             continue
+        if threads.enabled() and kind == 'chat':
+            raise threads.ThreadError(409, 'unavailable')
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(
             item and user and (item.user_id == user.id or (kind == 'note' and can_bypass_access_control(user)))
@@ -1363,8 +1367,15 @@ def _marked(text: str, markers: list[tuple[int, int]], start: int = 0) -> str:
 class AgentTurn:
     """Bind one submitted input and its cancellation guard to an assistant message."""
 
-    def __init__(self, client: SoevClient, metadata: dict[str, Any], as_user: str) -> None:
+    def __init__(
+        self,
+        client: SoevClient,
+        metadata: dict[str, Any],
+        as_user: str,
+        organizations: Organizations | None = None,
+    ) -> None:
         self.client, self.metadata, self.as_user = client, metadata, as_user
+        self.organizations = organizations
         self.thread_id: str | None = None
         self.position = 0
         self.input_position: int | None = None
@@ -1455,7 +1466,7 @@ class AgentTurn:
         if not self.notices:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
-        if chat_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and not is_temporary_chat_id(chat_id):
             if self.removed:
                 await _drop_chat_files(chat_id, self.removed)
             if message_id:
@@ -1466,6 +1477,20 @@ class AgentTurn:
         return f'{_ROOT}/{quote(self.thread_id or "", safe="")}' + (f'/{operation}' if operation else '')
 
     async def prepare(self) -> None:
+        if threads.enabled():
+            if self.organizations is None:
+                raise threads.ThreadError(503, 'reconnect')
+            records = await self.organizations.list(self.metadata['user_id'])
+            record = next((r for r in records if r.id == self.metadata.get('chat_id')), None)
+            if record is None:
+                if not self.metadata.get('new_thread'):
+                    raise threads.ThreadError(404, 'unavailable')
+                return
+            self.thread_id = record.thread_id
+            thread = await self.client.get(self.path(), as_user=self.as_user)
+            self.position = thread['status']['position']
+            await self._seed_sources(thread['events'], self.position)
+            return
         parent_id = self.metadata.get('parent_message_id')
         chat_id = self.metadata.get('chat_id')
         if not parent_id or not chat_id:
@@ -1532,6 +1557,8 @@ class AgentTurn:
         return added
 
     async def persist(self) -> None:
+        if threads.enabled():
+            return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         if self.thread_id and chat_id and message_id and is_temporary_chat_id(chat_id):
             bookmark = {'thread_id': self.thread_id, 'position': self.position}
@@ -1714,12 +1741,12 @@ class AgentTurn:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         stored = {}
-        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and message_id and not is_temporary_chat_id(chat_id):
             stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
         self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
         self.attached_files.update(files)
         update = {'files': list(self.attached_files.values())}
-        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
         # The full list, stored above: a `files` event would be appended to the stored files again.
         await self.emit('chat:message:files', update)
@@ -1818,6 +1845,15 @@ class AgentTurn:
     async def render(self, event: ChatEvent) -> list[dict[str, Any]]:
         if event.event == 'connection':
             self.thread_id = event.data['thread_id']
+            if threads.enabled() and self.metadata.get('new_thread'):
+                record = threads.Organization(
+                    id=self.metadata.get('chat_id') or self.thread_id,
+                    thread_id=self.thread_id,
+                    folder_id=self.metadata.get('folder_id'),
+                )
+                await self.organizations.put(self.metadata['user_id'], record)
+                self.metadata['chat_id'] = record.id
+                self.metadata['new_thread'] = False
             return []
         position = event.position or event.data.get('position')
         if event.event != 'status' and position is not None:
@@ -1986,7 +2022,7 @@ class AgentTurn:
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.keep_attachments(body['input'].get('attachments') or [])
-            if not self.thread_id and (earlier := await _earlier(self.metadata)):
+            if not threads.enabled() and not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             self.keep_texts(body['input'].get('texts') or [])
             # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
@@ -2014,11 +2050,16 @@ class AgentTurn:
 
 
 async def call_agent_v2(
-    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str | None, model: str | None = None
+    form_data: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    agent: str | None,
+    model: str | None = None,
+    organizations: Organizations | None = None,
 ) -> StreamingResponse | dict:
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
-    turn = AgentTurn(identity.build_client(), metadata, user_ref)
+    turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:
         chunks = await _sent(turn, text, metadata, agent=agent, model=model)

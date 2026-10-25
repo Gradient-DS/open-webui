@@ -1128,6 +1128,14 @@ status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
 
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}"
+description = "soev/thread_routes.py reads and forks soev-api threads; reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
+same_as = "meeting"
+
 # The v2 router dependency refuses these before loading or looking up any function.
 # Probe fictional ids; legacy mode continues to install and exercise real fixtures.
 

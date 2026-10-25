@@ -10,6 +10,8 @@ import pycrdt as Y
 import socketio
 from socketio.packet import Packet
 
+from open_webui.soev.thread_content import legacy_event_emitter
+from open_webui.soev import threads as soev_threads
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
@@ -618,6 +620,9 @@ async def close_note_rooms(note_id: str) -> None:
 
 
 async def get_folder_unread_counts(user_id: str) -> dict[str, int]:
+    if soev_threads.enabled():
+        return {}
+
     folder_list = await Folders.get_folders_by_user_id(user_id)
     parent_by_id = {folder.id: folder.parent_id for folder in folder_list}
     unread_counts = dict.fromkeys(parent_by_id.keys(), 0)
@@ -637,6 +642,9 @@ async def get_folder_unread_counts(user_id: str) -> dict[str, int]:
 
 @sio.on('events:chat')
 async def chat_events(sid, data):
+    if soev_threads.enabled():
+        return
+
     user = await get_socket_session_user(sid)
     if not user:
         return
@@ -978,6 +986,7 @@ async def _release_temporary_agent_threads(session_ids: list[str]) -> None:
         log.exception('Failed to delete the agent threads of closed temporary chats')
 
 
+@legacy_event_emitter
 async def get_event_emitter(request_info, update_db=True):
 
     async def __event_emitter__(event_data):
@@ -1100,6 +1109,9 @@ async def get_event_emitter(request_info, update_db=True):
 
 
 async def get_event_call(request_info):
+    if soev_threads.enabled():
+        return None
+
     async def __event_caller__(event_data):
         session_id = request_info['session_id']
 

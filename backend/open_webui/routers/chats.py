@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from open_webui.soev.chat_routes import DarkChatRoute
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
@@ -47,7 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=DarkChatRoute)
 
 CHAT_CONFIG_KEYS = {
     'CONTEXT_COMPACTION_MODEL': 'chat.context_compaction.model',

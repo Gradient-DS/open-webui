@@ -36,6 +36,7 @@ from open_webui.services.archival.service import ArchiveService
 from open_webui.soev import group_sync, identity
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.thread_content import refuse_local_content
 
 if TYPE_CHECKING:
     from open_webui.services.deletion.offboarding import Inventory, OffboardingOptions, SharedItem
@@ -198,6 +199,7 @@ async def delete_storage_files(paths: list[str]) -> None:
 
 
 async def _delete_threads(user_id: str, *, db: AsyncSession) -> None:
+    refuse_local_content()
     if not configured():
         return
     messages = (await db.execute(select(ChatMessage).where(ChatMessage.user_id == user_id))).scalars()
@@ -220,6 +222,7 @@ async def finalize_local(
     user_id: str, *, options: OffboardingOptions, archive: UserArchive | None, db: AsyncSession
 ) -> int:
     """Stage all content and account changes in the caller's transaction."""
+    refuse_local_content()
     if archive is not None:
         db.add(archive)
     await _dispose_resources(user_id, options=options, db=db)
@@ -286,6 +289,7 @@ async def _dispose_resource_table(
 
 async def delete_resource_dependents(table: type[Base], ids: list[str], *, db: AsyncSession) -> None:
     """Stage junction cleanup before deleting a resource row."""
+    refuse_local_content()
     if table is Knowledge:
         await db.execute(delete(KnowledgeFile).where(KnowledgeFile.knowledge_id.in_(ids)))
         await db.execute(delete(KnowledgeDirectory).where(KnowledgeDirectory.knowledge_id.in_(ids)))

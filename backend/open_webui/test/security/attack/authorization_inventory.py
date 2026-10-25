@@ -42,18 +42,32 @@ def _mounts():
             ):
                 continue
             target = call.args[0]
+            factory = None
             if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
                 module, name = imports[target.value.id]
                 module, child_router = f'{module}.{name}', target.attr
             elif isinstance(target, ast.Name) and target.id in imports:
                 module, child_router = imports[target.id]
+            elif isinstance(target, ast.Call) and isinstance(target.func, ast.Name) and target.func.id in imports:
+                module, factory = imports[target.func.id]
+                child_router = None
             else:
                 continue
             path = ROOT / 'backend' / (module.replace('.', '/') + '.py')
             child_prefix = prefix + _router_prefix(tree, router)
             child_prefix += next((ast.literal_eval(k.value) for k in call.keywords if k.arg == 'prefix'), '')
             if path.exists():
-                mounts.append((path, child_prefix, child_router, ast.parse(path.read_text())))
+                child_tree = ast.parse(path.read_text())
+                if factory is not None:
+                    definition = next(
+                        node for node in child_tree.body if isinstance(node, ast.FunctionDef) and node.name == factory
+                    )
+                    returned = next(node for node in definition.body if isinstance(node, ast.Return))
+                    if not isinstance(returned.value, ast.Name):
+                        raise ValueError(f'Cannot resolve router factory {factory}')
+                    child_router = returned.value.id
+                    child_tree = ast.Module(body=definition.body, type_ignores=[])
+                mounts.append((path, child_prefix, child_router, child_tree))
     return mounts
 
 
@@ -155,7 +169,7 @@ def platform_operations(spec=SPEC):
     return [
         route
         for route in operations(spec)
-        if route.split(' ', 1)[1].startswith(('/api/v1/cloud-sync/', '/api/v1/meetings'))
+        if route.split(' ', 1)[1].startswith(('/api/v1/cloud-sync/', '/api/v1/meetings', '/api/v1/threads'))
         or route
         in {'POST /api/v1/files/onedrive/attach', 'HEAD /api/v1/files/{id}/content', 'POST /api/v1/audio/speech'}
     ]

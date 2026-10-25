@@ -16,6 +16,7 @@ from open_webui.internal.db import get_async_db
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chat, ChatForm, Chats
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.thread_content import refuse_local_content
 from open_webui.tasks import has_active_tasks
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import get_message_list
@@ -169,6 +170,7 @@ async def create_timer(
 
 async def claim_due_timers(now_ns: int, limit: int = 10) -> list[tuple[str, str]]:
     """Claim due timers by moving them from pending to running."""
+    refuse_local_content()
     async with get_async_db() as db:
         stmt = (
             select(Chat)
@@ -202,6 +204,7 @@ async def cancel_timers_for_chat(
     parent_chat_id: str, event: Literal['chat.read', 'chat.user_message'], user_id: str
 ) -> None:
     """Owner-scoped: without the user filter, reading a chat cancels every user's timers on it."""
+    refuse_local_content()
     async with get_async_db() as db:
         result = await db.execute(
             select(Chat)
@@ -227,6 +230,7 @@ async def cancel_timers_for_chat(
 
 
 async def execute_due_timer(app, timer_id: str, claim_id: str | None = None) -> None:
+    refuse_local_content()
     lock = _timer_locks.setdefault(timer_id, asyncio.Lock())
     async with lock:
         from open_webui.socket.main import sio
@@ -414,6 +418,7 @@ async def execute_due_timer(app, timer_id: str, claim_id: str | None = None) -> 
 
 
 async def _set_timer_state(timer_id: str, status: str, **fields) -> None:
+    refuse_local_content()
     async with get_async_db() as db:
         row = await db.get(Chat, timer_id)
         if not row:

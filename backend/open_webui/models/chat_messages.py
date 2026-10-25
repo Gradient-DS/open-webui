@@ -6,6 +6,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import distinct
+from open_webui.soev.thread_content import legacy_content
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.models.files import strip_file_paths
 from open_webui.utils.response import merge_usage, normalize_usage
@@ -210,6 +211,7 @@ class ChatMessageModel(BaseModel):
 ####################
 
 
+@legacy_content
 class ChatMessageTable:
     @staticmethod
     def _apply_message_data(message: ChatMessage, data: dict, now: int) -> None:

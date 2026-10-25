@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.thread_content import refuse_local_content
 
 INGESTED, SUBMITTED, RUNNING, FAILED, PLANNED = 'ingested', 'submitted', 'running', 'failed', 'to check'
 MISSING, KNOWLEDGE, GONE, REFERENCE, NO_OWNER = (
@@ -73,6 +74,7 @@ def folder_file_ids(data: dict) -> set[str]:
 
 
 async def _referenced(db) -> set[str]:
+    refuse_local_content()
     import sqlalchemy as sa
 
     from open_webui.internal.db import get_async_db_context

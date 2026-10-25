@@ -13,6 +13,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chat, ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.thread_content import refuse_local_content
 from open_webui.tasks import create_task, has_active_tasks
 from open_webui.utils.auth import create_token
 from open_webui.utils.json_codec import JSONCodec
@@ -75,6 +76,7 @@ async def process_pending_internal_messages(
     user_id: str,
     run: dict,
 ) -> None:
+    refuse_local_content()
     lock = _parent_locks.setdefault(parent_chat_id, asyncio.Lock())
     while await has_active_tasks(source_request.app.state.redis, parent_chat_id):
         await asyncio.sleep(0.25)
@@ -279,6 +281,7 @@ async def delegate(
     parent_chat_id: str,
     parent_message_id: str | None,
 ) -> str:
+    refuse_local_content()
     global _foreground_semaphore
 
     task = task.strip()

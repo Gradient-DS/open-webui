@@ -5,6 +5,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
 from open_webui.models.models import ModelModel, Models
 from open_webui.models.users import UserModel
+from open_webui.soev import threads
 from open_webui.utils.agent_routing import AssistantBindingConflict, resolve_assistant_binding
 from open_webui.utils.assistants import build_assistant_model, merged_model_info
 from open_webui.utils.models import check_model_access
@@ -46,7 +47,7 @@ async def resolve_assistant_request(
         )
 
     bind = True
-    if chat_id and not chat_id.startswith('local:'):
+    if chat_id and not chat_id.startswith('local:') and not threads.enabled():
         row = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
         if row:
             bound_assistant = (row.meta or {}).get('assistant_id')

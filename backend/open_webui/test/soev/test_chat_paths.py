@@ -1,0 +1,567 @@
+"""The dark handlers exercised through the HTTP client and a fictional 7a API."""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from open_webui.soev import acting, threads
+from open_webui.soev.chat_paths import ChatPaths
+from open_webui.soev.threads import Organization, ThreadError
+from open_webui.test.soev.test_threads import index_item, page
+from open_webui.utils.auth import get_verified_user
+
+
+class FictionalOrganizations:
+    def __init__(self):
+        self.records = [
+            Organization(
+                id='fictional-chat',
+                thread_id='fictional-thread',
+                folder_id='fictional-folder',
+            )
+        ]
+        self.writes = []
+
+    async def list(self, user_id):
+        return list(self.records)
+
+    async def put(self, user_id, record):
+        self.records = [r for r in self.records if r.id != record.id] + [record]
+        self.writes.append(record)
+
+    async def remove(self, user_id, chat_id):
+        self.records = [r for r in self.records if r.id != chat_id]
+
+
+def fake_api(request, calls, state, visible, feedback):
+    import json
+
+    calls.append(request)
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login'
+    if state['status'] != 200:
+        return httpx.Response(state['status'], json={'detail': 'Fictional secret'})
+    path = request.url.path
+    if path in {'/v1/threads/usage', '/v1/feedback', '/v1/feedback/summary'}:
+        return fake_metrics(path, state, feedback)
+    if not state['allowed']:
+        return httpx.Response(404, json={'code': 'not_found'})
+    if path.startswith('/v1/chat/threads'):
+        return fake_runtime(request)
+    if path == '/v1/threads':
+        return httpx.Response(200, json={'items': visible, 'next_cursor': None})
+    if path.endswith('/fork'):
+        assert json.loads(request.content) == {'at': 2}
+        state['forks'] = state.get('forks', 0) + 1
+        return httpx.Response(200, json={'thread_id': 'fictional-child' if state['forks'] == 1 else 'fictional-clone'})
+    if path.endswith('/feedback'):
+        body = json.loads(request.content)
+        assert set(body) == {'rating', 'position', 'comment', 'comment_authored'}
+        feedback.append(
+            {
+                'thread_id': 'fictional-thread',
+                'rating': body['rating'],
+                'model': 'fictional-model',
+                'agent': 'fictional-agent',
+                'time': '2026-10-25T10:00:00Z',
+                'comment': body['comment'],
+            }
+        )
+        return httpx.Response(204)
+    if path in {'/v1/threads/fictional-thread', '/v1/threads/fictional-child'}:
+        if request.headers.get('If-None-Match'):
+            return httpx.Response(304)
+        return httpx.Response(
+            200,
+            json={**page(1, 2), 'thread_id': path.rsplit('/', 1)[1], 'preferences': {'tags': ['Fictional tag']}},
+            headers={'ETag': 'fictional-etag'},
+        )
+    return httpx.Response(501)
+
+
+def fake_runtime(request):
+    import json
+
+    path = request.url.path
+    if path == '/v1/chat/threads' and request.method == 'POST':
+        payload = json.loads(request.content)
+        assert set(payload) == {'agent', 'input', 'model'}
+        assert 'thread_id' not in payload
+        return httpx.Response(201, json={'thread_id': 'fictional-created', 'status': {}, 'events': []})
+    if path.endswith('/inputs') and request.method == 'POST':
+        return httpx.Response(200, json={'thread_id': 'fictional-thread', 'status': {}, 'events': []})
+    if path.startswith('/v1/chat/threads/') and request.method == 'DELETE':
+        return httpx.Response(204)
+    return httpx.Response(501)
+
+
+def fake_metrics(path, state, feedback):
+    if path == '/v1/threads/usage':
+        return httpx.Response(
+            200,
+            json={
+                'model_outputs': 3,
+                'unknown_outputs': 1,
+                'known_tokens': {'prompt_tokens': 7, 'completion_tokens': 3, 'total_tokens': 10},
+                'tokens': None,
+            },
+        )
+    if path == '/v1/feedback':
+        own = feedback if state['admin'] else feedback[:1]
+        return httpx.Response(200, json={'items': own, 'next_cursor': None})
+    if path == '/v1/feedback/summary':
+        return httpx.Response(
+            200,
+            json={
+                'items': [
+                    {
+                        'model': 'fictional-model',
+                        'agent': 'fictional-agent',
+                        'rating': 1,
+                        'count': len(feedback) if state['admin'] else min(1, len(feedback)),
+                    }
+                ],
+                'next_cursor': None,
+            },
+        )
+    raise AssertionError(path)
+
+
+@pytest_asyncio.fixture
+async def dark_api(monkeypatch):
+    from open_webui.routers import chats, evaluations, export, notes, tasks
+    from open_webui.soev import client as transport
+
+    calls, visible, feedback = [], [index_item()], []
+    state = {'allowed': True, 'admin': False, 'status': 200}
+    records = FictionalOrganizations()
+    api = FastAPI()
+    api.state.thread_organizations = records
+    for router, prefix in [
+        (chats.router, 'chats'),
+        (evaluations.router, 'evaluations'),
+        (export.router, 'export'),
+        (notes.router, 'notes'),
+        (tasks.router, 'tasks'),
+    ]:
+        api.include_router(router, prefix='/api/v1/' + prefix)
+    api.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern', role='user')
+    legacy = AsyncMock(return_value=[])
+    monkeypatch.setattr(chats.Chats, 'get_chat_title_id_list_by_user_id', legacy)
+    monkeypatch.setattr(chats, 'add_active_state_to_chat_list', AsyncMock(side_effect=lambda request, result: result))
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+
+    requester = acting._requester_ref.set('owui:user:fictional-fern')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login'))
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: fake_api(request, calls, state, visible, feedback))
+    ) as upstream:
+        monkeypatch.setattr(threads, '_shared_client', lambda: upstream)
+        monkeypatch.setattr(transport, '_shared_client', lambda: upstream)
+        client = threads.ThreadClient('https://soev.invalid', 'fictional-key')
+        monkeypatch.setattr(threads, 'build_client', lambda: client)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api), base_url='https://owui.invalid'
+        ) as browser:
+            yield SimpleNamespace(
+                browser=browser,
+                client=client,
+                calls=calls,
+                state=state,
+                visible=visible,
+                feedback=feedback,
+                records=records,
+                legacy=legacy,
+                app=api,
+            )
+    acting._token_resolver.reset(resolver)
+    acting._requester_ref.reset(requester)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'method,path',
+    [
+        ('POST', '/chats/import'),
+        ('POST', '/chats/fictional-chat'),
+        ('POST', '/chats/fictional-chat/messages/fictional-message'),
+        ('DELETE', '/chats/fictional-chat/messages/fictional-message'),
+        ('POST', '/chats/fictional-chat/messages/fictional-message/event'),
+        ('POST', '/chats/fictional-chat/compact'),
+        ('GET', '/chats/all'),
+        ('GET', '/chats/all/archived'),
+        ('POST', '/chats/fictional-chat/tags'),
+        ('DELETE', '/chats/fictional-chat/tags'),
+        ('POST', '/export/data'),
+        ('GET', '/export/data/status'),
+        ('DELETE', '/export/data'),
+        ('GET', '/notes/fictional-note/chat'),
+        ('GET', '/notes/fictional-note/chats'),
+        ('POST', '/notes/fictional-note/chat'),
+        ('POST', '/tasks/title/completions'),
+        ('POST', '/tasks/tags/completions'),
+        ('GET', '/evaluations/feedbacks/all/export'),
+        ('DELETE', '/evaluations/feedbacks'),
+    ],
+)
+async def test_refused_paths_never_read_or_write_local_content(dark_api, method, path):
+    response = await dark_api.browser.request(method, '/api/v1' + path, json={'snapshot': 'Fictional content'})
+    assert response.status_code == 409, response.text
+    assert response.json() == {'state': 'unavailable'}
+    assert response.headers['cache-control'] == 'private, no-store'
+    assert not dark_api.calls and not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_projection_forks_clone_tags_and_usage(dark_api):
+    response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
+    assert response.json()['messages'][1]['position'] == 2
+    assert response.headers['etag'] == 'fictional-etag'
+    conditional = await dark_api.browser.get(
+        '/api/v1/chats/fictional-chat', headers={'If-None-Match': 'fictional-etag'}
+    )
+    assert conditional.status_code == 304
+    for suffix, expected in [('fork', 'fictional-child'), ('clone', 'fictional-clone')]:
+        result = await dark_api.browser.post('/api/v1/chats/fictional-chat/' + suffix, json={'at': 2})
+        assert result.status_code == 200, result.text
+        assert result.json()['thread_id'] == expected
+    tags = await dark_api.browser.get('/api/v1/chats/fictional-chat/tags')
+    assert tags.json() == ['Fictional tag']
+    for path in ['stats/usage', 'stats/export', 'stats/export/fictional-chat']:
+        metrics = await dark_api.browser.get('/api/v1/chats/' + path)
+        assert metrics.json()['tokens'] is None
+        assert metrics.json()['unknown_outputs'] == 1
+    dark_api.state['allowed'] = False
+    refused = await dark_api.browser.get('/api/v1/chats/fictional-chat', headers={'If-None-Match': 'fictional-etag'})
+    assert refused.status_code == 404
+    assert 'Fictional' not in refused.text
+
+
+@pytest.mark.asyncio
+async def test_invisible_thread_changes_no_order_count_page_or_folder_unread(dark_api):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    before = await service.listing('fictional-fern', folder_id='fictional-folder', page=1)
+    counts = await service.folder_counts('fictional-fern', {'fictional-folder': None})
+    dark_api.records.records.insert(
+        0,
+        Organization(
+            id='fictional-hidden',
+            thread_id='fictional-invisible',
+            folder_id='fictional-folder',
+            pinned=True,
+        ),
+    )
+    assert await service.listing('fictional-fern', folder_id='fictional-folder', page=1) == before
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == counts
+    assert counts == {'fictional-folder': 1}
+    for path in [
+        'list?include_folders=true',
+        'search?text=Fictional',
+        'folder/fictional-folder',
+        'folder/fictional-folder/list',
+        'archived',
+        'pinned',
+        'archived/count',
+    ]:
+        response = await dark_api.browser.get('/api/v1/chats/' + path)
+        assert response.status_code == 200, response.text
+        assert 'fictional-hidden' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_organization_changes_reauthorize_and_store_no_content(dark_api):
+    for suffix in ['pin', 'archive', 'unread']:
+        response = await dark_api.browser.post('/api/v1/chats/fictional-chat/' + suffix)
+        assert response.status_code == 200, response.text
+        assert 'title' not in response.json() and 'messages' not in response.json()
+    writes = len(dark_api.records.writes)
+    dark_api.state['allowed'] = False
+    response = await dark_api.browser.post('/api/v1/chats/fictional-chat/pin')
+    assert response.status_code == 404
+    assert len(dark_api.records.writes) == writes
+
+
+@pytest.mark.asyncio
+async def test_platform_delete_completes_before_removing_record(dark_api):
+    dark_api.state['status'] = 503
+    response = await dark_api.browser.delete('/api/v1/chats/fictional-chat')
+    assert response.status_code == 503
+    assert len(dark_api.records.records) == 1
+    dark_api.state['status'] = 200
+    response = await dark_api.browser.delete('/api/v1/chats/fictional-chat')
+    assert response.status_code == 200
+    assert not dark_api.records.records
+    assert dark_api.calls[-1].url.path == '/v1/chat/threads/fictional-thread'
+
+
+@pytest.mark.asyncio
+async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api):
+    rating = {'thread_id': 'fictional-thread', 'position': 2, 'rating': 1}
+    for extra in [{'snapshot': {}}, {'model': 'fictional-forged'}, {'tags': []}, {'comment': 'Fictional unasserted'}]:
+        response = await dark_api.browser.post('/api/v1/evaluations/feedback', json={**rating, **extra})
+        assert response.status_code == 422
+    for comment in [None, 'Fictional written comment']:
+        response = await dark_api.browser.post(
+            '/api/v1/evaluations/feedback',
+            json={
+                **rating,
+                **({'comment': comment, 'comment_authored': True} if comment else {}),
+            },
+        )
+        assert response.status_code == 204, response.text
+    listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/user')
+    assert len(listed.json()['items']) == 1
+    dark_api.state['admin'] = True
+    # The fake's admin claim simulates the platform token, independent of OWUI role.
+    listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
+    assert len(listed.json()['items']) == 2
+    assert set(listed.json()['items'][1]) == {'thread_id', 'rating', 'model', 'agent', 'time', 'comment'}
+    summary = await dark_api.browser.get('/api/v1/evaluations/leaderboard')
+    assert summary.json()['items'][0]['count'] == 2
+    dark_api.state['status'] = 403
+    denied = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
+    assert denied.status_code == 404 and 'secret' not in denied.text
+
+
+@pytest.mark.asyncio
+async def test_flag_off_uses_original_handler(dark_api, monkeypatch):
+    monkeypatch.setattr(threads, 'enabled', lambda: False)
+    response = await dark_api.browser.get('/api/v1/chats/list')
+    assert response.status_code == 200 and response.json() == []
+    dark_api.legacy.assert_awaited_once()
+    assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+async def test_model_boundaries_work_with_content_tables_absent(monkeypatch):
+    from open_webui.models.chat_messages import ChatMessages
+    from open_webui.models.chats import Chats
+    from open_webui.models.feedbacks import Feedbacks
+    from open_webui.models.shared_chats import SharedChats
+
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    for facade, method in [
+        (Chats, 'get_chat_by_id'),
+        (ChatMessages, 'get_messages_by_chat_id'),
+        (SharedChats, 'get_by_id'),
+        (Feedbacks, 'get_feedback_by_id'),
+    ]:
+        with pytest.raises(ThreadError):
+            await getattr(facade, method)('fictional-chat')
+
+
+@pytest.mark.asyncio
+async def test_user_room_and_redis_never_retain_content_under_v2(monkeypatch):
+    from open_webui import tasks
+    from open_webui.socket import main as socket
+
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    redis = AsyncMock()
+    emit = AsyncMock()
+    monkeypatch.setattr(socket.sio, 'emit', emit)
+    emitter = await socket.get_event_emitter(
+        {
+            'user_id': 'fictional-fern',
+            'chat_id': 'fictional-chat',
+            'message_id': 'fictional-message',
+        }
+    )
+    await emitter({'type': 'message', 'data': {'content': 'Fictional secret'}})
+    await tasks.save_response_stream(redis, 'fictional-task', 'fictional-chat', 'fictional-message', 'Fictional', [])
+    assert await tasks.get_response_streams_by_chat_id(redis, 'fictional-chat') == []
+    emit.assert_not_awaited()
+    assert not redis.mock_calls
+
+
+@pytest.mark.asyncio
+async def test_non_router_entrypoints_refuse_before_touching_content(monkeypatch):
+    import importlib
+
+    from open_webui.services.export.service import ExportService
+
+    main = importlib.import_module('open_webui.main')
+
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    # Empty arguments would fail immediately if any legacy code ran before
+    # the refusal. No content tables, models or response stores are supplied.
+    for call in [
+        lambda: main.serve_cache_file('exports/fictional-user/fictional.zip', SimpleNamespace()),
+        lambda: ExportService.build_export_zip('fictional-user', {}),
+    ]:
+        with pytest.raises(ThreadError):
+            await call()
+    with pytest.raises(ThreadError):
+        ExportService.get_active_export('fictional-user')
+
+
+@pytest.mark.asyncio
+async def test_per_thread_feedback_filters_all_authorized_records(dark_api):
+    dark_api.state['admin'] = True
+    for thread_id in ['fictional-thread', 'fictional-other']:
+        dark_api.feedback.append(
+            {
+                'thread_id': thread_id,
+                'rating': 1,
+                'model': 'fictional-model',
+                'agent': 'fictional-agent',
+                'time': '2026-10-25T10:00:00Z',
+                'comment': None,
+            }
+        )
+    response = await dark_api.browser.get('/api/v1/evaluations/feedback/conversation/fictional-thread')
+    assert response.status_code == 200
+    assert [item['thread_id'] for item in response.json()['items']] == ['fictional-thread']
+
+
+@pytest.mark.asyncio
+async def test_edit_forks_keep_chat_identity_and_clone_has_an_independent_lifecycle(dark_api):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    edited = await service.fork('fictional-fern', 'fictional-chat', 2)
+    assert edited.id == 'fictional-chat'
+    assert edited.thread_id == 'fictional-child'
+    assert edited.branch_thread_ids == ['fictional-child', 'fictional-thread']
+    assert 'branch_thread_ids' not in edited.model_dump()
+    dark_api.visible.append(index_item('fictional-child', 'fictional-thread', 2))
+    items = await service.authorized('fictional-fern')
+    assert [item['thread_id'] for item in items] == ['fictional-child']
+    cloned = await service.fork('fictional-fern', 'fictional-chat', 2, clone=True)
+    assert cloned.id == 'fictional-clone'
+    assert cloned.branch_thread_ids == []
+    assert len(dark_api.records.records) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'method,path,payload',
+    [
+        ('GET', '/chats/?include_folders=true', None),
+        ('GET', '/chats/all/tags', None),
+        ('POST', '/chats/tags', {'name': 'Fictional tag'}),
+        ('GET', '/chats/fictional-chat/pinned', None),
+        ('POST', '/chats/fictional-chat/folder', {'folder_id': None}),
+        ('POST', '/chats/read', None),
+        ('POST', '/chats/archive/all', None),
+        ('POST', '/chats/unarchive/all', None),
+    ],
+)
+async def test_remaining_organizational_routes_use_the_platform_set(dark_api, method, path, payload):
+    response = await dark_api.browser.request(method, '/api/v1' + path, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.headers['cache-control'] == 'private, no-store'
+    assert dark_api.calls
+    assert 'messages' not in response.json() if isinstance(response.json(), dict) else True
+
+
+@pytest.mark.asyncio
+async def test_create_uses_runtime_first_input_then_organizational_row(dark_api):
+    response = await dark_api.browser.post(
+        '/api/v1/chats/new',
+        json={
+            'agent': 'fictional-agent',
+            'input': {'text': 'Fictional first input'},
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()['thread_id'] == 'fictional-created'
+    assert dark_api.records.writes[-1].thread_id == 'fictional-created'
+    assert dark_api.calls[-1].url.path == '/v1/chat/threads'
+    dark_api.state['status'] = 503
+    writes = len(dark_api.records.writes)
+    response = await dark_api.browser.post(
+        '/api/v1/chats/new',
+        json={
+            'agent': 'fictional-agent',
+            'input': 'Fictional input',
+        },
+    )
+    assert response.status_code == 503
+    assert len(dark_api.records.writes) == writes
+
+
+@pytest.mark.asyncio
+async def test_delete_all_uses_runtime_per_owned_chat(dark_api):
+    dark_api.records.records.append(Organization(id='fictional-second', thread_id='fictional-second-thread'))
+    response = await dark_api.browser.delete('/api/v1/chats/')
+    assert response.status_code == 200
+    assert not dark_api.records.records
+    assert [call.url.path for call in dark_api.calls] == [
+        '/v1/chat/threads/fictional-thread',
+        '/v1/chat/threads/fictional-second-thread',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_missing_empty_and_temporary_create_contracts_do_not_write(dark_api):
+    for payload, status in [
+        ({}, 422),
+        ({'agent': 'fictional-agent'}, 422),
+        ({'agent': 'fictional-agent', 'input': {}, 'temporary': True}, 409),
+        ({'agent': 'fictional-agent', 'input': {}, 'thread_id': 'chosen'}, 422),
+    ]:
+        response = await dark_api.browser.post('/api/v1/chats/new', json=payload)
+        assert response.status_code == status, response.text
+    assert not dark_api.calls and not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'action,fields,expected',
+    [
+        ('approve', {}, {'approve': True}),
+        ('reject', {}, {'approve': False}),
+        (
+            'answer',
+            {'answers': {'fictional-choice': 'fictional-value'}},
+            {'answers': {'fictional-choice': 'fictional-value'}, 'timed_out': False},
+        ),
+    ],
+)
+async def test_tool_approvals_use_platform_input_without_local_messages(dark_api, action, fields, expected):
+    import json
+
+    from open_webui.soev.thread_approvals import resolve
+    from open_webui.utils.tool_approval import ResolveToolCallForm
+
+    form = ResolveToolCallForm(call_id='root:7', action=action, **fields)
+    result = await resolve(dark_api.records, 'fictional-chat', form, 'fictional-fern')
+    assert result == {'status': True, 'chat_id': 'fictional-chat'}
+    assert dark_api.calls[-1].url.path == '/v1/chat/threads/fictional-thread/inputs'
+    assert json.loads(dark_api.calls[-1].content) == {'answering': 'root:7', 'input': expected}
+    assert not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_owned_branch_delete_keeps_the_clone_independent(dark_api):
+    dark_api.records.records[0] = dark_api.records.records[0].model_copy(
+        update={
+            'thread_id': 'fictional-edit',
+            'branch_thread_ids': ['fictional-thread', 'fictional-edit'],
+        }
+    )
+    dark_api.records.records.append(Organization(id='fictional-clone', thread_id='fictional-cloned-thread'))
+    response = await dark_api.browser.delete('/api/v1/chats/fictional-chat')
+    assert response.status_code == 200
+    assert [record.id for record in dark_api.records.records] == ['fictional-clone']
+    assert {call.url.path for call in dark_api.calls} == {
+        '/v1/chat/threads/fictional-thread',
+        '/v1/chat/threads/fictional-edit',
+    }
+
+
+@pytest.mark.asyncio
+async def test_standalone_thread_fork_gets_its_own_organization(dark_api):
+    from open_webui.soev.thread_routes import create_thread_router
+
+    async def create_fork(user_id, thread_id, at):
+        organization = await ChatPaths(dark_api.client, dark_api.records).fork(user_id, thread_id, at, clone=True)
+        return threads.CreatedThread(thread_id=organization.thread_id)
+
+    dark_api.app.include_router(
+        create_thread_router(dark_api.records.list, create_fork=create_fork), prefix='/api/v1/threads'
+    )
+    response = await dark_api.browser.post('/api/v1/threads/fictional-thread/fork', json={'at': 2})
+    assert response.status_code == 200, response.text
+    assert response.json() == {'thread_id': 'fictional-child'}
+    assert dark_api.records.writes[-1].id == 'fictional-child'

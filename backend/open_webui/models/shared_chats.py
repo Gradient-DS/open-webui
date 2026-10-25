@@ -6,6 +6,7 @@ from typing import Optional
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.files import strip_file_paths
 from open_webui.models.ordering import request_order
+from open_webui.soev.thread_content import legacy_content
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import JSON, BigInteger, Column, ForeignKey, Text, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +60,7 @@ class SharedChatResponse(BaseModel):
 ####################
 
 
+@legacy_content
 class SharedChatsTable:
     async def create(self, chat_id: str, user_id: str, db: Optional[AsyncSession] = None) -> Optional[SharedChatModel]:
         """
