@@ -166,3 +166,23 @@ reason = "Unrelated waiver"
         hits['hits'].append('GET /other')
         with pytest.raises(AssertionError, match='GET /other'):
             coverage.assert_no_waiver_covers_a_route_the_plane_actually_reached()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_catalog_embedding_waivers_are_drive_only_and_never_skip_probes(monkeypatch, tmp_path, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    routes = {'POST /api/embeddings', 'POST /api/v1/embeddings'}
+    assert coverage.waivers().keys() & routes == (routes if mode == 'drive' else set())
+    for route in routes:
+        assert not seeds.route_waived(route)
+        assert plane._target(route, {}, plane.Seeding()) == route.split(' ', 1)[1]
+    monkeypatch.setattr(coverage, 'operations', lambda: routes)
+    monkeypatch.setattr(coverage, 'evidence', lambda: {'hits': []})
+    if mode == 'drive':
+        coverage.assert_every_route_is_driven_or_waived()
+        monkeypatch.setattr(coverage, 'evidence', lambda: {'hits': sorted(routes)})
+        with pytest.raises(AssertionError, match='waived but actually driven'):
+            coverage.assert_no_waiver_covers_a_route_the_plane_actually_reached()
+    else:
+        with pytest.raises(AssertionError, match='POST /api/embeddings'):
+            coverage.assert_every_route_is_driven_or_waived()

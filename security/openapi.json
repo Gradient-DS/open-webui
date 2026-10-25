@@ -41940,7 +41940,7 @@
     },
     "/api/v1/users/{user_id}/oauth/sessions": {
       "get": {
-        "description": "Session metadata only: the tokens are the user's credentials, never an admin's to read.",
+        "description": "Only the owner can read session metadata; tokens are never returned.",
         "operationId": "get_user_oauth_sessions_by_id_api_v1_users__user_id__oauth_sessions_get",
         "parameters": [
           {

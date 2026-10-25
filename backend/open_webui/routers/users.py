@@ -843,7 +843,9 @@ async def get_user_info_by_id(
 async def get_user_oauth_sessions_by_id(
     user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
-    """Session metadata only: the tokens are the user's credentials, never an admin's to read."""
+    """Only the owner can read session metadata; tokens are never returned."""
+    if user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
         return [OAuthSessionResponse.model_validate(session.model_dump()) for session in sessions]

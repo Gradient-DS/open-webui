@@ -221,7 +221,7 @@ def drive_model_paths(
     admin, parameters, *, spec=SPEC, payloads=None, full=None, chunk_timeout=CHUNK_TIMEOUT, wall_timeout=WALL_TIMEOUT
 ):
     routes = targets(spec)
-    model = parameters['/api/v1/analytics/models/{model_id}/chats', 'model_id']
+    model = parameters['/api/v1/analytics/models/{model_id}/overview', 'model_id']
     fields = writable_string_fields(spec)
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
     full = os.getenv('ATTACK_FULL_CORPUS') == '1' if full is None else full

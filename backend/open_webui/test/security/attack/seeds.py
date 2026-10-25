@@ -286,6 +286,20 @@ def connection_index(ctx, parameter):
     return '0'
 
 
+def seed_archive_user(ctx, parameter):
+    return ctx.admin.identity['id']
+
+
+def seed_ollama_connection(ctx, parameter):
+    index = connection_index(ctx, parameter)
+    # The aggregate endpoint also populates OLLAMA_MODELS, used by /api/models/unload.
+    body = ctx.request('GET', '/ollama/api/tags', actor=ctx.admin)
+    model = next((item for item in body.get('models', []) if int(index) in item.get('urls', [])), None)
+    model_id = _extract(model, 'model', name='upstream_model', via='GET /ollama/api/tags')
+    ctx.provide(parameter, 'upstream_model', model_id)
+    return index
+
+
 def upstream_path(ctx, parameter):
     ctx.request('GET', ctx.fill(parameter['probe'], parameter, path=True), actor=ctx.admin)
     return parameter['value']
@@ -376,7 +390,6 @@ def catalog_default_model(ctx, parameter):
 
 def seed_model(ctx, parameter):
     model_id = catalog_default_model(ctx, parameter)
-    ctx.values['upstream_model'] = model_id
     register_readable_model(ctx, model_id)
     return model_id
 
@@ -596,6 +609,8 @@ _SEEDERS = {
     for function in (
         prepare_configuration,
         connection_index,
+        seed_archive_user,
+        seed_ollama_connection,
         upstream_path,
         seed_terminal,
         seed_export,

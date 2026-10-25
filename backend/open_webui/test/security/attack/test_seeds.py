@@ -562,6 +562,24 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
         assert order['namespace'] < order[key]
 
 
+@pytest.mark.parametrize('oidc_mode', [False, True])
+def test_archive_seed_snapshots_its_admin_owner(monkeypatch, oidc_mode):
+    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
+    admin = Mock(identity={'id': 'fictional-admin'})
+    client = Mock(identity={'id': 'fictional-user'})
+    ctx = seeds.SeedContext(client, admin, seeds.SURFACE)
+    entries = {p['key']: p for p in seeds.SURFACE['parameter']}
+    ctx.values['archive_user'] = seeds.seed_archive_user(ctx, entries['archive_user'])
+    ctx.values['namespace'] = 'fictional-namespace'
+    ctx.values['user'] = 'disposable-account-target'
+    admin.request.return_value = response(200, {'archive_id': 'fictional-archive'})
+    assert seeds._seed_endpoint(ctx, entries['archive']) == 'fictional-archive'
+    assert admin.request.call_args.args == ('POST', '/api/v1/archives/user/fictional-admin')
+    assert entries['archive_user']['actor'] == entries['archive']['actor'] == 'admin'
+    assert entries['archive_user']['fresh'] is False
+    client.request.assert_not_called()
+
+
 def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
     def provides_extra(ctx, entry):
         ctx.provide(entry, 'extra', 'extra-value')
@@ -853,11 +871,37 @@ def test_drive_model_seed_registers_the_soev_catalog_default(monkeypatch):
         ]
     )
     assert seeds.seed_model(ctx, {'key': 'model'}) == 'ci/chat'
-    assert ctx.values['upstream_model'] == 'ci/chat'
+    assert 'upstream_model' not in ctx.values
     config, registration = ctx.request.call_args_list
     assert config.args == ('GET', '/api/config')
     assert config.kwargs == {'actor': ctx.admin}
     assert registration.kwargs['json'] == {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ]}
+
+
+def test_ollama_seed_uses_a_model_from_its_connection_instead_of_the_catalog():
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.values['model'] = 'fictional/catalog-model'
+    ctx.request = Mock(
+        side_effect=[
+            {'OLLAMA_BASE_URLS': ['http://provider.invalid']},
+            {'models': [{'model': 'fictional-ollama'}]},
+            {'models': [{'model': 'other-connection', 'urls': [1]}, {'model': 'fictional-ollama', 'urls': [0]}]},
+        ]
+    )
+    assert seeds.seed_ollama_connection(ctx, entry) == '0'
+    assert ctx.values['upstream_model'] == 'fictional-ollama'
+    assert ctx.request.call_args.args == ('GET', '/ollama/api/tags')
+    assert ctx.request.call_args.kwargs == {'actor': ctx.admin}
+
+
+def test_ollama_seed_refuses_an_empty_connection_instead_of_substituting_the_catalog():
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(side_effect=[{'OLLAMA_BASE_URLS': ['http://provider.invalid']}, {'models': []}, {'models': []}])
+    with pytest.raises(RuntimeError, match='upstream_model'):
+        seeds.seed_ollama_connection(ctx, entry)
+    assert 'upstream_model' not in ctx.values
 
 
 @pytest.mark.parametrize('default', [None, '', 'a/b,c/d', ['ci/chat']])
