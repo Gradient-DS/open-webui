@@ -1,5 +1,6 @@
 """Use the organisation repository with every chat content column/table absent."""
 
+import re
 from contextlib import asynccontextmanager
 
 import pytest
@@ -26,6 +27,7 @@ async def organization_store(monkeypatch):
             pinned BOOLEAN, archived BOOLEAN, last_read_at BIGINT, created_at BIGINT, updated_at BIGINT
         )""")
         )
+        await conn.execute(sa.text('CREATE TABLE shared_chat (id TEXT PRIMARY KEY, chat_id TEXT, user_id TEXT)'))
         await conn.execute(sa.text('CREATE TABLE chat_thread (thread_id TEXT PRIMARY KEY, chat_id TEXT)'))
         await conn.execute(sa.text("INSERT INTO chat (id, user_id) VALUES ('fictional-legacy', 'fictional-fern')"))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -90,3 +92,25 @@ async def test_stale_organization_update_does_not_lose_owned_branches(organizati
     await repository.put('fictional-fern', record.model_copy(update={'pinned': True}))
     rows = await repository.list('fictional-fern')
     assert set(rows[0].branch_thread_ids) == {'fictional-root', 'fictional-child'}
+
+
+@pytest.mark.asyncio
+async def test_retired_link_and_folder_mapping_need_no_snapshot_columns(organization_store):
+    repository, session, statements = organization_store
+    await repository.put(
+        'fictional-owner',
+        Organization(
+            id='fictional-chat',
+            thread_id='fictional-thread',
+            folder_id='fictional-folder',
+        ),
+    )
+    async with session() as db:
+        await db.execute(
+            sa.text("INSERT INTO shared_chat VALUES ('fictional-link', 'fictional-chat', 'fictional-owner')")
+        )
+        await db.commit()
+    assert await repository.legacy_share('fictional-link') == ('fictional-owner', 'fictional-chat', 'fictional-thread')
+    assert await repository.legacy_share('fictional-missing') is None
+    assert await repository.folder_records('fictional-folder') == {'fictional-thread': 'fictional-owner'}
+    assert not any(re.search(r'shared_chat\.(chat|title)\b', sql) for sql in statements)

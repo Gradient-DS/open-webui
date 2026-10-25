@@ -14,6 +14,8 @@ class Organizations(Protocol):
     async def list(self, user_id: str) -> list[Organization]: ...
     async def put(self, user_id: str, record: Organization) -> None: ...
     async def remove(self, user_id: str, chat_id: str) -> None: ...
+    async def legacy_share(self, share_id: str) -> tuple[str, str, str | None] | None: ...
+    async def folder_records(self, folder_id: str) -> dict[str, str]: ...
 
 
 class FeedbackForm(BaseModel):
@@ -86,11 +88,46 @@ class ChatPaths:
         if page is not None and page < 1:
             raise ThreadError(422, 'invalid_request')
         items = await self.authorized(user_id, q=q)
+        if folder_id is not None:
+            items = await self.in_folder(user_id, items, folder_id)
         items = [
             item for item in items if self._included(item, folder_id, archived, pinned, include_pinned, include_folders)
         ]
         items.sort(key=lambda item: self._sort_key(item, sort_by), reverse=sort_dir == 'desc')
-        return items if page is None else items[(page - 1) * 60 : page * 60]
+        selected = items if page is None else items[(page - 1) * 60 : page * 60]
+        return self.folder_rows(selected) if folder_id is not None else selected
+
+    @staticmethod
+    def folder_rows(items: list[dict]) -> list[dict]:
+        return [
+            {
+                **item,
+                'id': item['thread_id'] if item['readonly'] else item['organization']['id'],
+                'updated_at': int(dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()),
+                'last_read_at': item['organization']['last_read_at'],
+                'active': False,
+            }
+            for item in items
+        ]
+
+    async def in_folder(self, user_id: str, items: list[dict], folder_id: str) -> list[dict]:
+        members = await self.organizations.folder_records(folder_id)
+        result = []
+        for item in items:
+            org = item['organization']
+            if item['thread_id'] not in members and (org or {}).get('folder_id') != folder_id:
+                continue
+            # Join only after the platform's grant + label filtering. Never
+            # borrow another person's pin, archive or last-read state.
+            org = org or Organization(id=item['thread_id'], thread_id=item['thread_id']).model_dump()
+            result.append(
+                {
+                    **item,
+                    'organization': {**org, 'folder_id': folder_id},
+                    'readonly': members.get(item['thread_id'], user_id) != user_id,
+                }
+            )
+        return result
 
     @staticmethod
     def _included(item, folder_id, archived, pinned, include_pinned, include_folders) -> bool:
@@ -154,7 +191,11 @@ class ChatPaths:
 
     async def folder_counts(self, user_id: str, parents: dict[str, str | None]) -> dict[str, int]:
         counts = dict.fromkeys(parents, 0)
-        for item in await self.authorized(user_id):
+        items = await self.authorized(user_id)
+        for folder_id in parents:
+            joined = {item['thread_id']: item for item in await self.in_folder(user_id, items, folder_id)}
+            items = [joined.get(item['thread_id'], item) for item in items]
+        for item in items:
             org = item['organization'] or {}
             updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
             if org.get('archived') or updated <= (org.get('last_read_at') or 0):

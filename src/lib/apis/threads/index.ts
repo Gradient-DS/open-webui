@@ -35,7 +35,13 @@ export type Organization = {
 
 export type SidebarItem = IndexItem & { organization: Organization | null };
 export type Page<T> = { items: T[]; next_cursor: string | null };
-export type ThreadState = 'reconnect' | 'unavailable' | 'sign_in' | 'invalid_request';
+export type ThreadState =
+	| 'reconnect'
+	| 'unavailable'
+	| 'sign_in'
+	| 'invalid_request'
+	| 'share_refused'
+	| 'legacy_share';
 
 export class ThreadError extends Error {
 	constructor(public state: ThreadState) {
@@ -47,7 +53,9 @@ export const stateText: Record<ThreadState, string> = {
 	reconnect: 'Reconnect to view this chat',
 	unavailable: 'This chat is unavailable',
 	sign_in: 'Sign in again to view this chat',
-	invalid_request: 'Reload this chat to continue'
+	invalid_request: 'Reload this chat to continue',
+	share_refused: "This chat uses sources you don't have access to",
+	legacy_share: 'This chat is no longer available to others'
 };
 
 export type ProjectionResult = {

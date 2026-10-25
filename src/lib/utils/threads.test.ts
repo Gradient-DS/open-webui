@@ -20,10 +20,15 @@ import nl from '$lib/i18n/locales/nl-NL/translation.json';
 import windowSource from '$lib/components/chat/ThreadWindow.svelte?raw';
 import sidebarSource from '$lib/components/layout/ThreadSidebar.svelte?raw';
 import stateSource from '$lib/components/common/ThreadState.svelte?raw';
+import shareSource from '$lib/components/chat/ThreadShareModal.svelte?raw';
+import sharedSource from '$lib/components/chat/SharedThread.svelte?raw';
+import { sharingAPI, shareStateText } from './threadSharing';
 
 it('provides English keys and Dutch translations for every thread UI label', () => {
 	const keys = [
-		...(windowSource + sidebarSource + stateSource).matchAll(/\$i18n\.t\('([^']+)'/g)
+		...(windowSource + sidebarSource + stateSource + shareSource + sharedSource).matchAll(
+			/\$i18n\.t\('([^']+)'/g
+		)
 	].map((match) => match[1]);
 	for (const key of keys) {
 		expect(Object.hasOwn(en, key), key).toBe(true);
@@ -361,5 +366,59 @@ describe('platform sidebar', () => {
 		await controller.more();
 		expect(controller.snapshot.items).toEqual([]);
 		expect(controller.snapshot.state).toBe('unavailable');
+	});
+});
+
+describe('live thread sharing', () => {
+	it('sends session credentials and bounded share positions without snapshots', async () => {
+		const fetcher = vi.fn(
+			async () => new Response(JSON.stringify({ share_id: 'fictional-thread' }))
+		);
+		vi.stubGlobal('fetch', fetcher);
+		try {
+			const api = sharingAPI('fictional-session');
+			const audience = { kind: 'person' as const, id: 'fictional-person' };
+			await api.share('fictional-chat', { audience, at: 7 });
+			await api.unshare('fictional-chat', audience);
+			await api.clone('fictional-thread');
+			await api.read('fictional-thread', 'fictional-older');
+			const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+			expect(JSON.parse(String(calls[0][1].body))).toEqual({ audience, at: 7 });
+			expect(JSON.parse(String(calls[1][1].body))).toEqual({ audience });
+			expect(calls[2][0]).toContain('/fictional-thread/clone/shared');
+			expect(calls[3][0]).toContain('before=fictional-older');
+			for (const [, init] of calls) {
+				expect(init.cache).toBe('no-store');
+				expect(init.headers).toEqual({
+					Authorization: 'Bearer fictional-session',
+					'Content-Type': 'application/json'
+				});
+			}
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+	it('renders only fixed translated refusals, including legacy and tokenless states', async () => {
+		for (const state of ['share_refused', 'legacy_share', 'sign_in'] as const) {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(
+					async () =>
+						new Response(JSON.stringify({ state, detail: 'Fictional private title' }), {
+							status: state === 'sign_in' ? 401 : 404
+						})
+				)
+			);
+			try {
+				await expect(sharingAPI('fictional-session').read('fictional-thread')).rejects.toEqual(
+					new ThreadError(state)
+				);
+				expect(shareStateText(new ThreadError(state))).toBe(stateText[state]);
+				expect(Object.hasOwn(en, stateText[state])).toBe(true);
+				expect((nl as Record<string, string>)[stateText[state]]).toBeTruthy();
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
 	});
 });

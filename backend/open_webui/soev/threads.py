@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from open_webui.soev import acting
 from open_webui.soev.client import _shared_client
 
-ThreadState = Literal['reconnect', 'unavailable', 'sign_in', 'invalid_request']
+ThreadState = Literal['reconnect', 'unavailable', 'sign_in', 'invalid_request', 'share_refused', 'legacy_share']
 
 
 class ThreadError(Exception):
@@ -34,6 +34,7 @@ class MessageView(WireModel):
 
 
 class ProjectionPage(WireModel):
+    version: str | None = None
     thread_id: str
     generation: str
     title: str | None
@@ -57,6 +58,21 @@ class IndexPage(WireModel):
 
 class CreatedThread(WireModel):
     thread_id: str
+
+
+class ShareAudience(WireModel):
+    kind: Literal['person', 'group', 'folder']
+    id: str = Field(min_length=1, max_length=128)
+
+
+class Share(WireModel):
+    audience: ShareAudience
+    at: int = Field(gt=0)
+
+
+class SharePage(WireModel):
+    items: list[Share]
+    next_cursor: str | None
 
 
 class FeedbackItem(WireModel):
@@ -253,6 +269,30 @@ class ThreadClient:
                 body={'at': at},
             ),
             CreatedThread,
+        )
+
+    async def shares(self, thread_id: str, *, cursor: str = '') -> SharePage:
+        return self._parse(
+            await self._request(
+                'GET',
+                f'/v1/threads/{_identifier(thread_id)}/shares',
+                params={'limit': 200, 'cursor': cursor},
+            ),
+            SharePage,
+        )
+
+    async def share(self, thread_id: str, share: Share) -> None:
+        await self._request(
+            'POST',
+            f'/v1/threads/{_identifier(thread_id)}/shares',
+            body=share.model_dump(),
+        )
+
+    async def unshare(self, thread_id: str, audience: ShareAudience) -> None:
+        await self._request(
+            'DELETE',
+            f'/v1/threads/{_identifier(thread_id)}/shares',
+            body={'audience': audience.model_dump()},
         )
 
     async def create(self, *, agent: str, input: JsonValue, model: str | None = None) -> CreatedThread:

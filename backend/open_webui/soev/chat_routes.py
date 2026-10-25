@@ -57,8 +57,10 @@ async def chat(request: Request, user, route: str):
         refused()
     if method == 'POST' and (route in {'/{id}', '/{id}/compact'} or '/messages/' in route):
         refused()
-    if '/share' in route or '/shared' in route:
-        refused()  # 7h supplies the replacement, never serve a local snapshot.
+    if '/share' in route or '/shared' in route or route == '/{id}/clone/shared':
+        from open_webui.soev.thread_sharing import dispatch
+
+        return await dispatch(paths(request), request, user, route)
     service = paths(request)
     identifier = request.path_params.get('id')
     if method == 'DELETE':
@@ -87,6 +89,8 @@ async def chat_read(service, request, user, identifier, route):
         '/folder/{folder_id}',
         '/folder/{folder_id}/list',
     }:
+        if 'folder_id' in request.path_params:
+            await require_folder_read(user.id, request.path_params['folder_id'])
         items = await service.listing(
             user.id,
             q=request.query_params.get('text', request.query_params.get('q', '')),
@@ -124,6 +128,15 @@ async def chat_read(service, request, user, identifier, route):
         await service.projection(user.id, identifier, window=1)
         return (await service.record(user.id, identifier)).pinned
     refused()
+
+
+async def require_folder_read(user_id: str, folder_id: str) -> None:
+    from open_webui.models.folders import Folders
+    from open_webui.utils.access_control.folders import has_folder_access
+
+    folder = await Folders.get_folder_by_id(folder_id)
+    if folder is None or not await has_folder_access(user_id, folder, 'read', None):
+        raise ThreadError(404, 'unavailable')
 
 
 async def chat_write(service, request, user, identifier, route):
