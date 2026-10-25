@@ -34,6 +34,8 @@ class FakeStack:
         self.lookup_status = 200
         self.create_status = 201
         self.redirect_loop = False
+        self.two_fa_config = {'ENABLE_2FA': False, 'REQUIRE_2FA': False, 'TWO_FA_GRACE_PERIOD_DAYS': 0}
+        self.totp_secrets = {}
 
     async def dispatch(self, request):
         host, path = request.url.hostname, request.url.path
@@ -53,7 +55,11 @@ class FakeStack:
         token = request.headers.get('authorization', '').removeprefix('Bearer ')
         if path == '/api/v1/memories/' or path.startswith('/api/v1/export/data'):
             return self.platform(request, token)
-        payload = await request.json() if request.method == 'POST' else {}
+        payload = json.loads(await request.body() or b'{}') if request.method == 'POST' else {}
+        if path == '/api/v1/configs/2fa' or path.startswith('/api/v1/auths/2fa/'):
+            return self.two_factor(token, path, payload)
+        if path == '/api/v1/auths/signin' and (challenge := self.two_factor_challenge(payload)):
+            return JSONResponse({challenge: True, 'partial_token': 'fictional-partial'})
         result = self.identities.request(
             SimpleNamespace(token=token), request.method, path, json=payload, params=dict(request.query_params)
         )
@@ -61,6 +67,38 @@ class FakeStack:
         if self.probe_email and path == '/api/v1/auths/':
             body['email'] = self.probe_email
         return JSONResponse(body, status_code=result.status_code)
+
+    def two_factor_challenge(self, payload):
+        if not self.two_fa_config['ENABLE_2FA']:
+            return None
+        user = next((u for u in self.identities.users.values() if u['email'] == payload['email']), None)
+        if user and user['password'] == payload['password'] and not user.get('oauth'):
+            if user['id'] in self.totp_secrets:
+                return 'requires_2fa'
+            if self.two_fa_config['REQUIRE_2FA']:
+                return 'requires_2fa_setup'
+        return None
+
+    def two_factor(self, token, path, payload):
+        user = self.identities.holder(token)
+        assert user is not None
+        if path == '/api/v1/configs/2fa':
+            assert user['role'] == 'admin'
+            self.two_fa_config.update(payload)
+            return JSONResponse(self.two_fa_config)
+        if user.get('oauth'):
+            return JSONResponse({'detail': '2FA is not available for SSO accounts'}, status_code=400)
+        assert self.two_fa_config['ENABLE_2FA']
+        if path.endswith('/setup'):
+            return JSONResponse({'secret': 'JBSWY3DPEHPK3PXP'})
+        assert payload['password'] == user['password']
+        if path.endswith('/enable'):
+            assert payload['code'] == seeds.totp_code(payload['secret'])
+            self.totp_secrets[user['id']] = payload['secret']
+            return JSONResponse({'totp_enabled': True})
+        assert path.endswith('/disable')
+        del self.totp_secrets[user['id']]
+        return JSONResponse({'totp_enabled': False})
 
     def callback(self, request):
         assert request.cookies.get('oidc_state') == 'fictional-state'
@@ -75,6 +113,7 @@ class FakeStack:
                 {'role': 'admin'},
             )
             user = self.identities.users[json_body(result)['id']]
+        user['oauth'] = {'oidc': {'sub': email}}
         response = RedirectResponse('/auth')
         if self.callback_token:
             response.set_cookie('token', self.identities.session(user)['token'])
@@ -259,6 +298,52 @@ def test_password_endpoint_negative_probe_remains_enabled_in_oidc_mode(stack, tm
         assert oidc.enabled()
         assert stack.identities.attempts == {identities.USER_EMAIL: 1}
         actors.user.verify_identity(email=identities.USER_EMAIL, role='user')
+    finally:
+        actors.close()
+
+
+def test_totp_seed_keeps_a_password_identity_in_oidc_mode(stack, tmp_path):
+    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
+    try:
+        stack.two_fa_config['ENABLE_2FA'] = True
+        ctx = seeds.SeedContext(actors.user, actors.admin, seeds.SURFACE, token='fictional-totp')
+        parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'totp_user')
+        user_id = seeds.seed_totp_user(ctx, parameter)
+        assert user_id not in {c.user_id for c in actors.clients}
+        assert user_id in stack.totp_secrets
+        assert not stack.identities.users[user_id].get('oauth')
+        assert 'attack-totp-fictional-totp@example.com' not in stack.users
+        setup_calls = [headers for _, _, path, headers in stack.calls if path == '/api/v1/auths/2fa/totp/setup']
+        assert len(setup_calls) == 1
+        assert 'cookie' not in setup_calls[0]
+    finally:
+        actors.close()
+
+
+@pytest.mark.parametrize('challenge', ['requires_2fa', 'requires_2fa_setup'])
+@pytest.mark.parametrize('oidc_mode', [False, True])
+def test_password_2fa_probe_uses_a_password_identity(stack, tmp_path, monkeypatch, challenge, oidc_mode):
+    from .test_live_client import test_real_2fa_signin_success_status_is_rejected
+
+    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
+    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
+    try:
+        original_config = dict(stack.two_fa_config)
+        original_users = set(stack.identities.users)
+        test_real_2fa_signin_success_status_is_rejected(actors, challenge)
+        assert oidc.enabled() is oidc_mode
+        assert stack.two_fa_config == original_config
+        assert not stack.totp_secrets
+        if oidc_mode:
+            (user_id,) = set(stack.identities.users) - original_users
+        else:
+            assert set(stack.identities.users) == original_users
+            user_id = actors.intruder.user_id
+        local_user = stack.identities.users[user_id]
+        assert local_user['role'] == 'user'
+        assert not local_user.get('oauth')
+        assert local_user['email'] not in stack.users
+        actors.intruder.verify_identity(email=identities.INTRUDER_EMAIL, role='user')
     finally:
         actors.close()
 
