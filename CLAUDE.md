@@ -102,8 +102,8 @@ Every base model (a catalog model, or a row without `base_model_id`) uses the gl
 `models.system_prompt` (Admin > Settings > System prompt, shown wherever the models tab is), unless its own row still
 has a prompt; `DEFAULT_MODEL_PARAMS.system` comes below it. An empty prompt box (`system: null`) falls back instead of
 blanking it. Assistants keep their own prompt only. One resolver, `soev/system_prompt.py`, serves the agent route
-(`main.py`) and the direct routers. The v2 migration moves the v1 per-model prompts to the global one: see
-`helm/open-webui-tenant/README.md` (`mode: plan`, `soevApi.migrate.systemPrompt`).
+(`main.py`) and the direct routers. The platform cutover tooling moves v1 per-model prompts to the global one: see
+`docs/cutover-handoff.md`.
 
 ## What's new tour
 
@@ -125,7 +125,7 @@ picker registers through the same function with `attached_by: 'user'`. One attac
 documents are merged into the message files and `chat:message:files` is emitted once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
-routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
+routes stream platform originals with the requesting user's login token. Every v2 turn ensures
 and sends the user's chat attachments collection; stored reference metadata is sent next turn.
 The platform binds that collection into its live ticket; a missing or changed target
 refuses collection_mismatch. Provider identity and Retry-After remain structured client
@@ -185,8 +185,8 @@ the click stack; a new resource requiring consent asks for another click rather
 than opening a delayed popup. Match the picker tenant and object ID against the
 connection's provider_tenant_id and provider_identity before choosing its grant.
 Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.
-If an older reference event lacks MIME metadata, successful job polling reads the
-completed document as its owning user and fills content_type before marking it ready.
+If an older reference event lacks MIME metadata, the owner's next authenticated request reads the
+completed document with their login token and fills content_type before marking it ready.
 MSAL uses one organisational client and caches in-flight initialization across picker
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
@@ -265,10 +265,12 @@ The folder share modal lists the items a folder share leaves out with why (`clou
 `GET /folders/{id}/sharing` (owner only), nl/en. That route also says whether the reader may change the folder's
 access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 
-`soev/groups.py` narrows platform membership before local writes and publishes widening afterward.
-`soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup
-and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
-Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
+`soev/group_mirror.py` pulls platform groups and flattened person memberships from paged `GET /v1/groups`
+at startup and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15). Only the mirror writes group identity or
+membership; group routes and OAuth/SCIM/LDAP management refuse `403 platform_groups_read_only`.
+OWUI admins may edit per-group product settings, keyed by platform group id; they never grant platform actions.
+The session-only `soev/migrate_groups.cutover_groups` rewrites groups, memberships and group access grants
+through the cutover's verified group map. See `docs/cutover-handoff.md`.
 
 An assistant's files (explicit `file` entries of a model's `meta.knowledge`) must be files the model owner owns: a
 save holding anyone else's is refused (403), and file access, sync and migration ignore such an entry; another's file
@@ -280,7 +282,7 @@ commit; narrowing runs before commit. A file still ingesting elsewhere records a
 authenticated request. A turn sends them as
 `attachments`, read as the user; one not there yet is skipped as processing and records pending work only on its
 owner's turn, a deleted one is
-noticed as the assistant's. The v2 migration uploads step ingests them into that same collection.
+noticed as the assistant's. Cutover tooling imports existing files into that same collection.
 
 Sharing a folder shares its knowledge (`soev/folder_sharing.py`): everyone a folder (or a same-owner ancestor) is
 shared with gets a read grant on the local knowledge bases and notes in it that the folder owner owns, through
@@ -296,9 +298,6 @@ is unshared, emptied or deleted. Its readers and files are narrowed before a fol
 owner's request after commit (missing files submitted as the owner; waiting files record a pending sync). Folder items carry
 `folder_id`, and a turn reads a folder file there first, as the user. Hidden from KB lists.
 
-Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
-OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
-
 Knowledge grants project everyone to `platform:pseudo:owui`; writes explicitly include read access.
 Access changes commission one `PUT /access` job carrying readers and writers, retaining the owner in both.
 KB types come only from the collection's immutable `source_kind`, sent at create. Cloud collections omit the
@@ -312,33 +311,30 @@ browser knows it (`SKIP_REASONS` in `utils/sourceState.ts`; unknown codes read a
 never reaches the browser), and writers get Retry failed files (schedule action `retry_failed`, a run that
 refetches every file without a landed version) there and in the source's ⋯ menu.
 
-Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
-principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
-and no grants; reconciliation reads them as their owners because the service is not a cloud reader.
-Role writes in `models/users.py` serialize with group reconciliation. Pending demotions first revoke
-cloud schedules/connections as the still-linked person, then unlink before committing. Approvals queue
-failed links for backoff retry. `ensure_link` checks the current local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
-the supplied platform contract has no link listing to discover otherwise unknown deleted users.
+User platform calls require that person's own login token. `SoevClient.as_service()` explicitly
+selects product authority. No subject signing, identity links or owner override remains.
+The durable job poller runs as the service; missing reference MIME metadata is completed
+inside the owner's next authenticated request using their token. The removed offline migration
+CLI and chart Job are replaced by platform cutover tooling; see `docs/cutover-handoff.md`.
+Role demotion and offboarding remain subject to the console boundary in `soev/policy_jobs.py`.
 
-`owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
-narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.
+Archive readership comes from the console-managed platform Archive readers group, configured through
+`SOEV_ARCHIVE_READERS_GROUP_REF` (required with `SOEV_API_URL`, no default). Local admin roles never confer it.
 
 Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
 `confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
-`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the linked departing person,
-narrows groups, disposes resources, unlinks, then commits local erasure/reassignment together.
+`mode=archive`. `services/deletion/offboarding.py` requires console offboarding under the v2 runtime before
+any remote or local changes.
+The legacy disposition path disposes resources, then commits local erasure/reassignment together.
 Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
 resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,
 and archive deletion/expiry removes the resources before dropping the snapshot. Retention edits publish
 the KB expiry before the local update. A failed remote step preserves local content/account rows.
 
-Pending users have already lost cloud custody on demotion. Their offboarding skips subject revocation,
-uses service authority for collection inventory/disposition, and keeps group narrowing, unlinking and
-local erasure fail-closed. Demotion and offboarding share `soev/cloud_sync.revoke_cloud`.
+The legacy pending-user disposition path uses service authority for collection inventory/disposition and
+keeps local erasure fail-closed. The v2 runtime refuses it through the same console offboarding boundary.
 There is no archive restore endpoint; archived KBs return to a person through the collection ownership
 transfer path (`POST /v1/collections/{key}/owner`).
-The supplied platform contract has no link listing to discover otherwise unknown deleted users.
-The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.
 
 Assistant knowledge sharing uses the same owner-wide derivation as folder sharing (`soev/knowledge_sharing.py`):
 local KBs and notes owned by the assistant owner receive read access for its audience. `assistant_share_grant`

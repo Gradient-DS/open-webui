@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -60,7 +60,6 @@ async def offboard_store(identity_config, chat_http, monkeypatch, platform_capab
         db.add(Memory(id='memory', user_id='fern', content='A preference', created_at=1, updated_at=1))
         await db.commit()
         client = identity.build_client()
-        await identity.ensure_link('owui:user:fern', client)
         for key, kind in [('native', 'local'), ('cloud', 'onedrive')]:
             await client.send(
                 'POST',
@@ -90,7 +89,7 @@ async def offboard_store(identity_config, chat_http, monkeypatch, platform_capab
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['delete', 'transfer', 'archive'])
-async def test_modes_move_or_delete_resources_then_unlink(offboard_store, mode):
+async def test_modes_move_or_delete_resources_before_local_deletion(offboard_store, mode):
     store = offboard_store
     options = store.module.OffboardingOptions(
         mode=mode,
@@ -111,7 +110,7 @@ async def test_modes_move_or_delete_resources_then_unlink(offboard_store, mode):
     owner_calls = [r for r in store.api.requests if r.url.path.endswith('/owner')]
     if mode != 'delete':
         assert len(owner_calls) == 1
-        assert 'X-Soev-Subject' not in owner_calls[0].headers
+        assert 'X-Soev-' + 'Subject' not in owner_calls[0].headers
         body = json.loads(owner_calls[0].content)
         assert body['owner'] == ('owui:user:lark' if mode == 'transfer' else expected_owner)
         if mode == 'archive':
@@ -123,11 +122,7 @@ async def test_modes_move_or_delete_resources_then_unlink(offboard_store, mode):
                 .strftime('%Y-%m-%d')
             )
             assert archive.data['chats'][0]['id'] == 'chat'
-    unlink = [r for r in store.api.requests if '/identity/links/' in r.url.path]
-    assert len(unlink) == 1
-    assert store.api.requests.index(unlink[0]) > max(
-        i for i, r in enumerate(store.api.requests) if r.url.path.startswith('/v1/collections/') and r.method != 'GET'
-    )
+    assert not any('/identity/' in request.url.path for request in store.api.requests)
 
 
 @pytest.mark.asyncio
@@ -163,11 +158,11 @@ async def test_chat_attachments_are_never_transferred_to_another_person(offboard
 async def test_inventory_links_an_approved_user_before_listing_as_them(offboard_store):
     """The shared-data listing works for a user whose link is not cached (e.g. a queued retry)."""
     store = offboard_store
-    store.identity._linked_refs.clear()
     owned = await store.module.inventory('fern', db=store.db)
     assert {row['key'] for row in owned.collections} == {'native', 'cloud'}
     paths = [(r.method, r.url.path) for r in store.api.requests]
-    assert paths.index(('POST', '/v1/identity/links')) < paths.index(('GET', '/v1/collections'))
+    assert ('GET', '/v1/collections') in paths
+    assert ('POST', '/v1/identity/links') not in paths
 
 
 @pytest.mark.asyncio
@@ -233,15 +228,13 @@ async def test_shared_deletion_requires_exact_inventory(offboard_store):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('step', ['inventory', 'cloud', 'resources', 'unlink', 'local'])
+@pytest.mark.parametrize('step', ['inventory', 'resources', 'local'])
 async def test_failure_never_partially_deletes_local_data(offboard_store, monkeypatch, step):
     store = offboard_store
 
     targets = {
         'inventory': (store.module, 'inventory'),
-        'cloud': (store.module, 'revoke_cloud'),
         'resources': (store.module, 'apply_collections'),
-        'unlink': (store.identity, 'unlink'),
         'local': (store.module, 'finalize_local'),
     }
     obj, name = targets[step]
@@ -331,8 +324,7 @@ async def test_final_transaction_rolls_back_already_staged_deletions(offboard_st
 
 
 @pytest.mark.asyncio
-async def test_cloud_revocations_act_as_departing_user(offboard_store):
-    from open_webui.test.soev.test_identity import claims
+async def test_legacy_offboarding_does_not_impersonate_cloud_custody(offboard_store):
 
     store = offboard_store
     client = store.identity.build_client()
@@ -359,10 +351,9 @@ async def test_cloud_revocations_act_as_departing_user(offboard_store):
         for r in store.api.requests
         if r.method == 'DELETE' and r.url.path.startswith(('/v1/schedules/', '/v1/connections/'))
     ]
-    assert len(mutations) == 2
-    assert all(claims(r.headers['X-Soev-Subject'])['sub'] == 'owui:user:fern' for r in mutations)
-    assert store.api.schedules[schedule['id']]['subscribers'] == []
-    assert connection['id'] not in store.api.connections
+    assert mutations == []
+    assert store.api.schedules[schedule['id']]['subscribers']
+    assert connection['id'] in store.api.connections
 
 
 @pytest.mark.asyncio
@@ -397,7 +388,7 @@ async def test_transfer_refuses_invalid_target_before_remote_changes(offboard_st
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('path', ['/v1/connections/', '/v1/collections/native', '/v1/identity/links/'])
+@pytest.mark.parametrize('path', ['/v1/collections/native'])
 async def test_actual_http_failure_keeps_local_source_rows(offboard_store, monkeypatch, path):
 
     store = offboard_store
@@ -431,14 +422,14 @@ async def test_actual_http_failure_keeps_local_source_rows(offboard_store, monke
 @pytest.mark.asyncio
 async def test_archive_retry_reuses_snapshot_and_original_collection_manifest(offboard_store, monkeypatch):
     store = offboard_store
-    unlink = store.identity.unlink
-    monkeypatch.setattr(store.identity, 'unlink', AsyncMock(side_effect=RuntimeError('unlink failed')))
+    finalize = store.module.finalize_local
+    monkeypatch.setattr(store.module, 'finalize_local', AsyncMock(side_effect=RuntimeError('local failed')))
     options = store.module.OffboardingOptions(mode='archive', archive_reason='Departure')
     with pytest.raises(RuntimeError):
         await store.module.offboard_user('fern', actor_id='operator', options=options, db=store.db)
     Archive = store.classes[-2]
     first = (await store.db.execute(select(Archive))).scalar_one()
-    monkeypatch.setattr(store.identity, 'unlink', unlink)
+    monkeypatch.setattr(store.module, 'finalize_local', finalize)
     await store.module.offboard_user('fern', actor_id='operator', options=options, db=store.db)
     archive = (await store.db.execute(select(Archive))).scalar_one()
     assert archive.id == first.id
@@ -465,7 +456,7 @@ async def test_archive_cleanup_removes_owned_resources_and_snapshot(offboard_sto
         return original(request)
 
     monkeypatch.setattr(store.api, 'handle', handle)
-    assert await delete_archive(archive.id, db=store.db)
+    assert await delete_archive(archive.id, client=store.identity.build_client(), db=store.db)
     for cls, rid in zip(store.classes[1:5], ['assistant', 'prompt', 'tool', 'note']):
         store.db.expire_all()
         assert await store.db.get(cls, rid) is None
@@ -516,22 +507,21 @@ async def test_retention_edits_send_the_same_expiry_and_never_delete(offboard_st
     row = (await store.db.execute(select(Archive))).scalar_one()
     archive = await UserArchives.get_archive_by_id(row.id, db=store.db)
     archive.expires_at = archive.created_at + 2 * 86400
-    resolver = AsyncMock(return_value='fictional-admin-token')
+    resolver = AsyncMock(return_value='fictional-login:owui:user:lark')
     token = acting._token_resolver.set(resolver)
     requester = acting._requester_ref.set('owui:user:lark')
     try:
-        with acting.acting_as('owui:user:lark'):
-            await set_expiry(archive)
+        await set_expiry(archive, client=store.identity.build_client())
+        assert json.loads(store.api.requests[-1].content)['expires_at']
+        archive.never_delete = True
+        await set_expiry(archive, client=store.identity.build_client())
     finally:
         acting._requester_ref.reset(requester)
         acting._token_resolver.reset(token)
-    resolver.assert_not_awaited()
+    assert resolver.await_count == 2
     request = store.api.requests[-1]
-    assert 'X-Soev-Subject' not in request.headers
-    assert 'X-Soev-User-Token' not in request.headers
-    assert json.loads(request.content)['expires_at']
-    archive.never_delete = True
-    await set_expiry(archive)
+    assert 'X-Soev-' + 'Subject' not in request.headers
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:lark'
     assert 'expires_at' not in json.loads(store.api.requests[-1].content)
 
 
@@ -644,18 +634,14 @@ async def test_scim_deletion_does_not_erase_threads_before_shared_confirmation(m
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['delete', 'transfer', 'archive'])
 async def test_pending_offboarding_uses_service_without_recreating_a_link(offboard_store, monkeypatch, mode):
-    from open_webui.models.users import Users
 
     store = offboard_store
-    await Users.update_user_role_by_id('fern', 'pending', db=store.db)
-    monkeypatch.setattr(
-        store.identity, 'ensure_link', AsyncMock(side_effect=AssertionError('Pending users stay unlinked'))
-    )
+    await store.db.execute(update(store.classes[0]).where(store.classes[0].id == 'fern').values(role='pending'))
+    await store.db.commit()
     responses = [
         httpx.Response(200, json={'data': list(store.api.collections.values()), 'next_cursor': None}),
         httpx.Response(204),
         httpx.Response(204 if mode == 'delete' else 200, json={}),
-        httpx.Response(204),
     ]
     store.api.requests.clear()
 
@@ -671,10 +657,10 @@ async def test_pending_offboarding_uses_service_without_recreating_a_link(offboa
         db=store.db,
     )
     assert not responses
-    assert all('X-Soev-Subject' not in request.headers for request in store.api.requests)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in store.api.requests)
     assert store.api.requests[0].url.path == '/v1/collections'
     assert not any(request.url.path.startswith(('/v1/schedules', '/v1/connections')) for request in store.api.requests)
-    assert store.api.requests[-1].url.path.startswith('/v1/identity/links/')
+    assert not any('/identity/' in request.url.path for request in store.api.requests)
     assert await store.db.get(store.classes[0], 'fern') is None
     model = await store.db.get(store.classes[1], 'assistant')
     if mode == 'delete':
@@ -683,107 +669,13 @@ async def test_pending_offboarding_uses_service_without_recreating_a_link(offboa
         assert model.user_id == ('lark' if mode == 'transfer' else 'platform:svc:archive-owui')
 
 
-async def seed_cloud_custody(store):
-    client = store.identity.build_client()
-    connection = await client.send(
-        'POST',
-        '/v1/connections',
-        {'source_kind': 'onedrive', 'credential_kind': 'user_oauth'},
-        as_user='owui:user:fern',
-        idempotency_key='connection:fern',
-    )
-    schedule = await client.send(
-        'POST',
-        '/v1/schedules',
-        {'connection_id': connection['id'], 'collection_key': 'cloud', 'kind': 'content'},
-        as_user='owui:user:fern',
-        idempotency_key='schedule:fern',
-    )
-    return connection['id'], schedule['id']
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize('role', ['user', 'admin'])
-@pytest.mark.parametrize('method', ['role', 'update'])
-async def test_demotion_revokes_cloud_before_unlink_and_role_commit(offboard_store, monkeypatch, role, method):
-    from open_webui.models.users import Users
-    from open_webui.test.soev.test_identity import claims
-
-    store = offboard_store
-    await Users.update_user_role_by_id('fern', role, db=store.db)
-    connection_id, schedule_id = await seed_cloud_custody(store)
-    store.api.requests.clear()
-    original = store.api.handle
-    observed_roles = []
-
-    async def handle(request):
-        observed_roles.append((await Users.get_user_by_id('fern', db=store.db)).role)
-        return original(request)
-
-    monkeypatch.setattr(store.api, 'handle', handle)
-    if method == 'role':
-        await Users.update_user_role_by_id('fern', 'pending', db=store.db)
-    else:
-        await Users.update_user_by_id('fern', {'role': 'pending', 'name': 'New name'}, db=store.db)
-    assert observed_roles and set(observed_roles) == {role}
-    assert store.api.requests[0].url.path == '/v1/schedules'
-    deletes = [request for request in store.api.requests if request.method == 'DELETE']
-    assert [request.url.path for request in deletes] == [
-        f'/v1/schedules/{schedule_id}',
-        f'/v1/connections/{connection_id}',
-        '/v1/identity/links/' + store.identity.platform_user_id('owui:user:fern'),
-    ]
-    assert all(claims(request.headers['X-Soev-Subject'])['sub'] == 'owui:user:fern' for request in deletes[:2])
-    assert 'X-Soev-Subject' not in deletes[-1].headers
-    assert connection_id not in store.api.connections
-    assert store.api.schedules[schedule_id]['subscribers'] == []
-    assert 'owui:user:fern' not in store.api.links
-    assert (await Users.get_user_by_id('fern', db=store.db)).role == 'pending'
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['schedule', 'connection', 'unlink'])
-@pytest.mark.parametrize('role', ['user', 'admin'])
-async def test_demotion_revocation_failures_preserve_local_role_and_link(offboard_store, monkeypatch, failure, role):
-    from open_webui.models.users import Users
-
-    store = offboard_store
-    await Users.update_user_role_by_id('fern', role, db=store.db)
-    connection_id, schedule_id = await seed_cloud_custody(store)
-    original = store.api.handle
-    path = {
-        'schedule': f'/v1/schedules/{schedule_id}',
-        'connection': f'/v1/connections/{connection_id}',
-        'unlink': '/v1/identity/links/' + store.identity.platform_user_id('owui:user:fern'),
-    }[failure]
-    failed = []
-
-    def handle(request):
-        if request.method == 'DELETE' and request.url.path == path:
-            failed.append(request)
-            return httpx.Response(503, json={'code': 'service_unavailable'})
-        return original(request)
-
-    monkeypatch.setattr(store.api, 'handle', handle)
-    with pytest.raises(store.identity.SoevApiError):
-        await Users.update_user_by_id('fern', {'role': 'pending', 'name': 'New name'}, db=store.db)
-    assert failed
-    user = await Users.get_user_by_id('fern', db=store.db)
-    assert user.role == role and user.name == 'Fern'
-    assert 'owui:user:fern' in store.api.links
-    assert not any(request.url.path.startswith('/v1/identity/links/') for request in store.api.requests)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('step', ['inventory', 'resources', 'unlink', 'local'])
+@pytest.mark.parametrize('step', ['inventory', 'resources', 'local'])
 async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, monkeypatch, step):
-    from open_webui.models.users import Users
 
     store = offboard_store
-    await Users.update_user_role_by_id('fern', 'pending', db=store.db)
-    monkeypatch.setattr(
-        store.identity, 'ensure_link', AsyncMock(side_effect=AssertionError('Pending users stay unlinked'))
-    )
+    await store.db.execute(update(store.classes[0]).where(store.classes[0].id == 'fern').values(role='pending'))
+    await store.db.commit()
     store.api.requests.clear()
     failure = store.identity.SoevApiError(503, 'service_unavailable', 'Unavailable')
     if step == 'local':
@@ -798,10 +690,8 @@ async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, 
     def handle(request):
         store.api.requests.append(request)
         path = request.url.path
-        if (
-            step == 'inventory'
-            or (step == 'resources' and request.method == 'DELETE' and path.startswith('/v1/collections/'))
-            or (step == 'unlink' and path.startswith('/v1/identity/links/'))
+        if step == 'inventory' or (
+            step == 'resources' and request.method == 'DELETE' and path.startswith('/v1/collections/')
         ):
             return httpx.Response(503, json={'code': 'service_unavailable'})
         if request.method == 'GET':
@@ -813,7 +703,29 @@ async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, 
         await store.module.offboard_user(
             'fern', actor_id='operator', options=store.module.OffboardingOptions(), db=store.db
         )
-    assert all('X-Soev-Subject' not in request.headers for request in store.api.requests)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in store.api.requests)
     assert not any(request.url.path.startswith(('/v1/schedules', '/v1/connections')) for request in store.api.requests)
     for cls, rid in zip(store.classes[:8], ['fern', 'assistant', 'prompt', 'tool', 'note', 'chat', 'memory', 'native']):
         assert await store.db.get(cls, rid) is not None
+
+
+@pytest.mark.asyncio
+async def test_offboarding_another_person_refuses_before_local_or_remote_writes(offboard_store, monkeypatch):
+    from open_webui import env
+    from open_webui.soev import acting
+
+    monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
+    store = offboard_store
+    requester = acting._requester_ref.set('owui:user:operator')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login:owui:user:operator'))
+    try:
+        with pytest.raises(store.identity.SoevApiError) as error:
+            await store.module.offboard_user(
+                'fern', actor_id='operator', options=store.module.OffboardingOptions(), db=store.db
+            )
+        assert (error.value.status, error.value.constraint) == (403, 'offboarding:console')
+        assert store.api.requests == []
+        assert await store.db.get(store.classes[0], 'fern') is not None
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)

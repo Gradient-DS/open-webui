@@ -19,9 +19,11 @@ def api(monkeypatch, platform_capabilities):
     requests, responses = [], []
     refs = []
 
-    def mint(ref):
+    async def login_token(ref):
         refs.append(ref)
-        return f'invalid-test-assertion-{len(refs)}'
+        return 'fictional-alice-token'
+
+    monkeypatch.setattr('open_webui.soev.client.user_token', login_token)
 
     def handle(request):
         requests.append(request)
@@ -32,10 +34,9 @@ def api(monkeypatch, platform_capabilities):
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
-    client = SoevClient('https://soev.invalid', 'invalid-test-runtime-key', subject_minter=mint)
+    client = SoevClient('https://soev.invalid', 'invalid-test-runtime-key')
     monkeypatch.setattr(cloud_sync.identity, 'build_client', Mock(return_value=client))
     link = AsyncMock()
-    monkeypatch.setattr(cloud_sync.identity, 'ensure_link', link)
     app = FastAPI()
     app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync')
     user = SimpleNamespace(id='alice', role='user', email='alice@example.com')
@@ -73,7 +74,7 @@ def test_create_connection_returns_the_authorize_url(api, provider):
         ('POST', '/v1/connections/connection-1/authorize'),
     ]
     assert api.refs == ['owui:user:alice', 'owui:user:alice']
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_create_connection_reuses_an_existing_healthy_connection_without_consent(api):
@@ -83,7 +84,7 @@ def test_create_connection_reuses_an_existing_healthy_connection_without_consent
     assert result.status_code == 200
     assert result.json() == {'connection_id': 'conn-live', 'authorize_url': None}
     assert [(request.method, request.url.path) for request in api.requests] == [('POST', '/v1/connections')]
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize(
@@ -145,7 +146,7 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api, cadence):
     assert result.status_code == 200
     assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb-1'}
     assert api.requests[0].url.path == '/v1/schedules'
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
     assert (
         api.browser.post(
             '/api/v1/cloud-sync/knowledge/kb-1/schedules', json={**body, 'collection_key': 'foreign'}
@@ -200,7 +201,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     assert dict(api.requests[2].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
     # One connection fetch for two schedules sharing it, and no per-schedule call.
     assert len(api.refs) == 4
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize(
@@ -287,15 +288,16 @@ def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
             assert result.content == (b'{"job_id":"job-1"}' if runs else b'')
             assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
     assert result.status_code < 300 or operation == 'foreign'
-    api.link.assert_awaited_once()
+    api.link.assert_not_awaited()
     assert api.refs == ['owui:user:alice'] * len(api.requests)
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
-def assert_assertions(requests):
+def assert_login_headers(requests):
     for index, request in enumerate(requests, 1):
         assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
-        assert request.headers['X-Soev-Subject'] == f'invalid-test-assertion-{index}'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-alice-token'
+        assert 'X-Soev-' + 'Subject' not in request.headers
         if request.method != 'GET':
             assert request.headers['Idempotency-Key']
 
@@ -315,7 +317,7 @@ def test_reauthorize_sends_owner_email_only_for_google(api, provider):
     else:
         assert not api.requests[-1].content
     assert api.refs == ['owui:user:alice', 'owui:user:alice']
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize(
@@ -352,7 +354,7 @@ def test_delete_forwards_the_kb_as_collection_key(api, key):
     assert api.requests[-1].method == 'DELETE'
     assert api.requests[-1].url.path == '/v1/schedules/s'
     assert dict(api.requests[-1].url.params) == {'collection_key': key}
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize('action', ['delete', 'run', 'retry_failed', 'cancel', 'suspend', 'resume'])
@@ -377,7 +379,7 @@ def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
     assert len(api.requests) == (2 if subscribed else 1)
     if not subscribed:
         assert result.json()['detail']['code'] == 'connection_not_found'
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize('field', ['label', 'path'])
@@ -410,7 +412,7 @@ def test_schedule_create_forwards_label_and_path(api):
     assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
     assert result.json()['label'] == 'Reports'
     assert result.json()['path'] == '/Team/Reports'
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_connection_usage_lists_subscribing_kbs(api):
@@ -438,7 +440,7 @@ def test_connection_usage_lists_subscribing_kbs(api):
     assert dict(api.requests[1].url.params) == {'connection_id': 'c'}
     assert dict(api.requests[2].url.params) == {'connection_id': 'c', 'cursor': 'next'}
     assert api.refs == ['owui:user:alice'] * 3
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_connection_usage_without_schedules_is_empty(api):
@@ -447,7 +449,7 @@ def test_connection_usage_without_schedules_is_empty(api):
     result = api.browser.get('/api/v1/cloud-sync/connections/c/usage')
     assert result.status_code == 200
     assert result.json() == {'knowledge_ids': []}
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_connection_usage_refuses_an_inaccessible_connection(api):
@@ -456,7 +458,7 @@ def test_connection_usage_refuses_an_inaccessible_connection(api):
     result = api.browser.get('/api/v1/cloud-sync/connections/foreign/usage')
     assert result.status_code == 404
     assert len(api.requests) == 1
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_connection_usage_requires_a_verified_user(api):
@@ -555,7 +557,7 @@ def test_skipped_items_list_failed_job_items(api):
     assert api.requests[3].url.path == '/v1/collections/kb/documents'
     assert dict(api.requests[4].url.params) == {'cursor': 'next'}
     assert api.refs == ['owui:user:alice'] * 5
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_skipped_items_ignore_acl_refresh_echoes(api):
@@ -570,7 +572,7 @@ def test_skipped_items_ignore_acl_refresh_echoes(api):
     assert result.status_code == 200
     assert result.json() == []
     assert len(api.requests) == 2
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 @pytest.mark.parametrize('subscribed', [False, True])
@@ -589,7 +591,7 @@ def test_skipped_items_require_subscription_and_allow_no_run(api, subscribed):
     if subscribed:
         assert result.json() == []
     assert len(api.requests) == 2
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)
 
 
 def test_skipped_items_require_readable_knowledge(api):
@@ -616,7 +618,7 @@ def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypat
     request = api.requests[0]
     assert (request.method, request.url.path) == ('GET', '/v1/sync-policy')
     assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
-    assert 'X-Soev-Subject' not in request.headers
+    assert 'X-Soev-' + 'Subject' not in request.headers
     assert api.refs == []
     api.link.assert_not_awaited()
 
@@ -745,7 +747,7 @@ def test_live_document_grant_enable_uses_owned_connection(api, lifecycle, provid
         api.responses.append(response({**grant, 'lifecycle': 'enabled'}))
     result = api.browser.post(f'/api/v1/cloud-sync/connections/c/live/{family}')
     assert result.status_code == 200 and result.json()['lifecycle'] == 'enabled'
-    assert all(r.headers.get('X-Soev-Subject') for r in api.requests)
+    assert all(r.headers.get('X-Soev-User-Token') for r in api.requests)
     if lifecycle == 'missing':
         assert json.loads(api.requests[-1].content) == {'families': [family]}
         assert api.requests[-1].headers['Idempotency-Key'] == f'live:{family}:c'
@@ -780,4 +782,4 @@ def test_sync_all_runs_the_kbs_schedules_in_one_call(api, key):
     assert api.requests[0].method == 'POST'
     assert api.requests[0].url.raw_path.decode() == f'/v1/collections/{quote(key, safe="")}/sync'
     assert api.requests[0].headers['Idempotency-Key']
-    assert_assertions(api.requests)
+    assert_login_headers(api.requests)

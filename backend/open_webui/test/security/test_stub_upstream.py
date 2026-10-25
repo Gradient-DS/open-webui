@@ -88,6 +88,22 @@ def test_model_discovery_exposes_a_usable_model(stub):
     assert models[0]['id'] == tags[0]['model'] == 'stub-model'
 
 
+def test_speech_returns_audio_and_captures_the_openai_body(stub):
+    payload = {
+        'model': 'stub-model',
+        'input': 'Fictional speech.',
+        'voice': 'fictional-voice',
+        'response_format': 'mp3',
+    }
+    get_json(stub, '/_recorded/reset')
+    content_type, body = request(stub, '/v1/audio/speech', payload)
+    assert content_type == 'audio/mpeg'
+    assert body.startswith(b'ID3') and len(body) > 10
+    record = get_json(stub, '/_recorded')['requests'][-1]
+    assert record['path'] == '/v1/audio/speech'
+    assert record['body'] == payload
+
+
 @pytest.mark.parametrize('path,field', [('/api/chat', 'message'), ('/api/generate', 'response')])
 @pytest.mark.parametrize('stream', [True, False])
 def test_ollama_uses_its_own_protocol(stub, path, field, stream):
@@ -175,9 +191,10 @@ def test_unmodelled_upstreams_have_the_planned_catch_all(stub, path):
 
 
 @pytest.mark.parametrize('raw', [b'[]', b'not-json'])
-def test_malformed_model_body_is_an_explicit_refusal(stub, raw):
+@pytest.mark.parametrize('path', ['/v1/chat/completions', '/v1/audio/speech'])
+def test_malformed_model_body_is_an_explicit_refusal(stub, raw, path):
     with pytest.raises(HTTPError) as error:
-        request(stub, '/v1/chat/completions', raw=raw)
+        request(stub, path, raw=raw)
     assert error.value.code == 400
     assert json.loads(error.value.read())['error'] == 'expected a JSON object'
 
@@ -196,3 +213,125 @@ def test_head_answers_headers_without_a_body(stub):
     head, _, body = data.partition(b'\r\n\r\n')
     assert b' 200 ' in head.split(b'\r\n')[0]
     assert body == b''
+
+
+@pytest.mark.parametrize('path,ollama', [('/v1/chat/completions', False), ('/api/chat', True)])
+def test_task_fixture_stream_is_held_but_other_completions_still_answer(stub, path, ollama):
+    connection = HTTPConnection('127.0.0.1', urlsplit(stub[1]).port, timeout=5)
+    body = {'stream': True, 'messages': [{'role': 'user', 'content': 'owui_attack_task_hold:' + 'a' * 24}]}
+    connection.request('POST', path, json.dumps(body), {'Content-Type': 'application/json'})
+    response = connection.getresponse()
+    try:
+        assert response.status == 200
+        for _ in range(2):
+            frame = response.readline()
+            if not ollama:
+                assert frame.startswith(b'data: ')
+                frame = frame.removeprefix(b'data: ')
+                assert response.readline() == b'\n'
+            payload = json.loads(frame)
+            if ollama:
+                assert payload['done'] is False
+                assert payload['message']['content'] == ''
+            else:
+                assert payload['choices'][0]['delta']['content'] == ''
+                assert payload['choices'][0]['finish_reason'] is None
+        assert get_json(stub, '/v1/chat/completions', payload={'stream': False})['choices'][0]['message']['content']
+    finally:
+        response.close()
+        connection.close()
+
+
+@pytest.mark.parametrize('path', ['/v1/chat/completions', '/api/chat'])
+def test_task_hold_expires_and_then_completes_normally(stub, monkeypatch, path):
+    assert stub[0].TASK_HOLD_SECONDS == 3600
+    monkeypatch.setattr(stub[0], 'TASK_HOLD_SECONDS', 0.05)
+    monkeypatch.setattr(stub[0], 'TASK_HEARTBEAT_SECONDS', 0.01)
+    content_type, raw = request(
+        stub,
+        path,
+        {'stream': True, 'messages': [{'role': 'user', 'content': 'owui_attack_task_hold:' + 'b' * 24}]},
+    )
+    if content_type == 'text/event-stream':
+        frames = [frame.removeprefix(b'data: ') for frame in raw.split(b'\n\n') if frame]
+        assert frames[-1] == b'[DONE]'
+        chunks = [json.loads(frame)['choices'][0] for frame in frames[:-1]]
+        assert any(chunk['delta'].get('content') == '' and chunk['finish_reason'] is None for chunk in chunks)
+        assert chunks[-1]['finish_reason'] == 'stop'
+    else:
+        chunks = [json.loads(line) for line in raw.splitlines()]
+        assert any(chunk['message']['content'] == '' and chunk['done'] is False for chunk in chunks)
+        assert chunks[-1]['done'] is True
+
+
+def test_task_hold_stops_writing_when_cancellation_closes_the_connection(stub, monkeypatch):
+    from unittest.mock import Mock
+
+    handler = object.__new__(stub[0].Handler)
+    handler.wfile = Mock()
+    handler.wfile.write.side_effect = BrokenPipeError('fixture disconnected')
+    handler.send_response = Mock()
+    handler.send_header = Mock()
+    handler.end_headers = Mock()
+    pause = Mock(side_effect=AssertionError('Disconnected streams must not wait'))
+    monkeypatch.setattr(stub[0].time, 'sleep', pause)
+    handler._send_stream({'messages': [{'content': 'owui_attack_task_hold:' + 'c' * 24}]})
+    handler.wfile.write.assert_called_once()
+    pause.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_held_inference_task_is_visible_only_to_its_owner_and_cancellable(stub, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from fastapi import FastAPI
+    from open_webui import tasks
+    from open_webui.main import Chats, list_tasks_by_chat_id_endpoint, stop_task_endpoint
+    from open_webui.utils.auth import get_admin_user, get_verified_user
+
+    monkeypatch.setattr(tasks, 'tasks', {})
+    monkeypatch.setattr(tasks, 'item_tasks', {})
+    monkeypatch.setattr(tasks, 'response_streams', {})
+    monkeypatch.setattr(Chats, 'get_chat_by_id', AsyncMock(return_value=SimpleNamespace(user_id='fictional-owner')))
+    app = FastAPI()
+    app.state.redis = None
+    app.add_api_route('/api/tasks/chat/{chat_id}', list_tasks_by_chat_id_endpoint, methods=['GET'])
+    app.add_api_route('/api/tasks/stop/{task_id}', stop_task_endpoint, methods=['POST'])
+    actor = SimpleNamespace(id='fictional-owner', role='admin')
+    app.dependency_overrides[get_verified_user] = lambda: actor
+    app.dependency_overrides[get_admin_user] = lambda: actor
+    entered = asyncio.Event()
+
+    async def inference():
+        async with httpx.AsyncClient(trust_env=False) as upstream:
+            async with upstream.stream(
+                'POST',
+                stub[1] + '/v1/chat/completions',
+                json={'stream': True, 'messages': [{'role': 'user', 'content': 'owui_attack_task_hold:' + 'd' * 24}]},
+                timeout=5,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line.startswith('data: '):
+                        entered.set()
+
+    task_id, task = await tasks.create_task(None, inference(), id='fictional-chat')
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert not task.done()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
+            owner = await client.get('/api/tasks/chat/fictional-chat')
+            assert owner.json() == {'task_ids': [task_id]}
+            actor = SimpleNamespace(id='fictional-second-account', role='user')
+            stranger = await client.get('/api/tasks/chat/fictional-chat')
+            assert stranger.json() == {'task_ids': []}
+            actor = SimpleNamespace(id='fictional-owner', role='admin')
+            stopped = await client.post(f'/api/tasks/stop/{task_id}')
+            assert stopped.status_code == 200 and stopped.json()['status'] is True
+            assert task.cancelled()
+            assert (await client.get('/api/tasks/chat/fictional-chat')).json() == {'task_ids': []}
+    finally:
+        await tasks.stop_task(None, task_id)

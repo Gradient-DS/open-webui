@@ -2,7 +2,6 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import httpx
@@ -33,7 +32,7 @@ def boundary(monkeypatch, platform_capabilities):
         assert request.url.scheme == 'https'
         assert request.url.host == 'platform.invalid'
         assert request.headers['authorization'] == 'Bearer ci-key'
-        assert request.headers['x-soev-subject'] == 'assertion:owui:user:owner'
+        assert request.headers['x-soev-user-token'] == 'fictional-login:owui:user:owner'
         return replies.pop(0)
 
     original = httpx.AsyncClient
@@ -41,9 +40,13 @@ def boundary(monkeypatch, platform_capabilities):
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: original(transport=httpx.MockTransport(handle), **kwargs),
     )
-    client = SoevClient('https://platform.invalid', 'ci-key', subject_minter=lambda ref: f'assertion:{ref}')
+
+    async def token(ref):
+        return f'fictional-login:{ref}'
+
+    monkeypatch.setattr('open_webui.soev.client.user_token', token)
+    client = SoevClient('https://platform.invalid', 'ci-key')
     monkeypatch.setattr(cloud_sync.identity, 'build_client', lambda: client)
-    monkeypatch.setattr(cloud_sync.identity, 'ensure_link', AsyncMock())
     app = FastAPI()
     app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync')
     app.dependency_overrides[cloud_sync.get_verified_user] = lambda: SimpleNamespace(

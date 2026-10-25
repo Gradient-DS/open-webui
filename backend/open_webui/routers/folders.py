@@ -1,4 +1,5 @@
 import logging
+import time
 import mimetypes
 import os
 import shutil
@@ -9,6 +10,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
+from open_webui.soev import threads as soev_threads
+from open_webui.soev.chat_routes import paths as thread_paths
 from open_webui.config import UPLOAD_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
@@ -50,10 +53,16 @@ router = APIRouter()
 from open_webui.utils.access_control.folders import has_folder_access as _has_folder_access
 
 
-async def get_folder_unread_counts(user_id: str, db: AsyncSession | None = None) -> dict[str, int]:
+async def get_folder_unread_counts(
+    user_id: str, db: AsyncSession | None = None, request: Request | None = None
+) -> dict[str, int]:
     folders = await Folders.get_folders_by_user_id(user_id, db=db)
     parent_by_id = {folder.id: folder.parent_id for folder in folders}
     unread_counts = dict.fromkeys(parent_by_id.keys(), 0)
+    if soev_threads.enabled():
+        if request is None:
+            raise soev_threads.ThreadError(503, 'reconnect')
+        return await thread_paths(request).folder_counts(user_id, parent_by_id)
     direct_unread_counts = await Chats.count_unread_by_folder_ids(user_id, list(parent_by_id.keys()), db=db)
 
     for unread_folder_id, unread_count in direct_unread_counts.items():
@@ -136,7 +145,7 @@ async def get_folders(
 
         folder_list.append(folder)
 
-    unread_counts = await get_folder_unread_counts(user.id, db=db)
+    unread_counts = await get_folder_unread_counts(user.id, db=db, request=request)
 
     return [
         FolderNameIdResponse(**folder.model_dump(), unread_count=unread_counts.get(folder.id, 0))
@@ -647,6 +656,23 @@ async def get_shared_folder_chats(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    if soev_threads.enabled():
+        items = await thread_paths(request).listing(
+            user.id,
+            folder_id=id,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+        total = len(items)
+        skip = (page - 1) * 10 if page is not None else 0
+        result = {
+            'chats': items[skip : skip + 10] if page is not None else items[:60],
+            'folder_permission': 'write' if has_write else 'read',
+        }
+        if page is not None:
+            result.update({'total': total, 'has_more': skip + 10 < total})
+        return result
+
     limit = 10
     skip = (page - 1) * limit if page is not None else 0
     chats = await Chats.get_all_chats_by_folder_id(
@@ -708,13 +734,23 @@ async def mark_folder_chats_read_by_id(
     folder_ids = (
         await Folders.get_folder_ids_by_id_and_user_id_in_subtree(id, folder.user_id, db=db) if is_owner else [id]
     )
-    updated_count = await Chats.mark_chats_read_by_folder_ids(user.id, folder_ids, db=db)
+    if soev_threads.enabled():
+        service = thread_paths(request)
+        items = await service.authorized(user.id)
+        updated_count = 0
+        for item in items:
+            org = item['organization'] or {}
+            if org.get('folder_id') in folder_ids:
+                await service.organize(user.id, org.get('id', item['thread_id']), {'last_read_at': int(time.time())})
+                updated_count += 1
+    else:
+        updated_count = await Chats.mark_chats_read_by_folder_ids(user.id, folder_ids, db=db)
 
     return {
         'folder_id': id,
         'folder_ids': folder_ids,
         'updated_count': updated_count,
-        'folder_unread_counts': await get_folder_unread_counts(user.id, db=db),
+        'folder_unread_counts': await get_folder_unread_counts(user.id, db=db, request=request),
     }
 
 
@@ -761,7 +797,19 @@ async def delete_folder_by_id(
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    chat_ids = []
+    if v2_enabled() and delete_contents:
+        from open_webui.soev.agent_threads import delete_chats_threads, deletion_chat_ids
+
+        chat_ids = await deletion_chat_ids(folder_owner_id, folder_ids=folder_ids, db=db)
+        await delete_chats_threads(folder_owner_id, chat_ids, db=db)
     await folder_sharing.check_delete(user.id, folder_owner_id, folder_ids)
+
+    if v2_enabled() and delete_contents:
+        for chat_id in chat_ids:
+            await Chats.soft_delete_by_id(chat_id, db=db)
 
     folders = []
     folders.append(folder)

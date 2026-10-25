@@ -1,13 +1,11 @@
-"""HTTP boundary for soev-api, with fresh assertions and caller-owned mutation keys.
-
-No retries: subject assertions are single-use and mutations belong to the caller.
-"""
+"""HTTP boundary for soev-api, with request-local login tokens and caller-owned mutation keys."""
 
 import asyncio
 import json
 import logging
+import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
@@ -15,7 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
-from open_webui.soev.acting import user_token
+from open_webui.soev.acting import requester_ref, user_token
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
@@ -32,7 +30,7 @@ def _shared_client() -> httpx.AsyncClient:
     global _http_client
     loop = asyncio.get_running_loop()
     if _http_client is None or _http_client[0] is not loop:
-        # Credentials remain request-local, including on presigned downloads.
+        # Credentials remain request-local, including on download redemption.
         # No connection cap: long chat streams must not queue other soev-api calls.
         client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=20),
@@ -173,13 +171,11 @@ class SoevClient:
         base_url: str,
         api_key: str,
         *,
-        subject_minter: Callable[[str], str] | None = None,
         timeout: float = 30.0,
         service: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip('/')
         self._api_key = api_key
-        self._subject_minter = subject_minter
         self._timeout = timeout
         self.is_service = service
 
@@ -191,13 +187,12 @@ class SoevClient:
         headers = {'Authorization': f'Bearer {self._api_key}'}
         if self.is_service:
             return headers
-        if as_user is not None:
-            if self._subject_minter is None:
-                raise ValueError('Acting as a user requires a subject minter')
-            headers['X-Soev-Subject'] = self._subject_minter(as_user)
-        access_token = user_access_token if user_access_token is not None else await user_token(as_user)
+        ref = as_user if as_user is not None else requester_ref()
+        access_token = user_access_token if user_access_token is not None else await user_token(ref)
         if access_token:
             headers['X-Soev-User-Token'] = access_token
+        elif ref is not None or user_access_token is not None:
+            raise SoevApiError(401, 'sign_in', 'Platform login required', 'identity:platform_login')
         return headers
 
     async def me(self, access_token: str) -> dict:
@@ -279,8 +274,8 @@ class SoevClient:
 
     async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
         """Pass a streamed task completion's SSE bytes through unchanged."""
-        if not as_user or self._subject_minter is None:
-            raise ValueError('A task completion requires an acting user and subject minter')
+        if not as_user:
+            raise ValueError('A task completion requires an acting user')
         headers = await self._headers(as_user)
         headers['Accept'] = 'text/event-stream'
         try:
@@ -304,7 +299,11 @@ class SoevClient:
         """Delete a thread once; the chat contract has no mutation replay key."""
         if not as_user:
             raise ValueError('Chat requires an acting user')
-        await self._request('DELETE', path, as_user=as_user)
+        from open_webui.soev.policy_jobs import v2_enabled
+
+        response = await self._request('DELETE', path, as_user=as_user)
+        if v2_enabled() and response.status_code != 204:
+            raise SoevApiError(502, 'upstream_error', 'Thread deletion did not complete')
 
     async def chat_stream(
         self,
@@ -318,8 +317,8 @@ class SoevClient:
         """Reconnect capped streams through events, never by replaying the POST."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        if not as_user or self._subject_minter is None:
-            raise ValueError('Chat requires an acting user and subject minter')
+        if not as_user:
+            raise ValueError('Chat requires an acting user')
         method = 'POST'
         try:
             while True:
@@ -367,22 +366,70 @@ class SoevClient:
                         return
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
-        key = (self._base_url, self._api_key, as_user, path, tuple(sorted((params or {}).items())))
-        response = await memoized(key, lambda: self._request('GET', path, as_user=as_user, params=params))
+        await self._require_thread_request(path, as_user)
+        headers = await self._headers(as_user)
+        key = (
+            self._base_url,
+            self._api_key,
+            type(self),
+            self.is_service,
+            tuple(sorted(headers.items())),
+            path,
+            tuple(sorted((params or {}).items())),
+        )
+        response = await memoized(
+            key, lambda: self._request('GET', path, as_user=as_user, params=params, admission_headers=headers)
+        )
+        return self._json_object(response)
+
+    async def get_retention_policy(self, *, as_user: str) -> dict | None:
+        response = await self._request('GET', '/v1/retention-policy', as_user=as_user)
+        if response.json() is None:
+            return None
         return self._json_object(response)
 
     async def get_text(self, path: str, *, as_user: str | None = None) -> str:
         """Read API text with the same authority and error handling as JSON reads."""
-        response = await self._request('GET', path, as_user=as_user)
-        return response.text
+        async with self.stream_response(path, as_user=as_user) as response:
+            await response.aread()
+            return response.text
 
     async def stream(self, path: str, *, as_user: str) -> AsyncIterator[bytes]:
-        """Stream original bytes, following one presigned redirect without API credentials."""
+        """Stream bytes with the caller's admission on one download redemption."""
+        if not as_user:
+            raise ValueError('Acting as a user requires an acting user')
+        async with self.stream_response(path, as_user=as_user) as response:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+
+    def _download_url(self, location: str) -> httpx.URL:
+        try:
+            origin = httpx.URL(self._base_url)
+            target = origin.join(location)
+            if (
+                not location
+                or (target.scheme, target.host, target.port) != (origin.scheme, origin.host, origin.port)
+                or target.userinfo
+                or target.query
+                or target.fragment
+                or not re.fullmatch(rb'/v1/downloads/[A-Za-z0-9_-]+', target.raw_path)
+            ):
+                raise ValueError
+        except (httpx.InvalidURL, ValueError):
+            raise SoevApiError(502, 'upstream_error', 'Invalid download URL') from None
+        return target
+
+    @asynccontextmanager
+    async def stream_response(
+        self, path: str, *, as_user: str | None = None, range_header: str | None = None
+    ) -> AsyncIterator[httpx.Response]:
+        """Expose download status and headers while keeping the upstream open."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        if self._subject_minter is None or not as_user:
-            raise ValueError('Acting as a user requires a subject minter and user')
+        await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
+        if range_header is not None:
+            headers['Range'] = range_header
         try:
             async with AsyncExitStack() as stack:
                 client = _shared_client()
@@ -390,33 +437,40 @@ class SoevClient:
                     client.stream('GET', f'{self._base_url}{path}', headers=headers, timeout=self._timeout)
                 )
                 if response.status_code == 303:
-                    location = response.headers.get('Location', '')
-                    if not location.startswith(('https://', 'http://')):
-                        raise SoevApiError(502, 'upstream_error', 'Invalid original download URL')
-                    response = await stack.enter_async_context(client.stream('GET', location, timeout=self._timeout))
-                    if not response.is_success:
-                        raise SoevApiError(502, 'upstream_error', 'Original download failed')
-                elif not response.is_success:
+                    location = self._download_url(response.headers.get('Location', ''))
+                    await response.aclose()
+                    response = await stack.enter_async_context(
+                        client.stream('GET', location, headers=headers, timeout=self._timeout)
+                    )
+                    if response.is_redirect:
+                        raise SoevApiError(502, 'upstream_error', 'Download redirected more than once')
+                if not response.is_success and not (range_header is not None and response.status_code == 416):
                     await response.aread()
                     raise _response_error(response)
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+                yield response
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             raise SoevApiError(status, 'upstream_error', 'Original download failed') from None
 
-    async def put_bytes(self, url: str, *, headers: dict[str, str], body: bytes) -> None:
-        """Upload bytes using the presigned URL as the sole credential."""
-        try:
-            response = await _shared_client().put(url, headers=headers, content=body, timeout=self._timeout)
-        except httpx.TransportError as error:
-            status = 504 if isinstance(error, httpx.TimeoutException) else 502
-            raise SoevApiError(status, 'upload_failed', 'File upload failed') from None
-        if not response.is_success:
-            raise SoevApiError(502, 'upload_failed', f'File upload returned HTTP {response.status_code}')
+    async def upload_document(
+        self,
+        job_id: str,
+        source_id: str,
+        chunks: AsyncIterator[bytes],
+        *,
+        size: int,
+        content_type: str,
+        as_user: str | None = None,
+    ) -> None:
+        """Stream a declared file to its authenticated API route without retrying."""
+        path = f'/v1/jobs/{quote(job_id, safe="")}/uploads/{quote(source_id, safe="")}'
+        async with aclosing(chunks):
+            await self._request(
+                'PUT', path, content=chunks, as_user=as_user, content_type=content_type, content_length=size
+            )
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
-        """Yield each page's data items, minting a fresh assertion for every cursor request."""
+        """Yield each page's data items with fresh admission for every cursor request."""
         query = dict(params or {})
         while True:
             page = await self.get(path, as_user=as_user, params=query)
@@ -443,23 +497,44 @@ class SoevClient:
             return None
         return self._json_object(response)
 
+    async def _require_thread_request(self, path: str, as_user: str | None) -> None:
+        from open_webui.soev.policy_jobs import require_thread_owner, v2_enabled
+
+        if v2_enabled() and path.startswith('/v1/chat/threads/'):
+            if self.is_service or not as_user:
+                raise SoevApiError(403, 'policy_forbids', 'Owner request required', constraint='thread:owner_request')
+            await require_thread_owner(as_user.removeprefix('owui:user:'))
+
     async def _request(
         self,
         method: str,
         path: str,
         *,
         body: dict | None = None,
-        content: bytes | None = None,
+        content: bytes | AsyncIterator[bytes] | None = None,
+        content_type: str | None = None,
+        content_length: int | None = None,
         files: dict | None = None,
         data: dict | None = None,
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
         user_access_token: str | None = None,
+        admission_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        headers = await self._headers(as_user, user_access_token=user_access_token)
+        if method in {'GET', 'DELETE'}:
+            await self._require_thread_request(path, as_user)
+        headers = (
+            admission_headers
+            if admission_headers is not None
+            else await self._headers(as_user, user_access_token=user_access_token)
+        )
+        if content_type is not None:
+            headers['Content-Type'] = content_type
+        if content_length is not None:
+            headers['Content-Length'] = str(content_length)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()

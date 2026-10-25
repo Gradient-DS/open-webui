@@ -23,6 +23,7 @@ from open_webui.models.tools import Tools
 from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
 from open_webui.soev.availability import configured
+from open_webui.soev.thread_content import refuse_local_content
 from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class ExportService:
     @staticmethod
     def get_export_dir(user_id: str) -> Path:
         """Get or create the export directory for a user."""
+        refuse_local_content()
         user_dir = EXPORT_DIR / user_id
         user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
@@ -44,6 +46,7 @@ class ExportService:
     @staticmethod
     def get_active_export(user_id: str) -> dict | None:
         """Check if there's an existing export for this user."""
+        refuse_local_content()
         user_dir = EXPORT_DIR / user_id
         if not user_dir.exists():
             return None
@@ -72,6 +75,7 @@ class ExportService:
         Collect all exportable data for a user.
         Returns a dict of data category -> list/dict of records.
         """
+        refuse_local_content()
         data = {}
 
         # User profile

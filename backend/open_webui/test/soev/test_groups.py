@@ -24,12 +24,16 @@ def row(id='old', members=None):
 @pytest.mark.asyncio
 async def test_pull_pages_replaces_members_and_preserves_product_settings(group_db, monkeypatch):
     requests = []
+    resolve_token = AsyncMock(side_effect=AssertionError('Directory mirroring uses service authority'))
+    monkeypatch.setattr('open_webui.soev.client.user_token', resolve_token)
 
     def handle(request):
         requests.append(request)
         assert request.method == 'GET'
         assert request.url.path == '/v1/groups'
         assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
+        assert 'X-Soev-User-Token' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         if request.url.params.get('cursor') == 'page-2':
             return httpx.Response(200, json={'data': [row('new', ['fern-person'])], 'next_cursor': None})
         return httpx.Response(200, json={'data': [row()], 'next_cursor': 'page-2'})
@@ -41,6 +45,7 @@ async def test_pull_pages_replaces_members_and_preserves_product_settings(group_
     )
     await group_mirror.reconcile(db=group_db)
     assert len(requests) == 2
+    resolve_token.assert_not_awaited()
     old = await Groups.get_group_by_id('old', db=group_db)
     assert old.name == 'Meadow'
     assert old.permissions == {'workspace': {'knowledge': True}}
@@ -169,7 +174,7 @@ async def test_oauth_group_sync_refuses_without_mutating(group_db):
 
 
 @pytest.mark.asyncio
-async def test_product_permissions_are_local_configuration_only(group_db, identity_config, monkeypatch):
+async def test_product_permissions_are_local_configuration_only(group_db, monkeypatch):
     # The product setting cannot author group identity, membership or platform policy.
     client = SimpleNamespace(send=AsyncMock(side_effect=AssertionError('No platform writes')))
     monkeypatch.setattr(group_mirror, 'build_service_client', lambda: client)
@@ -182,17 +187,6 @@ async def test_product_permissions_are_local_configuration_only(group_db, identi
         db=group_db,
     )
     assert updated.permissions['platform']['role:assign'] is True
-    import datetime as dt
-
-    import jwt
-
-    identity, _ = identity_config
-    claims = jwt.decode(
-        identity.mint_assertion('owui:user:fern', now=dt.datetime.now(dt.UTC)),
-        options={'verify_signature': False},
-    )
-    assert set(claims) == {'iss', 'sub', 'aud', 'iat', 'exp', 'jti'}
-    assert claims['sub'] == 'owui:user:fern'
     with pytest.raises(HTTPException):
         await Groups.insert_new_group('fern', None, db=group_db)
     assert updated.name == 'Old'

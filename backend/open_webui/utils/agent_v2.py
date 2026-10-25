@@ -30,21 +30,21 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents, threads
+from open_webui.soev.chat_paths import Organizations
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.mail_status import mail_search_status
-
 from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
 from starlette.responses import JSONResponse, StreamingResponse
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 _ROOT = '/v1/chat/threads'
@@ -263,7 +263,7 @@ async def _knowledge(
     keys = _knowledge_keys(metadata, folder)
     if not keys:
         return [], []
-    user_id = None if acting.acting_ref() else metadata['user_id']
+    user_id = None if acting.requester_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     skipped = []
     if missing := [key for key in keys if key not in described]:
@@ -374,7 +374,7 @@ async def _attachments(metadata: dict[str, Any], folder: list[dict[str, Any]] = 
     unavailable: list[Skipped] = []
     notes: list[str] = []
     entries = {entry['id']: entry for entry in metadata.get('files') or [] if ingest.is_chat_attachment(entry)}
-    user_id = None if acting.acting_ref() else metadata['user_id']
+    user_id = None if acting.requester_ref() else metadata['user_id']
     for file_id, entry in entries.items():
         await _chat_attachment(file_id, entry, user_id, attached, unavailable, notes)
     await _assistant_attachments(metadata, set(entries), user_id, attached, unavailable)
@@ -628,11 +628,42 @@ async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
         await Chats.update_chat_by_id(chat_id, {'files': kept}, touch=False)
 
 
+async def _add_chat(
+    entry: dict[str, Any],
+    chats: list[dict[str, str]] | None,
+    organizations: Organizations | None,
+    owner_id: str | None,
+    *,
+    origin: str,
+) -> list[Skipped]:
+    thread_id = entry.get('thread_id')
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id):
+        item_id = entry.get('id')
+        thread_id = (
+            await organizations.context_thread_id(owner_id, item_id) if organizations and owner_id and item_id else None
+        )
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id) or chats is None:
+        if origin != 'assistant':
+            raise threads.ThreadError(409, 'unavailable')
+        return [Skipped('chat', 'gone', entry.get('id') or '', entry.get('name'), in_chat=False)]
+    ref = {'thread_id': thread_id}
+    if ref not in chats:
+        chats.append(ref)
+    return []
+
+
 async def _texts(
-    entries: list[dict[str, Any]], user_id: str, *, origin: str = 'chat'
+    entries: list[dict[str, Any]],
+    user_id: str,
+    *,
+    origin: str = 'chat',
+    chats: list[dict[str, str]] | None = None,
+    organizations: Organizations | None = None,
+    chat_owner_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Gradient] Read attached notes and chats (`origin` chat), a folder's notes or an assistant's notes and chats with
-    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out."""
+    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out.
+    Under v2, chats contribute only thread references for the runtime to authorize and import."""
     if not entries:
         return [], []
     user = await Users.get_user_by_id(user_id)
@@ -656,6 +687,11 @@ async def _texts(
                     'text': text[:TEXT_CHARACTERS],
                     'length': len(text),
                 }
+            )
+            continue
+        if threads.enabled() and kind == 'chat':
+            unavailable += await _add_chat(
+                entry, chats, organizations, user_id if origin == 'chat' else chat_owner_id, origin=origin
             )
             continue
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
@@ -698,7 +734,12 @@ TEXTS = 10
 
 
 async def _more_texts(
-    folder: list[dict[str, Any]], entries: list[dict[str, Any]], metadata: dict[str, Any]
+    folder: list[dict[str, Any]],
+    entries: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    *,
+    chats: list[dict[str, str]] | None = None,
+    organizations: Organizations | None = None,
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Claude] The folder's notes, then the assistant's notes and chats, not attached in the chat too, in the room
     the chat's own texts leave; the rest are skipped, never refusing the turn."""
@@ -709,6 +750,11 @@ async def _more_texts(
         for item in metadata.get('knowledge') or []
         if isinstance(item, dict) and item.get('type') in ('note', 'chat') and isinstance(item.get('id'), str)
     ]
+    chat_owner_id = None
+    if threads.enabled() and any(item['type'] == 'chat' for item in assistant):
+        model_id = metadata.get('assistant_id') or metadata.get('model_id')
+        model = await Models.get_model_by_id(model_id) if model_id else None
+        chat_owner_id = model.user_id if model is not None else None
     texts, skipped = [], []
     for items, origin in (([item for item in folder if item['type'] == 'note'], 'folder'), (assistant, 'assistant')):
         fresh = []
@@ -716,7 +762,14 @@ async def _more_texts(
             if (item['type'], item['id']) not in taken:
                 taken.add((item['type'], item['id']))
                 fresh.append(item)
-        read, more = await _texts(fresh[:room], metadata['user_id'], origin=origin)
+        read, more = await _texts(
+            fresh[:room],
+            metadata['user_id'],
+            origin=origin,
+            chats=chats,
+            organizations=organizations,
+            chat_owner_id=chat_owner_id,
+        )
         texts += read
         skipped += more
         skipped += [
@@ -814,7 +867,6 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
         ):
             images.append(cached)
             continue
-        await identity.ensure_link(user, client)
         try:
             uploaded = await client.post_bytes('/v1/chat/images', body, as_user=user, params={'name': name})
         except SoevApiError as error:
@@ -1363,8 +1415,15 @@ def _marked(text: str, markers: list[tuple[int, int]], start: int = 0) -> str:
 class AgentTurn:
     """Bind one submitted input and its cancellation guard to an assistant message."""
 
-    def __init__(self, client: SoevClient, metadata: dict[str, Any], as_user: str) -> None:
+    def __init__(
+        self,
+        client: SoevClient,
+        metadata: dict[str, Any],
+        as_user: str,
+        organizations: Organizations | None = None,
+    ) -> None:
         self.client, self.metadata, self.as_user = client, metadata, as_user
+        self.organizations = organizations
         self.thread_id: str | None = None
         self.position = 0
         self.input_position: int | None = None
@@ -1430,6 +1489,9 @@ class AgentTurn:
     def failed(self, error: Exception) -> dict[str, Any]:
         """[Claude] The error chunk for a turn that raised; soev-api's detail reaches a refusal only on a 4xx."""
         language = self.metadata.get('user_language')
+        if isinstance(error, threads.ThreadError):
+            self.fail(error.status, error.state)
+            return _error(error.state, language=language)
         if not isinstance(error, SoevApiError):
             self.fail(500, type(error).__name__)
             return _error('service_unavailable', language=language)
@@ -1455,7 +1517,7 @@ class AgentTurn:
         if not self.notices:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
-        if chat_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and not is_temporary_chat_id(chat_id):
             if self.removed:
                 await _drop_chat_files(chat_id, self.removed)
             if message_id:
@@ -1466,6 +1528,20 @@ class AgentTurn:
         return f'{_ROOT}/{quote(self.thread_id or "", safe="")}' + (f'/{operation}' if operation else '')
 
     async def prepare(self) -> None:
+        if threads.enabled():
+            if self.organizations is None:
+                raise threads.ThreadError(503, 'reconnect')
+            records = await self.organizations.list(self.metadata['user_id'])
+            record = next((r for r in records if r.id == self.metadata.get('chat_id')), None)
+            if record is None:
+                if not self.metadata.get('new_thread'):
+                    raise threads.ThreadError(404, 'unavailable')
+                return
+            self.thread_id = record.thread_id
+            thread = await self.client.get(self.path(), as_user=self.as_user)
+            self.position = thread['status']['position']
+            await self._seed_sources(thread['events'], self.position)
+            return
         parent_id = self.metadata.get('parent_message_id')
         chat_id = self.metadata.get('chat_id')
         if not parent_id or not chat_id:
@@ -1532,6 +1608,8 @@ class AgentTurn:
         return added
 
     async def persist(self) -> None:
+        if threads.enabled():
+            return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         if self.thread_id and chat_id and message_id and is_temporary_chat_id(chat_id):
             bookmark = {'thread_id': self.thread_id, 'position': self.position}
@@ -1714,12 +1792,12 @@ class AgentTurn:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         stored = {}
-        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and message_id and not is_temporary_chat_id(chat_id):
             stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
         self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
         self.attached_files.update(files)
         update = {'files': list(self.attached_files.values())}
-        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+        if not threads.enabled() and chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
         # The full list, stored above: a `files` event would be appended to the stored files again.
         await self.emit('chat:message:files', update)
@@ -1791,6 +1869,8 @@ class AgentTurn:
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
         path = self.path('inputs') if self.thread_id else _ROOT
+        if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
+            body = {**body, 'temporary': True}
         try:
             stream = self.client.chat_stream(
                 path, body, as_user=self.as_user, thread_id=self.thread_id, after=self.position
@@ -1818,6 +1898,15 @@ class AgentTurn:
     async def render(self, event: ChatEvent) -> list[dict[str, Any]]:
         if event.event == 'connection':
             self.thread_id = event.data['thread_id']
+            if threads.enabled() and self.metadata.get('new_thread'):
+                record = threads.Organization(
+                    id=self.metadata.get('chat_id') or self.thread_id,
+                    thread_id=self.thread_id,
+                    folder_id=self.metadata.get('folder_id'),
+                )
+                await self.organizations.put(self.metadata['user_id'], record)
+                self.metadata['chat_id'] = record.id
+                self.metadata['new_thread'] = False
             return []
         position = event.position or event.data.get('position')
         if event.event != 'status' and position is not None:
@@ -1981,12 +2070,11 @@ class AgentTurn:
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()
-            await identity.ensure_link(self.as_user, self.client)
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.keep_attachments(body['input'].get('attachments') or [])
-            if not self.thread_id and (earlier := await _earlier(self.metadata)):
+            if not threads.enabled() and not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             self.keep_texts(body['input'].get('texts') or [])
             # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
@@ -2014,11 +2102,16 @@ class AgentTurn:
 
 
 async def call_agent_v2(
-    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str | None, model: str | None = None
+    form_data: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    agent: str | None,
+    model: str | None = None,
+    organizations: Organizations | None = None,
 ) -> StreamingResponse | dict:
     """Submit one user message; the thread owns the conversation history."""
-    user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
-    turn = AgentTurn(identity.build_client(), metadata, user_ref)
+    user_ref = acting.requester_ref() or f'owui:user:{metadata["user_id"]}'
+    turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:
         chunks = await _sent(turn, text, metadata, agent=agent, model=model)
@@ -2083,11 +2176,14 @@ async def _sent(
         turn.fail(422, 'attachments_unavailable')
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
+        chats: list[dict[str, str]] = []
         folder, skipped_folders = await _folder_items(metadata)
         knowledge, skipped = await _knowledge(metadata, folder)
         attachments = await _attachments(metadata, folder)
-        texts, skipped_texts = await _texts(entries, metadata['user_id'])
-        more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)
+        texts, skipped_texts = await _texts(entries, metadata['user_id'], chats=chats, organizations=turn.organizations)
+        more_texts, skipped_more_texts = await _more_texts(
+            folder, entries, metadata, chats=chats, organizations=turn.organizations
+        )
         images = await _images(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
@@ -2134,10 +2230,9 @@ async def _sent(
             'documents': documents,
         }
     }
-    if images:
-        body['input']['images'] = images
-    if texts:
-        body['input']['texts'] = texts
+    for key, value in (('images', images), ('texts', texts), ('chats', chats)):
+        if value:
+            body['input'][key] = value
     if isinstance(model, str) and model:
         body['model'] = model
     return turn.run(body, agent)

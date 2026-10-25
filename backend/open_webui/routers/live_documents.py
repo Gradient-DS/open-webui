@@ -55,7 +55,7 @@ async def attach_onedrive(
             )
     client = identity.build_client()
     try:
-        subject = await identity.acting_ref(user, client)
+        subject = identity.external_ref(user)
         collection = await ingest.ensure_attachments_collection(user.id, client)
         ref = body.model_dump(include={'grant_id', 'drive_id', 'item_id', 'etag'})
         result = await client.send(

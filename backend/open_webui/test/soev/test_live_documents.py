@@ -1,5 +1,6 @@
 """Reference attachments use durable Files, the job poller and user-scoped originals."""
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -108,18 +109,19 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
     file = await live_documents.register_attachment('alice', attachment())
     calls, closed = [], []
 
-    async def stream(path, *, as_user):
+    @asynccontextmanager
+    async def stream(path, *, as_user, range_header=None):
         calls.append((path, as_user))
         try:
             if denied:
                 raise SoevApiError(403, 'forbidden', 'Access revoked')
-            yield b'original'
-            yield b' bytes'
+            import httpx
+
+            yield httpx.Response(200, content=b'original bytes')
         finally:
             closed.append(True)
 
-    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
-    monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
+    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream_response=stream))
     storage = Mock(side_effect=AssertionError('Reference originals must not use OWUI storage'))
     monkeypatch.setattr(files.Storage, 'get_file', storage)
     user = SimpleNamespace(id='alice', role='user')
@@ -151,12 +153,12 @@ async def test_missing_original_while_processing_is_a_conflict(env, monkeypatch)
 
     file = await live_documents.register_attachment('alice', attachment())
 
-    async def stream(path, *, as_user):
+    @asynccontextmanager
+    async def stream(path, *, as_user, range_header=None):
         raise SoevApiError(404, 'not_found', 'Document not found')
         yield b''
 
-    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
-    monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
+    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream_response=stream))
     user = SimpleNamespace(id='alice', role='user')
     with pytest.raises(HTTPException) as error:
         await files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
@@ -174,7 +176,9 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
 
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
+    turn = SimpleNamespace(
+        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
+    )
     result = await agent_v2._sent(
         turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
     )
@@ -232,7 +236,9 @@ async def test_unavailable_reference_does_not_block_next_turn(env, monkeypatch, 
         await env.files.Files.set_status(row.id, status)
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
+    turn = SimpleNamespace(
+        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
+    )
     assert (
         await agent_v2._sent(
             turn, 'next', {'user_id': 'alice', 'files': [live_documents.chat_file(row)]}, agent=None, model=None
@@ -259,7 +265,9 @@ async def test_collection_cache_and_setup_failure(env, monkeypatch):  # noqa: F8
     setup.side_effect = RuntimeError('unavailable')
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
+    turn = SimpleNamespace(
+        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
+    )
     await agent_v2._sent(
         turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
     )
@@ -323,7 +331,9 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     assert row.meta['content_type'] == document['content_type']
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    next_turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
+    next_turn = SimpleNamespace(
+        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
+    )
     assert (
         await agent_v2._sent(
             next_turn, 'Read it', {'user_id': 'alice', 'files': message['files']}, agent=None, model=None
@@ -343,9 +353,16 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
     event = {**attachment(), 'content_type': None}
     row = await live_documents.register_attachment('alice', event)
     client = SimpleNamespace(get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}]))
-    monkeypatch.setattr(env.jobs.identity, 'ensure_link', AsyncMock())
     client.as_service = lambda: client
-    assert await env.jobs.poll_once(client, now=row.meta['soev_job']['submitted_at']) == 1
+    from open_webui.soev import acting
+
+    requester = acting._requester_ref.set('owui:user:alice')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login-token'))
+    try:
+        assert await env.jobs.poll_once(client, now=row.meta['soev_job']['submitted_at']) == 1
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
     updated = await env.files.Files.get_file_by_id(row.id)
     assert updated.meta['content_type'] == 'application/pdf'
     assert updated.meta['status'] == 'completed'

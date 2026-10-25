@@ -10,11 +10,25 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
-
 from open_webui.soev import acting
 from open_webui.soev.client import SoevApiError, SoevClient
+
+
+async def _send_file(api, ref, operation):
+    if operation == 'bytes':
+        await api.post_bytes('/v1/images', b'fictional-image', as_user=ref)
+    else:
+
+        async def chunks():
+            yield b'fictional-upload'
+
+        await api.upload_document('job', 'source', chunks(), size=16, content_type='text/plain', as_user=ref)
+
+
+async def platform_error(request, error):
+    return JSONResponse(status_code=error.status, content={'code': error.code})
 
 
 @pytest_asyncio.fixture
@@ -67,6 +81,8 @@ async def token_app(identity_config, monkeypatch):
     app = FastAPI()
     app.state.oauth_manager = manager
     acting.install(app)
+
+    app.add_exception_handler(SoevApiError, platform_error)
     requests = []
 
     def handle(request):
@@ -80,8 +96,8 @@ async def token_app(identity_config, monkeypatch):
         if request.url.path == '/v1/completions/task':
             return httpx.Response(200, text='data: {"text":"hello"}\n\n')
         if request.url.path == '/v1/original':
-            return httpx.Response(303, headers={'Location': 'https://storage.invalid/original'})
-        if request.url.host == 'storage.invalid':
+            return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
+        if request.url.path == '/v1/downloads/fictional-code':
             return httpx.Response(200, content=b'fictional-original')
         if request.url.path == '/v1/failure':
             return httpx.Response(503, text='unavailable')
@@ -91,7 +107,7 @@ async def token_app(identity_config, monkeypatch):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as api_http:
         monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: api_http)
-        api = SoevClient('https://soev.invalid', 'fictional-product-key', subject_minter=lambda _: 'fictional-subject')
+        api = SoevClient('https://soev.invalid', 'fictional-product-key')
 
         @app.middleware('http')
         async def api_key_header(request, call_next):
@@ -102,8 +118,8 @@ async def token_app(identity_config, monkeypatch):
         @app.get('/call/{operation}')
         async def call(operation: str, resolved=Depends(auth.get_verified_user)):
             ref = identity.external_ref(resolved)
-            if operation == 'bytes':
-                await api.post_bytes('/v1/images', b'fictional-image', as_user=ref)
+            if operation in {'bytes', 'upload'}:
+                await _send_file(api, ref, operation)
             elif operation == 'task':
                 return StreamingResponse(api.stream_task({}, as_user=ref))
             elif operation == 'chat':
@@ -113,14 +129,12 @@ async def token_app(identity_config, monkeypatch):
                 ]
             elif operation == 'original':
                 return StreamingResponse(api.stream('/v1/original', as_user=ref))
-            elif operation == 'presigned-upload':
-                await api.put_bytes('https://storage.invalid/upload', headers={}, body=b'fictional-upload')
             elif operation in {'failure', 'transport'}:
                 with pytest.raises(SoevApiError):
                     await api.get(f'/v1/{operation}', as_user=ref)
                 raise HTTPException(503)
             elif operation == 'product':
-                await api.get('/v1/capabilities')
+                await api.as_service().get('/v1/capabilities')
             else:
                 await api.send('POST', '/v1/collections', {}, as_user=ref, idempotency_key='fictional-operation')
             return {}
@@ -145,7 +159,7 @@ async def token_app(identity_config, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('operation', ['json', 'bytes', 'task', 'chat', 'original', 'product'])
+@pytest.mark.parametrize('operation', ['json', 'bytes', 'task', 'chat', 'original', 'upload', 'product'])
 async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operation):
     ctx = token_app
     assert acting._token_resolver.get() is None
@@ -160,15 +174,16 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
     assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
     if operation != 'product':
-        assert request.headers['X-Soev-Subject'] == 'fictional-subject'
+        assert 'X-Soev-' + 'Subject' not in request.headers
     if operation == 'bytes':
         assert request.content == b'fictional-image'
     if operation in {'chat', 'task'}:
         assert request.headers['Accept'] == 'text/event-stream'
     if operation == 'original':
         assert response.content == b'fictional-original'
-        assert 'X-Soev-User-Token' not in ctx.requests[1].headers
-        assert 'Authorization' not in ctx.requests[1].headers
+        assert ctx.requests[1].headers['X-Soev-User-Token'] == 'fictional-access-token'
+        assert ctx.requests[1].headers['Authorization'] == 'Bearer fictional-product-key'
+        assert 'X-Soev-' + 'Subject' not in ctx.requests[1].headers
     assert 'fictional-access-token' not in caplog.text
     assert 'fictional-refresh-token' not in caplog.text
     ctx.refresh.assert_not_awaited()
@@ -189,8 +204,9 @@ async def test_non_oidc_or_unowned_sessions_have_no_token(token_app, provider):
         ctx.session.user_id = 'rowan'
     else:
         ctx.session.provider = provider
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
     ctx.refresh.assert_not_awaited()
     if provider == 'password':
         ctx.lookup.assert_not_awaited()
@@ -207,8 +223,9 @@ async def test_api_keys_ignore_an_oidc_session_cookie(token_app, credential):
         ctx.browser.cookies.set('token', 'sk-fictional')
     else:
         ctx.browser.headers['x-api-key'] = 'sk-fictional'
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
     ctx.lookup.assert_not_awaited()
 
 
@@ -247,16 +264,9 @@ async def test_missing_or_failed_refresh_does_not_forward_old_credentials(token_
         ctx.refresh.return_value = None
     else:
         ctx.session.token = {}
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
-
-
-@pytest.mark.asyncio
-async def test_presigned_upload_has_no_user_token(token_app):
-    ctx = token_app
-    assert (await ctx.browser.get('/call/presigned-upload')).status_code == 200
-    for header in ('Authorization', 'X-Soev-Subject', 'X-Soev-User-Token'):
-        assert header not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
 
 
 @pytest.mark.asyncio
@@ -280,12 +290,12 @@ async def test_request_started_chat_tasks_inherit_the_token(token_app):
 
     async def child():
         await release.wait()
-        await ctx.api.get('/v1/after-request', as_user=acting.acting_ref())
-        return await acting.user_token(acting.acting_ref())
+        await ctx.api.get('/v1/after-request', as_user=acting.requester_ref())
+        return await acting.user_token(acting.requester_ref())
 
     @ctx.app.get('/spawn')
     async def spawn(user=Depends(ctx.auth.get_verified_user)):
-        assert await acting.user_token(acting.acting_ref()) == 'fictional-access-token'
+        assert await acting.user_token(acting.requester_ref()) == 'fictional-access-token'
         tasks.append(asyncio.create_task(child()))
         return {}
 
@@ -316,7 +326,7 @@ async def test_concurrent_requests_do_not_share_tokens(token_app):
         await ctx.api.get(
             '/v1/concurrent',
             params={'session': bool(request.cookies.get('oauth_session_id'))},
-            as_user=acting.acting_ref(),
+            as_user=acting.requester_ref(),
         )
         return {}
 
@@ -326,13 +336,13 @@ async def test_concurrent_requests_do_not_share_tokens(token_app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=ctx.app), base_url='https://owui.invalid'
         ) as other:
-            assert (await other.get('/held', headers=dict(ctx.browser.headers))).status_code == 200
+            assert (await other.get('/held', headers=dict(ctx.browser.headers))).status_code == 401
         assert (await pending).status_code == 200
     finally:
         release.set()
         await pending
     headers = {request.url.params['session']: request.headers for request in ctx.requests}
-    assert 'X-Soev-User-Token' not in headers['false']
+    assert 'false' not in headers
     assert headers['true']['X-Soev-User-Token'] == 'fictional-access-token'
 
 
@@ -342,9 +352,8 @@ async def test_acting_for_another_user_sends_no_user_token(token_app):
 
     @ctx.app.get('/as-owner')
     async def as_owner(user=Depends(ctx.auth.get_verified_user)):
-        assert await acting.user_token(acting.acting_ref()) == 'fictional-access-token'
-        with acting.acting_as('owui:user:fictional-owner'):
-            assert await acting.user_token(acting.acting_ref()) is None
+        assert await acting.user_token(acting.requester_ref()) == 'fictional-access-token'
+        assert await acting.user_token('owui:user:fictional-owner') is None
         return {}
 
     assert (await ctx.browser.get('/as-owner')).status_code == 200

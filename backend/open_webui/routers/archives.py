@@ -20,6 +20,8 @@ from open_webui.models.user_archives import (
     UpdateArchiveForm,
 )
 from open_webui.services.archival import ArchiveService
+from open_webui.soev import acting, identity
+from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.utils.auth import get_admin_user
 
 from pydantic import BaseModel
@@ -27,6 +29,13 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def requester_client(user) -> SoevClient:
+    ref = identity.external_ref(user)
+    if acting.requester_ref() != ref or not await acting.user_token(ref):
+        raise SoevApiError(401, 'sign_in', 'Platform login required', 'identity:platform_login')
+    return identity.build_client()
 
 
 def require_content_access(user, owner_id: str) -> None:
@@ -295,6 +304,7 @@ async def update_archive(
 
     from open_webui.services.archival.resources import set_expiry
 
+    client = await requester_client(user)
     current = await UserArchives.get_archive_by_id(archive_id)
     if current is None:
         raise HTTPException(status_code=404, detail='Archive not found')
@@ -308,7 +318,7 @@ async def update_archive(
         form_data = form_data.model_copy(update={'retention_days': updated.retention_days})
     updated.expires_at = None if updated.never_delete else updated.created_at + updated.retention_days * 86400
     if not updated.restored:
-        await set_expiry(updated)
+        await set_expiry(updated, client=client)
     archive = await UserArchives.update_archive(archive_id, form_data)
     if not archive:
         raise HTTPException(
@@ -339,7 +349,7 @@ async def delete_archive(
 
     from open_webui.services.archival.resources import delete_archive as delete_archived_data
 
-    success = await delete_archived_data(archive_id)
+    success = await delete_archived_data(archive_id, client=await requester_client(user))
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

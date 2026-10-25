@@ -23,6 +23,8 @@
 # existence, not guaranteed authorization, body validity, or coverage. Machine
 # credentials and external-provider sessions remain separate prerequisites.
 # No unseedable entry may be silently substituted with a plausible-looking id.
+# v2_refused_value is an explicit fictional probe id in drive mode only, where
+# the router refuses before looking up a resource. [[control]] pins that refusal.
 # backed_by="soev-solutions" seeds and field setup run only with RUNTIME_SOEV_BACKED=drive.
 
 # Full export snapshots protect every pass and every mutating request, without
@@ -323,6 +325,7 @@ actor = "admin"
 
 [[parameter]]
 key = "function"
+v2_refused_value = "attack_function_{token}"
 name = "id"
 prefix = "/api/v1/functions/id/{id}"
 description = "routers/functions.py:create_new_function loads the Action class, then inserts Functions.id. Valves classes make valves routes address actual schemas."
@@ -333,6 +336,7 @@ actor = "admin"
 
 [[parameter]]
 key = "active_function"
+v2_refused_value = "attack_active_{token}"
 name = "id"
 prefix = "/api/v1/functions/id/{id}/valves/user"
 description = "routers/functions.py:update_function_user_valves_by_id answers 400 'Function is not active' for an inactive function, and FunctionForm has no is_active: a function is created off. seed_active_function creates an Action and turns it on with /toggle, which the passes drive against the shared {function} only, so this one stays active through every pass."
@@ -539,17 +543,9 @@ unseedable = "main.py:oauth_client_authorize requires a registered OAuth client.
 key = "task"
 name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
-description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. The inlet also works in private stacks with agent routing enabled. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
+description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh assistant inherits the readable catalog fixture with public read access and no function/filter. Its streaming user message carries the CI stub's owui_attack_task_hold marker. The stub holds only that response with empty heartbeat chunks for at most one hour, until cancellation disconnects it. Seed late, cancel after the pass, and re-seed each pass."
 seeded_by = "seed_task"
 depends_on = ["model", "chat", "prompt_history", "terminal_path"]
-content = """
-import asyncio
-
-class Filter:
-    async def inlet(self, body: dict) -> dict:
-        await asyncio.sleep(3600)
-        return body
-"""
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -976,6 +972,11 @@ description = "Multipart: routers/files.py:upload_file takes an UploadFile, whic
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
 
 [[field]]
+route = "POST /api/v1/audio/speech"
+description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. The private stack resolves the platform speech role to the stub. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
+json = { input = "Fictional speech probe {token}.", response_format = "mp3" }
+
+[[field]]
 route = "POST /api/v1/audio/transcriptions"
 description = "Multipart: an audio part. routers/audio.py:transcription refuses a content type outside audio.stt.supported_content_types, which defaults to audio/* and video/webm. CI runs speech-to-text on the stub (CI-005)."
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
@@ -1015,11 +1016,13 @@ allow = ["same-object"]
 reason = "A user's avatar, shown wherever the user appears to any verified user."
 
 [[shared]]
+runtime_soev_backed = "waive"
 route = "GET /api/v1/functions/id/{id}/valves/user/spec"
 allow = ["same-object"]
 reason = "routers/functions.py:get_function_user_valves_spec_by_id serves an active function's UserValves JSON schema to any verified user: the form the per-user settings dialog renders. It is the function's code, identical for every caller, and carries no user's values."
 
 [[shared]]
+runtime_soev_backed = "waive"
 route = "POST /api/v1/functions/id/{id}/valves/user/update"
 allow = ["same-object", "write"]
 reason = "routers/functions.py:update_function_user_valves_by_id writes the caller's own user.settings.functions.valves[id] (models/functions.py:update_user_valves_by_id_and_user_id), never the function or another user's settings; the answer echoes the caller's own values. Measured live: after both accounts wrote, each read back only its own label. Functions carry no access grants to check against, unlike tools (routers/tools.py checks read access before a user-valves write)."
@@ -1095,6 +1098,13 @@ allow = ["same-object", "write"]
 reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
 
 [[control]]
+runtime_soev_backed = "waive"
+route = "POST /api/v1/audio/speech"
+status = 401
+detail = "identity:platform_login"
+reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
+
+[[control]]
 route = "POST /api/v1/invites/{token}/accept"
 status = 410
 detail = "already been used"
@@ -1117,3 +1127,140 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}"
+description = "soev/thread_routes.py reads and forks soev-api threads; reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
+same_as = "meeting"
+
+# The v2 router dependency refuses these before loading or looking up any function.
+# Probe fictional ids; legacy mode continues to install and exercise real fixtures.
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/create"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/export"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/id/{id}"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "DELETE /api/v1/functions/id/{id}/delete"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/id/{id}/toggle"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/id/{id}/toggle/global"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/id/{id}/update"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/id/{id}/valves"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/id/{id}/valves/spec"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/id/{id}/valves/update"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/id/{id}/valves/user"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/id/{id}/valves/user/spec"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/id/{id}/valves/user/update"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "GET /api/v1/functions/list"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/load/url"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/functions/sync"
+status = 403
+detail = "Custom functions are disabled under v2"
+reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/chat/actions/{action_id}"
+status = 400
+detail = "Action not found:"
+reason = "main.py still mounts chat/actions and verifies chat ownership. utils/actions.py looks up the action before model dispatch; v2 cannot install the fictional action because function creation is refused. Keep probing the route with an owned chat and readable model."

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 import time
-from typing import Optional
+from typing import Literal, Optional
 from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import throttle
@@ -269,11 +269,11 @@ class UserProfileImageResponse(UserNameResponse):
 
 class UserRoleUpdateForm(BaseModel):
     id: str
-    role: str
+    role: Literal['admin', 'user', 'pending']
 
 
 class UserUpdateForm(BaseModel):
-    role: str | None = None
+    role: Literal['admin', 'user', 'pending'] | None = None
     name: str | None = None
     email: str | None = None
     profile_image_url: str | None = None

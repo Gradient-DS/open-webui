@@ -283,6 +283,7 @@ class DeletionService:
         from open_webui.models.chats import Chats
         from open_webui.models.tags import Tags
         from open_webui.soev.agent_threads import delete_chat_threads
+        from open_webui.soev.policy_jobs import v2_enabled
 
         report = DeletionReport()
 
@@ -291,6 +292,10 @@ class DeletionService:
         if not chat:
             report.add_error(f'Chat {chat_id} not found')
             return report
+
+        # A refused remote deletion must leave files, tags and the chat unchanged.
+        if v2_enabled():
+            await delete_chat_threads(chat.user_id, chat_id)
 
         # 1. Get files associated with this chat
         chat_files = await Chats.get_files_by_chat_id(chat_id)
@@ -318,12 +323,12 @@ class DeletionService:
                 except Exception as e:
                     report.add_error(f'Failed to cleanup tag {tag_name}: {e}')
 
-        # [Gradient] Its agent threads in soev-api, unless another chat of the user still bookmarks them
-        try:
-            if kept := await delete_chat_threads(chat.user_id, chat_id):
-                report.add_error(f'Agent threads not deleted: {len(kept)}')
-        except Exception as e:
-            report.add_error(f'Failed to delete agent threads of chat {chat_id}: {e}')
+        if not v2_enabled():
+            try:
+                if kept := await delete_chat_threads(chat.user_id, chat_id):
+                    report.add_error(f'Agent threads not deleted: {len(kept)}')
+            except Exception as e:
+                report.add_error(f'Failed to delete agent threads of chat {chat_id}: {e}')
 
         # 4. Delete chat (ChatFile junction cascades via FK)
         try:

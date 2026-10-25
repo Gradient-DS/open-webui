@@ -5,6 +5,7 @@ from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel
+from open_webui.soev.thread_content import legacy_content
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import JSON, BigInteger, Boolean, Column, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,6 +146,7 @@ class ModelHistoryResponse(BaseModel):
     history: list[ModelHistoryEntry]
 
 
+@legacy_content
 class FeedbackTable:
     async def insert_new_feedback(
         self, user_id: str, form_data: FeedbackForm, db: Optional[AsyncSession] = None

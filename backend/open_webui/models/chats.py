@@ -16,6 +16,7 @@ from typing import Any, Literal
 from typing import Optional
 
 # local imports
+from open_webui.soev.thread_content import legacy_content
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrant
@@ -139,6 +140,7 @@ class Chat(Base):  # database table mapping for chat entity
 
     id = Column(String, primary_key=True, unique=True)
     user_id = Column(String, index=True)  # owner user id
+    thread_id = Column(String, nullable=True)
     title = Column(Text)  # user-visible conversation title
     chat = Column(JSON)
 
@@ -409,6 +411,7 @@ class ChatStatsExport(BaseModel):
 
 
 # [Gradient] User-facing queries exclude soft-deleted rows until retention cleanup.
+@legacy_content
 class ChatTable:
     def _sanitize_for_db(self, obj):
         """Remove null bytes from strings and storage paths from embedded File records."""

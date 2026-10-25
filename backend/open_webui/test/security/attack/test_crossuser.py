@@ -534,3 +534,22 @@ def test_subject_scoped_results_allow_independent_objects_but_still_catch_disclo
         resource_ids=['owner-resource'],
     )
     assert len(result.violations) == 2
+
+
+def test_seeded_task_list_distinguishes_owner_from_second_account_and_detects_leaks():
+    route = 'GET /api/tasks/chat/{chat_id}'
+    owner = plane.Outcome(200, True, '{"task_ids":["fictional-live-task"]}')
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"task_ids":[]}'),
+        owner,
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert not result.violations
+    assert result.controls[route] == 200
+    crossuser._check(result, route, owner, owner, (), admin_only=False, control=True)
+    assert result.violations[0]['reason'] == 'second account received the same nonempty object as the owner'

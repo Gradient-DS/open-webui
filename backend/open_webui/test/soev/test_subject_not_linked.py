@@ -9,10 +9,6 @@ from open_webui.soev.client import SoevApiError
 async def test_cloud_sync_passes_subject_not_linked_through_as_its_code(chat_http, monkeypatch, platform_capabilities):
     from open_webui.routers import cloud_sync
 
-    async def acting_ref(user, client):
-        return f'owui:user:{user.id}'
-
-    monkeypatch.setattr(cloud_sync.identity, 'acting_ref', acting_ref)
     request = Request({'type': 'http', 'path': '/cloud-sync/connections', 'headers': []})
     dependency = cloud_sync.cloud_sync(request, user=type('User', (), {'id': 'alice'})())
     await anext(dependency)

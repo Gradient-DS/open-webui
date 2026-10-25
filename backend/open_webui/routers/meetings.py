@@ -55,7 +55,7 @@ async def require_meetings(user=Depends(get_verified_user)):
 async def caller(user=Depends(require_meetings)) -> Caller:
     client = identity.build_client(timeout=120.0)
     try:
-        return Caller(client, await identity.acting_ref(user, client))
+        return Caller(client, identity.external_ref(user))
     except SoevApiError as error:
         raise _http_error(error) from None
 

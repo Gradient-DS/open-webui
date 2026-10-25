@@ -1,4 +1,4 @@
-"""Inspectable in-memory HTTP contract with signature, identity, and replay checks."""
+"""Inspectable in-memory HTTP contract with login-token, identity, and replay checks."""
 
 import base64
 import copy
@@ -6,12 +6,10 @@ import datetime as dt
 import hashlib
 import json
 import re
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from uuid import uuid4
 
 import httpx
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from open_webui.test.soev.fake_chat import FakeChatApi
 
 
@@ -25,18 +23,16 @@ class FakeSoevApi:
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
         self.credentials = {'soev_test_cred-runtime_test-secret': 'owui:service:webui'}
+        self.user_tokens: dict[str, str] = {}
         self.capabilities = {'soev_test_cred-runtime_test-secret': {'*'}}
         self.credential_id = 'cred-runtime'
-        self.audience = None
-        self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
-        self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
-        self.seen_jtis = set()
+        self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
         self.models: list[dict] = []
@@ -56,18 +52,17 @@ class FakeSoevApi:
             return httpx.Response(error.status, json=body, headers={'Content-Type': 'application/problem+json'})
 
     def _handle(self, request):
-        if request.method == 'PUT' and request.url.host == 'soev.invalid' and request.url.path.startswith('/uploads/'):
-            return self._upload(request)
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
-        subject = self._assertion(request.headers['X-Soev-Subject']) if 'X-Soev-Subject' in request.headers else None
-        if subject and subject not in self.links:
-            raise Problem(401, 'identity_not_linked')
+        subject = self._subject(request)
+        if request.method == 'PUT' and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path):
+            return self._upload(request, credential)
         body = json.loads(request.content) if request.content else None
         if (
             request.method == 'GET'
             or request.url.path.startswith('/v1/chat/threads')
+            or request.url.path.startswith('/v1/threads/')
             or request.url.path == '/v1/completions/task'
         ):
             return self._route(request, body, credential, subject)
@@ -80,7 +75,7 @@ class FakeSoevApi:
             self._admit_ingest(body, credential, subject)
         if request.method == 'POST' and len(parts) == 4 and parts[:2] == ['v1', 'jobs']:
             return self._route(request, body, credential, subject)
-        if (request.method == 'POST' and parts == ['v1', 'identity', 'links']) or (
+        if (
             request.method == 'PUT'
             and len(parts) == 5
             and parts[:3] == ['v1', 'directory', 'groups']
@@ -94,6 +89,18 @@ class FakeSoevApi:
         response = self._route(request, body, credential, subject)
         self.replays[key] = (copy.deepcopy(fingerprint), response.status_code, response.content)
         return response
+
+    def _subject(self, request):
+        subject = None
+        access_token = request.headers.get('X-Soev-User-Token')
+        if access_token:
+            if access_token in self.user_tokens:
+                subject = self.user_tokens[access_token]
+            elif access_token.startswith('fictional-login:'):
+                subject = access_token.removeprefix('fictional-login:')
+            else:
+                raise Problem(401, 'sign_in')
+        return subject
 
     def _replay(self, key, fingerprint, ingest_create):
         previous, status, content = self.replays[key]
@@ -109,48 +116,25 @@ class FakeSoevApi:
         if '*' not in capabilities and capability not in capabilities:
             raise Problem(403, 'scope_insufficient', f'capability:{capability}')
 
-    def _upload(self, request):
-        if 'Authorization' in request.headers:
-            raise Problem(400, 'bearer_on_presigned_put')
-        digest = request.url.path.removeprefix('/uploads/')
-        targets = [
-            (job['job_id'], document)
-            for job in self.jobs.values()
-            for document in job.get('documents', [])
-            if document.get('sha256') == digest
-        ]
-        if not targets:
-            raise Problem(404, 'upload_not_found')
-        if any(request.headers.get('Content-Length') != str(document['size']) for _, document in targets):
-            raise Problem(400, 'upload_length_mismatch')
-        if any(len(request.content) != document['size'] for _, document in targets):
-            raise Problem(400, 'upload_length_mismatch')
-        if hashlib.sha256(request.content).hexdigest() != digest:
-            raise Problem(400, 'upload_digest_mismatch')
-        for job_id, document in targets:
-            self.uploads[job_id, document['source_id']] = request.content
-        return httpx.Response(200)
-
-    def _assertion(self, token):
-        try:
-            header_part, encoded, signature_part = token.split('.')
-            header = json.loads(base64.urlsafe_b64decode(header_part + '=' * (-len(header_part) % 4)))
-            if header['alg'] != 'Ed25519' or header.get('typ') != 'subject+jwt':
-                raise Problem(401, 'credential_invalid')
-            jwk = self.signing_keys[header['kid']]
-            key = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(jwk['x'] + '=' * (-len(jwk['x']) % 4)))
-            signature = base64.urlsafe_b64decode(signature_part + '=' * (-len(signature_part) % 4))
-            key.verify(signature, f'{header_part}.{encoded}'.encode())
-            payload = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
-            if payload['iss'] != self.credential_id or (self.audience is not None and payload['aud'] != self.audience):
-                raise Problem(401, 'credential_invalid')
-            ref, jti = payload['sub'], payload['jti']
-        except (ValueError, KeyError, TypeError, InvalidSignature):
-            raise Problem(401, 'credential_invalid') from None
-        if jti in self.seen_jtis:
-            raise Problem(401, 'assertion_replayed')
-        self.seen_jtis.add(jti)
-        return ref
+    def _upload(self, request, credential):
+        self._require(credential, 'ingest')
+        _, _, _, job_id, _, source_id = request.url.path.split('/', 5)
+        job = self.jobs.get(job_id)
+        if job is None or self.job_owners[job_id] != credential or job['status'] != 'AWAITING_UPLOAD':
+            raise Problem(404, 'not_found')
+        if dt.datetime.fromisoformat(self.now) >= dt.datetime.fromisoformat(job['created_at']) + dt.timedelta(
+            minutes=15
+        ):
+            raise Problem(404, 'not_found')
+        document = next((doc for doc in job.get('documents', []) if doc['source_id'] == source_id), None)
+        if document is None or 'size' not in document:
+            raise Problem(404, 'not_found')
+        if len(request.content) != document['size']:
+            raise Problem(400, 'upload_missing')
+        if hashlib.sha256(request.content).hexdigest() != document['sha256']:
+            raise Problem(400, 'upload_missing')
+        self.uploads[job_id, source_id] = request.content
+        return httpx.Response(204)
 
     def _closure(self, ref):
         return {ref} | {group for group, members in self.groups.items() if ref in members}
@@ -240,7 +224,7 @@ class FakeSoevApi:
             return httpx.Response(
                 200, json={'groups': rows[start:end], 'next_cursor': str(end) if end < len(rows) else None}
             )
-        if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
+        if parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
             return self._jobs(request, parts, body, credential, subject)
@@ -370,17 +354,6 @@ class FakeSoevApi:
         return httpx.Response(200, json={'data': rows, 'next_cursor': None})
 
     def _identity(self, method, parts, body):
-        if len(parts) == 4 and parts[:3] == ['v1', 'identity', 'links'] and method == 'DELETE':
-            self.links = {
-                ref: uid for ref, uid in self.links.items() if uid != parts[3] or not ref.startswith('owui:user:')
-            }
-            return httpx.Response(204)
-        if parts == ['v1', 'identity', 'links'] and method == 'POST':
-            ref = self._assertion(body['assertion'])
-            if not ref.startswith('owui:user:'):
-                raise Problem(422, 'invalid_field')
-            self.links[ref] = body['platform_user_id']
-            return httpx.Response(204)
         if len(parts) == 5 and parts[1:3] == ['directory', 'groups'] and parts[-1] == 'members' and method == 'PUT':
             if not parts[3].startswith('owui:group:') or any(
                 not ref.startswith(('owui:user:', 'platform:user:')) for ref in body['members']
@@ -529,7 +502,7 @@ class FakeSoevApi:
             {
                 'source_id': document['source_id'],
                 'method': 'PUT',
-                'url': 'https://soev.invalid/uploads/' + document['sha256'],
+                'url': f'/v1/jobs/{job["job_id"]}/uploads/{quote(document["source_id"], safe="")}',
                 'headers': {
                     'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
                     'Content-Length': str(document['size']),

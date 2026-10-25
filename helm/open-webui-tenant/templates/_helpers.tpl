@@ -205,7 +205,7 @@ Shared services URLs
 
 {{/*
 [Gradient] Secret-backed and extra env of the open-webui container, shared with the
-v2-migrate Job so it runs with exactly the app's credentials.
+other app containers so they use the same credentials.
 */}}
 {{- define "open-webui-tenant.openWebui.env" -}}
 # Secrets
@@ -290,11 +290,6 @@ v2-migrate Job so it runs with exactly the app's credentials.
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: soev-api-key
-- name: SOEV_API_SIGNING_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: soev-api-signing-key
 {{- end }}
 # Loader-worker → /ingest callback bearer
 {{- if or .Values.secrets.loaderIngestApiKey .Values.externalSecrets.onepassword.fields.loaderIngestApiKey }}

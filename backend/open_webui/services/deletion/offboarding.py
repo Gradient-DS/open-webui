@@ -18,7 +18,7 @@ from open_webui.soev import identity, ingest
 from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui.soev.cloud_sync import revoke_cloud
+from open_webui.soev.policy_jobs import refuse_offboarding
 
 
 class OffboardingOptions(BaseModel):
@@ -54,6 +54,7 @@ class Inventory:
 
 async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     """List owned resources with the platform's principals and writers."""
+    refuse_offboarding()
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
@@ -61,13 +62,11 @@ async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     as_user = ref if user.role in {'user', 'admin'} else None
     collections = []
     if configured():
-        if as_user is not None:
-            # An approved user whose link push is still queued lists as themselves too.
-            await identity.ensure_link(as_user, identity.build_client(), db=db)
+        client = identity.build_client()
+        if as_user is None:
+            client = client.as_service()
         collections = [
-            row
-            async for row in identity.build_client().pages('/v1/collections', as_user=as_user)
-            if row['created_by'] == ref
+            row async for row in client.pages('/v1/collections', as_user=as_user) if row['created_by'] == ref
         ]
     shared = [
         {'id': row['key'], 'kind': 'knowledge'}
@@ -90,14 +89,15 @@ async def offboard_user(
     language: str = 'en',
 ) -> int:
     """Complete remote steps before atomically removing or reassigning local rows."""
+    refuse_offboarding()
     async with get_async_db_context(db) as session:
-        async with identity.link_lock(f'owui:user:{user_id}'):
-            return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
+        return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
 
 
 async def _offboard(
     user_id: str, *, actor_id: str, options: OffboardingOptions, db: AsyncSession, language: str
 ) -> int:
+    refuse_offboarding()
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
@@ -106,12 +106,8 @@ async def _offboard(
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
-    if configured() and as_user is not None:
-        await revoke_cloud(user_id, client=identity.build_client())
     await apply_collections(owned, options=options, archive=archive, as_user=as_user)
     await delete_external_user_data(user_id, options=options, db=db)
-    if configured():
-        await identity.unlink(identity.external_ref(user), identity.build_client())
     try:
         count = await finalize_local(user_id, options=options, archive=archive, db=db)
         await db.commit()
@@ -153,6 +149,8 @@ async def apply_collections(
     if not configured():
         return
     client = identity.build_client()
+    if as_user is None:
+        client = client.as_service()
     rows = owned.collections if archive is None else archive.data['offboarding']['collections']
     for row in rows:
         path = f'/v1/collections/{quote(row["key"], safe="")}'
@@ -168,7 +166,7 @@ async def apply_collections(
                 body['expires_at'] = (
                     dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')
                 )
-        await client.send(
+        await client.as_service().send(
             'POST',
             path + '/owner',
             body,

@@ -44,11 +44,9 @@ def api(monkeypatch, platform_capabilities):
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
-    client = SoevClient(
-        'https://soev.invalid', 'invalid-test-runtime-key', subject_minter=lambda ref: 'invalid-test-assertion'
-    )
+    monkeypatch.setattr('open_webui.soev.client.user_token', AsyncMock(return_value='fictional-alice-token'))
+    client = SoevClient('https://soev.invalid', 'invalid-test-runtime-key')
     monkeypatch.setattr(silent_connect.identity, 'build_client', Mock(return_value=client))
-    monkeypatch.setattr(silent_connect.identity, 'ensure_link', AsyncMock())
     settings: dict = {}
 
     async def get_user_by_id(user_id):

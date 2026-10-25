@@ -18,7 +18,7 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { chatId, socket } from '$lib/stores';
+	import { chatId, socket, config } from '$lib/stores';
 
 	dayjs.extend(localizedFormat);
 
@@ -29,6 +29,7 @@
 		created_at?: number | null;
 		last_read_at?: number | null;
 		active?: boolean;
+		readonly?: boolean;
 		time_range?: string;
 		user_id?: string;
 		owner_name?: string;
@@ -210,7 +211,9 @@
 			<a
 				class=" w-full flex justify-between items-center rounded-lg text-sm py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-850"
 				draggable="false"
-				href={`/c/${chat.id}`}
+				href={$config?.features?.enable_v2_threads && chat.readonly
+					? `/s/${chat.id}`
+					: `/c/${chat.id}`}
 				on:click={() => markChatRead(chat, unread)}
 			>
 				<div class="flex min-w-0 items-center w-full sm:basis-3/5">

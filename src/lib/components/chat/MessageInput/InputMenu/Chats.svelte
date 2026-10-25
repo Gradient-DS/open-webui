@@ -3,6 +3,7 @@
 	import { onDestroy, onMount, tick, getContext } from 'svelte';
 
 	import { decodeString } from '$lib/utils';
+	import { chatReference } from '$lib/utils/chatReference';
 	import { getChatList, getChatListBySearchText } from '$lib/apis/chats';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -78,6 +79,7 @@
 		items = [
 			...items,
 			...res
+				.map(chatReference)
 				.filter((item) => item?.id !== $chatId)
 				.map((item) => {
 					return {

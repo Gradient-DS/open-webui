@@ -16,18 +16,17 @@ from open_webui.services.deletion.offboarding_store import (
     delete_resource_dependents,
     delete_storage_files,
 )
-from open_webui.soev import identity
 from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
-from open_webui.soev.client import SoevApiError, build_service_client
+from open_webui.soev.client import SoevApiError, SoevClient
 
 
-async def set_expiry(archive: UserArchiveModel) -> None:
+async def set_expiry(archive: UserArchiveModel, *, client: SoevClient) -> None:
     """Publish an archive's new retention before committing its local metadata."""
     body = {'owner': ARCHIVE_OWNER, 'readers': [archive_group_ref()]}
     if archive.expires_at is not None and not archive.never_delete:
         body['expires_at'] = dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     for key in archive.data.get('collections', []):
-        await build_service_client().send(
+        await client.send(
             'POST',
             f'/v1/collections/{quote(key, safe="")}/owner',
             body,
@@ -35,8 +34,16 @@ async def set_expiry(archive: UserArchiveModel) -> None:
         )
 
 
-async def delete_archive(archive_id: str, *, db: AsyncSession | None = None, delete_collections: bool = True) -> bool:
+async def delete_archive(
+    archive_id: str,
+    *,
+    client: SoevClient | None,
+    db: AsyncSession | None = None,
+    delete_collections: bool = True,
+) -> bool:
     """Remove archived content before dropping its snapshot and resource manifest."""
+    if delete_collections and client is None:
+        raise ValueError('Deleting platform collections requires a requester client')
     async with get_async_db_context(db) as session:
         archive = await UserArchives.get_archive_by_id(archive_id, db=session)
         if archive is None:
@@ -46,7 +53,7 @@ async def delete_archive(archive_id: str, *, db: AsyncSession | None = None, del
         # Expired platform archives are deleted by soev-sync using archive_expires_at.
         for key in archive.data.get('collections', []) if delete_collections else []:
             try:
-                await identity.build_client().send(
+                await client.send(
                     'DELETE',
                     f'/v1/collections/{quote(key, safe="")}',
                     None,

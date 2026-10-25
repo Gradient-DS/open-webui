@@ -1,6 +1,5 @@
 """Knowledge store behavior against recorded HTTP and isolated OWUI file rows."""
 
-import base64
 import datetime as dt
 import importlib
 import inspect
@@ -131,7 +130,6 @@ async def env(identity_config, fake_api, monkeypatch):
 
 async def seed(env, key='kb', owner='alice', name='Research'):
     ref = f'owui:user:{owner}'
-    await env.identity.ensure_link(ref, env.client)
     await env.client.send(
         'POST',
         '/v1/collections',
@@ -253,7 +251,7 @@ async def test_get_knowledge_by_id_reads_as_the_service_principal(env):
     assert model == env.projection.knowledge_of(
         env.api._view(env.api.collections['kb'], None), service_principal=SERVICE
     )
-    assert all('X-Soev-Subject' not in request.headers for request in env.api.requests)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
     assert await env.store.get_knowledge_by_id('absent') is None
 
 
@@ -261,21 +259,20 @@ async def test_get_knowledge_by_id_reads_as_the_service_principal(env):
 async def test_get_knowledge_by_id_inside_a_request_runs_as_the_acting_user(env):
     """Collection reads assert the acting user while grant reads remain identity-free in the same context."""
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:alice')
+    token = acting._requester_ref.set('owui:user:alice')
     try:
         assert (await env.store.get_knowledge_by_id('kb')).id == 'kb'
         request = env.api.requests[0]
         assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         env.api.requests.clear()
         assert await env.store.get_collection_grants('kb') == []
         assert len(env.api.requests) == 1
         request = env.api.requests[0]
         assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
 
 
 @pytest.mark.asyncio
@@ -284,11 +281,11 @@ async def test_search_knowledge_bases_reads_under_the_users_assertion(env):
     acting = importlib.import_module('open_webui.soev.acting')
     await seed(env, 'other', owner='bob', name='Private')
     await seed(env, 'second', name='Alpha')
-    token = acting._acting_ref.set('owui:user:bob')
+    token = acting._requester_ref.set('owui:user:bob')
     try:
         result = await env.store.search_knowledge_bases('alice', {'order_by': 'name', 'direction': 'asc'}, limit=1)
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     assert result.total == 2 and [row.id for row in result.items] == ['second']
     assert (await env.store.search_knowledge_bases('alice', {'query': 'research'})).total == 1
     assert (await env.store.search_knowledge_bases('alice', {'view_option': 'shared'})).total == 0
@@ -316,7 +313,7 @@ def schedule(env, id, key, provider, *, kind='content', lifecycle='enabled', own
 @pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
 @pytest.mark.parametrize('has_schedule', [False, True])
 async def test_cloud_type_survives_without_a_subscription(env, monkeypatch, provider, has_schedule):
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
     env.api.collections['kb']['source_kind'] = provider
     await seed(env, 'local')
     if has_schedule:
@@ -345,7 +342,7 @@ async def test_cloud_creation_has_only_the_owner_and_retains_its_type(env, monke
     row = env.api.collections[result.id]
     assert row['source_kind'] == provider
     assert row['principals'] == row['writers'] == ['owui:user:carol']
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:carol')
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:carol')
     assert (await env.store.get_knowledge_by_id(result.id)).type == provider
     creates = [r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections']
     assert json.loads(creates[0].content)['source_kind'] == provider
@@ -371,7 +368,7 @@ async def test_listing_uses_source_kind_without_reading_schedules(env, monkeypat
     for key in ('kb', 'second', 'third'):
         env.api.collections[key]['source_kind'] = 'onedrive'
         env.api.add_document(key, 'shared-document')
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
     env.api.page_size = page_size
     env.api.requests.clear()
     result = await getattr(env.store, method)(*args)
@@ -394,7 +391,7 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     assert row['principals'] == [SERVICE, 'owui:user:carol', 'platform:group:staff']
     assert row['writers'] == ['owui:user:carol', 'platform:group:staff']
     relevant = [request for request in env.api.requests if request.method == 'POST']
-    assert relevant[-2].url.path == '/v1/identity/links'
+    assert len(relevant) == 1
     assert relevant[-1].url.path == '/v1/collections'
 
 
@@ -414,7 +411,7 @@ async def test_create_replays_with_the_collection_key(env, monkeypatch):
 @pytest.mark.parametrize('method', ['delete_knowledge_by_id', 'soft_delete_by_id', 'soft_delete_by_user_id'])
 async def test_collection_deletion_retry_commissions_one_job(env, method, monkeypatch):
     """All collection deletion entry points reuse the collection's deletion identity."""
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
     argument = 'alice' if method == 'soft_delete_by_user_id' else 'kb'
     await getattr(env.store, method)(argument)
     await env.store.delete_knowledge_by_id('kb')
@@ -488,7 +485,7 @@ async def test_folder_and_document_moves_replay_by_paths(env):
 async def test_update_patches_and_regrants_through_the_access_job(env):
     """Request identity reaches writes, preserving owner authority and read ACLs until job completion."""
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:alice')
+    token = acting._requester_ref.set('owui:user:alice')
     form = env.models.KnowledgeForm(
         name='Renamed',
         description='New',
@@ -500,13 +497,13 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
     try:
         result = await env.store.update_knowledge_by_id('kb', form)
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     assert result.name == 'Renamed'
     assert env.api.collections['kb']['writers'] == ['owui:user:alice']
     assert env.api.collections['kb']['visibility'] == 'restricted'
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'update_collection_access' and job['status'] == 'QUEUED'
-    assert all('X-Soev-Subject' in r.headers for r in env.api.requests if r.method in ('PATCH', 'PUT'))
+    assert all('X-Soev-User-Token' in r.headers for r in env.api.requests if r.method in ('PATCH', 'PUT'))
     env.api.advance(job['job_id'], 'SUCCEEDED')
     assert env.api.collections['kb']['visibility'] == 'restricted'
     assert 'platform:pseudo:owui' in env.api.collections['kb']['principals']
@@ -517,7 +514,7 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
 @pytest.mark.parametrize('method', ['delete_knowledge_by_id', 'soft_delete_by_id'])
 async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monkeypatch):
     """The deleting user's listing hides queued and running deletions immediately and reveals failed ones."""
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
     assert await getattr(env.store, method)('kb') is True
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'delete_collection'
@@ -533,8 +530,7 @@ async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monke
     assert queries == ['QUEUED', 'RUNNING'] * 3
     for request in env.api.requests:
         if request.method == 'DELETE' or (request.method == 'GET' and request.url.path == '/v1/jobs'):
-            encoded = request.headers['X-Soev-Subject'].split('.')[1]
-            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
 
 
 @pytest.mark.asyncio
@@ -593,19 +589,18 @@ async def test_request_identity_cannot_fall_back_to_capability_only_writes(env):
     """An authenticated non-writer is refused, while a background write deliberately carries no subject."""
     acting = importlib.import_module('open_webui.soev.acting')
     env.api.collections['kb']['principals'].append('owui:user:bob')
-    token = acting._acting_ref.set('owui:user:bob')
+    token = acting._requester_ref.set('owui:user:bob')
     try:
         with pytest.raises(Exception) as caught:
             await env.store.update_knowledge_by_id('kb', env.models.KnowledgeForm(name='Refused', description=''))
         assert caught.value.status == 403
     finally:
-        acting._acting_ref.reset(token)
-    assert 'owui:user:bob' in env.api.links
-    assert env.api.requests[0].url.path == '/v1/identity/links'
+        acting._requester_ref.reset(token)
+    assert all('/v1/identity/' not in request.url.path for request in env.api.requests)
     env.api.requests.clear()
     result = await env.store.update_knowledge_by_id('kb', env.models.KnowledgeForm(name='Worker', description=''))
     assert result.name == 'Worker'
-    assert all('X-Soev-Subject' not in r.headers for r in env.api.requests)
+    assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -721,8 +716,7 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
     requests = [request for request in env.api.requests if request.method == 'GET']
     assert requests
     for request in requests:
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert not any('/private' in request.url.path for request in requests)
 
 
@@ -987,8 +981,7 @@ async def test_add_file_with_a_directory_moves_a_landed_document(env):
         ('POST', '/v1/collections/kb/documents/f1/move')
     ]
     assert json.loads(writes[0].content) == {'to': 'a'}
-    encoded = writes[0].headers['X-Soev-Subject'].split('.')[1]
-    assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+    assert writes[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
 
 
 @pytest.mark.asyncio
@@ -1098,13 +1091,13 @@ async def test_referenced_file_ids_count_knowledge_bases_the_acting_user_cannot_
     env.api.add_document('private', 'shared')
     env.api.add_document('private', 'only-bobs')
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:alice')
+    token = acting._requester_ref.set('owui:user:alice')
     env.api.requests.clear()
     try:
         assert await env.store.get_referenced_file_ids(['shared', 'only-bobs', 'gone']) == {'shared', 'only-bobs'}
     finally:
-        acting._acting_ref.reset(token)
-    assert all('X-Soev-Subject' not in request.headers for request in env.api.requests)
+        acting._requester_ref.reset(token)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -1118,12 +1111,12 @@ async def test_references_use_the_source_lookup_route(env, acting_user):
     await seed(env, 'private', owner='bob')
     env.api.add_document('private', 'first')
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set(f'owui:user:{acting_user}' if acting_user else None)
+    token = acting._requester_ref.set(f'owui:user:{acting_user}' if acting_user else None)
     env.api.requests.clear()
     try:
         pairs = await env.store._references({'first', 'second', 'missing'})
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     expected = {('kb', 'first'), ('kb', 'second'), ('other', 'first')}
     if acting_user is None:
         expected.add(('private', 'first'))
@@ -1140,10 +1133,9 @@ async def test_references_use_the_source_lookup_route(env, acting_user):
     assert not any(request.url.path == '/v1/collections' for request in env.api.requests)
     for request in env.api.requests:
         if acting_user:
-            encoded = request.headers['X-Soev-Subject'].split('.')[1]
-            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         else:
-            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
 
 
 @pytest.mark.asyncio

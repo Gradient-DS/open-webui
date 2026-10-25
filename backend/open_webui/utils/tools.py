@@ -522,6 +522,8 @@ async def get_builtin_tools(
     Only returns tools when BOTH the global config is enabled AND the model capability allows it.
     """
     tools_dict = {}
+    from open_webui.soev.policy_jobs import v2_enabled
+
     builtin_functions = []
     features = features or {}
     model = model or {}
@@ -635,7 +637,9 @@ async def get_builtin_tools(
             )
 
     # Chats tools - search and fetch user's chat history
-    if is_builtin_tool_enabled('chats'):
+    from open_webui.soev import threads
+
+    if is_builtin_tool_enabled('chats') and not threads.enabled():
         builtin_functions.extend([search_chats, view_chat])
 
     if (
@@ -644,7 +648,9 @@ async def get_builtin_tools(
         and getattr(request.state, 'internal', False) is not True
         and getattr(request.state, 'direct', False) is not True
     ):
-        builtin_functions.extend([delegate_task, timer])
+        builtin_functions.append(delegate_task)
+        if not v2_enabled():
+            builtin_functions.append(timer)
 
     # Add memory tools when memory is enabled and the model allows this builtin category.
     if (
@@ -705,6 +711,7 @@ async def get_builtin_tools(
     # Automation tools - create and manage scheduled automations from chat
     if (
         is_builtin_tool_enabled('automations')
+        and not v2_enabled()
         and config.get('automations.enable')
         and await has_user_permission('automations')
     ):
@@ -748,7 +755,7 @@ async def get_builtin_tools(
         )
 
         spec = get_builtin_tool_spec(func)
-        if func.__name__ == 'delegate_task' and not config.get('subagents.background_enabled'):
+        if func.__name__ == 'delegate_task' and (v2_enabled() or not config.get('subagents.background_enabled')):
             parameters = spec.get('parameters', {})
             parameters.get('properties', {}).pop('background', None)
             if isinstance(parameters.get('required'), list):

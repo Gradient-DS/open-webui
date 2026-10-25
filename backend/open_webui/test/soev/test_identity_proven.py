@@ -1,12 +1,8 @@
 """Proven Entra link requests at sign-in and failure isolation from login."""
 
-import base64
-import json
-import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-import httpx
 import jwt
 import pytest
 from starlette.responses import Response
@@ -92,37 +88,13 @@ def assert_logged_in(response, login):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('account', ['existing', 'new'])
-async def test_a_microsoft_login_links_the_entra_oid_as_proven(identity_config, login, identity_http, account):
-    """Every Microsoft sign-in sends its oid proof before minting the OWUI session."""
-    identity, key = identity_config
-    requests, responses = identity_http
+async def test_microsoft_login_never_publishes_a_legacy_link(login, identity_http, monkeypatch, account):
+
     if account != 'existing':
         login.oauth.Users.get_user_by_oauth_sub.return_value = None
-
-    async def accept(request):
-        assert login.mint.call_count == len(requests) - 1
-        body = json.loads(request.content)
-        assert set(body) == {'platform_user_id', 'assertion', 'id_token'}
-        assert body['platform_user_id'] == identity.platform_user_id('owui:user:alice')
-        assert body['id_token'] == login.token['id_token']
-        claims = jwt.decode(body['assertion'], options={'verify_signature': False})
-        assert claims['sub'] == 'entra:user:test-entra-oid'
-        assert claims['iss'] == 'cred-runtime'
-        assert claims['aud'] == 'test-tenant'
-        header, payload, signature = body['assertion'].split('.')
-        key.public_key().verify(base64.urlsafe_b64decode(signature + '=='), f'{header}.{payload}'.encode())
-        assert request.method == 'POST'
-        assert request.url.path == '/v1/identity/links'
-        assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-        assert 'X-Soev-Subject' not in request.headers
-        return httpx.Response(204)
-
-    responses.extend([accept, accept])
     for _ in range(2):
         assert_logged_in(await login.callback(), login)
-    assert len(requests) == 2
-    assert requests[0].headers['Idempotency-Key'] != requests[1].headers['Idempotency-Key']
-    assert json.loads(requests[0].content)['assertion'] != json.loads(requests[1].content)['assertion']
+    assert identity_http[0] == []
 
 
 @pytest.mark.asyncio
@@ -162,82 +134,8 @@ async def test_a_local_login_links_nothing(identity_config, login, identity_http
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['api', 'transport', 'signer', 'missing-token', 'malformed-token', 'missing-oid'])
-async def test_a_link_failure_never_blocks_login(identity_config, login, identity_http, monkeypatch, caplog, failure):
-    """API, transport, configuration and token failures still produce a login cookie."""
-    identity, _ = identity_config
-    _, responses = identity_http
-    code = 'invalid_id_token'
-    if failure == 'api':
-        code = 'proof_rejected'
-        responses.append(
-            httpx.Response(
-                403, json={'code': code, 'detail': 'Rejected'}, headers={'Content-Type': 'application/problem+json'}
-            )
-        )
-    elif failure == 'transport':
-        code = 'upstream_error'
-
-        async def unavailable(request):
-            raise httpx.ConnectError('Unavailable', request=request)
-
-        responses.append(unavailable)
-    elif failure == 'signer':
-        code = 'link_failed'
-        monkeypatch.setattr(identity, 'mint_assertion', Mock(side_effect=ValueError('Invalid signing configuration')))
-    elif failure == 'missing-token':
-        login.token.pop('id_token')
-    elif failure == 'malformed-token':
-        login.token['id_token'] = 'invalid-test-id-token'
-    else:
-        login.token['id_token'] = jwt.encode({'sub': 'not-an-oid'}, key='', algorithm='none')
-    with caplog.at_level(logging.WARNING):
-        assert_logged_in(await login.callback(), login)
-    record = next(record for record in caplog.records if record.name == identity.__name__)
-    assert record.user_id == login.user.id
-    assert record.code == code
-    assert record.exc_info is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('outcome', ['success', 'api-error', 'unexpected-error'])
-async def test_the_id_token_never_reaches_a_log_record(identity_config, login, identity_http, caplog, outcome):
-    """Neither successful links nor errors echoing credentials expose tokens or assertions."""
-    identity, _ = identity_config
-    requests, responses = identity_http
-
-    async def reply(request):
-        body = json.loads(request.content)
-        detail = f'{body["id_token"]} {body["assertion"]} {login.token["access_token"]}'
-        if outcome == 'unexpected-error':
-            raise RuntimeError(detail)
-        if outcome == 'api-error':
-            return httpx.Response(
-                403,
-                json={'code': 'proof_rejected', 'detail': detail},
-                headers={'Content-Type': 'application/problem+json'},
-            )
-        return httpx.Response(204)
-
-    responses.append(reply)
-    with caplog.at_level(logging.DEBUG):
-        assert_logged_in(await login.callback(), login)
-    exposed = caplog.text + repr([vars(record) for record in caplog.records])
-    for secret in (
-        login.token['id_token'],
-        login.token['access_token'],
-        json.loads(requests[0].content)['assertion'],
-        identity.config.SOEV_API_KEY,
-        identity.config.SOEV_API_SIGNING_KEY,
-    ):
-        assert secret not in exposed
-
-
-@pytest.mark.asyncio
 async def test_a_login_can_go_through_a_silent_reconnect_first(login, identity_http):
     """The callback hands its destination to the silent reconnect and still sets the session cookie."""
-    _, responses = identity_http
-    responses.append(httpx.Response(204))
     start = 'https://soev.invalid/oauth/start/invalid-attempt-capability'
     login.silent.side_effect = lambda user, provider, url: start
     response = await login.callback()

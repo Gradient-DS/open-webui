@@ -1,9 +1,7 @@
 """Exercise the reusable fake through HTTP against the recorded B5 wire contract."""
 
 import base64
-import datetime as dt
 import hashlib
-import importlib
 from uuid import uuid4
 
 import httpx
@@ -31,11 +29,6 @@ def ingest(client, *documents, **kwargs):
     return send(client, 'POST', '/v1/jobs', {'collection_key': 'kb', 'documents': list(documents)}, **kwargs)
 
 
-def assertion(ref):
-    identity = importlib.import_module('open_webui.soev.identity')
-    return identity.mint_assertion(ref, now=dt.datetime.now(dt.UTC))
-
-
 @pytest.fixture
 def api(fake_api):
     """Use a real HTTP client over MockTransport with inspectable fake state."""
@@ -50,15 +43,13 @@ def send(
 ):
     headers = {'Authorization': f'Bearer {credential}'}
     if user:
-        headers['X-Soev-Subject'] = assertion(user)
+        headers['X-Soev-User-Token'] = f'fictional-login:{user}'
     if method != 'GET':
         headers['Idempotency-Key'] = operation or str(uuid4())
     return client.request(method, path, json=body, headers=headers)
 
 
 def seed(client, key='kb', user='owui:user:alice'):
-    response = send(client, 'POST', '/v1/identity/links', {'platform_user_id': 'person', 'assertion': assertion(user)})
-    assert response.status_code == 204
     body = {
         'key': key,
         'name': key,
@@ -185,7 +176,7 @@ def test_folder_and_document_routes_preserve_paths_and_replays(api):
 
 
 def test_identity_groups_and_credential_scoped_jobs(api):
-    """Membership replacement affects closure, assertions are single-use, and subjects never widen job visibility."""
+    """Membership replacement affects closure, and login tokens never widen credential-scoped job visibility."""
     fake, client = api
     seed(client)
     seed(client, 'other', 'owui:user:bob')
@@ -213,51 +204,26 @@ def test_identity_groups_and_credential_scoped_jobs(api):
         == 404
     )
     assert send(client, 'GET', '/v1/jobs', credential='other-key').json()['data'] == []
-    token = assertion('owui:user:alice')
-    headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret', 'X-Soev-Subject': token}
-    assert client.get('/v1/collections/kb', headers=headers).status_code == 200
-    assert client.get('/v1/collections/kb', headers=headers).status_code == 401
     send(client, 'PUT', '/v1/directory/groups/owui%3Agroup%3Astaff/members', {'members': []})
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').status_code == 404
 
 
-def test_identity_link_and_group_routes_replay_freely(api):
-    """Links and group replacements require valid keys without caching bodies or bypassing assertion checks."""
+def test_group_replacements_replay_freely(api):
+    """Directory replacements accept a repeated operation key but require a valid key."""
     fake, client = api
-    link_path = '/v1/identity/links'
-    group_path = '/v1/directory/groups/owui%3Agroup%3Astaff/members'
-    operation = 'directory:repeated'
-    for _ in range(2):
-        response = send(
-            client,
-            'POST',
-            link_path,
-            {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-            operation=operation,
-        )
-        assert response.status_code == 204
-    assert fake.links == {'owui:user:alice': 'person'}
+    path = '/v1/directory/groups/owui%3Agroup%3Astaff/members'
     for members in (['owui:user:alice'], [], ['owui:user:alice']):
-        response = send(client, 'PUT', group_path, {'members': members}, operation=operation)
+        response = send(client, 'PUT', path, {'members': members}, operation='directory:repeated')
         assert response.status_code == 204
         assert fake.groups['owui:group:staff'] == members
     assert not fake.replays
-    body = {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}
-    assert send(client, 'POST', link_path, body, operation=operation).status_code == 204
-    replayed_assertion = send(client, 'POST', link_path, body, operation=operation)
-    assert replayed_assertion.status_code == 401
-    assert replayed_assertion.json()['code'] == 'assertion_replayed'
-    for method, path, body in (
-        ('POST', link_path, {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}),
-        ('PUT', group_path, {'members': []}),
-    ):
-        for invalid in (None, 'short', 'x' * 256):
-            headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
-            if invalid is not None:
-                headers['Idempotency-Key'] = invalid
-            response = client.request(method, path, json=body, headers=headers)
-            assert response.status_code == 400
-            assert response.json()['code'] == 'invalid_idempotency_key'
+    for invalid in (None, 'short', 'x' * 256):
+        headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
+        if invalid is not None:
+            headers['Idempotency-Key'] = invalid
+        response = client.put(path, json={'members': []}, headers=headers)
+        assert response.status_code == 400
+        assert response.json()['code'] == 'invalid_idempotency_key'
 
 
 def test_pages_and_document_acl_follow_the_wire_contract(api):
@@ -278,71 +244,8 @@ def test_pages_and_document_acl_follow_the_wire_contract(api):
     assert missing_key.status_code == 400
 
 
-def test_an_assertion_signed_with_the_derived_kid_is_accepted_by_the_fake(api):
-    """The registered public key verifies assertions minted with the derived kid."""
-    fake, client = api
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 204
-    assert fake.links == {'owui:user:alice': 'person'}
-
-
-def test_an_assertion_with_an_unregistered_kid_is_refused_by_the_fake(api):
-    """A valid signature cannot authenticate an unregistered kid."""
-    fake, client = api
-    fake.signing_keys.clear()
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
-    assert not fake.links
-
-
-def test_an_assertion_with_a_forged_signature_is_refused_by_the_fake(api):
-    """A registered kid cannot authenticate a forged signature."""
-    fake, client = api
-    header, payload, _ = assertion('owui:user:alice').split('.')
-    forged = base64.urlsafe_b64encode(bytes(64)).decode().rstrip('=')
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': f'{header}.{payload}.{forged}'},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
-    assert not fake.links
-
-
-@pytest.mark.parametrize(
-    ('setting', 'value'),
-    [('SOEV_API_KEY', 'soev_test_cred-wrong_test-secret'), ('SOEV_API_AUDIENCE', 'wrong-value')],
-)
-def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_config, monkeypatch, setting, value):
-    """A valid signature still requires the credential issuer and configured audience."""
-    _, client = api
-    identity, _ = identity_config
-    monkeypatch.setattr(identity.config, setting, value)
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
-
-
-def test_a_file_document_opens_an_awaiting_upload_job_with_a_presigned_put(api):
-    """File proposals publish an absolute PUT URL with S3 checksum and length headers."""
+def test_a_file_document_opens_an_awaiting_upload_job_with_an_authenticated_put(api):
+    """File proposals publish a relative streaming PUT route and the declared length."""
     fake, client = api
     seed(client)
     document = file_document()
@@ -355,7 +258,7 @@ def test_a_file_document_opens_an_awaiting_upload_job_with_a_presigned_put(api):
         {
             'source_id': 'file',
             'method': 'PUT',
-            'url': 'https://soev.invalid/uploads/' + document['sha256'],
+            'url': f'/v1/jobs/{job["job_id"]}/uploads/file',
             'headers': {
                 'x-amz-checksum-sha256': base64.b64encode(hashlib.sha256(FILE_BYTES).digest()).decode(),
                 'Content-Length': str(len(FILE_BYTES)),
@@ -449,35 +352,43 @@ def test_a_replayed_job_create_returns_no_uploads(api):
     assert len(fake.jobs) == 1
 
 
-def test_the_presigned_put_refuses_a_bearer(api):
-    """Presigned uploads reject authorization even when it names a valid credential."""
+def test_the_upload_put_requires_a_bearer(api):
+    """Streaming uploads require the product credential."""
     fake, client = api
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
     response = client.put(
         upload['url'],
         content=FILE_BYTES,
-        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+        headers=upload['headers'],
     )
-    assert response.status_code == 400
-    assert response.json()['code'] == 'bearer_on_presigned_put'
+    assert response.status_code == 401
+    assert response.json()['code'] == 'invalid_credential'
     assert not fake.uploads
 
 
 @pytest.mark.parametrize(
     'length,content,code',
     [
-        ('1', FILE_BYTES, 'upload_length_mismatch'),
-        (str(len(FILE_BYTES)), b'short', 'upload_length_mismatch'),
-        (str(len(FILE_BYTES)), b'x' * len(FILE_BYTES), 'upload_digest_mismatch'),
+        (str(len(FILE_BYTES)), FILE_BYTES + b'extra', 'upload_missing'),
+        (str(len(FILE_BYTES)), b'short', 'upload_missing'),
+        (str(len(FILE_BYTES)), b'x' * len(FILE_BYTES), 'upload_missing'),
     ],
 )
-def test_the_presigned_put_checks_length_and_digest(api, length, content, code):
-    """Neither a dishonest length nor bytes with another digest can land."""
+def test_the_upload_put_checks_length_and_digest(api, length, content, code):
+    """Neither a mismatched size nor bytes with another digest can land."""
     fake, client = api
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
-    response = client.put(upload['url'], content=content, headers={**upload['headers'], 'Content-Length': length})
+    response = client.put(
+        upload['url'],
+        content=content,
+        headers={
+            **upload['headers'],
+            'Content-Length': length,
+            'Authorization': 'Bearer soev_test_cred-runtime_test-secret',
+        },
+    )
     assert response.status_code == 400
     assert response.json()['code'] == code
     assert not fake.uploads
@@ -495,13 +406,17 @@ def test_commit_before_upload_is_409_upload_missing(api):
 
 
 def test_commit_after_upload_queues_the_job(api):
-    """A valid absolute PUT stores bytes and commit only queues the mixed batch."""
+    """An authenticated PUT stores bytes and commit only queues the mixed batch."""
     fake, client = api
     seed(client)
     job = ingest(client, file_document(), inline_document()).json()
     upload = job['uploads'][0]
-    response = client.put(upload['url'], content=FILE_BYTES, headers=upload['headers'])
-    assert response.status_code == 200 and response.content == b''
+    response = client.put(
+        upload['url'],
+        content=FILE_BYTES,
+        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+    )
+    assert response.status_code == 204 and response.content == b''
     assert fake.uploads[job['job_id'], 'file'] == FILE_BYTES
     operation = str(uuid4())
     response = send(client, 'POST', f'/v1/jobs/{job["job_id"]}/commit', operation=operation)
@@ -766,12 +681,19 @@ def test_the_fake_never_advances_a_job_on_its_own(api):
     seed(client)
     file_job = ingest(client, file_document()).json()
     inline_job = ingest(client, inline_document()).json()
+    upload = file_job['uploads'][0]
+    assert (
+        client.put(
+            upload['url'],
+            content=FILE_BYTES,
+            headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+        ).status_code
+        == 204
+    )
     fake.now = '2030-01-01T00:00:00Z'
     for _ in range(3):
         assert send(client, 'GET', f'/v1/jobs/{file_job["job_id"]}').json()['status'] == 'AWAITING_UPLOAD'
         assert send(client, 'GET', f'/v1/jobs/{inline_job["job_id"]}').json()['status'] == 'QUEUED'
-    upload = file_job['uploads'][0]
-    assert client.put(upload['url'], content=FILE_BYTES, headers=upload['headers']).status_code == 200
     for job in (file_job, inline_job):
         for _ in range(3):
             response = send(client, 'POST', f'/v1/jobs/{job["job_id"]}/commit')

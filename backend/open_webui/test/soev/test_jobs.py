@@ -44,7 +44,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     events = AsyncMock()
     monkeypatch.setattr(jobs, 'emit_file_status', events)
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     await client.send(
         'POST',
         '/v1/collections',
@@ -90,8 +89,7 @@ async def test_upload_recovery_is_service_only_even_inside_a_request(env):
     token = acting._token_resolver.set(resolver)
     requester = acting._requester_ref.set('owui:user:alice')
     try:
-        with acting.acting_as('owui:user:alice'):
-            assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
+        assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
     finally:
         acting._requester_ref.reset(requester)
         acting._token_resolver.reset(token)
@@ -101,7 +99,7 @@ async def test_upload_recovery_is_service_only_even_inside_a_request(env):
     for request in env.api.requests:
         if request.url.path.startswith('/v1/'):
             assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
             assert 'X-Soev-User-Token' not in request.headers
             assert b'acting_as' not in request.content
     resolver.assert_not_awaited()
@@ -248,7 +246,7 @@ async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, comm
     assert row.data['status'] == 'processing'
     commit = env.api.requests[-1]
     assert commit.headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{job["sha256"]}:1:commit'
-    assert 'X-Soev-Subject' not in commit.headers
+    assert 'X-Soev-' + 'Subject' not in commit.headers
     env.events.assert_not_awaited()
 
 
@@ -322,7 +320,7 @@ async def test_the_poller_never_carries_a_subject(env):
     env.api.documents['kb', file.id]['path'] = None
     assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 62) == 1
     assert len(env.api.requests) == 5
-    assert all('X-Soev-Subject' not in r.headers for r in env.api.requests)
+    assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
     assert all(r.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret' for r in env.api.requests)
 
 

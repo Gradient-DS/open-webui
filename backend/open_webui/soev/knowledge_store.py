@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from open_webui.soev.acting import acting_ref
+from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.request_cache import memoized
@@ -95,27 +95,24 @@ class SoevKnowledgeTable:
 
         return projection
 
-    async def _as_user(self, explicit_user_id: str | None = None) -> str | None:
-        ref = f'owui:user:{explicit_user_id}' if explicit_user_id else acting_ref()
-        if ref is not None:
-            from open_webui.soev import identity
-
-            await identity.ensure_link(ref, self._client)
-        return ref
+    @staticmethod
+    def _user_ref(explicit_user_id: str | None = None) -> str | None:
+        return f'owui:user:{explicit_user_id}' if explicit_user_id else requester_ref()
 
     async def _get(self, path, *, user_id=None, params=None):
-        return await self._client.get(path, as_user=await self._as_user(user_id), params=params)
+        return await self._client.get(path, as_user=self._user_ref(user_id), params=params)
 
     async def _pages(self, path, *, user_id=None, params=None, as_service=False):
-        ref = None if as_service else await self._as_user(user_id)
-        return [row async for row in self._client.pages(path, as_user=ref, params=params)]
+        ref = None if as_service else self._user_ref(user_id)
+        client = self._client.as_service() if as_service else self._client
+        return [row async for row in client.pages(path, as_user=ref, params=params)]
 
     async def _send(self, method, path, body=None, *, user_id=None, idempotency_key=None):
         if idempotency_key is None:
             operation = json.dumps([method, path, body], sort_keys=True, separators=(',', ':'))
             idempotency_key = hashlib.sha256(operation.encode()).hexdigest()
         return await self._client.send(
-            method, path, body, as_user=await self._as_user(user_id), idempotency_key=idempotency_key
+            method, path, body, as_user=self._user_ref(user_id), idempotency_key=idempotency_key
         )
 
     @staticmethod
@@ -190,7 +187,7 @@ class SoevKnowledgeTable:
 
     async def _service_collection(self, key):
         try:
-            return await self._client.get(self._path(key), as_user=None)
+            return await self._client.as_service().get(self._path(key))
         except SoevApiError as error:
             if error.status == 404:
                 return None
@@ -290,7 +287,7 @@ class SoevKnowledgeTable:
 
     async def get_collection_grants(self, id):
         try:
-            row = await self._client.get(self._path(id))
+            row = await self._client.as_service().get(self._path(id))
         except SoevApiError as error:
             if error.status == 404:
                 return []
@@ -385,7 +382,7 @@ class SoevKnowledgeTable:
 
     async def _members(self, key, *, user_id=None):
         return await memoized(
-            ('members', self, f'owui:user:{user_id}' if user_id else acting_ref(), key),
+            ('members', self, f'owui:user:{user_id}' if user_id else requester_ref(), key),
             lambda: self._load_members(key, user_id=user_id),
         )
 
@@ -453,14 +450,16 @@ class SoevKnowledgeTable:
     async def has_file(self, knowledge_id, file_id, db=None):
         return file_id in await self._members(knowledge_id)
 
-    async def catalog_original(self, source_id, *, user_id):
-        """Return (file row, byte stream) for a catalog member the user may read, or None."""
+    async def catalog_original(self, source_id, *, user_id, range_header=None):
+        """Return (file row, download context) for a catalog member the user may read, or None."""
         members = await self._references({source_id}, user_id=user_id)
         if not members:
             return None
         collection, document = members[0]
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
-        return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
+        return _catalog_file_row(document, user_id), self._client.stream_response(
+            path, as_user=self._user_ref(user_id), range_header=range_header
+        )
 
     async def _references(self, ids, *, user_id=None, as_service=False):
         result = []
@@ -468,7 +467,7 @@ class SoevKnowledgeTable:
         for source_id in sorted(ids):
             params = {'source_id': source_id}
             if as_service:
-                response = await self._client.get('/v1/documents', as_user=None, params=params)
+                response = await self._client.as_service().get('/v1/documents', params=params)
             else:
                 response = await self._get('/v1/documents', params=params, user_id=user_id)
             keys = list(
