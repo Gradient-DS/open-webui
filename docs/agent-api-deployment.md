@@ -17,6 +17,28 @@ Set `AGENT_API_ENABLED=true` and configure:
 | `SOEV_API_AUDIENCE` | `soevApi.audience` | Assertion audience |
 | `SOEV_API_SERVICE_PRINCIPAL` | `soevApi.servicePrincipal` | Declared Open WebUI service principal |
 
+`SOEV_ARCHIVE_READERS_GROUP_REF` is required whenever `SOEV_API_URL` is set.
+Set it to the seeded `platform:group:<id>` for **Archive readers** through the
+chart's existing extra environment variables. There is no default. Local admin
+roles do not grant archive readership.
+
+Groups and flattened person memberships are pulled from paged `GET /v1/groups`
+at startup and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15). The product
+credential needs directory read. A failed or invalid page preserves the previous
+complete snapshot; the reconciler retries after 10 seconds. The console manages
+group names and membership. OWUI admins can edit local feature permissions and
+sharing settings, keyed by platform group id; these never grant platform actions.
+OAuth, LDAP, SCIM, trusted-header and signup defaults cannot manage memberships.
+Disable OAuth/LDAP group management before reopening; attempts return
+`403 platform_groups_read_only`.
+
+The cutover Job can call `soev.migrate_groups.cutover_groups(session, group_map)`
+with 9g's OWUI-id to platform-group-ref mapping before starting the mirror. It
+rewrites groups, memberships and group access grants in the caller's transaction,
+preserves product settings, returns changed-row counts, and refuses unmapped ids
+or conflicting targets. The caller commits or rolls back; the function makes no
+network calls.
+
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
 With External Secrets enabled and a platform URL set, provide `soevApiKey` and
 `soevApiSigningKey` in the configured 1Password item instead of inline secrets.
@@ -71,7 +93,6 @@ features remain disabled. Changing the backend URL or API key resets the cache.
 | `live_mail` | Outlook mail search and reads |
 | `cloud_sync` | Bulk sync policy, schedules, usage and sync actions |
 | `meetings` | Meeting routes, UI availability and meeting attachments |
-| `groups_push` | Publishing local group memberships to the platform directory |
 | `images` | Chat image upload and the catalog's UI vision availability |
 
 The existing deployment and user settings still apply. Capabilities narrow their
@@ -156,7 +177,7 @@ Inputs (environment):
 1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite).
 2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
 3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Each user's default model selection (`settings.ui.models`) is cleared instead, so every user starts on the platform default; `--apply --models` maps it like the rest, since users chose it after the migration. Every other stored id that is neither a catalog id nor an assistant becomes the tenant's default model: the catalog entry marked `default`, which `/api/config` serves as `default_models` (see **Default** above). The run reads it from soev-api's `GET /v1/models` before writing anything, and stops with exit 2 when the catalog marks no default or the map rewrites the default. An unmapped base-model override row is not renamed: its grants move to the default and the row is deactivated, so its name and params never land on the default model. Then every catalog model without a system prompt gets the one of the most recently created base-model row that has one (assistants never count): a model with a row gets it in `params.system`, one without gets a row named after its catalog label. A model whose renamed row brought its own prompt keeps it, and when no base-model row has a prompt nothing is copied. `--apply --models` copies none. Every change, mapped, defaulted or cleared, is recorded with its path, so `--restore` puts it back (a cleared selection only while the user has not chosen a new one). The log prints the default, per site the count of mapped and of defaulted references, per old id how many references went to the default, and which row's system prompt went to which catalog models. `--restore` removes a copied prompt, and a row created for it, only while it still holds that prompt.
-4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
+4. **Directory and KB copy.** Identity links, collections with grants, folders and cloud schedules. Platform groups and group ids are converted by the cutover Job before this step.
 5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules. The job outcome is written to the file row (processing, then completed or failed), which v1 shares: after a rollback, v1 shows the v2 outcome on re-ingested files, e.g. failed for a file v2 could not ingest, while its own v1 vectors are intact.
    **Chat uploads.** Every upload a stored chat attaches (chat-level and message `files`, type `file`, not an image, not picked from a KB; deleted chats excluded) that is not a KB file is submitted through `ingest.submit` as its owner into their attachments collection, the path a fresh v2 chat upload takes, and its `collection_name` is set to that collection. Files already there, in flight or terminally failed are skipped; an original gone from storage is listed and skipped. Images need nothing: the agent turn reads their bytes from storage. `--apply --uploads` (chart `mode: uploads`) runs only this step, for tenants migrated before it existed.
 6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.

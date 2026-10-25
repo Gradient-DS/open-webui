@@ -5,7 +5,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { deleteGroupById, updateGroupById } from '$lib/apis/groups';
+	import { updateGroupById } from '$lib/apis/groups';
 
 	import EditGroupModal from './EditGroupModal.svelte';
 
@@ -20,8 +20,6 @@
 	export let defaultPermissions = {};
 
 	export let setGroups = () => {};
-	/** @type {(group: any) => void} */
-	export let updateGroup = () => {};
 
 	let showEdit = false;
 	$: hasCustomPermissions = Object.keys(group?.permissions ?? {}).length > 0;
@@ -34,18 +32,6 @@
 
 		if (res) {
 			toast.success($i18n.t('Group updated successfully'));
-			setGroups();
-		}
-	};
-
-	const deleteHandler = async () => {
-		const res = await deleteGroupById(localStorage.token, group.id).catch((error) => {
-			toast.error($i18n.t(error?.detail ?? `${error}`));
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t('Group deleted successfully'));
 			setGroups();
 		}
 	};
@@ -65,8 +51,6 @@
 	{defaultPermissions}
 	tabs={['general', 'permissions', 'users', 'preview']}
 	onSubmit={updateHandler}
-	onDelete={deleteHandler}
-	onMemberChange={updateGroup}
 />
 
 <button

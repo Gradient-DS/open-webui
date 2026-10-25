@@ -295,3 +295,15 @@ export const getGroupPreview = async (token: string, id: string) => {
 
 	return res;
 };
+
+export const getGroupUsers = async (
+	token: string,
+	id: string
+): Promise<{ id: string; name: string; email: string }[]> => {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/users`, {
+		method: 'POST',
+		headers: { authorization: `Bearer ${token}` }
+	});
+	if (!response.ok) throw await response.json();
+	return response.json();
+};
