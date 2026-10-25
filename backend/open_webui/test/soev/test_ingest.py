@@ -145,6 +145,35 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('text', [None, 'fictional generated text'])
+@pytest.mark.parametrize(
+    'status', ['QUEUED', 'RUNNING', 'SUCCEEDED', 'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED']
+)
+async def test_submit_replays_an_existing_job_without_uploading_again(env, monkeypatch, status, text):
+    monkeypatch.setattr(env.module.config, 'SOEV_API_INLINE_DOCUMENT_BYTES', 4)
+    file = await new_file(env)
+    job_id = await submit(env, file, text=text)
+    env.api.advance(job_id, status)
+    await env.files.Files.update_file_metadata_by_id(file.id, {'soev_job': None})
+    file = await env.files.Files.get_file_by_id(file.id)
+    env.api.requests.clear()
+
+    assert await submit(env, file, text=text) == job_id
+
+    assert [(request.method, request.url.path) for request in env.api.requests] == [
+        ('POST', '/v1/jobs'),
+        ('POST', f'/v1/jobs/{job_id}/commit'),
+    ]
+    assert len(env.api.jobs) == 1
+    assert env.api.jobs[job_id]['status'] == status
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['soev_job']['job_id'] == job_id
+    assert row.meta['soev_job']['committed'] is True
+    assert row.meta['status'] == row.data['status'] == 'processing'
+    assert [pending.id for pending in await env.files.Files.get_files_with_soev_jobs()] == [file.id]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('declared', [None, 'application/octet-stream', 'image/png'])
 async def test_submit_forwards_derived_content_type(env, declared):
     file = await new_file(env, name='notes.md', content_type=declared)

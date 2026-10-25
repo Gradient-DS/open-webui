@@ -216,14 +216,15 @@ async def submit(
     await Files.update_file_metadata_by_id(file.id, {'soev_job': job, 'soev_collection_key': collection_key})
     await Files.set_status(file.id, 'processing')
     if not inline:
-        await client.upload_document(
-            job_id,
-            file.id,
-            _file_chunks(file_path) if text is None else _text_chunks(text),
-            size=size,
-            content_type=document['content_type'],
-            as_user=ref,
-        )
+        if response['status'] == 'AWAITING_UPLOAD':
+            await client.upload_document(
+                job_id,
+                file.id,
+                _file_chunks(file_path) if text is None else _text_chunks(text),
+                size=size,
+                content_type=document['content_type'],
+                as_user=ref,
+            )
         await client.send('POST', f'/v1/jobs/{job_id}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit')
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}})
     return job_id
