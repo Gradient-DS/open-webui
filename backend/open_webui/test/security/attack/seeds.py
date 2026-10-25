@@ -21,8 +21,10 @@ from urllib.parse import quote
 
 import requests
 
+from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
+from .identities import create_oidc_identity
 
 ROOT = Path(__file__).resolve().parents[5]
 SURFACE_PATH = ROOT / 'security/attack-surface.toml'
@@ -227,6 +229,14 @@ class SeedContext:
     def request(self, method, path, *, actor=None, **kwargs):
         if is_destructive(method, path, self.surface):
             raise RuntimeError(f'Destructive route cannot seed fixtures: {method} {path}')
+        if oidc.enabled() and method == 'POST' and path == '/api/v1/auths/add':
+            with create_oidc_identity(self.admin, **kwargs['json']) as client:
+                return {
+                    **client.identity,
+                    'token': client.token,
+                    'token_type': 'Bearer',
+                    'oauth_session_id': client.oauth_session_id,
+                }
         response = (actor or self.client).request(method, path, **kwargs)
         if not 200 <= response.status_code < 300:
             raise RuntimeError(f'Seeding {method} {path} failed (HTTP {response.status_code})')
@@ -314,6 +324,8 @@ def seed_export(ctx, parameter):
     # /auths/add returns a real session for the newly created disposable user.
     token = _extract(ctx.payloads['user'], 'token', name='export identity', via='POST /api/v1/auths/add')
     with AttackClient(ctx.client.base_url, token=token) as exporter:
+        if oidc.enabled():
+            exporter.oauth_session_id = ctx.payloads['user']['oauth_session_id']
         exporter.verify_identity(user_id=ctx.values['user'], role='user')
         ctx.request('POST', '/api/v1/export/data', actor=exporter)
         deadline = time.monotonic() + 60
@@ -416,6 +428,8 @@ def seed_totp_user(ctx, parameter):
     user_id = _extract(body, 'id', name=parameter['key'], via='POST /api/v1/auths/add')
     token = _extract(body, 'token', name=parameter['key'], via='POST /api/v1/auths/add')
     with AttackClient(ctx.client.base_url, token=token) as enrolee:
+        if oidc.enabled():
+            enrolee.oauth_session_id = body['oauth_session_id']
         enrolee.verify_identity(user_id=user_id, role='user')
         setup = ctx.request('POST', '/api/v1/auths/2fa/totp/setup', actor=enrolee)
         secret = _extract(setup, 'secret', name=parameter['key'], via='POST /api/v1/auths/2fa/totp/setup')
