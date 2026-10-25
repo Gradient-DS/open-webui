@@ -629,18 +629,27 @@ async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
 
 
 async def _add_chat(
-    entry: dict[str, Any], chats: list[dict[str, str]] | None, organizations: Organizations | None
-) -> None:
-    item_id = entry.get('id')
-    thread_id = await organizations.context_thread_id(item_id) if organizations and item_id else None
-    # Shared platform threads use their thread id as the UI id and may have no organization row.
-    if thread_id is None and entry.get('thread_id') == item_id:
-        thread_id = entry.get('thread_id')
+    entry: dict[str, Any],
+    chats: list[dict[str, str]] | None,
+    organizations: Organizations | None,
+    owner_id: str | None,
+    *,
+    origin: str,
+) -> list[Skipped]:
+    thread_id = entry.get('thread_id')
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id):
+        item_id = entry.get('id')
+        thread_id = (
+            await organizations.context_thread_id(owner_id, item_id) if organizations and owner_id and item_id else None
+        )
     if not isinstance(thread_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id) or chats is None:
-        raise threads.ThreadError(409, 'unavailable')
+        if origin != 'assistant':
+            raise threads.ThreadError(409, 'unavailable')
+        return [Skipped('chat', 'gone', entry.get('id') or '', entry.get('name'), in_chat=False)]
     ref = {'thread_id': thread_id}
     if ref not in chats:
         chats.append(ref)
+    return []
 
 
 async def _texts(
@@ -650,6 +659,7 @@ async def _texts(
     origin: str = 'chat',
     chats: list[dict[str, str]] | None = None,
     organizations: Organizations | None = None,
+    chat_owner_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Gradient] Read attached notes and chats (`origin` chat), a folder's notes or an assistant's notes and chats with
     the same grants as upstream retrieval; the ones deleted or not readable by the user are left out.
@@ -680,7 +690,9 @@ async def _texts(
             )
             continue
         if threads.enabled() and kind == 'chat':
-            await _add_chat(entry, chats, organizations)
+            unavailable += await _add_chat(
+                entry, chats, organizations, user_id if origin == 'chat' else chat_owner_id, origin=origin
+            )
             continue
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(
@@ -738,6 +750,11 @@ async def _more_texts(
         for item in metadata.get('knowledge') or []
         if isinstance(item, dict) and item.get('type') in ('note', 'chat') and isinstance(item.get('id'), str)
     ]
+    chat_owner_id = None
+    if threads.enabled() and any(item['type'] == 'chat' for item in assistant):
+        model_id = metadata.get('assistant_id') or metadata.get('model_id')
+        model = await Models.get_model_by_id(model_id) if model_id else None
+        chat_owner_id = model.user_id if model is not None else None
     texts, skipped = [], []
     for items, origin in (([item for item in folder if item['type'] == 'note'], 'folder'), (assistant, 'assistant')):
         fresh = []
@@ -746,7 +763,12 @@ async def _more_texts(
                 taken.add((item['type'], item['id']))
                 fresh.append(item)
         read, more = await _texts(
-            fresh[:room], metadata['user_id'], origin=origin, chats=chats, organizations=organizations
+            fresh[:room],
+            metadata['user_id'],
+            origin=origin,
+            chats=chats,
+            organizations=organizations,
+            chat_owner_id=chat_owner_id,
         )
         texts += read
         skipped += more

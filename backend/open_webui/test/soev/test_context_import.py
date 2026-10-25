@@ -30,17 +30,22 @@ def context_turn(chat_http, organization_store, monkeypatch):
         if not name.startswith('__') and callable(method):
             monkeypatch.setattr(agent_v2.Chats, name, forbidden)
     monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='fictional-fern')))
+    monkeypatch.setattr(
+        agent_v2.Models, 'get_model_by_id', AsyncMock(return_value=SimpleNamespace(user_id='fictional-fern'))
+    )
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=None))
 
-    async def turn(files=(), knowledge=(), *, new=True):
+    async def turn(files=(), knowledge=(), *, new=True, assistant_id=None):
         return await agent_v2.call_agent_v2(
             {'stream': False},
             {
                 'chat_id': 'fictional-destination',
                 'message_id': 'fictional-answer',
                 'user_id': 'fictional-fern',
+                'model_id': 'fictional-assistant',
+                'assistant_id': assistant_id,
                 'user_message': {'content': 'Fictional new question'},
                 'new_thread': new,
                 'files': list(files),
@@ -60,14 +65,13 @@ def context_turn(chat_http, organization_store, monkeypatch):
 async def test_v2_turn_sends_only_source_thread_ids(context_turn, origin):
     context = context_turn
     await context.repository.put(
-        'fictional-other-owner', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
+        'fictional-fern', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
     )
     entry = {
         'type': 'chat',
         'id': 'fictional-source-chat',
         'name': 'Fictional private title',
         'text': 'Fictional private conversation',
-        'thread_id': 'fictional-stale-thread',
     }
     for new in (True, False):
         result = await context.turn(
@@ -88,24 +92,111 @@ async def test_v2_turn_sends_only_source_thread_ids(context_turn, origin):
 
 
 @pytest.mark.asyncio
-async def test_shared_thread_reference_needs_no_local_chat(context_turn):
-    result = await context_turn.turn(
-        [{'type': 'chat', 'id': 'fictional-shared-thread', 'thread_id': 'fictional-shared-thread'}]
-    )
+@pytest.mark.parametrize('origin', ['chat', 'assistant'])
+async def test_shared_thread_reference_needs_no_local_chat(context_turn, monkeypatch, origin):
+    lookup = AsyncMock(side_effect=AssertionError('Explicit thread references need no local mapping'))
+    monkeypatch.setattr(context_turn.repository, 'context_thread_id', lookup)
+    entry = {'type': 'chat', 'id': 'fictional-ui-id', 'thread_id': 'fictional-shared-thread'}
+    result = await context_turn.turn([entry] if origin == 'chat' else [], [entry] if origin == 'assistant' else [])
     assert not isinstance(result, JSONResponse)
     body = json.loads(context_turn.api.chat.requests[-1].content)
     assert body['input']['chats'] == [{'thread_id': 'fictional-shared-thread'}]
+    lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('origin', ['chat', 'assistant'])
 @pytest.mark.parametrize('source', ['fictional-legacy', 'fictional-missing'])
-async def test_chat_without_v2_thread_id_refuses_before_sending(context_turn, origin, source):
+async def test_chat_without_v2_thread_id_refuses_before_sending(context_turn, source):
     entry = {'type': 'chat', 'id': source}
-    result = await context_turn.turn([entry] if origin == 'chat' else [], [entry] if origin == 'assistant' else [])
+    result = await context_turn.turn([entry])
     assert isinstance(result, JSONResponse)
     assert result.status_code == 409
     assert not context_turn.api.requests
+
+
+@pytest.mark.asyncio
+async def test_another_users_chat_and_missing_chat_refuse_identically(context_turn):
+    await context_turn.repository.put(
+        'fictional-other-owner', Organization(id='fictional-private-chat', thread_id='fictional-private-thread')
+    )
+    results = [
+        await context_turn.turn([{'type': 'chat', 'id': source, 'name': 'Fictional context'}])
+        for source in ('fictional-private-chat', 'fictional-missing')
+    ]
+    assert all(isinstance(result, JSONResponse) and result.status_code == 409 for result in results)
+    assert results[0].body == results[1].body
+    assert dict(results[0].headers) == dict(results[1].headers)
+    assert not context_turn.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('assistant_id', [None, 'fictional-split-assistant'])
+async def test_shared_assistant_resolves_its_owners_chats(context_turn, monkeypatch, assistant_id):
+    model = AsyncMock(return_value=SimpleNamespace(user_id='fictional-other-owner'))
+    monkeypatch.setattr(agent_v2.Models, 'get_model_by_id', model)
+    await context_turn.repository.put(
+        'fictional-other-owner', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
+    )
+    result = await context_turn.turn(
+        knowledge=[{'type': 'chat', 'id': 'fictional-source-chat'}], assistant_id=assistant_id
+    )
+    assert not isinstance(result, JSONResponse)
+    body = json.loads(context_turn.api.chat.requests[-1].content)
+    assert body['input']['chats'] == [{'thread_id': 'fictional-source-thread'}]
+    assert body['input']['text'] == 'Fictional new question'
+    model.assert_awaited_once_with(assistant_id or 'fictional-assistant')
+
+
+@pytest.mark.asyncio
+async def test_assistant_skips_unmapped_chats_uniformly(context_turn, monkeypatch):
+    monkeypatch.setattr(
+        agent_v2.Models, 'get_model_by_id', AsyncMock(return_value=SimpleNamespace(user_id='fictional-assistant-owner'))
+    )
+    for owner, source in [
+        ('fictional-fern', 'fictional-callers-chat'),
+        ('fictional-stranger', 'fictional-private-chat'),
+    ]:
+        await context_turn.repository.put(owner, Organization(id=source, thread_id=f'{source}-thread'))
+    inputs = []
+    for source in ('fictional-callers-chat', 'fictional-private-chat', 'fictional-missing', 'fictional-legacy'):
+        result = await context_turn.turn(knowledge=[{'type': 'chat', 'id': source, 'name': 'Fictional context'}])
+        assert not isinstance(result, JSONResponse)
+        inputs.append(json.loads(context_turn.api.chat.requests[-1].content)['input'])
+    assert all(item == inputs[0] for item in inputs)
+    assert 'chats' not in inputs[0]
+    assert 'Fictional context' in inputs[0]['text']
+    assert 'not available, left out: Fictional context' in inputs[0]['text']
+
+
+@pytest.mark.asyncio
+async def test_missing_assistant_does_not_use_callers_chat_mapping(context_turn, monkeypatch):
+    monkeypatch.setattr(agent_v2.Models, 'get_model_by_id', AsyncMock(return_value=None))
+    await context_turn.repository.put(
+        'fictional-fern', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
+    )
+    result = await context_turn.turn(knowledge=[{'type': 'chat', 'id': 'fictional-source-chat'}])
+    assert not isinstance(result, JSONResponse)
+    body = json.loads(context_turn.api.chat.requests[-1].content)
+    assert 'chats' not in body['input']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('thread_id', ['', 'fictional/invalid', 'f' * 129, 'fictional-thread\n', 7, None])
+@pytest.mark.parametrize('mapped', [False, True])
+async def test_invalid_explicit_reference_uses_only_owned_mapping(context_turn, thread_id, mapped):
+    if mapped:
+        await context_turn.repository.put(
+            'fictional-fern', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
+        )
+    result = await context_turn.turn([{'type': 'chat', 'id': 'fictional-source-chat', 'thread_id': thread_id}])
+    if mapped:
+        assert not isinstance(result, JSONResponse)
+        body = json.loads(context_turn.api.chat.requests[-1].content)
+        assert body['input']['chats'] == [{'thread_id': 'fictional-source-thread'}]
+    else:
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 409
+        assert not context_turn.api.requests
 
 
 @pytest.mark.asyncio

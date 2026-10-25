@@ -29,11 +29,13 @@ class ThreadOrganizations:
     def __init__(self, session: Callable = get_async_db) -> None:
         self.session = session
 
-    async def context_thread_id(self, chat_id: str) -> str | None:
-        # Mapping only, including assistant knowledge owned by someone else.
-        # The runtime authorizes the source under the destination turn's grant.
+    async def context_thread_id(self, user_id: str, chat_id: str) -> str | None:
+        # Resolve only the attaching container owner's mapping; source access
+        # remains the runtime's decision under the destination turn's grant.
         async with self.session() as db:
-            return (await db.execute(sa.select(chat.c.thread_id).where(chat.c.id == chat_id))).scalar_one_or_none()
+            return (
+                await db.execute(sa.select(chat.c.thread_id).where(chat.c.id == chat_id, chat.c.user_id == user_id))
+            ).scalar_one_or_none()
 
     async def list(self, user_id: str) -> list[Organization]:
         async with self.session() as db:
