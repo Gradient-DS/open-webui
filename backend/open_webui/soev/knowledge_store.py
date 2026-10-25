@@ -463,15 +463,11 @@ class SoevKnowledgeTable:
         result = []
         collections = {}
         for source_id in sorted(ids):
-            params = {'source_id': source_id}
-            if as_service:
-                response = await self._client.as_service().get('/v1/documents', params=params)
-            else:
-                response = await self._get('/v1/documents', params=params, user_id=user_id)
+            documents = await self._pages(
+                '/v1/documents', params={'source_id': source_id}, user_id=user_id, as_service=as_service
+            )
             keys = list(
-                dict.fromkeys(
-                    doc['collection_key'] for doc in response['data'] if doc['collection_key'] not in collections
-                )
+                dict.fromkeys(doc['collection_key'] for doc in documents if doc['collection_key'] not in collections)
             )
             rows = await asyncio.gather(
                 *(
@@ -484,7 +480,7 @@ class SoevKnowledgeTable:
                 if isinstance(row, BaseException):
                     raise row
                 collections[key] = row
-            for document in response['data']:
+            for document in documents:
                 collection = collections[document['collection_key']]
                 if collection is not None:
                     result.append((collection, document))

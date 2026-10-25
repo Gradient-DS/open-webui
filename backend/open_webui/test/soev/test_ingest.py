@@ -543,7 +543,8 @@ async def test_the_rendition_is_read_under_the_users_assertion(env):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('has_attachment', [False, True])
 async def test_rendition_prefers_own_attachments_then_returned_order(env, has_attachment):
-    """Own attachments take precedence, while other collections retain their returned order."""
+    """Own attachments on later pages take precedence; other collections keep their returned order."""
+    env.api.page_size = 1
     file = await rendition_file(env)
     for user in ('alice', 'bob'):
         key = env.module.attachments_collection_key(user)
@@ -554,7 +555,14 @@ async def test_rendition_prefers_own_attachments_then_returned_order(env, has_at
     env.api.requests.clear()
     expected = '# alice' if has_attachment else '# Knowledge'
     assert await env.module.rendition_of(file, 'alice', client=env.client) == expected
-    assert len(env.api.requests) == 2
+    lookups = [request for request in env.api.requests if request.url.path == '/v1/documents']
+    assert [dict(request.url.params) for request in lookups] == [
+        {'source_id': file.id},
+        *({'source_id': file.id, 'cursor': str(cursor)} for cursor in range(1, 3 if has_attachment else 2)),
+    ]
+    assert all(
+        request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in env.api.requests
+    )
 
 
 @pytest.mark.asyncio
@@ -562,7 +570,9 @@ async def test_rendition_keeps_returned_order_and_quotes_path_segments(env, monk
     """Non-attachment keys keep server ordering and reserved characters remain inside path segments."""
     file = await rendition_file(env)
     file.id = 'file/with ?#%'
-    lookup = AsyncMock(return_value={'data': [{'collection_key': 'z/ ?#%'}, {'collection_key': 'a'}]})
+    lookup = AsyncMock(
+        return_value={'data': [{'collection_key': 'z/ ?#%'}, {'collection_key': 'a'}], 'next_cursor': None}
+    )
     read = AsyncMock(return_value='# Markdown')
     monkeypatch.setattr(env.client, 'get', lookup)
     monkeypatch.setattr(env.client, 'get_text', read)

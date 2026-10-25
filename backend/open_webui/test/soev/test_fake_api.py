@@ -572,26 +572,39 @@ def test_unsuccessful_terminal_jobs_create_no_documents(api, status):
 
 @pytest.mark.parametrize('user', [None, 'owui:user:alice'])
 def test_the_source_lookup_is_gated_like_the_document_read(api, user):
-    """Lookup checks collection and document access and sorts all matches without pagination."""
+    """Lookup pages readable KB occurrences in order, applying access checks before pagination."""
     fake, client = api
-    for key in ('z', 'a', 'hidden_collection', 'hidden_document'):
+    for key in ('z', 'a', 'hidden_collection', 'hidden_document', 'corpus'):
         seed(client, key)
         fake.add_document(key, 'shared')
+    fake.collections['corpus']['kind'] = 'corpus'
     fake.collections['hidden_collection']['principals'] = []
     fake.documents['hidden_document', 'shared']['principals'] = ['owui:user:bob']
     fake.add_document('a', 'different')
     result = send(client, 'GET', '/v1/documents?source_id=shared', user=user)
     assert result.status_code == 200
     assert result.json() == {
-        'data': [fake.documents['a', 'shared'], fake.documents['z', 'shared']],
+        'data': [fake.documents['a', 'shared']],
+        'next_cursor': '1',
+    }
+    following = send(client, 'GET', '/v1/documents?source_id=shared&cursor=' + result.json()['next_cursor'], user=user)
+    assert following.json() == {
+        'data': [fake.documents['z', 'shared']],
         'next_cursor': None,
     }
-    for row in result.json()['data']:
+    rows = result.json()['data'] + following.json()['data']
+    assert send(client, 'GET', '/v1/documents?source_id=shared&limit=200', user=user).json() == {
+        'data': rows,
+        'next_cursor': None,
+    }
+    for row in rows:
         assert send(client, 'GET', f'/v1/collections/{row["collection_key"]}/documents/shared', user=user).json() == row
     assert send(client, 'GET', '/v1/documents?source_id=missing', user=user).json()['data'] == []
-    for path in ('/v1/documents', '/v1/documents?source_id='):
+    for path in ('/v1/documents', '/v1/documents?source_id=', '/v1/documents?source_id=%20'):
         response = send(client, 'GET', path, user=user)
         assert response.status_code == 400 and response.json()['code'] == 'malformed_request'
+    for query in ('limit=0', 'limit=201', 'limit=invalid'):
+        assert send(client, 'GET', '/v1/documents?source_id=shared&' + query, user=user).status_code == 422
 
 
 def test_content_serves_the_rendition_or_409(api):
