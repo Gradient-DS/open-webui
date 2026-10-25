@@ -21,7 +21,9 @@ chart's existing extra environment variables. There is no default. Local admin
 roles do not grant archive readership.
 
 Groups and flattened person memberships are pulled from paged `GET /v1/groups`
-at startup and at most every half snapshot lifetime (2.5 seconds).
+at startup and at most every third of the snapshot lifetime (5/3 seconds), measured
+from the start of each pull. One worker holds a database lease; the others poll
+the committed generation row.
 `SOEV_GROUP_RECONCILE_MINUTES` (default 15) may shorten that interval. The product
 credential needs directory read. A failed or invalid page preserves the previous
 complete snapshot without renewing its validity; retries use the same bound. The console manages
@@ -275,7 +277,12 @@ unit chooses the production size from measured first-paint and paging times.
 
 The directory mirror requires `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS=5` when
 `SOEV_API_URL` is set, matching the platform grant-context revocation bound.
-Group authorization fails closed until this worker observes a successful complete
-pull and whenever that snapshot expires. The fetch start time bounds evidence age;
-failed or slow refreshes cannot extend validity. The refresh interval is capped at
-half the bound, including retries; `SOEV_GROUP_RECONCILE_MINUTES` may shorten it.
+Group authorization fails closed until this worker commits a complete pull or
+observes a new committed generation after establishing its startup baseline. Each worker uses a process-local monotonic deadline, with pull latency
+consuming the bound. Reobserving the same generation never renews it, and clock
+steps cannot revive expired membership. Failed or slow pulls do not renew validity.
+Unchanged snapshots advance the generation without rewriting memberships. The
+refresh interval is capped at one third of the bound, including retries;
+`SOEV_GROUP_RECONCILE_MINUTES` may shorten it. Note and collaborative document
+events recheck each recipient on its delivery worker and evict readers who lost
+access, including when a group snapshot expires.

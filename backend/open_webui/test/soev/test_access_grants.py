@@ -291,7 +291,9 @@ async def test_every_other_resource_type_is_untouched(identity_config, resource_
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             import time
 
-            db.add(groups.GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time()))
+            monkeypatch.setattr(groups, '_snapshot_verification', groups.SnapshotVerification())
+            groups._snapshot_verification.verify(1, groups.monotonic() + 5)
+            db.add(groups.GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time(), generation=1))
             db.add(groups.GroupMember(id='membership', group_id='team', user_id='user', created_at=1, updated_at=1))
             await db.commit()
             grants = [{'principal_type': 'group', 'principal_id': 'team', 'permission': 'write'}]

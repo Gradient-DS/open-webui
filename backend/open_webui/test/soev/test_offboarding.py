@@ -262,10 +262,13 @@ async def test_archive_never_delete_omits_expiry(offboard_store):
 
 @pytest.mark.asyncio
 async def test_archive_assistant_follows_platform_readers_not_local_admins(offboard_store, monkeypatch):
+    from open_webui.models import groups
     from open_webui.models.access_grants import AccessGrantsTable
     from open_webui.models.users import Users
 
     store = offboard_store
+    monkeypatch.setattr(groups, '_snapshot_verification', groups.SnapshotVerification())
+    store.db.add(groups.GroupSnapshot(id='directory', fetched_at=0, completed_at=0))
     await Users.insert_new_user('rook', 'Rook', 'rook@example.invalid', role='admin', db=store.db)
     await store.module.offboard_user(
         'fern', actor_id='rook', options=store.module.OffboardingOptions(mode='archive'), db=store.db

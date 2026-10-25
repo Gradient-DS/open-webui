@@ -117,8 +117,18 @@ async def role_store(identity_config, monkeypatch, platform_capabilities):
     await engine.dispose()
 
 
+@pytest.fixture
+def snapshot_clock(monkeypatch):
+    from open_webui.models import groups
+
+    now = [100.0]
+    monkeypatch.setattr(groups, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(groups, '_snapshot_verification', groups.SnapshotVerification())
+    return now
+
+
 @pytest_asyncio.fixture
-async def group_db(identity_config, monkeypatch):
+async def group_db(identity_config, monkeypatch, snapshot_clock):
     from open_webui.internal import db as database
     from open_webui.models.access_grants import AccessGrant
     from open_webui.models.groups import Group, GroupMember, GroupSnapshot
@@ -193,7 +203,10 @@ async def group_db(identity_config, monkeypatch):
         await db.flush()
         import time
 
-        db.add(GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time()))
+        db.add(GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time(), generation=1))
+        from open_webui.models import groups
+
+        groups._snapshot_verification.verify(1, snapshot_clock[0] + 5)
         db.add(
             GroupMember(
                 id='membership',
