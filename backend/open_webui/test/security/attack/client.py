@@ -182,6 +182,7 @@ class AttackClient:
         self.session = requests.Session()
         self.session.trust_env = False  # No ambient proxy or .netrc credentials.
         self.token = token
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
         retry = ConnectionRetry(
@@ -237,6 +238,12 @@ class AttackClient:
             raise ValueError('AttackClient uses bearer headers only')
         if self.token and 'Authorization' not in headers:
             headers['Authorization'] = f'Bearer {self.token}'
+        if (
+            self.oauth_session_id
+            and headers.get('Authorization') == f'Bearer {self.token}'
+            and 'x-api-key' not in headers
+        ):
+            kwargs['cookies'] = {'oauth_session_id': self.oauth_session_id}
         if kwargs.pop('allow_redirects', False):
             raise ValueError('AttackClient never follows redirects')
         self.session.cookies.clear()
@@ -260,6 +267,7 @@ class AttackClient:
 
     def authenticate(self, response: requests.Response, email: str, *, role: str | None = None):
         self.token = None
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
         body = session_body(response, email)
@@ -287,12 +295,13 @@ class AttackClient:
             raise AuthenticationError('Only an authenticated client can reauthenticate')
         expected_id, expected_role = self.identity['id'], self.identity['role']
         self.token = None
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
-        result = self.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
-        self.authenticate(result, email, role=expected_role)
+        _login(self, email, password, role=expected_role)
         if self.identity['id'] != expected_id:
             self.token = None
+            self.oauth_session_id = None
             self.identity = None
             raise AuthenticationError('Reauthentication returned a different user')
         return self
@@ -329,11 +338,19 @@ class AttackClient:
 def login(email: str, password: str, *, base_url: str | None = None, role: str | None = None) -> AttackClient:
     client = AttackClient(base_url)
     try:
-        result = client.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
-        return client.authenticate(result, email, role=role)
+        return _login(client, email, password, role=role)
     except Exception:
         client.close()
         raise
+
+
+def _login(client: AttackClient, email: str, password: str, *, role: str | None = None) -> AttackClient:
+    from . import oidc
+
+    if oidc.enabled():
+        return oidc.authenticate(client, email, password, role=role)
+    result = client.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
+    return client.authenticate(result, email, role=role)
 
 
 def totp_code(secret: str, *, at: float | None = None) -> str:

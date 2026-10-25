@@ -52,9 +52,10 @@ from hostile_corpus import REFLECTION_PROBE, fetch_payloads
 from openapi_surface import body_skeletons, constrained_string_fields, writable_string_fields
 
 from . import client as transport
+from . import oidc
 from .configuration import preserve_configuration
 from .hits_path import hits_path
-from .identities import PASSWORD
+from .identities import PASSWORD, create_oidc_identity
 from .seeds import (
     DESTRUCTIVE,
     METHODS,
@@ -413,6 +414,8 @@ def _fill(path, parameters):
 
 def _throwaway(admin):
     email = f'attack-plane-throwaway-{uuid4().hex}@example.com'
+    if oidc.enabled():
+        return create_oidc_identity(admin, email=email, password=PASSWORD, name='Attack throwaway', role='admin')
     response = admin.request(
         'POST',
         '/api/v1/auths/add',
