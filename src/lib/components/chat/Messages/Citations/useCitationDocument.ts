@@ -4,21 +4,29 @@ import { rectsFromMetadata } from '$lib/utils/citationRects';
 import type { CitationDocument } from './citationDocuments';
 import type { DisplayCitation } from './reduceSources';
 
+/**
+ * `contentType` is what the content route serves, when probed: a catalog document named by its title says
+ * through it that it is a PDF, and one served as text (no original, only its markdown) has nothing to preview.
+ */
 export function citationFileInfo(
 	citation: DisplayCitation | null | undefined,
-	documents: CitationDocument[]
+	documents: CitationDocument[],
+	contentType?: string
 ) {
 	const fileName = documents[0]?.metadata?.name ?? citation?.source?.name ?? '';
 	const fileId = documents[0]?.metadata?.file_id;
-	const isPDF = fileName.toLowerCase().endsWith('.pdf');
-	const isDocx = fileName.toLowerCase().endsWith('.docx');
-	const isXlsx = fileName.toLowerCase().endsWith('.xlsx');
-	const isPptx = fileName.toLowerCase().endsWith('.pptx');
-	const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
-	const isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
+	const name = fileName.toLowerCase();
+	const textOnly = !!contentType?.startsWith('text/');
+	const isPDF = !textOnly && (name.endsWith('.pdf') || contentType === 'application/pdf');
+	const isDocx = !textOnly && name.endsWith('.docx');
+	const isXlsx = !textOnly && name.endsWith('.xlsx');
+	const isPptx = !textOnly && name.endsWith('.pptx');
+	const isImage = !textOnly && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
+	const isAudio = !textOnly && /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
 	return {
 		fileName,
 		fileId,
+		textOnly,
 		isPDF,
 		isDocx,
 		isXlsx,

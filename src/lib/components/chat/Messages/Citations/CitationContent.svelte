@@ -38,7 +38,8 @@
 
 		<div>
 			<div class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1">
-				{#if document.source?.url?.includes('http')}
+				<!-- [Gradient] A platform document has its text and preview here; only a web page links out. -->
+				{#if document.source?.url?.includes('http') && !(document.metadata?.file_id && !document.source?.provider)}
 					{@const snippetUrl = getTextFragmentUrl(document)}
 					{#if snippetUrl}
 						<a

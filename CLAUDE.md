@@ -220,7 +220,10 @@ persist and travel as `features.data_sources`; `agent_v2._knowledge` appends the
 after the chat's, assistant's and folder's, dropping non-`ds:` ids and everything while the gate is closed. They are
 never chat `files`, so no chip and no notice. A citation's `/files/{source_id}/content` serves a catalog document's
 original as the user (`soev/catalog_content.py`); without one (404 or 409 `original_missing`), its retained markdown
-as inline `text/plain`, so text fragments still land; 404 when neither is readable.
+as inline `text/plain`, so text fragments still land; 404 when neither is readable. The sources panel reads the
+served type from its HEAD probe (`probeFile`): a PDF gets Voorbeeld | Inhoud even when named by its title, text-only
+gets Inhoud alone with a plain title, and the icon beside the title opens `source_url`. A platform document's
+Inhoud label never links out (only web pages and provider documents keep that link).
 
 ### Live mail
 

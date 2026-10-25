@@ -30,6 +30,7 @@
 	export let mergedDocuments: CitationDocument[] = [];
 	export let activeSnippetIdx = 0;
 	export let previewAvailable = true;
+	export let previewType: string | undefined = undefined;
 	export let imageHeightClass = 'max-h-full';
 	// PDF viewer instance — snippet switches call setHighlight() on it rather
 	// than re-rendering the viewer.
@@ -55,7 +56,8 @@
 
 	$: ({ fileName, fileId, isPDF, isDocx, isXlsx, isPptx, isImage, isAudio } = citationFileInfo(
 		citation,
-		mergedDocuments
+		mergedDocuments,
+		previewType
 	));
 	$: activeSnippet = mergedDocuments?.[activeSnippetIdx];
 	$: activeSnippetText = activeSnippet?.document ?? '';
