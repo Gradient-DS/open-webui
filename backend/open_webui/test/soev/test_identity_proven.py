@@ -89,16 +89,12 @@ def assert_logged_in(response, login):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('account', ['existing', 'new'])
 async def test_microsoft_login_never_publishes_a_legacy_link(login, identity_http, monkeypatch, account):
-    from open_webui.soev import identity
 
-    signer = Mock(side_effect=AssertionError('A login must never mint a subject'))
-    monkeypatch.setattr(identity, 'mint_assertion', signer)
     if account != 'existing':
         login.oauth.Users.get_user_by_oauth_sub.return_value = None
     for _ in range(2):
         assert_logged_in(await login.callback(), login)
     assert identity_http[0] == []
-    signer.assert_not_called()
 
 
 @pytest.mark.asyncio

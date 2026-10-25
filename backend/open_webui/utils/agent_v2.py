@@ -266,7 +266,7 @@ async def _knowledge(
     keys = _knowledge_keys(metadata, folder)
     if not keys:
         return [], []
-    user_id = None if acting.acting_ref() else metadata['user_id']
+    user_id = None if acting.requester_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     skipped = []
     if missing := [key for key in keys if key not in described]:
@@ -377,7 +377,7 @@ async def _attachments(metadata: dict[str, Any], folder: list[dict[str, Any]] = 
     unavailable: list[Skipped] = []
     notes: list[str] = []
     entries = {entry['id']: entry for entry in metadata.get('files') or [] if ingest.is_chat_attachment(entry)}
-    user_id = None if acting.acting_ref() else metadata['user_id']
+    user_id = None if acting.requester_ref() else metadata['user_id']
     for file_id, entry in entries.items():
         await _chat_attachment(file_id, entry, user_id, attached, unavailable, notes)
     await _assistant_attachments(metadata, set(entries), user_id, attached, unavailable)
@@ -2059,7 +2059,7 @@ async def call_agent_v2(
     organizations: Organizations | None = None,
 ) -> StreamingResponse | dict:
     """Submit one user message; the thread owns the conversation history."""
-    user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
+    user_ref = acting.requester_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:

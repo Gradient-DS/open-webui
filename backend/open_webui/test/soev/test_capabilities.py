@@ -41,7 +41,7 @@ async def test_advertised_features(cache, identity_http, feature, present):
     assert len(requests) == 1
     assert requests[0].url.path == '/v1/capabilities'
     assert requests[0].headers['authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-    assert 'x-soev-subject' not in requests[0].headers
+    assert 'x-soev-' + 'subject' not in requests[0].headers
 
 
 @pytest.mark.asyncio

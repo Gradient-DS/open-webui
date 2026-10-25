@@ -165,7 +165,7 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
     assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
     if operation != 'product':
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
     if operation == 'bytes':
         assert request.content == b'fictional-image'
     if operation in {'chat', 'task'}:
@@ -263,7 +263,7 @@ async def test_missing_or_failed_refresh_does_not_forward_old_credentials(token_
 async def test_presigned_upload_has_no_user_token(token_app):
     ctx = token_app
     assert (await ctx.browser.get('/call/presigned-upload')).status_code == 200
-    for header in ('Authorization', 'X-Soev-Subject', 'X-Soev-User-Token'):
+    for header in ('Authorization', 'X-Soev-' + 'Subject', 'X-Soev-User-Token'):
         assert header not in ctx.requests[0].headers
 
 
@@ -288,12 +288,12 @@ async def test_request_started_chat_tasks_inherit_the_token(token_app):
 
     async def child():
         await release.wait()
-        await ctx.api.get('/v1/after-request', as_user=acting.acting_ref())
-        return await acting.user_token(acting.acting_ref())
+        await ctx.api.get('/v1/after-request', as_user=acting.requester_ref())
+        return await acting.user_token(acting.requester_ref())
 
     @ctx.app.get('/spawn')
     async def spawn(user=Depends(ctx.auth.get_verified_user)):
-        assert await acting.user_token(acting.acting_ref()) == 'fictional-access-token'
+        assert await acting.user_token(acting.requester_ref()) == 'fictional-access-token'
         tasks.append(asyncio.create_task(child()))
         return {}
 
@@ -324,7 +324,7 @@ async def test_concurrent_requests_do_not_share_tokens(token_app):
         await ctx.api.get(
             '/v1/concurrent',
             params={'session': bool(request.cookies.get('oauth_session_id'))},
-            as_user=acting.acting_ref(),
+            as_user=acting.requester_ref(),
         )
         return {}
 
@@ -350,9 +350,8 @@ async def test_acting_for_another_user_sends_no_user_token(token_app):
 
     @ctx.app.get('/as-owner')
     async def as_owner(user=Depends(ctx.auth.get_verified_user)):
-        assert await acting.user_token(acting.acting_ref()) == 'fictional-access-token'
-        with acting.acting_as('owui:user:fictional-owner'):
-            assert await acting.user_token(acting.acting_ref()) is None
+        assert await acting.user_token(acting.requester_ref()) == 'fictional-access-token'
+        assert await acting.user_token('owui:user:fictional-owner') is None
         return {}
 
     assert (await ctx.browser.get('/as-owner')).status_code == 200

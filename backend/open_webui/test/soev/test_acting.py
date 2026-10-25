@@ -33,11 +33,11 @@ def acting_app(identity_config, monkeypatch):
 
     @app.get('/verified')
     async def verified(resolved=Depends(auth.get_verified_user)):
-        return {'ref': acting.acting_ref(), 'same_user': resolved is user}
+        return {'ref': acting.requester_ref(), 'same_user': resolved is user}
 
     @app.get('/anonymous')
     async def anonymous():
-        return {'ref': acting.acting_ref()}
+        return {'ref': acting.requester_ref()}
 
     return app, acting, auth, user, lookup
 
@@ -45,18 +45,18 @@ def acting_app(identity_config, monkeypatch):
 def test_a_request_sets_the_acting_ref_only_for_its_handler(acting_app):
     """Verified requests carry their user's ref and leave outside and subsequent anonymous contexts unset."""
     app, acting, _, user, lookup = acting_app
-    assert acting.acting_ref() is None
+    assert acting.requester_ref() is None
     with TestClient(app) as client:
         response = client.get('/verified', headers={'Authorization': 'Bearer sk-test'})
         assert response.status_code == 200
         assert response.json()['ref'] == 'owui:user:alice'
-        assert acting.acting_ref() is None
+        assert acting.requester_ref() is None
         assert client.get('/anonymous').json() == {'ref': None}
         user.id = 'bob'
         assert client.get('/verified', headers={'Authorization': 'Bearer sk-test'}).json()['ref'] == 'owui:user:bob'
         assert client.get('/verified').status_code == 401
     assert lookup.await_count == 2
-    assert acting.acting_ref() is None
+    assert acting.requester_ref() is None
 
 
 @pytest.mark.asyncio
@@ -68,20 +68,20 @@ async def test_request_resets_the_acting_ref_in_the_callers_context(acting_app):
 
     async def child():
         await released.wait()
-        return acting.acting_ref()
+        return acting.requester_ref()
 
     @app.get('/spawn')
     async def spawn(user=Depends(auth.get_verified_user)):
         tasks.append(asyncio.create_task(child()))
-        return {'ref': acting.acting_ref()}
+        return {'ref': acting.requester_ref()}
 
-    assert acting.acting_ref() is None
+    assert acting.requester_ref() is None
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
             response = await client.get('/spawn', headers={'Authorization': 'Bearer sk-test'})
             assert response.status_code == 200
             assert response.json() == {'ref': 'owui:user:alice'}
-            assert acting.acting_ref() is None
+            assert acting.requester_ref() is None
             assert (await client.get('/anonymous')).json() == {'ref': None}
     finally:
         released.set()
@@ -119,39 +119,10 @@ def test_integration_startup_rejects_invalid_credentials(identity_config, monkey
         install(FastAPI())
 
 
-@pytest.mark.parametrize('encrypted', [False, True])
-def test_background_signing_rejects_unusable_private_keys(identity_config, monkeypatch, encrypted):
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from open_webui.soev.acting import install
-
-    identity, key = identity_config
-    if not encrypted:
-        key = ec.generate_private_key(ec.SECP256R1())
-    encryption = serialization.BestAvailableEncryption(b'password') if encrypted else serialization.NoEncryption()
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption).decode()
-    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KEY', pem)
-    install(FastAPI())
-    with pytest.raises(ValueError, match='SOEV_API_SIGNING_KEY must be an .*Ed25519'):
-        identity.signing_key()
-
-
 def test_disabled_integration_does_not_require_credentials(identity_config, monkeypatch):
     from open_webui.soev.acting import install
 
     identity, _ = identity_config
-    for setting in ('SOEV_API_URL', 'SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
+    for setting in ('SOEV_API_URL', 'SOEV_API_KEY'):
         monkeypatch.setattr(identity.config, setting, '')
     install(FastAPI())
-
-
-@pytest.mark.parametrize('pem', ['', 'malformed-pem'])
-def test_user_transport_does_not_require_a_legacy_signing_key(identity_config, monkeypatch, pem):
-    from open_webui.soev.acting import install
-
-    identity, _ = identity_config
-    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KEY', pem)
-    install(FastAPI())
-    assert identity.build_client()
-    with pytest.raises(ValueError, match='SOEV_API_SIGNING_KEY'):
-        identity.signing_key()

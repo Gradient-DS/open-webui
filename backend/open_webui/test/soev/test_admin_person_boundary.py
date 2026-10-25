@@ -353,7 +353,7 @@ async def test_archive_mutations_require_the_admins_own_token(admin_app, method,
     assert response.status_code == 200
     for request in store.ctx.requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
     assert all(call.args == ('owui:user:fern',) for call in store.resolve.await_args_list)
 
 

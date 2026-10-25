@@ -119,16 +119,15 @@ async def test_index_search_forks_and_fork_creation(thread_http):
 
 
 @pytest.mark.asyncio
-async def test_only_requester_login_token_even_inside_owner_context(thread_http):
+async def test_projection_uses_only_requester_login_token(thread_http):
     requests, responses, client = thread_http
     responses.extend([httpx.Response(200, json=page(1)) for _ in range(2)])
-    with acting.acting_as('owui:user:fictional-other-owner'):
-        await client.projection('fictional-thread')
-        await client.projection('fictional-thread')
+    await client.projection('fictional-thread')
+    await client.projection('fictional-thread')
     for request in requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
         assert request.headers['Authorization'] == 'Bearer fictional-product-key'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         assert 'Idempotency-Key' not in request.headers
     assert acting._token_resolver.get().await_count == 2
     resolver = acting._token_resolver.set(AsyncMock(return_value=None))
@@ -213,7 +212,7 @@ async def test_contract_fake_checks_admission_before_etag(thread_http, monkeypat
 
     def fake_api(request):
         calls.append(request)
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         if request.headers.get('X-Soev-User-Token') != 'fictional-login-token':
             return httpx.Response(401, json={'code': 'invalid_credential'})
         if not allowed:

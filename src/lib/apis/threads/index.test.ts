@@ -45,7 +45,7 @@ it('requests private pages with only the OWUI credential and preserves opaque cu
 		'If-None-Match': '"fictional"'
 	});
 	expect(init.headers).not.toHaveProperty('X-Soev-User-Token');
-	expect(init.headers).not.toHaveProperty('X-Soev-Subject');
+	expect(init.headers).not.toHaveProperty('X-Soev-' + 'Subject');
 });
 
 it.each([

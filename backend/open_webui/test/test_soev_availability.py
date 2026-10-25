@@ -24,8 +24,6 @@ async def test_dependency_and_registered_global_handler(soev_state, monkeypatch)
 
     app = FastAPI(exception_handlers={SoevNotConfigured: main_app.exception_handlers[SoevNotConfigured]})
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id='reader', role='user')
-    keys = Mock(side_effect=AssertionError('keys must not be read'))
-    monkeypatch.setattr(identity, 'signing_key', keys)
 
     @app.get('/dependency', dependencies=[Depends(require_soev)])
     async def dependency():
@@ -46,7 +44,6 @@ async def test_dependency_and_registered_global_handler(soev_state, monkeypatch)
                 if soev_state
                 else {'detail': {'code': 'soev_not_configured', 'detail': 'Soev API is not configured.'}}
             )
-    keys.assert_not_called()
 
 
 @pytest.mark.asyncio

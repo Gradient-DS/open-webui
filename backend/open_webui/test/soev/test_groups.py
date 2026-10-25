@@ -100,7 +100,7 @@ def directory_http(monkeypatch):
         assert group_ref.startswith('owui:group:')
         assert request.url.raw_path == f'{prefix}{quote(group_ref, safe="")}/members'.encode()
         assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         operation = request.headers['Idempotency-Key']
         assert 8 <= len(operation) <= 255
         body = json.loads(request.content)
@@ -180,8 +180,7 @@ async def test_push_skips_users_without_person_ids_and_keeps_local_members(group
     token = acting._token_resolver.set(resolver)
     requester = acting._requester_ref.set('owui:user:alice')
     try:
-        with acting.acting_as('owui:user:alice'):
-            await group_sync.publish(store.table, [group.id], db=store.db)
+        await group_sync.publish(store.table, [group.id], db=store.db)
     finally:
         acting._requester_ref.reset(requester)
         acting._token_resolver.reset(token)

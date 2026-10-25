@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from open_webui.soev.acting import acting_ref
+from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.request_cache import memoized
@@ -97,7 +97,7 @@ class SoevKnowledgeTable:
 
     @staticmethod
     def _user_ref(explicit_user_id: str | None = None) -> str | None:
-        return f'owui:user:{explicit_user_id}' if explicit_user_id else acting_ref()
+        return f'owui:user:{explicit_user_id}' if explicit_user_id else requester_ref()
 
     async def _get(self, path, *, user_id=None, params=None):
         return await self._client.get(path, as_user=self._user_ref(user_id), params=params)
@@ -382,7 +382,7 @@ class SoevKnowledgeTable:
 
     async def _members(self, key, *, user_id=None):
         return await memoized(
-            ('members', self, f'owui:user:{user_id}' if user_id else acting_ref(), key),
+            ('members', self, f'owui:user:{user_id}' if user_id else requester_ref(), key),
             lambda: self._load_members(key, user_id=user_id),
         )
 

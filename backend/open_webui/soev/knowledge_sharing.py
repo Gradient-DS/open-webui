@@ -110,46 +110,43 @@ async def reconcile(owner_id: str, folders, assistants: dict, *, widen: bool) ->
             (row.principal_type, row.principal_id)
         )
     resources = set().union(*(set(items) for items in [*sources.values(), *recorded.values()]))
-    with acting.acting_as(f'owui:user:{owner_id}'):
-        for resource in sorted(resources):
-            wants = {
-                source: await permitted(owner, resource[0], items.get(resource, set())) if owner else set()
-                for source, items in sources.items()
-            }
-            mine = set().union(*(items.get(resource, set()) for items in recorded.values()))
-            current = await _grants(resource, owner_id)
-            want = set().union(*wants.values())
-            if current is not None:
-                holders = {(g['principal_type'], g['principal_id']) for g in current}
-                writers = {(g['principal_type'], g['principal_id']) for g in current if g['permission'] == 'write'}
-                remove = mine - want - writers
-                add = want - holders if widen else set()
-                # Record before publishing; a failed remote write must remain revocable on the next edit.
-                managed = mine | add
-                for source, principals in wants.items():
-                    keep = principals & managed
-                    if source is None:
-                        await FolderShareGrants.record(owner_id, *resource, keep)
-                    else:
-                        await AssistantShareGrants.record(owner_id, source, *resource, keep)
-                if remove or add:
-                    grants = [
-                        g
-                        for g in current
-                        if g['permission'] != 'read' or (g['principal_type'], g['principal_id']) not in remove
-                    ]
-                    grants += [
-                        {'principal_type': pt, 'principal_id': pid, 'permission': 'read'} for pt, pid in sorted(add)
-                    ]
-                    evicting = note_access_change(resource[1]) if resource[0] == 'note' else nullcontext()
-                    async with evicting:
-                        await AccessGrants.set_access_grants(*resource, grants)
-            for source, items in recorded.items():
-                forget = items.get(resource, set()) - (wants.get(source, set()) if current is not None else set())
+    for resource in sorted(resources):
+        wants = {
+            source: await permitted(owner, resource[0], items.get(resource, set())) if owner else set()
+            for source, items in sources.items()
+        }
+        mine = set().union(*(items.get(resource, set()) for items in recorded.values()))
+        current = await _grants(resource, owner_id)
+        want = set().union(*wants.values())
+        if current is not None:
+            holders = {(g['principal_type'], g['principal_id']) for g in current}
+            writers = {(g['principal_type'], g['principal_id']) for g in current if g['permission'] == 'write'}
+            remove = mine - want - writers
+            add = want - holders if widen else set()
+            # Record before publishing; a failed remote write must remain revocable on the next edit.
+            managed = mine | add
+            for source, principals in wants.items():
+                keep = principals & managed
                 if source is None:
-                    await FolderShareGrants.forget(*resource, forget)
+                    await FolderShareGrants.record(owner_id, *resource, keep)
                 else:
-                    await AssistantShareGrants.forget(source, *resource, forget)
+                    await AssistantShareGrants.record(owner_id, source, *resource, keep)
+            if remove or add:
+                grants = [
+                    g
+                    for g in current
+                    if g['permission'] != 'read' or (g['principal_type'], g['principal_id']) not in remove
+                ]
+                grants += [{'principal_type': pt, 'principal_id': pid, 'permission': 'read'} for pt, pid in sorted(add)]
+                evicting = note_access_change(resource[1]) if resource[0] == 'note' else nullcontext()
+                async with evicting:
+                    await AccessGrants.set_access_grants(*resource, grants)
+        for source, items in recorded.items():
+            forget = items.get(resource, set()) - (wants.get(source, set()) if current is not None else set())
+            if source is None:
+                await FolderShareGrants.forget(*resource, forget)
+            else:
+                await AssistantShareGrants.forget(source, *resource, forget)
 
 
 async def left_out(owner_id: str, entries: list | None) -> list[dict]:

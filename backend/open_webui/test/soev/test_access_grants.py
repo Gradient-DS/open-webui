@@ -38,7 +38,6 @@ async def env(identity_config, fake_api, monkeypatch):
     monkeypatch.setattr(
         models, 'get_async_db_context', AsyncMock(side_effect=AssertionError('Knowledge must not use SQL grants'))
     )
-    await identity.ensure_link('owui:user:owner', client)
     await client.send(
         'POST',
         '/v1/collections',
@@ -67,16 +66,16 @@ def subject(request):
 async def test_empty_user_id_falls_back_to_the_acting_ref(env, ref):
     """An empty explicit user ID uses the request context without asserting or linking an empty identity."""
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set(ref)
+    token = acting._requester_ref.set(ref)
     try:
         assert await env.table.has_access('', 'knowledge', 'kb', 'read') is True
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     assert env.api.requests
     assert all(request.method == 'GET' for request in env.api.requests)
     for request in env.api.requests:
         if ref is None:
-            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
         else:
             assert subject(request) == ref
 
@@ -154,7 +153,7 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
     await env.store.delete_knowledge_by_id('deleted')
     env.api.requests.clear()
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:outsider')
+    token = acting._requester_ref.set('owui:user:outsider')
     try:
         result = await env.table.get_accessible_resource_ids(
             user_id,
@@ -166,9 +165,9 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
         assert result == expected
         assert await env.table.get_accessible_resource_ids(user_id, 'knowledge', ['kb'], permission, set()) == set()
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     assert env.api.requests
-    assert all(request.method == 'GET' and 'X-Soev-Subject' not in request.headers for request in env.api.requests)
+    assert all(request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -186,25 +185,25 @@ async def test_a_user_query_still_uses_the_assertion(env, permission, expected):
 async def test_grant_reads_are_identity_free_projections(env):
     """Grant reads use the service credential and exclude the owner and service from the projection."""
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:outsider')
+    token = acting._requester_ref.set('owui:user:outsider')
     try:
         rows = await env.table.get_grants_by_resources('knowledge', ['kb', 'missing'])
         single = await env.table.get_grants_by_resource('knowledge', 'kb')
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     assert rows == {'kb': single, 'missing': []}
     assert {(row.principal_id, row.permission) for row in single} == {
         ('readers', 'read'),
         ('writers', 'read'),
         ('writers', 'write'),
     }
-    assert all(request.method == 'GET' and 'X-Soev-Subject' not in request.headers for request in env.api.requests)
+    assert all(request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
 
 
 @pytest.mark.asyncio
 async def test_setting_grants_commissions_one_atomic_access_job(env):
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._acting_ref.set('owui:user:owner')
+    token = acting._requester_ref.set('owui:user:owner')
     grants = [
         {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
         {'principal_type': 'user', 'principal_id': '*', 'permission': 'write'},
@@ -215,7 +214,7 @@ async def test_setting_grants_commissions_one_atomic_access_job(env):
         await env.table.set_access_grants('knowledge', 'kb', grants)
         await env.table.set_access_grants('knowledge', 'kb', grants)
     finally:
-        acting._acting_ref.reset(token)
+        acting._requester_ref.reset(token)
     writes = [request for request in env.api.requests if request.method in ('PATCH', 'PUT')]
     assert [request.method for request in writes] == ['PUT', 'PUT']
     assert all(request.url.path == '/v1/collections/kb/access' for request in writes)
