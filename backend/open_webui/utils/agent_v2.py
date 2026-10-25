@@ -33,6 +33,7 @@ from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -818,7 +819,6 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
         ):
             images.append(cached)
             continue
-        await identity.ensure_link(user, client)
         try:
             uploaded = await client.post_bytes('/v1/chat/images', body, as_user=user, params={'name': name})
         except SoevApiError as error:
@@ -1818,6 +1818,8 @@ class AgentTurn:
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
         path = self.path('inputs') if self.thread_id else _ROOT
+        if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
+            body = {**body, 'temporary': True}
         try:
             stream = self.client.chat_stream(
                 path, body, as_user=self.as_user, thread_id=self.thread_id, after=self.position
@@ -2017,7 +2019,6 @@ class AgentTurn:
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()
-            await identity.ensure_link(self.as_user, self.client)
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()

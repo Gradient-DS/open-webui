@@ -237,10 +237,8 @@ async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
     await env.module.submit(file, collection_key='kb', user_id='alice')
     create, upload, commit = env.api.requests
     for request in (create, commit):
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
-        assert claims['sub'] == 'owui:user:alice'
-    assert create.headers['X-Soev-Subject'] != commit.headers['X-Soev-Subject']
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+    assert create.headers['X-Soev-User-Token'] == commit.headers['X-Soev-User-Token']
     assert 'X-Soev-Subject' not in upload.headers and 'Authorization' not in upload.headers
     await env.module.cancel(file)
     assert len(builds) == 2
@@ -345,7 +343,7 @@ async def test_the_attachments_collection_is_created_once_per_user(env):
         assert request.headers['Idempotency-Key'] == f'kb:{key}'
         reads = [r for r in env.api.requests if r.url.path == f'/v1/collections/{key}']
         assert len(reads) == 2
-        assert all('X-Soev-Subject' in r.headers for r in [request, *reads])
+        assert all('X-Soev-User-Token' in r.headers for r in [request, *reads])
     assert 'owui-attachments-alice' != env.module.attachments_collection_key('bob')
 
 
@@ -372,7 +370,7 @@ async def test_existing_attachments_collection_gets_tagged_once(env, tags):
     assert json.loads(update.content) == {'tags': expected_tags}
     assert env.api.collections[key]['tags'] == expected_tags
     assert update.headers['Idempotency-Key'] == f'kb:{key}:tag:chat-attachments'
-    assert 'X-Soev-Subject' in update.headers
+    assert 'X-Soev-User-Token' in update.headers
 
 
 @pytest.mark.asyncio
@@ -538,12 +536,9 @@ async def test_the_rendition_is_read_under_the_users_assertion(env):
     env.api.add_document('kb', file.id, rendition='# Markdown')
     assert await env.module.rendition_of(file, 'alice', client=env.client) == '# Markdown'
     assert len(env.api.requests) == 2
-    tokens = [request.headers['X-Soev-Subject'] for request in env.api.requests]
-    assert len(set(tokens)) == 2
-    for token in tokens:
-        encoded = token.split('.')[1]
-        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
-        assert claims['sub'] == 'owui:user:alice'
+    assert all(
+        request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in env.api.requests
+    )
 
 
 @pytest.mark.asyncio

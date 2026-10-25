@@ -89,7 +89,7 @@ async def test_public_speech_refusal_is_observed_before_upstream_io(speech_clien
         actor.id, actor.role = user_id, role
         response = await http.post(PATH, **body)
         assert crossuser.refused_as_expected(crossuser.expected_refusals()[ROUTE], response.status_code, response.text)
-        assert response.json()['detail']['code'] == 'scope_insufficient'
+        assert response.json()['detail']['code'] == 'sign_in'
     assert not get_json(stub, '/_recorded')['requests']
 
 

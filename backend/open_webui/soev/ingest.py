@@ -62,12 +62,6 @@ def is_chat_attachment(entry: dict) -> bool:
     )
 
 
-async def _as_user(user_id: str, client: SoevClient) -> str:
-    ref = f'owui:user:{user_id}'
-    await identity.ensure_link(ref, client)
-    return ref
-
-
 async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | None = None) -> str | None:
     content = (file.data or {}).get('content')
     if content:
@@ -75,7 +69,7 @@ async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | No
     if not config.SOEV_API_URL:
         return None
     client = client if client is not None else identity.build_client()
-    ref = await _as_user(user_id, client)
+    ref = f'owui:user:{user_id}'
     response = await client.get('/v1/documents', params={'source_id': file.id}, as_user=ref)
     keys = [document['collection_key'] for document in response['data']]
     keys.sort(key=lambda key: key != attachments_collection_key(user_id))
@@ -97,7 +91,7 @@ def _read_file(file_path: str) -> bytes:
 
 async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str:
     key = attachments_collection_key(user_id)
-    ref = await _as_user(user_id, client)
+    ref = f'owui:user:{user_id}'
     try:
         collection = await client.get(f'/v1/collections/{quote(key, safe="")}', as_user=ref)
     except SoevApiError as error:
@@ -164,7 +158,7 @@ async def submit(
         document['created_at'] = dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     document.update({'text': text} if inline else {'size': len(body), 'sha256': digest})
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
-    ref = None if client.is_service else await _as_user(user_id, client)
+    ref = None if client.is_service else f'owui:user:{user_id}'
     response = await client.send(
         'POST',
         '/v1/jobs',

@@ -143,7 +143,7 @@ async def _tick() -> None:
     if not config.SOEV_API_URL:
         return
     try:
-        await poll_once(identity.build_client(), now=int(time.time()))
+        await poll_once(identity.build_background_client(), now=int(time.time()))
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job poll tick failed (%s)', code)

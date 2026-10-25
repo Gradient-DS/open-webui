@@ -50,8 +50,6 @@ def _path(key: str) -> str:
 
 
 async def _existing(key: str, client: SoevClient) -> dict | None:
-    if acting.requester_ref() is not None:
-        await identity.ensure_link(acting.requester_ref(), client)
     try:
         return await client.get(_path(key), as_user=acting.requester_ref())
     except SoevApiError as error:
@@ -135,7 +133,6 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
             await _delete(collection, client)
         return False
     owner = f'owui:user:{folder.user_id}'
-    await identity.ensure_link(owner, client)
     body = access(folder.user_id, principals)
     if await _existing(key, client) is None:
         await client.send(

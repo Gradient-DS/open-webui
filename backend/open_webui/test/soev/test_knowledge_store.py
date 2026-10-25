@@ -1,6 +1,5 @@
 """Knowledge store behavior against recorded HTTP and isolated OWUI file rows."""
 
-import base64
 import datetime as dt
 import importlib
 import inspect
@@ -266,8 +265,7 @@ async def test_get_knowledge_by_id_inside_a_request_runs_as_the_acting_user(env)
         assert (await env.store.get_knowledge_by_id('kb')).id == 'kb'
         request = env.api.requests[0]
         assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         env.api.requests.clear()
         assert await env.store.get_collection_grants('kb') == []
         assert len(env.api.requests) == 1
@@ -394,7 +392,7 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     assert row['principals'] == ['owui:group:staff', SERVICE, 'owui:user:carol']
     assert row['writers'] == ['owui:group:staff', 'owui:user:carol']
     relevant = [request for request in env.api.requests if request.method == 'POST']
-    assert relevant[-2].url.path == '/v1/identity/links'
+    assert len(relevant) == 1
     assert relevant[-1].url.path == '/v1/collections'
 
 
@@ -506,7 +504,7 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
     assert env.api.collections['kb']['visibility'] == 'restricted'
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'update_collection_access' and job['status'] == 'QUEUED'
-    assert all('X-Soev-Subject' in r.headers for r in env.api.requests if r.method in ('PATCH', 'PUT'))
+    assert all('X-Soev-User-Token' in r.headers for r in env.api.requests if r.method in ('PATCH', 'PUT'))
     env.api.advance(job['job_id'], 'SUCCEEDED')
     assert env.api.collections['kb']['visibility'] == 'restricted'
     assert 'platform:pseudo:owui' in env.api.collections['kb']['principals']
@@ -533,8 +531,7 @@ async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monke
     assert queries == ['QUEUED', 'RUNNING'] * 3
     for request in env.api.requests:
         if request.method == 'DELETE' or (request.method == 'GET' and request.url.path == '/v1/jobs'):
-            encoded = request.headers['X-Soev-Subject'].split('.')[1]
-            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
 
 
 @pytest.mark.asyncio
@@ -600,8 +597,7 @@ async def test_request_identity_cannot_fall_back_to_capability_only_writes(env):
         assert caught.value.status == 403
     finally:
         acting._acting_ref.reset(token)
-    assert 'owui:user:bob' in env.api.links
-    assert env.api.requests[0].url.path == '/v1/identity/links'
+    assert all('/v1/identity/' not in request.url.path for request in env.api.requests)
     env.api.requests.clear()
     result = await env.store.update_knowledge_by_id('kb', env.models.KnowledgeForm(name='Worker', description=''))
     assert result.name == 'Worker'
@@ -721,8 +717,7 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
     requests = [request for request in env.api.requests if request.method == 'GET']
     assert requests
     for request in requests:
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert not any('/private' in request.url.path for request in requests)
 
 
@@ -987,8 +982,7 @@ async def test_add_file_with_a_directory_moves_a_landed_document(env):
         ('POST', '/v1/collections/kb/documents/f1/move')
     ]
     assert json.loads(writes[0].content) == {'to': 'a'}
-    encoded = writes[0].headers['X-Soev-Subject'].split('.')[1]
-    assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+    assert writes[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
 
 
 @pytest.mark.asyncio
@@ -1140,8 +1134,7 @@ async def test_references_use_the_source_lookup_route(env, acting_user):
     assert not any(request.url.path == '/v1/collections' for request in env.api.requests)
     for request in env.api.requests:
         if acting_user:
-            encoded = request.headers['X-Soev-Subject'].split('.')[1]
-            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+            assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         else:
             assert 'X-Soev-Subject' not in request.headers
 

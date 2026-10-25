@@ -177,26 +177,22 @@ async def test_a_failed_link_can_be_retried(identity_config, identity_http):
 
 
 @pytest.mark.asyncio
-async def test_acting_ref_links_before_each_request_mints_its_assertion(identity_config, identity_http, user):
-    """Acting refs ensure the link while the built client signs every page separately."""
+async def test_acting_ref_uses_the_login_without_publishing_a_link(identity_config, identity_http, user):
     identity, _ = identity_config
     requests, responses = identity_http
     responses.extend(
         [
-            httpx.Response(204),
             httpx.Response(200, json={'data': [{'key': 'a'}], 'next_cursor': 'next'}),
             httpx.Response(200, json={'data': [{'key': 'b'}], 'next_cursor': None}),
         ]
     )
     client = identity.build_client()
-    ref = await identity.acting_ref(user, client)
+    ref = identity.external_ref(user)
     assert ref == 'owui:user:alice'
     assert [item async for item in client.pages('/v1/collections', as_user=ref)] == [{'key': 'a'}, {'key': 'b'}]
-    tokens = [json.loads(requests[0].content)['assertion']]
-    tokens.extend(request.headers['X-Soev-Subject'] for request in requests[1:])
-    assert len({claims(token)['jti'] for token in tokens}) == 3
-    assert all(claims(token)['sub'] == ref for token in tokens)
-    assert all(abs(claims(token)['iat'] - dt.datetime.now(dt.UTC).timestamp()) < 10 for token in tokens)
+    assert len(requests) == 2
+    assert all(request.headers['X-Soev-User-Token'] == f'fictional-login:{ref}' for request in requests)
+    assert all('X-Soev-Subject' not in request.headers for request in requests)
 
 
 @pytest.mark.asyncio

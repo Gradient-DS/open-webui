@@ -241,8 +241,9 @@ def _by_collection(
 
 async def _ensure(owner: str, model_id: str | None, client) -> None:
     from open_webui.models.models import Models
-    from open_webui.soev import assistant_files, ingest
+    from open_webui.soev import assistant_files, identity, ingest
 
+    await identity.ensure_link(f'owui:user:{owner}', client)
     if model_id is None:
         await ingest.ensure_attachments_collection(owner, client)
         return
@@ -295,7 +296,7 @@ async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, pr
         f'{prefix}: {len(referenced)} files attached in chats, folders or assistants, {len(files)} with a file row',
         flush=True,
     )
-    client = None if dry_run else identity.build_client()
+    client = None if dry_run else identity.build_background_client()
     pending = []
     targets = _by_collection(files, linked, users, state, chat_ids, assistant_refs)
     for target, owned in sorted(targets.items(), key=lambda item: (item[0][0], item[0][2])):

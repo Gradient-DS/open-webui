@@ -180,7 +180,7 @@ async def task_completion(form_data: dict, user) -> dict | StreamingResponse:
     client = identity.build_client(timeout=TASK_TIMEOUT)
     body = task_body(form_data)
     try:
-        user_ref = await identity.acting_ref(user, client)
+        user_ref = identity.external_ref(user)
         if not body['stream']:
             return await client.complete_task(body, as_user=user_ref)
         stream = client.stream_task(body, as_user=user_ref)

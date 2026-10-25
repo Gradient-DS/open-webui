@@ -4,13 +4,17 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from open_webui.models.users import Users
+from sqlalchemy import func, select
+
+from open_webui.internal.db import get_async_db
 from open_webui.models.chats import Chats
+from open_webui.models.users import User, Users
 from open_webui.services.retention.config import (
-    get_effective_ttl_days,
     get_cutoff_timestamp,
+    get_effective_ttl_days,
     is_retention_enabled,
 )
+from open_webui.soev.policy_jobs import v2_enabled
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +64,12 @@ class DataRetentionService:
 
         effective_user_ttl = get_effective_ttl_days(master_ttl, user_inactivity_ttl)
 
+        if v2_enabled():
+            if effective_user_ttl > 0:
+                count = await _inactive_user_count(get_cutoff_timestamp(effective_user_ttl))
+                log.info('Retention: %d inactive users need console offboarding', count)
+            return report
+
         # Phase 0: Send warning emails to users approaching inactivity TTL
         if effective_user_ttl > 0 and warning_days > 0 and enable_warning_email:
             await DataRetentionService._send_warning_emails(app, effective_user_ttl, warning_days, report)
@@ -93,12 +103,12 @@ class DataRetentionService:
         re-sending. A warning is re-sent only if the user logged in since the last
         warning (which resets last_active_at) and went inactive again.
         """
-        from open_webui.services.email.graph_mail_client import (
-            send_mail,
-            render_retention_warning_subject,
-            render_retention_warning_email,
-        )
         from open_webui.config import DEFAULT_LOCALE, WEBUI_URL
+        from open_webui.services.email.graph_mail_client import (
+            render_retention_warning_email,
+            render_retention_warning_subject,
+            send_mail,
+        )
 
         now = int(time.time())
         # Users inactive longer than (ttl - warning) days but not yet at ttl
@@ -171,9 +181,11 @@ class DataRetentionService:
         report: RetentionReport,
     ) -> None:
         """Phase 1: Find and delete inactive users."""
-        from open_webui.services.deletion.service import DeletionService
         from open_webui.services.archival.service import ArchiveService
+        from open_webui.services.deletion.service import DeletionService
 
+        if v2_enabled():
+            return
         cutoff = get_cutoff_timestamp(ttl_days)
         users = await Users.get_inactive_users(
             inactive_since=cutoff,
@@ -219,6 +231,8 @@ class DataRetentionService:
     @staticmethod
     async def _cleanup_stale_chats(ttl_days: int, report: RetentionReport) -> None:
         """Phase 2: Soft-delete stale chats. Cleanup worker handles cascade."""
+        if v2_enabled():
+            return
         cutoff = get_cutoff_timestamp(ttl_days)
         stale_chats = await Chats.get_stale_chats(stale_before=cutoff, limit=500)
 
@@ -233,3 +247,8 @@ class DataRetentionService:
 
         if stale_chats:
             log.info(f'Retention: soft-deleted {report.chats_deleted} stale chats (older than {ttl_days} days)')
+
+
+async def _inactive_user_count(cutoff: int) -> int:
+    async with get_async_db() as db:
+        return await db.scalar(select(func.count(User.id)).where(User.last_active_at < cutoff, User.role != 'admin'))

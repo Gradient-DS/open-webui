@@ -277,15 +277,15 @@ async def test_another_users_context_never_supplies_a_token(platform, memory_sta
     with pytest.raises(SoevApiError) as error:
         await memories.query_memory(memory_state.request, memories.QueryMemoryForm(content='Tea?'), platform.user)
     assert (error.value.status, error.value.code, error.value.constraint) == (
-        403,
-        'scope_insufficient',
+        401,
+        'sign_in',
         'identity:platform_login',
     )
     async with platform.http(
         transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
     ) as client:
         response = await client.post('/transcriptions', files={'file': ('fiction.wav', b'fiction', 'audio/wav')})
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert platform.calls == []
     memory_state.legacy.assert_not_awaited()
 
@@ -319,7 +319,7 @@ async def test_a_login_without_a_platform_token_is_refused_before_any_call(platf
     monkeypatch.setattr(acting, '_token_resolver', acting.ContextVar('no-token', default=AsyncMock(return_value=None)))
     with pytest.raises(SoevApiError) as error:
         await primitives.embed_memory('Fictional note.', platform.user)
-    assert (error.value.status, error.value.constraint) == (403, 'identity:platform_login')
+    assert (error.value.status, error.value.constraint) == (401, 'identity:platform_login')
     assert platform.calls == []
 
 
@@ -380,7 +380,7 @@ async def test_speech_requires_requesting_persons_platform_login(
         transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
     ) as client:
         response = await client.post('/speech', json={'input': 'Fictional speech.'})
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert response.json()['detail']['constraint'] == 'identity:platform_login'
     assert not platform.calls
 

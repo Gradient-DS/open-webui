@@ -108,8 +108,6 @@ def test_the_override_returns_the_upstream_user_unchanged(acting_app):
     [
         ('SOEV_API_KEY', ''),
         ('SOEV_API_KEY', 'malformed-key'),
-        ('SOEV_API_SIGNING_KEY', ''),
-        ('SOEV_API_SIGNING_KEY', 'malformed-pem'),
     ],
 )
 def test_integration_startup_rejects_invalid_credentials(identity_config, monkeypatch, setting, value):
@@ -122,7 +120,7 @@ def test_integration_startup_rejects_invalid_credentials(identity_config, monkey
 
 
 @pytest.mark.parametrize('encrypted', [False, True])
-def test_integration_startup_rejects_unusable_private_keys(identity_config, monkeypatch, encrypted):
+def test_background_signing_rejects_unusable_private_keys(identity_config, monkeypatch, encrypted):
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
     from open_webui.soev.acting import install
@@ -133,8 +131,9 @@ def test_integration_startup_rejects_unusable_private_keys(identity_config, monk
     encryption = serialization.BestAvailableEncryption(b'password') if encrypted else serialization.NoEncryption()
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption).decode()
     monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KEY', pem)
+    install(FastAPI())
     with pytest.raises(ValueError, match='SOEV_API_SIGNING_KEY must be an .*Ed25519'):
-        install(FastAPI())
+        identity.signing_key()
 
 
 def test_disabled_integration_does_not_require_credentials(identity_config, monkeypatch):
@@ -144,3 +143,15 @@ def test_disabled_integration_does_not_require_credentials(identity_config, monk
     for setting in ('SOEV_API_URL', 'SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
         monkeypatch.setattr(identity.config, setting, '')
     install(FastAPI())
+
+
+@pytest.mark.parametrize('pem', ['', 'malformed-pem'])
+def test_user_transport_does_not_require_a_legacy_signing_key(identity_config, monkeypatch, pem):
+    from open_webui.soev.acting import install
+
+    identity, _ = identity_config
+    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KEY', pem)
+    install(FastAPI())
+    assert identity.build_client()
+    with pytest.raises(ValueError, match='SOEV_API_SIGNING_KEY'):
+        identity.signing_key()

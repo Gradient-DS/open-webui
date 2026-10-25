@@ -13,6 +13,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chat, ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.policy_jobs import refuse_automations, v2_enabled
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.tasks import create_task, has_active_tasks
 from open_webui.utils.auth import create_token
@@ -76,6 +77,8 @@ async def process_pending_internal_messages(
     user_id: str,
     run: dict,
 ) -> None:
+    if v2_enabled():
+        return
     refuse_local_content()
     lock = _parent_locks.setdefault(parent_chat_id, asyncio.Lock())
     while await has_active_tasks(source_request.app.state.redis, parent_chat_id):
@@ -281,6 +284,8 @@ async def delegate(
     parent_chat_id: str,
     parent_message_id: str | None,
 ) -> str:
+    if background:
+        refuse_automations()
     refuse_local_content()
     global _foreground_semaphore
 
@@ -541,6 +546,8 @@ async def delegate(
                 foreground_semaphore.release()
 
     async def run_background() -> dict:
+        if v2_enabled():
+            return {}
         started_at = time.time()
         cancelled = False
         try:
@@ -551,6 +558,8 @@ async def delegate(
         except Exception as exc:
             result = {'status': 'error', 'summary': '', 'error': str(exc)}
 
+        if v2_enabled():
+            return result
         duration = f'{time.time() - started_at:.1f}s'
         lines = [
             f'[ASYNC SUBAGENT COMPLETE - {delegation_id}]',
@@ -601,6 +610,8 @@ async def delegate(
             'timestamp': int(time.time()),
         }
 
+        if v2_enabled():
+            return result
         lock = _parent_locks.setdefault(parent_chat_id, asyncio.Lock())
         async with lock:
             async with get_async_db() as db:

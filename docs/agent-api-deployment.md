@@ -13,14 +13,15 @@ Set `AGENT_API_ENABLED=true` and configure:
 | --- | --- | --- |
 | `SOEV_API_URL` | `soevApi.url` | Platform base URL |
 | `SOEV_API_KEY` | `secrets.soevApiKey` | Platform caller credential |
-| `SOEV_API_SIGNING_KEY` | `secrets.soevApiSigningKey` | Unencrypted Ed25519 private PEM, preserving newlines |
-| `SOEV_API_AUDIENCE` | `soevApi.audience` | Assertion audience |
+| `SOEV_API_SIGNING_KEY` | `secrets.soevApiSigningKey` | Legacy background assertions only: unencrypted Ed25519 private PEM, preserving newlines |
+| `SOEV_API_AUDIENCE` | `soevApi.audience` | Legacy background assertion audience |
 | `SOEV_API_SERVICE_PRINCIPAL` | `soevApi.servicePrincipal` | Declared Open WebUI service principal |
 
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
 With External Secrets enabled and a platform URL set, provide `soevApiKey` and
 `soevApiSigningKey` in the configured 1Password item instead of inline secrets.
-Startup validates both keys when the platform URL is set. Missing platform
+Startup validates the product credential when the platform URL is set. Only legacy
+background work loads the signing key, when it first signs. Missing platform
 configuration refuses agent requests; it does not select another transport.
 
 `AGENT_API_AGENTS` (chart `agentApiAgents`) lists the agents an admin can
@@ -50,11 +51,58 @@ addresses do not link accounts.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product
-credential in `Authorization`. Other providers, password users, API-key requests
-and calls started without a user request send no user token. Chat tasks started
-by a user request inherit that request's token context. Presigned storage requests
-use only their presigned credentials. `X-Soev-Subject` remains during this
-integration step and is removed in the person-identity cutover (step 2).
+credential in `Authorization`. It never sends `X-Soev-Subject` with a login token.
+A user operation without that person's token fails with `401` / `sign_in`:
+password users, other OAuth providers, OWUI API keys, missing or expired sessions,
+and attempts to act as another user do not fall back to an assertion. Chat tasks
+started by a user request inherit its token context. Presigned storage requests
+use only their presigned credentials.
+
+Admin suspension to `pending` is refused with `403 policy_forbids` /
+`suspension:console` whenever soev is configured, before remote calls or local
+writes. v2 offboarding keeps the same console-only boundary. OWUI never revokes
+the target person's schedules or connections on an admin's behalf.
+Archive DELETE and retention PATCH require the admin's own login token and use
+a requester client. Scheduled archive expiry remains tokenless and makes no
+platform calls; the platform owns remote expiry.
+
+`SoevClient` resolves the requesting user's token even when a caller omits an
+explicit user reference. `as_service()` / `build_service_client()` explicitly
+select product authority for catalog/capability discovery, directory/group pushes,
+service inventory and grant projections, collection ownership
+operations, and credential-scoped job reads/commits. Those calls send neither
+person header. ThreadClient already requires the requester's token.
+
+### Remaining legacy subject assertions
+
+Only `identity.build_background_client()` constructs `BackgroundSoevClient`.
+It refuses a user request context or an explicit login token before minting.
+`identity.mint_assertion` also refuses request context, including legacy link
+assertions in JSON bodies. The remaining subject-header callers are listed
+exhaustively below; paths are under `backend/open_webui/soev/`.
+
+| Caller | Subject-header operations | Why no login token exists |
+| --- | --- | --- |
+| `migrate.copy_directory → _create_collection` | Create a collection when its migration supplies an owner | Offline migration command |
+| `migrate.copy_directory → _create_cloud_sync` | Create the owner's provider connection | Offline migration command |
+| `migrate.copy_directory → _subscribe` | Create the owner's content schedules | Offline migration command |
+| `migrate.copy_directory → _cloud_coverage` | Page the owner's schedules | Offline reconciliation |
+| `migrate.copy_directory → _reconcile_collections` | Page each cloud owner's collections | Offline reconciliation; cloud content is not a service-reader inventory |
+| `migrate_ingest.reingest → ingest.submit` | Create and commit file jobs using `directory.client` from `migrate.copy_directory` | Offline re-ingest as the recorded KB owner |
+| `migrate_uploads.ingest_uploads → _ensure → ingest.ensure_attachments_collection` | Read/create/tag the owner's attachment collection | Offline chat/folder upload migration |
+| `migrate_uploads.ingest_uploads → _ensure → assistant_files.ensure_collection` | Read/create/regrant the assistant owner's collection | Offline assistant upload migration |
+| `migrate_uploads.ingest_uploads → _submit → ingest.submit` | Create and commit upload jobs | Offline upload migration |
+| `jobs._tick → poll_once → _reference_ready` | Read a completed reference document as its File owner to fill missing MIME metadata | Durable job polling runs without a user session; existing D-2g-4 deferral |
+
+`identity.ensure_link` remains only for `migrate._push_directory`,
+`migrate_uploads._ensure`, and `jobs._reference_ready`. These send a signed
+assertion in a link request's body using product authority, without a subject
+header. User requests no longer publish links or proven Entra assertions; approval
+link retries are removed. Ordinary request clients do not need a signing key.
+
+The coordinated platform cut removes these background assertions and legacy link
+operations. This OWUI change leaves their tokenless offline/background behavior
+explicit until their replacement lands.
 
 ## Optional platform capabilities
 
@@ -161,7 +209,7 @@ Inputs (environment):
    **Chat uploads.** Every upload a stored chat attaches (chat-level and message `files`, type `file`, not an image, not picked from a KB; deleted chats excluded) that is not a KB file is submitted through `ingest.submit` as its owner into their attachments collection, the path a fresh v2 chat upload takes, and its `collection_name` is set to that collection. Files already there, in flight or terminally failed are skipped; an original gone from storage is listed and skipped. Images need nothing: the agent turn reads their bytes from storage. `--apply --uploads` (chart `mode: uploads`) runs only this step, for tenants migrated before it existed.
 6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.
 7. **Reconcile.** Exit 0 when every file is ingested or terminally failed (listed); 75 while ingest jobs still run; 1 on a missing or conflicting collection, missing memory vectors or an unreachable soev-api; 2 on invalid input.
-8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker, so each first Microsoft login creates the proven Entra link soev-connect requires. `WEBUI_SECRET_KEY` is not rotated. The sign-out is best-effort: if Redis loses its state, a user keeps their session, gets "Log in again with Microsoft to connect" (shown whenever soev-api answers `subject_not_linked`) on their first consent, and the link forms at that login. Being signed out is a convenience, not a security control.
+8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker so users sign in again through the configured OIDC provider. `WEBUI_SECRET_KEY` is not rotated. The sign-out is best-effort: if Redis loses its state, a user may keep an OWUI session, but platform operations still require a valid owned OIDC login token. Being signed out is a convenience, not a security control.
 
 `--dry-run` prints the plan without writes (it does not create the state tables either); its one HTTP request is the read of the model catalog for step 3's default. It needs the same `SOEV_V2_*` inputs as `--apply`, and fails like `--apply` when the catalog marks no default. The CLI requires one of `--apply`, `--restore` or `--dry-run`; it no longer runs the directory copy alone. The plan shows the snapshot state, every switched key, the model mapping with counts, the default model with the ids and counts that would go to it, per-KB files to check, memory rows and the sign-out.
 
@@ -169,7 +217,7 @@ Inputs (environment):
 
 Rollback: redeploy the previous full image set and values, and restore the database backup taken before the cutover. v2 migrates the schema past the v1 Alembic head (it drops `agent_config`), so a v1 image does not start on a v2 database.
 
-Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.
+Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Person and proven source-identity bindings come from the platform login; OWUI does not mint proven links at sign-in.
 
 ## Retired inference surfaces and credential boundaries
 
