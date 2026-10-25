@@ -5931,6 +5931,29 @@
         "title": "DataRetentionConfigForm",
         "type": "object"
       },
+      "DataSource": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "DataSource",
+        "type": "object"
+      },
       "DataWarningLogForm": {
         "properties": {
           "capabilities": {
@@ -33231,6 +33254,37 @@
         ]
       }
     },
+    "/api/v1/data-sources/": {
+      "get": {
+        "description": "Read as the caller on soev-api, so only the ones they may read; 404 while data sources are off.",
+        "operationId": "list_data_sources_api_v1_data_sources__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DataSource"
+                  },
+                  "title": "Response List Data Sources Api V1 Data Sources  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Data Sources",
+        "tags": [
+          "data-sources"
+        ]
+      }
+    },
     "/api/v1/data-warnings/accept": {
       "post": {
         "description": "Log that a user accepted a data sovereignty warning.",
@@ -43873,6 +43927,58 @@
           }
         ],
         "summary": "Delete Entries From Collection",
+        "tags": [
+          "retrieval"
+        ]
+      }
+    },
+    "/api/v1/retrieval/ef/{text}": {
+      "get": {
+        "operationId": "get_embeddings_api_v1_retrieval_ef__text__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "text",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Text"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Embeddings",
         "tags": [
           "retrieval"
         ]
