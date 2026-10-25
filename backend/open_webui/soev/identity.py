@@ -166,8 +166,10 @@ async def _unlink(user_ref: str, client: SoevClient) -> None:
 
 
 def check_role_change(user: UserModel, role: str) -> None:
-    if config.SOEV_API_URL and role == 'pending' and user.role in {'user', 'admin'}:
+    if config.SOEV_API_URL and user.role in {'user', 'admin'} and role not in {'user', 'admin'}:
         raise SoevApiError(403, 'policy_forbids', 'Console suspension required', constraint='suspension:console')
+    if role not in {'admin', 'user', 'pending'}:
+        raise SoevApiError(400, 'invalid_field', 'Invalid user role', constraint='role')
 
 
 @asynccontextmanager

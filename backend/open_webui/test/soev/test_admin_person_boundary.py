@@ -26,6 +26,7 @@ async def admin_app(token_app, monkeypatch):
     ctx.user.role = 'admin'
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://soev.invalid')
+    monkeypatch.setattr(scim, 'SCIM_AUTH_PROVIDER', 'fictional-provider')
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     monkeypatch.setattr(Config, 'get', AsyncMock(return_value=True))
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
@@ -101,6 +102,33 @@ async def test_admin_suspension_refuses_before_any_write(admin_app, monkeypatch,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['', 'disabled'])
+@pytest.mark.parametrize('before', ['user', 'admin', 'pending'])
+async def test_invalid_admin_role_update_refuses_before_any_write(admin_app, monkeypatch, before, role):
+    from open_webui.models.auths import Auths
+
+    store = admin_app
+    target = await store.db.get(store.user_table, 'elm')
+    target.role = before
+    await store.db.commit()
+    password = AsyncMock()
+    email = AsyncMock()
+    monkeypatch.setattr(Auths, 'update_user_password_by_id', password)
+    monkeypatch.setattr(Auths, 'update_email_by_id', email)
+    response = await store.ctx.browser.post(
+        '/api/v1/users/elm/update',
+        json={'role': role, 'name': 'Changed', 'email': 'changed@example.invalid', 'password': 'fictional'},
+    )
+    assert response.status_code == 422, response.text
+    await store.db.refresh(target)
+    assert (target.role, target.name, target.email) == (before, 'Elm', 'elm@example.invalid')
+    password.assert_not_awaited()
+    email.assert_not_awaited()
+    assert store.ctx.requests == []
+    store.resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('operation', ['offboard', 'preview'])
 async def test_admin_offboarding_refuses_with_the_real_token_resolver(admin_app, operation):
     store = admin_app
@@ -118,25 +146,74 @@ async def test_admin_offboarding_refuses_with_the_real_token_resolver(admin_app,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['PATCH', 'PUT'])
-async def test_scim_suspension_refuses_without_partial_updates(admin_app, method):
+@pytest.mark.parametrize('role', ['user', 'admin'])
+@pytest.mark.parametrize('other_fields', [False, True])
+async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkeypatch, method, role, other_fields):
+    from open_webui.routers import scim
+
     store = admin_app
-    body = (
-        {
-            'Operations': [
-                {'op': 'replace', 'path': 'externalId', 'value': 'changed'},
-                {'op': 'replace', 'path': 'active', 'value': False},
-            ]
-        }
-        if method == 'PATCH'
-        else {'userName': 'changed@example.invalid', 'active': False, 'externalId': 'changed'}
-    )
+    target = await store.db.get(store.user_table, 'elm')
+    target.role = role
+    target.scim = {'fictional-provider': {'external_id': 'original'}}
+    await store.db.commit()
+    original = (target.role, target.name, target.email, target.profile_image_url, target.scim.copy())
+    publish = AsyncMock()
+    monkeypatch.setattr(scim, 'publish_event', publish)
+    if method == 'PATCH':
+        operations = []
+        if other_fields:
+            operations.extend(
+                [
+                    {'op': 'replace', 'path': 'externalId', 'value': 'changed'},
+                    {'op': 'replace', 'path': 'displayName', 'value': 'Changed'},
+                    {'op': 'replace', 'path': 'userName', 'value': 'changed@example.invalid'},
+                ]
+            )
+        operations.append({'op': 'replace', 'path': 'active', 'value': False})
+        body = {'Operations': operations}
+    else:
+        body = {'active': False}
+        if other_fields:
+            body.update(
+                {
+                    'userName': 'changed@example.invalid',
+                    'displayName': 'Changed',
+                    'photos': [{'value': '/changed.png'}],
+                    'externalId': 'changed',
+                }
+            )
     response = await store.ctx.browser.request(method, '/scim/v2/Users/elm', json=body)
     assert response.status_code == 403, response.text
     assert response.json()['detail'].get('constraint'), response.text
     assert response.json()['detail']['constraint'] == 'suspension:console'
-    target = await store.db.get(store.user_table, 'elm')
     await store.db.refresh(target)
-    assert (target.role, target.email, target.scim) == ('user', 'elm@example.invalid', None)
+    assert (target.role, target.name, target.email, target.profile_image_url, target.scim) == original
+    publish.assert_not_awaited()
+    assert store.ctx.requests == []
+    store.resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_scim_cannot_hide_deactivation_with_a_later_reactivation(admin_app, role):
+    store = admin_app
+    target = await store.db.get(store.user_table, 'elm')
+    target.role = role
+    await store.db.commit()
+    response = await store.ctx.browser.patch(
+        '/scim/v2/Users/elm',
+        json={
+            'Operations': [
+                {'op': 'replace', 'path': 'active', 'value': False},
+                {'op': 'replace', 'path': 'active', 'value': True},
+                {'op': 'replace', 'path': 'externalId', 'value': 'changed'},
+            ]
+        },
+    )
+    assert response.status_code == 403, response.text
+    assert response.json()['detail']['constraint'] == 'suspension:console'
+    await store.db.refresh(target)
+    assert (target.role, target.scim) == (role, None)
     assert store.ctx.requests == []
 
 

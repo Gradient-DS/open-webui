@@ -58,6 +58,40 @@ async def test_suspension_refuses_before_remote_or_local_role_write(role_store, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('before', ['user', 'admin', 'pending'])
+@pytest.mark.parametrize('role', ['', 'disabled'])
+@pytest.mark.parametrize('method', ['role', 'update'])
+@pytest.mark.parametrize('configured', [False, True])
+async def test_invalid_role_refuses_before_remote_or_local_write(
+    role_store, monkeypatch, before, role, method, configured
+):
+    from open_webui.models.users import User
+    from open_webui.soev import group_sync
+
+    store = role_store
+    if not configured:
+        monkeypatch.setattr(store.identity.config, 'SOEV_API_URL', '')
+    target = await store.db.get(User, 'fern')
+    target.role = before
+    await store.db.commit()
+    client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
+    client.as_service = lambda: client
+    monkeypatch.setattr(store.identity, 'build_client', lambda: client)
+    narrow = AsyncMock()
+    monkeypatch.setattr(group_sync, 'narrow_admin', narrow)
+    with pytest.raises(store.identity.SoevApiError) as caught:
+        if method == 'role':
+            await store.users.update_user_role_by_id('fern', role, db=store.db)
+        else:
+            await store.users.update_user_by_id('fern', {'role': role, 'name': 'Changed'}, db=store.db)
+    assert caught.value.status == (403 if configured and before in {'user', 'admin'} else 400)
+    await store.db.refresh(target)
+    assert (target.role, target.name) == (before, 'Fern')
+    client.send.assert_not_awaited()
+    narrow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_unlink_contract_and_cache_invalidation(identity_config, identity_http):
     identity, _ = identity_config
     requests, responses = identity_http

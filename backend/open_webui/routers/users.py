@@ -963,7 +963,7 @@ async def update_user_by_id(
     if user:
         from open_webui.soev.identity import check_role_change
 
-        check_role_change(user, form_data.role or user.role)
+        check_role_change(user, form_data.role if form_data.role is not None else user.role)
         if form_data.email is not None and form_data.email.lower() != user.email:
             email_user = await Users.get_user_by_email(form_data.email.lower(), db=db)
             if email_user:
@@ -983,7 +983,7 @@ async def update_user_by_id(
                 await revoke_user_tokens(request, user_id)
 
         # Build update dict from only the provided fields
-        update_data = {}
+        update_data: dict[str, str] = {}
         if form_data.role is not None:
             update_data['role'] = form_data.role
         if form_data.name is not None:

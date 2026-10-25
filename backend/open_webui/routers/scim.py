@@ -21,6 +21,7 @@ from open_webui.env import SCIM_AUTH_PROVIDER
 from open_webui.internal.db import get_async_session
 from open_webui.models.groups import GroupModel, Groups
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.identity import check_role_change
 from open_webui.utils.auth import (
     decode_token,
     get_admin_user,
@@ -672,6 +673,9 @@ async def update_user(
             detail=f'User {user_id} not found',
         )
 
+    if user_data.active is False:
+        check_role_change(user, 'pending')
+
     # Build update dict
     update_data = {}
 
@@ -762,6 +766,7 @@ async def patch_user(
 
         if op == 'replace':
             if path == 'active':
+                check_role_change(user, 'user' if value else 'pending')
                 # Same guard as update_user: never demote an existing admin via SCIM.
                 if user.role != 'admin':
                     update_data['role'] = 'user' if value else 'pending'

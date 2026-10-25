@@ -16360,6 +16360,11 @@
           "role": {
             "anyOf": [
               {
+                "enum": [
+                  "admin",
+                  "user",
+                  "pending"
+                ],
                 "type": "string"
               },
               {
