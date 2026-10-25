@@ -48,12 +48,16 @@
 			snapshot = null;
 			return;
 		}
-		const next = new ThreadSidebar(transport, (value) => {
-			snapshot = value;
-			if (value.state === 'sign_in') void threadCacheOrigin().clear();
-		});
+		const origin = threadCacheOrigin();
+		const next = new ThreadSidebar(
+			transport,
+			(value) => {
+				snapshot = value;
+			},
+			() => void origin.clear()
+		);
 		controller = next;
-		const current = threadCacheOrigin().stamp();
+		const current = origin.stamp();
 		const unwatch = watchThreadVisibility(
 			(state) => next.clear(state),
 			() => void (current() ? next.refresh() : next.search(search))

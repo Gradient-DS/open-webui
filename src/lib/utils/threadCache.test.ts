@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
 	ThreadError,
 	type CacheAuthorization,
@@ -16,7 +16,7 @@ import {
 	type CacheRecord,
 	type ThreadCacheStorage
 } from './threadCache';
-import { ThreadWindow } from './threads';
+import { ThreadSidebar, ThreadWindow } from './threads';
 import { openDB } from 'idb';
 
 vi.mock('idb', () => ({ openDB: vi.fn(), deleteDB: vi.fn() }));
@@ -346,6 +346,85 @@ it('logout in another tab clears every partition, hides content, reloads, and de
 	expect(reload).toHaveBeenCalled();
 	expect(channelA.postMessage).toHaveBeenCalledOnce();
 	unsubscribe();
+});
+
+it('logout with a subscribed sidebar deletes storage and broadcasts once', async () => {
+	const { api, cache, storage } = setup();
+	await cache.read('fictional-thread');
+	const deleted = vi.spyOn(storage, 'clear');
+	const channel = { onmessage: null as BroadcastChannel['onmessage'], postMessage: vi.fn() };
+	const drafts = vi.fn();
+	const origin = new ThreadCacheOrigin(storage, channel, undefined, undefined, undefined, drafts);
+	const authenticationFailed = vi.fn(() => void origin.clear());
+	const sidebar = new ThreadSidebar(api, undefined, authenticationFailed);
+	const unsubscribe = origin.subscribe(() => sidebar.clear('sign_in'));
+	await origin.clear();
+	expect(sidebar.snapshot).toMatchObject({ state: 'sign_in', items: [] });
+	expect(authenticationFailed).not.toHaveBeenCalled();
+	expect(storage.all()).toEqual([]);
+	expect(deleted).toHaveBeenCalledOnce();
+	expect(channel.postMessage).toHaveBeenCalledOnce();
+	expect(drafts).toHaveBeenCalledOnce();
+	unsubscribe();
+});
+
+it('coalesces recursive and concurrent clears, and permits clearing again after completion', async () => {
+	const { storage } = setup();
+	const pending = deferred<void>();
+	const deleted = vi.spyOn(storage, 'clear').mockReturnValueOnce(pending.promise);
+	const channel = { onmessage: null as BroadcastChannel['onmessage'], postMessage: vi.fn() };
+	const origin = new ThreadCacheOrigin(storage, channel);
+	let nested: Promise<void> | undefined;
+	const unsubscribe = origin.subscribe(() => {
+		nested = origin.clear();
+	});
+	const clearing = origin.clear();
+	expect(nested).toBe(clearing);
+	expect(origin.clear()).toBe(clearing);
+	expect(origin.ready()).toBe(clearing);
+	await Promise.resolve();
+	expect(deleted).toHaveBeenCalledOnce();
+	expect(channel.postMessage).toHaveBeenCalledOnce();
+	pending.resolve();
+	await clearing;
+	unsubscribe();
+	await origin.clear();
+	expect(deleted).toHaveBeenCalledTimes(2);
+	expect(channel.postMessage).toHaveBeenCalledTimes(2);
+});
+
+it('deletes cached messages and drafts despite a throwing subscriber, then surfaces the failure', async () => {
+	const { cache, storage } = setup();
+	await cache.read('fictional-thread');
+	const deleted = vi.spyOn(storage, 'clear');
+	const drafts = vi.fn();
+	const origin = new ThreadCacheOrigin(storage, undefined, undefined, undefined, undefined, drafts);
+	const failure = new Error('Fictional subscriber failure');
+	origin.subscribe(() => {
+		throw failure;
+	});
+	const notified = vi.fn();
+	origin.subscribe(notified);
+	await expect(origin.clear()).rejects.toMatchObject({ errors: [failure] });
+	expect(storage.all()).toEqual([]);
+	expect(deleted).toHaveBeenCalledOnce();
+	expect(drafts).toHaveBeenCalledOnce();
+	expect(notified).toHaveBeenCalledOnce();
+});
+
+it('clears the origin only when the sidebar API refuses authentication', async () => {
+	const { api, cache, storage } = setup();
+	await cache.read('fictional-thread');
+	const origin = new ThreadCacheOrigin(storage);
+	const authenticationFailed = vi.fn(() => void origin.clear());
+	const sidebar = new ThreadSidebar(api, undefined, authenticationFailed);
+	origin.subscribe(() => sidebar.clear('sign_in'));
+	vi.mocked(api.index).mockRejectedValueOnce(new ThreadError('sign_in'));
+	await sidebar.search();
+	await origin.ready();
+	expect(authenticationFailed).toHaveBeenCalledOnce();
+	expect(sidebar.snapshot).toMatchObject({ state: 'sign_in', items: [] });
+	expect(storage.all()).toEqual([]);
 });
 
 it('a suspended tab detects an origin clear even before its broadcast is delivered', async () => {

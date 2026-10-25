@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastapi.security.utils import get_authorization_scheme_param
+
 from open_webui.soev import acting
 from open_webui.soev.threads import Share, ThreadError
 
@@ -133,6 +135,14 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
         ('DELETE', '/{id}/share'),
     }:
         raise ThreadError(409, 'unavailable')
+    if request.method in {'POST', 'DELETE'}:
+        if request.headers.get('Content-Type', '').split(';', 1)[0].strip().lower() != 'application/json':
+            raise ThreadError(415, 'invalid_request')
+        # get_verified_user validates this credential before dispatch; never
+        # allow its cookie fallback to authorize a share or clone mutation.
+        scheme, credential = get_authorization_scheme_param(request.headers.get('Authorization'))
+        if scheme.lower() != 'bearer' or not credential.strip():
+            raise ThreadError(401, 'sign_in')
     if route == '/share/{share_id}':
         result = await projection(
             service,

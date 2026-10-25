@@ -1,5 +1,6 @@
 """The dark handlers exercised through the HTTP client and a fictional 7a API."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -213,7 +214,9 @@ async def dark_api(monkeypatch):
         client = threads.ThreadClient('https://soev.invalid', 'fictional-key')
         monkeypatch.setattr(threads, 'build_client', lambda: client)
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api), base_url='https://owui.invalid'
+            transport=httpx.ASGITransport(app=api),
+            base_url='https://owui.invalid',
+            headers={'Authorization': 'Bearer fictional-session', 'Content-Type': 'application/json'},
         ) as browser:
             yield SimpleNamespace(
                 browser=browser,
@@ -622,7 +625,9 @@ async def test_standalone_thread_fork_gets_its_own_organization(dark_api):
 async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     form = {'audience': {'kind': kind, 'id': 'fictional-audience'}, 'at': 2}
     base = '/api/v1/chats'
-    shared = await dark_api.browser.post(base + '/fictional-chat/share', json=form)
+    shared = await dark_api.browser.post(
+        base + '/fictional-chat/share', json=form, headers={'Content-Type': 'application/json; charset=utf-8'}
+    )
     assert shared.status_code == 200 and shared.json() == {'share_id': 'fictional-thread'}
     listed = await dark_api.browser.get(base + '/shared/fictional-chat/access')
     assert listed.json() == {'items': [form], 'next_cursor': None}
@@ -634,6 +639,65 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     assert not dark_api.records.writes
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login' for r in dark_api.calls)
     assert all('X-Soev-Subject' not in r.headers for r in dark_api.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'method,path',
+    [
+        ('POST', '/fictional-chat/share'),
+        ('DELETE', '/fictional-chat/share'),
+        ('DELETE', '/share/all'),
+        ('POST', '/fictional-thread/clone/shared'),
+    ],
+)
+@pytest.mark.parametrize(
+    'media_type,authorization,status',
+    [
+        ('text/plain', None, 415),
+        ('text/plain', 'Bearer fictional-session', 415),
+        ('application/x-www-form-urlencoded', 'Bearer fictional-session', 415),
+        (None, 'Bearer fictional-session', 415),
+        ('application/json', None, 401),
+        ('application/json', 'Basic fictional-session', 401),
+        ('application/json', 'Bearer ', 401),
+    ],
+)
+async def test_share_mutations_refuse_csrf_before_platform_access(
+    dark_api, method, path, media_type, authorization, status
+):
+    dark_api.browser.headers.pop('Authorization')
+    dark_api.browser.headers.pop('Content-Type')
+    dark_api.browser.cookies.set('token', 'fictional-cookie-session')
+    headers = {'Origin': 'https://hostile.owui.invalid'}
+    if media_type is not None:
+        headers['Content-Type'] = media_type
+    if authorization is not None:
+        headers['Authorization'] = authorization
+    response = await dark_api.browser.request(
+        method,
+        '/api/v1/chats' + path,
+        headers=headers,
+        content=json.dumps({'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}),
+    )
+    assert response.status_code == status
+    assert response.json() == {'state': 'sign_in' if status == 401 else 'invalid_request'}
+    assert response.headers['Cache-Control'] == 'private, no-store'
+    assert response.headers['Vary'] == 'Authorization, Cookie'
+    assert not dark_api.calls and not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_share_mutation_validates_explicit_bearer_without_cookie_fallback(dark_api):
+    dark_api.app.dependency_overrides.pop(get_verified_user)
+    dark_api.browser.cookies.set('token', 'fictional-cookie-session')
+    response = await dark_api.browser.post(
+        '/api/v1/chats/fictional-chat/share',
+        headers={'Authorization': 'Bearer fictional-invalid-session'},
+        json={'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2},
+    )
+    assert response.status_code == 401 and response.json() == {'state': 'sign_in'}
+    assert not dark_api.calls and not dark_api.records.writes
 
 
 @pytest.mark.asyncio

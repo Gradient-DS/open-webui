@@ -154,7 +154,7 @@ type Channel = Pick<BroadcastChannel, 'postMessage' | 'onmessage'>;
 export class ThreadCacheOrigin {
 	private epoch = 0;
 	private listeners = new Set<() => void>();
-	private clearing: Promise<void> = Promise.resolve();
+	private clearing?: Promise<void>;
 	constructor(
 		readonly storage: ThreadCacheStorage,
 		private channel?: Channel,
@@ -176,7 +176,7 @@ export class ThreadCacheOrigin {
 		return () => this.listeners.delete(listener);
 	}
 	ready() {
-		return this.clearing;
+		return this.clearing ?? Promise.resolve();
 	}
 	bind(principal: string, session: string) {
 		if (this.identityChanged(principal, session)) {
@@ -185,14 +185,32 @@ export class ThreadCacheOrigin {
 		}
 	}
 	clear(broadcast = true, reload = false) {
-		this.epoch++;
-		if (broadcast) {
-			this.bumpRevision();
-			this.channel?.postMessage('clear');
+		if (!this.clearing) {
+			this.epoch++;
+			const errors: unknown[] = [];
+			const notify = (action: () => void) => {
+				try {
+					action();
+				} catch (error) {
+					errors.push(error);
+				}
+			};
+			// Publish the pending cleanup before callbacks can re-enter clear().
+			this.clearing = Promise.resolve()
+				.then(async () => {
+					await this.storage.clear();
+					if (errors.length) throw new AggregateError(errors, 'Thread cache invalidation failed');
+				})
+				.finally(() => {
+					this.clearing = undefined;
+				});
+			if (broadcast) {
+				notify(() => this.bumpRevision());
+				notify(() => this.channel?.postMessage('clear'));
+			}
+			for (const listener of this.listeners) notify(listener);
+			notify(() => this.clearDrafts());
 		}
-		for (const listener of this.listeners) listener();
-		this.clearDrafts();
-		this.clearing = this.clearing.catch(() => {}).then(() => this.storage.clear());
 		if (reload) void this.clearing.then(this.reload).catch(() => {});
 		return this.clearing;
 	}

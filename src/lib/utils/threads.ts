@@ -386,7 +386,8 @@ export class ThreadSidebar {
 	snapshot: SidebarSnapshot = { items: [], cursor: null, loading: false, state: null };
 	constructor(
 		private api: ThreadAPI,
-		private changed: (value: SidebarSnapshot) => void = () => {}
+		private changed: (value: SidebarSnapshot) => void = () => {},
+		private authenticationFailed: () => void = () => {}
 	) {}
 	clear(state: ThreadState | null = null) {
 		this.epoch++;
@@ -432,6 +433,7 @@ export class ThreadSidebar {
 				loading: false,
 				state: error instanceof ThreadError ? error.state : 'reconnect'
 			};
+			if (this.snapshot.state === 'sign_in') this.authenticationFailed();
 		}
 		this.changed(this.snapshot);
 	}
