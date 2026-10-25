@@ -222,8 +222,8 @@ never chat `files`, so no chip and no notice. A citation's `/files/{source_id}/c
 original as the user (`soev/catalog_content.py`); without one (404 or 409 `original_missing`), its retained markdown
 as inline `text/plain`, so text fragments still land; 404 when neither is readable. The sources panel reads the
 served type from its HEAD probe (`probeFile`): a PDF gets Voorbeeld | Inhoud even when named by its title, text-only
-gets Inhoud alone with a plain title, and the icon beside the title opens `source_url`. A platform document's
-Inhoud label never links out (only web pages and provider documents keep that link).
+gets Inhoud alone with a plain title, and the icon beside the title opens `source_url`. The Inhoud label in the text
+view is never a link, for any citation kind: the title or the icon beside it is the one way out of the panel.
 
 ### Live mail
 

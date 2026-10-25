@@ -11,11 +11,7 @@
 	import SearchSnippetNote from './SearchSnippetNote.svelte';
 	import { settings, config } from '$lib/stores';
 	import { injectCsp } from '$lib/utils/csp';
-	import {
-		calculatePercentage,
-		getRelevanceColor,
-		getTextFragmentUrl
-	} from './useCitationDocument';
+	import { calculatePercentage, getRelevanceColor } from './useCitationDocument';
 	export let mergedDocuments: CitationDocument[] = [];
 	export let showPercentage = false;
 	export let showRelevance = true;
@@ -38,21 +34,8 @@
 
 		<div>
 			<div class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1">
-				<!-- [Gradient] A platform document has its text and preview here; only a web page links out. -->
-				{#if document.source?.url?.includes('http') && !(document.metadata?.file_id && !document.source?.provider)}
-					{@const snippetUrl = getTextFragmentUrl(document)}
-					{#if snippetUrl}
-						<a
-							href={snippetUrl}
-							target="_blank"
-							class="underline hover:text-gray-500 dark:hover:text-gray-100">{$i18n.t('Content')}</a
-						>
-					{:else}
-						{$i18n.t('Content')}
-					{/if}
-				{:else}
-					{$i18n.t('Content')}
-				{/if}
+				<!-- [Gradient] A plain label: the title (or the icon beside it) is the one way out of the panel. -->
+				{$i18n.t('Content')}
 
 				{#if showRelevance && document.distance !== undefined}
 					<Tooltip

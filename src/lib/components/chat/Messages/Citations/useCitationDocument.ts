@@ -85,33 +85,3 @@ export const decodeString = (str: string) => {
 		return str;
 	}
 };
-
-export const getTextFragmentUrl = (doc: CitationDocument): string | null => {
-	const { metadata, source, document: content } = doc ?? {};
-	const { file_id, page } = metadata ?? {};
-	const sourceUrl = source?.url;
-
-	const baseUrl = file_id
-		? `${WEBUI_API_BASE_URL}/files/${file_id}/content${page !== undefined ? `#page=${Number(page) + 1}` : ''}`
-		: sourceUrl?.includes('http')
-			? sourceUrl
-			: null;
-
-	if (!baseUrl || !content) return baseUrl;
-
-	// Extract first and last words for text fragment, filtering out URLs and emojis
-	const words = content
-		.trim()
-		.replace(/\s+/g, ' ')
-		.split(' ')
-		.filter((w: string) => w.length > 0 && !/https?:\/\/|[\u{1F300}-\u{1F9FF}]/u.test(w));
-
-	if (words.length === 0) return baseUrl;
-
-	const clean = (w: string) => w.replace(/[^\w]/g, '');
-	const first = clean(words[0]);
-	const last = clean(words.at(-1) ?? '');
-	const fragment = words.length === 1 ? first : `${first},${last}`;
-
-	return fragment ? `${baseUrl}#:~:text=${fragment}` : baseUrl;
-};

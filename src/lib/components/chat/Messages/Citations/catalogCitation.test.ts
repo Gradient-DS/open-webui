@@ -75,7 +75,7 @@ describe('catalog document citations', () => {
 		expect(original).toContain(`href="${SOURCE_URL}"`);
 	});
 
-	it('never turns a platform document text label into a navigating link, but keeps it for OneDrive', () => {
+	it('never turns the text label into a link, for any citation kind', () => {
 		vi.stubGlobal('requestAnimationFrame', () => 0);
 		vi.stubGlobal('cancelAnimationFrame', () => undefined);
 		const label = (citation: DisplayCitation) =>
@@ -84,6 +84,7 @@ describe('catalog document citations', () => {
 				context: context()
 			}).body;
 		expect(label(catalog())).not.toContain('/content#');
-		expect(label(catalog('onedrive'))).toContain(`/files/${sourceId}/content#page=3`);
+		expect(label(catalog('onedrive'))).not.toContain('<a');
+		expect(label(catalog())).not.toContain('<a');
 	});
 });
