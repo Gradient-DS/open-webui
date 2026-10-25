@@ -124,6 +124,7 @@ from open_webui.services.model_request_bodies import chat_completion_body, embed
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
 from open_webui.soev import capabilities, model_catalog, system_prompt
+from open_webui.soev import threads as soev_threads
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
@@ -2576,6 +2577,7 @@ async def get_app_config(request: Request):
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
+                    'enable_v2_threads': soev_threads.enabled(),
                     'enable_live_mail': AGENT_API_ENABLED
                     and config.get('live_mail.enable')
                     and await capabilities.has(capabilities.LIVE_MAIL),

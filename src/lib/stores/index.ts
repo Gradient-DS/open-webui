@@ -449,6 +449,7 @@ type Config = {
 		feature_agent_api_enabled?: boolean;
 		enable_live_documents?: boolean;
 		enable_live_mail?: boolean;
+		enable_v2_threads?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_skill_files?: boolean;

@@ -208,3 +208,48 @@ pending decisions about images, speech and custom functions:
 
 `SOEV_API_KEY` is the product credential for soev-api, not a model-gateway key.
 The complete removal of every gateway credential awaits the decisions above.
+
+## Prepared platform thread UI
+
+`ENABLE_V2_THREADS` is a server-only switch, false by default. The authenticated
+configuration exposes `features.enable_v2_threads` only when that switch,
+`AGENT_API_ENABLED`, and `SOEV_API_URL` are set. This preparation does not mount
+the replacement routes or change the current chat and sidebar components.
+
+Activation must mount `soev.thread_routes.create_thread_router` at
+`/api/v1/threads`, supplying an async reader of the requesting user's
+organisational records from the reconciled chat/thread mapping. Only ids,
+thread ids, folders, pins, archive state and last-read timestamps enter that
+join. Platform index results determine membership, ordering and cursors; local
+records cannot add a thread or supply a title. The client calls `/v1/threads`
+through soev-api with the product credential and the requesting user's current
+login token in `X-Soev-User-Token`, without a subject assertion or impersonation.
+
+`chat/ThreadWindow.svelte` and `layout/ThreadSidebar.svelte` are the prepared
+renderers. Activation supplies the OWUI session credential and a context epoch
+that changes on tenant, account, session or authorization-context changes.
+The window builds the active `history` from projection pages, preserving message
+versions. Fork rows supply version targets; selecting one reads its projection
+rather than inventing message bodies. Older pages preserve scroll position.
+The authenticated stream adapter supplies projected message replacements through
+`projectedMessage(contextEpoch, threadId, generation, message)`. Stale contexts,
+other threads and other log generations are ignored. An optional `parent` prop
+(`threadId`, `at`) carries the selected index item's fork origin so a reopened
+fork can show freshly authorized sibling versions. This unit does not add a raw-event stream
+endpoint or connect the existing user-wide socket content relay.
+
+The draft UI contract gives `content` the type `JsonValue`. The adapter accepts
+plain text or an OWUI presentation object (`role`, `text`/`content`, `output`,
+`statusHistory`, `sources`, files and notices); runtime log envelopes are not
+rendered. Structured output and content markup use the existing renderer for
+reasoning, tool summaries and citations. The platform projector's presentation
+shape must be agreed before activation. Its fallback marker is likewise pending;
+the prepared UI recognizes `preferences.fallback: true` for the owner-only notice.
+
+ETags and opaque message versions pass through unchanged. The draft gateway
+currently always returns `200` on authorized reads, including conditional reads.
+The client also handles an authorized `304` defensively, without retaining a
+server-side page. The window always requests fresh projections; persistent
+browser caching and authorization-before-cache-display belong to the cache unit.
+The initial window is provisionally 20, the draft contract default; the measurement
+unit chooses the production size from measured first-paint and paging times.
