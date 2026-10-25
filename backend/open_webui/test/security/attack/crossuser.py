@@ -51,7 +51,11 @@ def _shared(surface=None):
     copy, which would rewrite a route such as invites/{token}/validate.
     """
     surface = seeds.SURFACE if surface is None else surface
-    return {entry['route']: frozenset(entry['allow']) for entry in surface.get('shared', [])}
+    return {
+        entry['route']: frozenset(entry['allow'])
+        for entry in surface.get('shared', [])
+        if entry.get('runtime_soev_backed', seeds.runtime_soev_backed()) == seeds.runtime_soev_backed()
+    }
 
 
 class ServiceClient:
@@ -113,7 +117,11 @@ def _markers_outside(target, markers):
 def expected_refusals(surface=None):
     """Route -> the [[control]] declaring an owner refusal that is a guard working, not a gap."""
     surface = seeds.SURFACE if surface is None else surface
-    return {entry['route']: entry for entry in surface.get('control', [])}
+    return {
+        entry['route']: entry
+        for entry in surface.get('control', [])
+        if entry.get('runtime_soev_backed', seeds.runtime_soev_backed()) == seeds.runtime_soev_backed()
+    }
 
 
 def refused_as_expected(declaration, status, body):

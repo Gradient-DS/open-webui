@@ -728,15 +728,15 @@ def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch, oid
         seeds.seed_totp_user(ctx, parameter)
 
 
-def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch):
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
     ctx.values['chat'] = 'chat-id'
     ctx.values['model'] = 'stub-model'
     ctx.request = Mock(
         side_effect=[
-            {'id': 'attack_task_fixture'},
-            {'is_active': True},
             {'id': 'attack_task_fixture'},
             {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
             {'data': [{'id': 'attack_task_fixture'}]},
@@ -745,11 +745,13 @@ def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch):
         ]
     )
     with pytest.raises(RuntimeError, match='Task completed'):
-        seeds.seed_task(ctx, {'key': 'task', 'content': 'fixture code'})
+        seeds.seed_task(ctx, {'key': 'task'})
     ctx.admin.request.assert_called_once_with('POST', '/api/tasks/stop/expired-task')
 
 
-def test_task_seeder_observes_a_live_task_after_registering_its_model_and_filter(monkeypatch):
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_task_seeder_observes_a_live_task_without_installing_a_function(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
     ctx.values['chat'] = 'chat-id'
@@ -757,58 +759,34 @@ def test_task_seeder_observes_a_live_task_after_registering_its_model_and_filter
     ctx.request = Mock(
         side_effect=[
             {'id': 'attack_task_fixture'},
-            {'is_active': True},
-            {'id': 'attack_task_fixture'},
             {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
             {'data': [{'id': 'attack_task_fixture'}]},
             {'task_ids': ['live-task']},
             *[{'task_ids': ['live-task']}] * 3,
         ]
     )
-    assert seeds.seed_task(ctx, {'key': 'task', 'content': 'fixture code'}) == 'live-task'
-    model = ctx.request.call_args_list[2]
+    assert seeds.seed_task(ctx, {'key': 'task'}) == 'live-task'
+    model = ctx.request.call_args_list[0]
     assert model.args == ('POST', '/api/v1/models/create')
     assert model.kwargs['json']['base_model_id'] == 'stub-model'
-    assert model.kwargs['json']['meta'] == {'filterIds': ['attack_task_fixture']}
-    registration = ctx.request.call_args_list[3]
+    assert model.kwargs['json']['meta'] == {}
+    registration = ctx.request.call_args_list[1]
     assert registration.args == ('POST', '/api/v1/models/model/access/update')
     assert registration.kwargs['json'] == {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]}
     assert registration.kwargs['actor'] is ctx.admin
-    completion = ctx.request.call_args_list[5]
+    completion = ctx.request.call_args_list[3]
     assert completion.kwargs['json']['chat_id'] == 'chat-id'
     assert completion.kwargs['json']['model'] == 'attack_task_fixture'
-    assert completion.kwargs['actor'] is ctx.admin
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list[4:])
-
-
-def test_task_filter_wait_is_bounded_and_cancellable(monkeypatch):
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'task')
-    namespace = {}
-    # nosec B102 - executes the filter body this repo's own attack-surface.toml declares,
-    # to prove the wait is bounded without standing up a pipeline server. No external input.
-    exec(parameter['content'], namespace)  # nosec B102
-
-    async def exercise():
-        entered = asyncio.Event()
-
-        async def wait(seconds):
-            assert seconds == 3600
-            entered.set()
-            await asyncio.Event().wait()
-
-        monkeypatch.setattr(namespace['asyncio'], 'sleep', wait)
-        task = asyncio.create_task(namespace['Filter']().inlet({'model': 'fixture'}))
-        await entered.wait()
-        assert not task.done()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(exercise())
+    assert completion.kwargs['json']['stream'] is True
+    assert completion.kwargs['json']['messages'] == [{'role': 'user', 'content': 'owui_attack_task_hold:fixture'}]
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    assert not any('/functions/' in call.args[1] for call in ctx.request.call_args_list)
 
 
 def stop_seed_task(admin, resolved):
-    task_id = resolved['/api/tasks/stop/{task_id}', 'task_id']
+    task_id = resolved.get(('/api/tasks/stop/{task_id}', 'task_id'))
+    if task_id is None:
+        return
     result = admin.request('POST', f'/api/tasks/stop/{task_id}')
     assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
 

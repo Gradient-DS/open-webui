@@ -185,3 +185,106 @@ def test_catalog_embedding_waivers_are_drive_only_and_never_skip_probes(monkeypa
     else:
         with pytest.raises(AssertionError, match='POST /api/embeddings'):
             coverage.assert_every_route_is_driven_or_waived()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_function_seeds_and_refusal_controls_follow_the_runtime(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    parameters = [p for p in seeds.SURFACE['parameter'] if p['key'] in {'function', 'active_function', 'action'}]
+    spec = {
+        'paths': {
+            path: item
+            for path, item in seeds.SPEC['paths'].items()
+            if path.startswith('/api/v1/functions/') or path == '/api/chat/actions/{action_id}'
+        }
+    }
+    endpoint = Mock(return_value='installed-function')
+    active = Mock(return_value='installed-action')
+    monkeypatch.setattr(seeds, '_seed_endpoint', endpoint)
+    monkeypatch.setitem(seeds._SEEDERS, 'seed_active_function', active)
+    resolved = seeds.resolve_parameters(Mock(), surface={'parameter': parameters}, spec=spec)
+    action = resolved['/api/chat/actions/{action_id}', 'action_id']
+    functions = {r for r in plane.operations() if r.split(' ', 1)[1].startswith('/api/v1/functions/')}
+    assert all(plane._target(route, resolved, plane.Seeding()) is not None for route in functions)
+    if mode == 'drive':
+        endpoint.assert_not_called()
+        active.assert_not_called()
+        assert action.startswith('attack_active_')
+        assert functions <= crossuser.expected_refusals().keys()
+        assert functions <= coverage.waivers().keys()
+        assert not functions & crossuser._shared().keys()
+        assert 'POST /api/chat/actions/{action_id}' in crossuser.expected_refusals()
+    else:
+        endpoint.assert_called_once()
+        active.assert_called_once()
+        assert action == 'installed-action'
+        assert not functions & crossuser.expected_refusals().keys()
+        assert not functions & coverage.waivers().keys()
+        assert 'GET /api/v1/functions/id/{id}/valves/user/spec' in crossuser._shared()
+    assert not resolved.failures and not resolved.blocked
+
+
+def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_route(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui import config, env
+    from open_webui.routers import functions
+
+    from . import crossuser
+    from .client import entered_the_handler
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
+    monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.example.invalid')
+    app = FastAPI()
+    app.include_router(functions.router, prefix='/api/v1/functions')
+    declarations = crossuser.expected_refusals()
+    observed = set()
+    with TestClient(app) as client:
+        for route in app.routes:
+            if not route.path.startswith('/api/v1/functions/'):
+                continue
+            for method in route.methods:
+                operation = f'{method} {route.path}'
+                response = client.request(method, route.path.replace('{id}', 'fictional-function'), json={})
+                assert crossuser.refused_as_expected(declarations[operation], response.status_code, response.text)
+                assert not entered_the_handler(response)
+                observed.add(operation)
+    functions_in_spec = {r for r in plane.operations() if r.split(' ', 1)[1].startswith('/api/v1/functions/')}
+    assert observed == functions_in_spec
+    assert observed <= coverage.waivers().keys()
+
+
+def test_v2_action_probe_reaches_the_existing_missing_action_refusal(monkeypatch):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui.utils import actions
+    from open_webui.utils.auth import get_verified_user
+
+    from . import crossuser
+
+    main = import_module('open_webui.main')
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    monkeypatch.setattr(actions, 'ENABLE_PLUGINS', True)
+    lookup = AsyncMock(return_value=None)
+    ownership = AsyncMock()
+    monkeypatch.setattr(actions.Functions, 'get_function_by_id', lookup)
+    monkeypatch.setattr(main, 'verify_chat_ownership', ownership)
+    app = FastAPI()
+    app.add_api_route('/api/chat/actions/{action_id}', main.chat_action, methods=['POST'])
+    user = SimpleNamespace(id='fictional-owner', role='admin')
+    app.dependency_overrides[get_verified_user] = lambda: user
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/chat/actions/fictional-action', json={'chat_id': 'fictional-chat', 'model': 'fictional-model'}
+        )
+    declaration = crossuser.expected_refusals()['POST /api/chat/actions/{action_id}']
+    assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
+    ownership.assert_awaited_once_with('fictional-chat', user)
+    lookup.assert_awaited_once_with('fictional-action')
