@@ -148,7 +148,10 @@ async def test_admin_offboarding_refuses_with_the_real_token_resolver(admin_app,
 @pytest.mark.parametrize('method', ['PATCH', 'PUT'])
 @pytest.mark.parametrize('role', ['user', 'admin'])
 @pytest.mark.parametrize('other_fields', [False, True])
-async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkeypatch, method, role, other_fields):
+@pytest.mark.parametrize('active_attribute', ['active', 'Active', 'ACTIVE', 'aCtIvE'])
+async def test_scim_suspension_refuses_without_partial_updates(
+    admin_app, monkeypatch, method, role, other_fields, active_attribute
+):
     from open_webui.routers import scim
 
     store = admin_app
@@ -157,7 +160,11 @@ async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkey
     target.scim = {'fictional-provider': {'external_id': 'original'}}
     await store.db.commit()
     original = (target.role, target.name, target.email, target.profile_image_url, target.scim.copy())
+    update = AsyncMock(wraps=scim.Users.update_user_by_id)
+    stamp = AsyncMock(wraps=scim.Users.update_user_scim_by_id)
     publish = AsyncMock()
+    monkeypatch.setattr(scim.Users, 'update_user_by_id', update)
+    monkeypatch.setattr(scim.Users, 'update_user_scim_by_id', stamp)
     monkeypatch.setattr(scim, 'publish_event', publish)
     if method == 'PATCH':
         operations = []
@@ -169,10 +176,10 @@ async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkey
                     {'op': 'replace', 'path': 'userName', 'value': 'changed@example.invalid'},
                 ]
             )
-        operations.append({'op': 'replace', 'path': 'active', 'value': False})
+        operations.append({'op': 'replace', 'path': active_attribute, 'value': False})
         body = {'Operations': operations}
     else:
-        body = {'active': False}
+        body = {active_attribute: False}
         if other_fields:
             body.update(
                 {
@@ -188,6 +195,8 @@ async def test_scim_suspension_refuses_without_partial_updates(admin_app, monkey
     assert response.json()['detail']['constraint'] == 'suspension:console'
     await store.db.refresh(target)
     assert (target.role, target.name, target.email, target.profile_image_url, target.scim) == original
+    update.assert_not_awaited()
+    stamp.assert_not_awaited()
     publish.assert_not_awaited()
     assert store.ctx.requests == []
     store.resolve.assert_not_awaited()
