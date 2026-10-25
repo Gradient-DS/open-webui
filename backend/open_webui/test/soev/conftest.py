@@ -44,7 +44,10 @@ def identity_config(monkeypatch, tmp_path):
         'SERVICE_PRINCIPAL': 'owui:service:webui',
     }.items():
         monkeypatch.setattr(identity.config, f'SOEV_API_{name}', value)
-    monkeypatch.setattr(identity.config, 'SOEV_ARCHIVE_READERS_GROUP_REF', 'platform:group:archive-readers')
+    monkeypatch.setattr(
+        identity.config, 'SOEV_ARCHIVE_READERS_GROUP_REF', 'platform:group:acb96241-0178-4089-b438-fae30a08d3ee'
+    )
+    monkeypatch.setattr(identity.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
     return identity, None
 
 
@@ -118,7 +121,7 @@ async def role_store(identity_config, monkeypatch, platform_capabilities):
 async def group_db(identity_config, monkeypatch):
     from open_webui.internal import db as database
     from open_webui.models.access_grants import AccessGrant
-    from open_webui.models.groups import Group, GroupMember
+    from open_webui.models.groups import Group, GroupMember, GroupSnapshot
     from open_webui.models.users import User
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -133,14 +136,21 @@ async def group_db(identity_config, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(
             lambda db: database.Base.metadata.create_all(
-                db, tables=[Group.__table__, GroupMember.__table__, User.__table__, AccessGrant.__table__]
+                db,
+                tables=[
+                    Group.__table__,
+                    GroupMember.__table__,
+                    GroupSnapshot.__table__,
+                    User.__table__,
+                    AccessGrant.__table__,
+                ],
             )
         )
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         db.add_all(
             [
                 Group(
-                    id='old',
+                    id='13b95f20-57d8-48c6-9a13-042bcf78d021',
                     user_id='fern',
                     name='Old',
                     description='',
@@ -154,7 +164,7 @@ async def group_db(identity_config, monkeypatch):
                     name='Fern',
                     email='fern@example.invalid',
                     role='admin',
-                    person_id='platform:user:fern-person',
+                    person_id='platform:user:128fdbd4-4697-4cf0-beda-de53b51b8d30',
                     last_active_at=1,
                     created_at=1,
                     updated_at=1,
@@ -164,7 +174,7 @@ async def group_db(identity_config, monkeypatch):
                     name='Lark',
                     email='lark@example.invalid',
                     role='user',
-                    person_id='platform:user:lark-person',
+                    person_id='platform:user:70c51d1b-8310-4649-89bd-084764d104f6',
                     last_active_at=1,
                     created_at=1,
                     updated_at=1,
@@ -181,7 +191,18 @@ async def group_db(identity_config, monkeypatch):
             ]
         )
         await db.flush()
-        db.add(GroupMember(id='membership', group_id='old', user_id='fern', created_at=1, updated_at=1))
+        import time
+
+        db.add(GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time()))
+        db.add(
+            GroupMember(
+                id='membership',
+                group_id='13b95f20-57d8-48c6-9a13-042bcf78d021',
+                user_id='fern',
+                created_at=1,
+                updated_at=1,
+            )
+        )
         await db.commit()
         yield db
     await engine.dispose()

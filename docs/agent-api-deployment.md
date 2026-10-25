@@ -21,9 +21,10 @@ chart's existing extra environment variables. There is no default. Local admin
 roles do not grant archive readership.
 
 Groups and flattened person memberships are pulled from paged `GET /v1/groups`
-at startup and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15). The product
+at startup and at most every half snapshot lifetime (2.5 seconds).
+`SOEV_GROUP_RECONCILE_MINUTES` (default 15) may shorten that interval. The product
 credential needs directory read. A failed or invalid page preserves the previous
-complete snapshot; the reconciler retries after 10 seconds. The console manages
+complete snapshot without renewing its validity; retries use the same bound. The console manages
 group names and membership. OWUI admins can edit local feature permissions and
 sharing settings, keyed by platform group id; these never grant platform actions.
 OAuth, LDAP, SCIM, trusted-header and signup defaults cannot manage memberships.
@@ -271,3 +272,10 @@ server-side page. The window always requests fresh projections; persistent
 browser caching and authorization-before-cache-display belong to the cache unit.
 The initial window is provisionally 20, the draft contract default; the measurement
 unit chooses the production size from measured first-paint and paging times.
+
+The directory mirror requires `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS=5` when
+`SOEV_API_URL` is set, matching the platform grant-context revocation bound.
+Group authorization fails closed until this worker observes a successful complete
+pull and whenever that snapshot expires. The fetch start time bounds evidence age;
+failed or slow refreshes cannot extend validity. The refresh interval is capped at
+half the bound, including retries; `SOEV_GROUP_RECONCILE_MINUTES` may shorten it.

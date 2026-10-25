@@ -266,7 +266,11 @@ The folder share modal lists the items a folder share leaves out with why (`clou
 access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 
 `soev/group_mirror.py` pulls platform groups and flattened person memberships from paged `GET /v1/groups`
-at startup and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15). Only the mirror writes group identity or
+at startup and within half of `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS` (required as 5 with `SOEV_API_URL`, the platform
+revocation bound); `SOEV_GROUP_RECONCILE_MINUTES` may shorten that interval. An unverified, pre-startup or expired
+snapshot confers no membership, including through precomputed ids; failed refreshes never renew it. Snapshot refs
+and stored person bindings are canonical UUID refs, with unique person bindings enforced in storage. Non-admin
+directory reads show only member groups and shared memberships. Only the mirror writes group identity or
 membership; group routes and OAuth/SCIM/LDAP management refuse `403 platform_groups_read_only`.
 OWUI admins may edit per-group product settings, keyed by platform group id; they never grant platform actions.
 The session-only `soev/migrate_groups.cutover_groups` rewrites groups, memberships and group access grants

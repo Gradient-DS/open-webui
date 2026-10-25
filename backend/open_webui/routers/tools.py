@@ -220,20 +220,21 @@ async def get_tool_list(user=Depends(get_verified_user), db: AsyncSession = Depe
         user_group_ids=user_group_ids,
     )
 
+    writable_ids = (
+        set()
+        if bypass_access_control
+        else await AccessGrants.get_accessible_resource_ids(
+            user.id,
+            'tool',
+            [tool.id for tool in tools],
+            'write',
+            user_group_ids,
+            db,
+        )
+    )
     result = []
     for tool in tools:
-        has_write = (
-            bypass_access_control
-            or user.id == tool.user_id
-            or any(
-                g.permission == 'write'
-                and (
-                    (g.principal_type == 'user' and (g.principal_id == user.id or g.principal_id == '*'))
-                    or (g.principal_type == 'group' and g.principal_id in user_group_ids)
-                )
-                for g in tool.access_grants
-            )
-        )
+        has_write = bypass_access_control or user.id == tool.user_id or tool.id in writable_ids
         result.append(
             ToolAccessResponse(
                 **tool.model_dump(),

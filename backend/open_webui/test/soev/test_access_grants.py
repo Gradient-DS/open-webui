@@ -272,12 +272,28 @@ async def test_every_other_resource_type_is_untouched(identity_config, resource_
 
     monkeypatch.setattr(models, 'get_async_db_context', context)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    groups = importlib.import_module('open_webui.models.groups')
     statements = []
     event.listen(engine.sync_engine, 'before_cursor_execute', lambda *args: statements.append(args[2]))
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(models.AccessGrant.__table__.create)
+            await connection.run_sync(
+                lambda db: models.Base.metadata.create_all(
+                    db,
+                    tables=[
+                        models.AccessGrant.__table__,
+                        groups.Group.__table__,
+                        groups.GroupMember.__table__,
+                        groups.GroupSnapshot.__table__,
+                    ],
+                )
+            )
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            import time
+
+            db.add(groups.GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time()))
+            db.add(groups.GroupMember(id='membership', group_id='team', user_id='user', created_at=1, updated_at=1))
+            await db.commit()
             grants = [{'principal_type': 'group', 'principal_id': 'team', 'permission': 'write'}]
             saved = await table.set_access_grants(resource_type, 'resource', grants, db=db)
             assert len(saved) == 1

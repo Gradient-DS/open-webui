@@ -7,6 +7,7 @@ import time
 from typing import Literal, Optional
 from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.soev.principal_refs import PERSON_REF_CHECK
 from open_webui.utils.misc import throttle
 from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,6 +16,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    CheckConstraint,
     Date,
     String,
     Text,
@@ -51,6 +53,7 @@ class UserSettings(BaseModel):
 class User(Base):  # identity & profile
     """One row per registered account — profile, role, and settings."""
 
+    __table_args__ = (CheckConstraint(PERSON_REF_CHECK, name='user_person_ref_canonical'),)
     __tablename__: str = 'user'  # Identity & Credentials
     id = Column(String, primary_key=True, unique=True)  # unique user id
     email = Column(String, unique=True)  # user email address
@@ -465,7 +468,7 @@ class UsersTable:
         """Paginated user listing with optional filters and sort."""
         async with get_async_db_context(db) as session:
             # Deferred imports to avoid circular dependencies
-            from open_webui.models.groups import GroupMember
+            from open_webui.models.groups import GroupMember, snapshot_is_fresh
 
             # Join GroupMember so we can order by group_id when requested
             stmt = select(User)
@@ -496,6 +499,7 @@ class UsersTable:
                         exists(
                             select(GroupMember.id).where(
                                 GroupMember.user_id == User.id,
+                                snapshot_is_fresh(),
                                 GroupMember.group_id.in_(group_ids),
                             )
                         )
@@ -521,6 +525,7 @@ class UsersTable:
                 membership_exists = exists(
                     select(GroupMember.id).where(
                         GroupMember.user_id == User.id,
+                        snapshot_is_fresh(),
                         GroupMember.group_id == group_id,
                     )
                 )
@@ -589,10 +594,12 @@ class UsersTable:
 
     async def get_users_by_group_id(self, group_id: str, db: AsyncSession | None = None) -> list[UserModel]:
         async with get_async_db_context(db) as session:
-            from open_webui.models.groups import GroupMember
+            from open_webui.models.groups import GroupMember, snapshot_is_fresh
 
             result = await session.execute(
-                select(User).join(GroupMember, User.id == GroupMember.user_id).filter(GroupMember.group_id == group_id)
+                select(User)
+                .join(GroupMember, User.id == GroupMember.user_id)
+                .filter(GroupMember.group_id == group_id, snapshot_is_fresh())
             )
             users = result.scalars().all()
             return [UserModel.model_validate(user) for user in users]

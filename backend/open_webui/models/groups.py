@@ -11,6 +11,8 @@ from sqlalchemy import (
     BigInteger,
     Column,
     ForeignKey,
+    Float,
+    bindparam,
     Index,
     Text,
     and_,
@@ -20,6 +22,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +49,41 @@ class Group(Base):
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+
+
+# A previous process's snapshot is not login evidence for a new worker.
+_started_at = time.time()
+
+
+class GroupSnapshot(Base):
+    __tablename__ = 'soev_group_snapshot'
+
+    id = Column(Text, primary_key=True)
+    fetched_at = Column(Float, nullable=False)
+    completed_at = Column(Float, nullable=False)
+
+
+def require_snapshot_verification() -> None:
+    global _started_at
+    _started_at = time.time()
+
+
+def snapshot_is_fresh() -> ColumnElement[bool]:
+    from open_webui import config
+
+    # Evaluate the clock at execution, including when a caller reuses a query.
+    now = bindparam('group_snapshot_now', callable_=lambda: time.time(), type_=Float, unique=True)
+    started_at = bindparam('group_snapshot_started_at', callable_=lambda: _started_at, type_=Float, unique=True)
+    return (
+        select(GroupSnapshot.id)
+        .where(
+            GroupSnapshot.id == 'directory',
+            GroupSnapshot.fetched_at >= started_at,
+            GroupSnapshot.fetched_at <= now,
+            GroupSnapshot.fetched_at > now - (config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS or 0),
+        )
+        .exists()
+    )
 
 
 class GroupModel(BaseModel):
@@ -80,6 +118,13 @@ class GroupMember(Base):
     user_id = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=True)
     updated_at = Column(BigInteger, nullable=True)
+
+
+def group_membership_matches(group_id: ColumnElement[str], user_id: str | None = None) -> ColumnElement[bool]:
+    conditions = [snapshot_is_fresh()]
+    if user_id:
+        conditions.append(group_id.in_(select(GroupMember.group_id).where(GroupMember.user_id == user_id)))
+    return and_(*conditions)
 
 
 class GroupMemberModel(BaseModel):
@@ -167,7 +212,7 @@ class GroupTable:
         async with get_async_db_context(db) as db:
             member_count = (
                 select(func.count(GroupMember.user_id))
-                .where(GroupMember.group_id == Group.id)
+                .where(GroupMember.group_id == Group.id, snapshot_is_fresh())
                 .correlate(Group)
                 .scalar_subquery()
                 .label('member_count')
@@ -178,7 +223,17 @@ class GroupTable:
                 if 'query' in filter:
                     stmt = stmt.filter(Group.name.ilike(f'%{filter["query"]}%'))
 
-                # When share filter is present, member check is handled in the share logic
+                if 'member_id' in filter:
+                    stmt = stmt.filter(
+                        Group.id.in_(
+                            select(GroupMember.group_id).where(
+                                snapshot_is_fresh(),
+                                GroupMember.user_id == filter['member_id'],
+                            )
+                        )
+                    )
+
+                # Sharing settings can narrow the caller's membership scope.
                 if 'share' in filter:
                     share_value = filter['share']
                     member_id = filter.get('member_id')
@@ -195,7 +250,9 @@ class GroupTable:
                         )
 
                         if member_id:
-                            member_groups_select = select(GroupMember.group_id).where(GroupMember.user_id == member_id)
+                            member_groups_select = select(GroupMember.group_id).where(
+                                snapshot_is_fresh(), GroupMember.user_id == member_id
+                            )
                             members_only_and_is_member = and_(
                                 json_share_lower == 'members',
                                 Group.id.in_(member_groups_select),
@@ -205,13 +262,6 @@ class GroupTable:
                             stmt = stmt.filter(anyone_can_share)
                     else:
                         stmt = stmt.filter(and_(Group.data.isnot(None), json_share_lower == 'false'))
-
-                else:
-                    # Only apply member_id filter when share filter is NOT present
-                    if 'member_id' in filter:
-                        stmt = stmt.filter(
-                            Group.id.in_(select(GroupMember.group_id).where(GroupMember.user_id == filter['member_id']))
-                        )
 
             result = await db.execute(stmt.order_by(Group.updated_at.desc()))
             rows = result.all()
@@ -241,7 +291,11 @@ class GroupTable:
                     stmt = stmt.filter(Group.name.ilike(f'%{filter["query"]}%'))
                 if 'member_id' in filter:
                     stmt = stmt.filter(
-                        Group.id.in_(select(GroupMember.group_id).where(GroupMember.user_id == filter['member_id']))
+                        Group.id.in_(
+                            select(GroupMember.group_id).where(
+                                snapshot_is_fresh(), GroupMember.user_id == filter['member_id']
+                            )
+                        )
                     )
 
                 if 'share' in filter:
@@ -254,7 +308,7 @@ class GroupTable:
 
             member_count = (
                 select(func.count(GroupMember.user_id))
-                .where(GroupMember.group_id == Group.id)
+                .where(GroupMember.group_id == Group.id, snapshot_is_fresh())
                 .correlate(Group)
                 .scalar_subquery()
                 .label('member_count')
@@ -286,7 +340,7 @@ class GroupTable:
             result = await db.execute(
                 select(Group)
                 .join(GroupMember, GroupMember.group_id == Group.id)
-                .filter(GroupMember.user_id == user_id)
+                .filter(GroupMember.user_id == user_id, snapshot_is_fresh())
                 .order_by(Group.updated_at.desc())
             )
             groups = [GroupModel.model_validate(group) for group in result.scalars().all()]
@@ -301,7 +355,7 @@ class GroupTable:
             result = await db.execute(
                 select(GroupMember.user_id, Group)
                 .join(Group, Group.id == GroupMember.group_id)
-                .filter(GroupMember.user_id.in_(user_ids))
+                .filter(GroupMember.user_id.in_(user_ids), snapshot_is_fresh())
                 .order_by(Group.updated_at.desc())
             )
             rows = result.all()
@@ -324,7 +378,9 @@ class GroupTable:
 
     async def get_group_user_ids_by_id(self, id: str, db: Optional[AsyncSession] = None) -> list[str]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(GroupMember.user_id).filter(GroupMember.group_id == id))
+            result = await db.execute(
+                select(GroupMember.user_id).filter(GroupMember.group_id == id, snapshot_is_fresh())
+            )
             members = result.all()
 
             if not members:
@@ -337,7 +393,9 @@ class GroupTable:
     ) -> dict[str, list[str]]:
         async with get_async_db_context(db) as db:
             result = await db.execute(
-                select(GroupMember.group_id, GroupMember.user_id).filter(GroupMember.group_id.in_(group_ids))
+                select(GroupMember.group_id, GroupMember.user_id).filter(
+                    GroupMember.group_id.in_(group_ids), snapshot_is_fresh()
+                )
             )
             members = result.all()
 
@@ -355,7 +413,9 @@ class GroupTable:
 
     async def get_group_member_count_by_id(self, id: str, db: Optional[AsyncSession] = None) -> int:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(func.count(GroupMember.user_id)).filter(GroupMember.group_id == id))
+            result = await db.execute(
+                select(func.count(GroupMember.user_id)).filter(GroupMember.group_id == id, snapshot_is_fresh())
+            )
             count = result.scalar()
             return count if count else 0
 
@@ -365,7 +425,7 @@ class GroupTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(
                 select(GroupMember.group_id, func.count(GroupMember.user_id))
-                .filter(GroupMember.group_id.in_(ids))
+                .filter(GroupMember.group_id.in_(ids), snapshot_is_fresh())
                 .group_by(GroupMember.group_id)
             )
             rows = result.all()

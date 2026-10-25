@@ -115,7 +115,7 @@ async def test_modes_move_or_delete_resources_before_local_deletion(offboard_sto
         assert body['owner'] == ('owui:user:lark' if mode == 'transfer' else expected_owner)
         if mode == 'archive':
             archive = (await store.db.execute(select(Archive))).scalar_one()
-            assert body['readers'] == ['platform:group:archive-readers']
+            assert body['readers'] == ['platform:group:acb96241-0178-4089-b438-fae30a08d3ee']
             assert body['expires_at'].startswith(
                 __import__('datetime')
                 .datetime.fromtimestamp(archive.expires_at, __import__('datetime').UTC)
@@ -277,10 +277,10 @@ async def test_archive_assistant_follows_platform_readers_not_local_admins(offbo
             return_value={
                 'data': [
                     {
-                        'id': 'archive-readers',
-                        'ref': 'platform:group:archive-readers',
+                        'id': 'acb96241-0178-4089-b438-fae30a08d3ee',
+                        'ref': 'platform:group:acb96241-0178-4089-b438-fae30a08d3ee',
                         'name': 'Archive readers',
-                        'members': ['lark-person'],
+                        'members': ['platform:user:70c51d1b-8310-4649-89bd-084764d104f6'],
                     }
                 ],
                 'next_cursor': None,
@@ -290,7 +290,7 @@ async def test_archive_assistant_follows_platform_readers_not_local_admins(offbo
     from open_webui.models.users import User
 
     user = await store.db.get(User, 'lark')
-    user.person_id = 'platform:user:lark-person'
+    user.person_id = 'platform:user:70c51d1b-8310-4649-89bd-084764d104f6'
     await store.db.commit()
     monkeypatch.setattr(group_mirror, 'build_service_client', lambda: client)
     await group_mirror.reconcile(db=store.db)

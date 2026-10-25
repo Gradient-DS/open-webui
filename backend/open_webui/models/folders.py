@@ -175,6 +175,7 @@ class FolderTable:
         Checks direct user grants, group grants, and public (user:*) grants.
         """
         from open_webui.models.access_grants import AccessGrant
+        from open_webui.models.groups import group_membership_matches
 
         async with get_async_db_context(db) as db:
             conditions = [
@@ -183,7 +184,11 @@ class FolderTable:
             ]
             if user_group_ids:
                 conditions.append(
-                    and_(AccessGrant.principal_type == 'group', AccessGrant.principal_id.in_(user_group_ids))
+                    and_(
+                        AccessGrant.principal_type == 'group',
+                        AccessGrant.principal_id.in_(user_group_ids),
+                        group_membership_matches(AccessGrant.principal_id, user_id),
+                    )
                 )
             result = await db.execute(
                 select(AccessGrant).filter(

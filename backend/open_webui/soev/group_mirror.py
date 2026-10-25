@@ -13,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
 from open_webui.internal.db import get_async_db_context
-from open_webui.models.groups import Group, GroupMember, GroupTable
+from open_webui.models.groups import Group, GroupMember, GroupSnapshot, GroupTable, require_snapshot_verification
 from open_webui.models.users import User
 from open_webui.soev.client import SoevApiError, build_service_client
+from open_webui.soev.principal_refs import is_canonical_person_ref, is_canonical_uuid
 
 log = logging.getLogger(__name__)
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
@@ -29,8 +30,10 @@ class PlatformGroup(BaseModel):
 
     @model_validator(mode='after')
     def check_ref(self) -> 'PlatformGroup':
-        if not self.id or self.ref != f'platform:group:{self.id}':
+        if not is_canonical_uuid(self.id) or self.ref != f'platform:group:{self.id}':
             raise ValueError('Invalid group ref')
+        if any(not is_canonical_person_ref(member) for member in self.members):
+            raise ValueError('Invalid member ref')
         return self
 
 
@@ -54,8 +57,16 @@ async def reconcile(*, db: AsyncSession | None = None) -> None:
                     text('SELECT pg_advisory_xact_lock(:key)'),
                     {'key': 0x4F57554947525053},
                 )
+            fetched_at = time.time()
             groups = await _fetch_groups()
             await _replace_snapshot(session, groups)
+            # Fetch latency consumes validity; a slow pull cannot renew old evidence.
+            snapshot = await session.get(GroupSnapshot, 'directory')
+            if snapshot is None:
+                snapshot = GroupSnapshot(id='directory')
+                session.add(snapshot)
+            snapshot.fetched_at = fetched_at
+            snapshot.completed_at = time.time()
             await session.commit()
         except BaseException:
             await session.rollback()
@@ -89,7 +100,12 @@ async def _replace_snapshot(session: AsyncSession, groups: dict[str, PlatformGro
     people = (await session.execute(select(User.id, User.person_id).where(User.person_id.isnot(None)))).all()
     users: dict[str, set[str]] = {}
     for user_id, person_id in people:
-        users.setdefault(person_id.removeprefix('platform:user:'), set()).add(user_id)
+        if is_canonical_person_ref(person_id):
+            users.setdefault(person_id, set()).add(user_id)
+    for person_id, user_ids in list(users.items()):
+        if len(user_ids) > 1:
+            log.warning('ambiguous person binding', extra={'user_ids': sorted(user_ids)})
+            del users[person_id]
     current = {row.id: row for row in (await session.scalars(select(Group))).all()}
     now = int(time.time())
     for group in groups.values():
@@ -109,7 +125,7 @@ async def _replace_snapshot(session: AsyncSession, groups: dict[str, PlatformGro
     await session.flush()
     await session.execute(delete(GroupMember))
     for group in groups.values():
-        members = {uid for pid in group.members for uid in users.get(pid.removeprefix('platform:user:'), set())}
+        members = {uid for pid in group.members for uid in users.get(pid, set())}
         session.add_all(
             [
                 GroupMember(
@@ -126,23 +142,27 @@ async def _replace_snapshot(session: AsyncSession, groups: dict[str, PlatformGro
 
 
 async def _run(stop: asyncio.Event) -> None:
+    interval = config.SOEV_GROUP_RECONCILE_MINUTES * 60
+    if config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS is not None:
+        interval = min(interval, config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS / 2)
     next_reconcile = 0.0
     try:
         while not stop.is_set():
             try:
                 if monotonic() >= next_reconcile:
                     await reconcile()
-                    next_reconcile = monotonic() + config.SOEV_GROUP_RECONCILE_MINUTES * 60
+                    next_reconcile = monotonic() + interval
             except Exception:
-                # Keep the last complete snapshot and retry after failures.
+                # Keep the last complete snapshot and retry without renewing it.
                 log.warning('soev-api group reconciliation unavailable')
-                next_reconcile = monotonic() + 10
-            await asyncio.sleep(1)
+                next_reconcile = monotonic() + min(10, interval)
+            await asyncio.sleep(min(1, max(0, next_reconcile - monotonic())))
     except asyncio.CancelledError:
         return
 
 
 def start_reconciler(app: FastAPI) -> None:
+    require_snapshot_verification()
     app.state.soev_group_reconciler_stop = asyncio.Event()
     app.state.soev_group_reconciler = asyncio.create_task(_run(app.state.soev_group_reconciler_stop))
 

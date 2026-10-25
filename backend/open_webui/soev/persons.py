@@ -1,7 +1,6 @@
 """Store platform person ids only from the requesting login's /v1/me response."""
 
 import logging
-from uuid import UUID
 
 from sqlalchemy import select, update
 
@@ -9,6 +8,7 @@ from open_webui import config
 from open_webui.internal.db import get_async_db_context
 from open_webui.models.users import User, UserModel
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.principal_refs import is_canonical_person_ref
 
 log = logging.getLogger(__name__)
 
@@ -38,10 +38,6 @@ async def remember_person(user: UserModel, access_token: str) -> None:
 
 def _person_id(payload: dict) -> str:
     person_id = payload.get('person_id')
-    try:
-        if not isinstance(person_id, str) or not person_id.startswith('platform:user:'):
-            raise ValueError
-        UUID(person_id.removeprefix('platform:user:'))
-    except ValueError:
-        raise SoevApiError(502, 'upstream_error', 'Invalid person response') from None
+    if not is_canonical_person_ref(person_id):
+        raise SoevApiError(502, 'upstream_error', 'Invalid person response')
     return person_id
