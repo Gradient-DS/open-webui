@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
-from open_webui.soev.acting import acting_ref, requester_ref, user_token
+from open_webui.soev.acting import requester_ref, user_token
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ class SoevClient:
         headers = {'Authorization': f'Bearer {self._api_key}'}
         if self.is_service:
             return headers
-        ref = as_user if as_user is not None else acting_ref() or requester_ref()
+        ref = as_user if as_user is not None else requester_ref()
         access_token = user_access_token if user_access_token is not None else await user_token(ref)
         if access_token:
             headers['X-Soev-User-Token'] = access_token
@@ -565,26 +565,3 @@ def build_service_client(*, timeout: float = 30.0) -> SoevClient:
 
     ensure_configured()
     return SoevClient(config.SOEV_API_URL, config.SOEV_API_KEY, timeout=timeout, service=True)
-
-
-class BackgroundSoevClient(SoevClient):
-    """Legacy subject authority for tokenless background work until the coordinated cut."""
-
-    def __init__(
-        self,
-        base_url: str,
-        api_key: str,
-        *,
-        subject_minter: Callable[[str], str],
-        timeout: float = 30.0,
-    ) -> None:
-        super().__init__(base_url, api_key, timeout=timeout)
-        self._subject_minter = subject_minter
-
-    async def _headers(self, as_user: str | None = None, *, user_access_token: str | None = None) -> dict[str, str]:
-        if requester_ref() is not None or acting_ref() is not None or user_access_token is not None:
-            raise SoevApiError(401, 'sign_in', 'Background authority cannot serve a user request')
-        headers = {'Authorization': f'Bearer {self._api_key}'}
-        if as_user is not None:
-            headers['X-Soev-Subject'] = self._subject_minter(as_user)
-        return headers

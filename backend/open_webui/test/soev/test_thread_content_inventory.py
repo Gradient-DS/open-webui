@@ -98,8 +98,6 @@ def test_v2_has_no_unguarded_local_content_writer():
         'utils/subagents.py': {'process_pending_internal_messages', 'delegate'},
         'utils/timers.py': {'claim_due_timers', 'cancel_timers_for_chat', 'execute_due_timer', '_set_timer_state'},
         'services/deletion/offboarding_store.py': {'_delete_threads', 'finalize_local', 'delete_resource_dependents'},
-        'soev/migrate_uploads.py': {'_referenced'},
-        'soev/migrate_models.py': {'rewrite', 'restore'},
         'soev/agent_threads.py': {'_user_messages', 'deletion_chat_ids'},
         'soev/retention.py': {'poll_deletions'},
     }

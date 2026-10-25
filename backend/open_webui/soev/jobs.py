@@ -9,7 +9,7 @@ from urllib.parse import quote
 from open_webui import config
 from open_webui.models.files import FileModel, Files
 from open_webui.services.files.events import emit_file_status
-from open_webui.soev import identity, ingest
+from open_webui.soev import acting, identity, ingest
 from open_webui.soev.client import SoevApiError, SoevClient
 
 log = logging.getLogger(__name__)
@@ -83,14 +83,17 @@ async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
 
 
 async def _reference_ready(client: SoevClient, file: FileModel, job: dict) -> int:
-    # TODO(D-2g-4): Move owner-scoped metadata lookup to the owner's next request or server-side.
     if not file.meta.get('content_type'):
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
         ref = f'owui:user:{file.user_id}'
-        await identity.ensure_link(ref, client)
+        if acting.requester_ref() != ref or not await acting.user_token(ref):
+            return 0
         document = await client.get(path, as_user=ref)
         if document.get('content_type'):
-            await Files.update_file_metadata_by_id(file.id, {'content_type': document['content_type']})
+            if await Files.update_file_metadata_by_id(file.id, {'content_type': document['content_type']}) is None:
+                raise RuntimeError('File metadata write failed')
+        else:
+            return 0
     return await _finish(file, job)
 
 
@@ -139,11 +142,29 @@ async def poll_once(client: SoevClient, *, now: int) -> int:
     return touched
 
 
+async def complete_references(owner_id: str) -> int:
+    """Fill missing reference MIME metadata only during its owner's login request."""
+    if not config.SOEV_API_URL:
+        return 0
+    acting.require_owner(owner_id)
+    touched = 0
+    client = identity.build_client()
+    for file in await Files.get_files_with_soev_jobs(user_id=owner_id):
+        if file.meta['soev_job'].get('kind') != 'reference' or file.meta.get('content_type'):
+            continue
+        try:
+            touched += await _poll_file(client, file, int(time.time()))
+        except Exception as error:
+            code = error.code if isinstance(error, SoevApiError) else type(error).__name__
+            log.warning('soev reference completion failed for file %s (%s)', file.id, code)
+    return touched
+
+
 async def _tick() -> None:
     if not config.SOEV_API_URL:
         return
     try:
-        await poll_once(identity.build_background_client(), now=int(time.time()))
+        await poll_once(identity.build_client().as_service(), now=int(time.time()))
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job poll tick failed (%s)', code)

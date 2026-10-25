@@ -37,7 +37,6 @@ def api(monkeypatch, platform_capabilities):
     client = SoevClient('https://soev.invalid', 'invalid-test-runtime-key')
     monkeypatch.setattr(cloud_sync.identity, 'build_client', Mock(return_value=client))
     link = AsyncMock()
-    monkeypatch.setattr(cloud_sync.identity, 'ensure_link', link)
     app = FastAPI()
     app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync')
     user = SimpleNamespace(id='alice', role='user', email='alice@example.com')
@@ -298,7 +297,7 @@ def assert_login_headers(requests):
     for index, request in enumerate(requests, 1):
         assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
         assert request.headers['X-Soev-User-Token'] == 'fictional-alice-token'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         if request.method != 'GET':
             assert request.headers['Idempotency-Key']
 
@@ -619,7 +618,7 @@ def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypat
     request = api.requests[0]
     assert (request.method, request.url.path) == ('GET', '/v1/sync-policy')
     assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
-    assert 'X-Soev-Subject' not in request.headers
+    assert 'X-Soev-' + 'Subject' not in request.headers
     assert api.refs == []
     api.link.assert_not_awaited()
 

@@ -2,7 +2,6 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import httpx
@@ -48,7 +47,6 @@ def boundary(monkeypatch, platform_capabilities):
     monkeypatch.setattr('open_webui.soev.client.user_token', token)
     client = SoevClient('https://platform.invalid', 'ci-key')
     monkeypatch.setattr(cloud_sync.identity, 'build_client', lambda: client)
-    monkeypatch.setattr(cloud_sync.identity, 'ensure_link', AsyncMock())
     app = FastAPI()
     app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync')
     app.dependency_overrides[cloud_sync.get_verified_user] = lambda: SimpleNamespace(

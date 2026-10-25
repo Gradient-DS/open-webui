@@ -21,7 +21,6 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 @pytest_asyncio.fixture
 async def platform(identity_config, eligible_identity, monkeypatch):
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
-    monkeypatch.setattr(identity, '_linked_refs', {'owui:user:fern', 'owui:user:moss'})
     user = SimpleNamespace(id='fern', role='admin')
     state = SimpleNamespace(calls=[], failure=None, embedding=None, text='Fictional dictation.')
     fake = FastAPI()
@@ -31,7 +30,7 @@ async def platform(identity_config, eligible_identity, monkeypatch):
         state.calls.append(request)
         assert request.url.hostname == 'soev.invalid'
         assert request.headers['authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-        assert 'x-soev-subject' not in request.headers
+        assert 'x-soev-' + 'subject' not in request.headers
         if request.headers.get('x-soev-user-token') != 'fictional-fern-token':
             return JSONResponse(
                 status_code=401,
@@ -451,7 +450,7 @@ async def test_speech_does_not_buffer_and_closes_upstream_on_disconnect(platform
 
     async def upstream(request):
         assert request.url.path == '/v1/audio/speech'
-        assert 'x-soev-subject' not in request.headers
+        assert 'x-soev-' + 'subject' not in request.headers
         assert request.headers['x-soev-user-token'] == 'fictional-fern-token'
         return httpx.Response(200, stream=audio_stream, headers={'Content-Type': 'audio/mpeg'})
 

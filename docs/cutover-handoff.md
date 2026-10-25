@@ -1,0 +1,36 @@
+# OWUI cutover handoff (pt-2cut-owui-b)
+
+The OWUI migration CLI, its helpers and chart Job are removed. The conductor must
+carry the following into soev-solutions' resumable cutover tooling, not a product
+API. Authority is the temporary migrator login from step 4 decision 3: present in
+the cutover commit, removed in the reopen commit. Follow the tenant-owner handoff
+and OWUI database relocation of step 4 §5.2; that login is not a member of OWUI's
+runtime login. Read/export OWUI rows with the existing tenant-owner credentials
+before relocation; write platform rows by direct SQL as the migrator. No runtime
+role gains cross-database access.
+
+Evidence: soev-docs `architecture/platform/TARGET.md` §§4, 7, 16; master plan
+`thoughts/plans/2026-10-23-target-implementation.md` §3; soev-solutions plans
+`2026-10-23-pt-step2-persons.md` §6 item 8, `2026-10-24-pt-step4-plan.md` decisions
+3 and 16, step 7 decision 7.4, and step 8's 2026-10-25 memory decision. These
+references live in the sibling repositories; this is an implementation handoff.
+
+| Removed OWUI step | Cutover disposition and exact source/target rows |
+| --- | --- |
+| Identity links | Delete outright. Never copy `identity_link_provenance`, signing keys, replay rows or product/person membership links. Resolve verified Keycloak identities into `control.principal_registry`, `principal_name`, `person`, `source_identity` and `door_use`; persist OWUI `user.person_id` and its OIDC binding from the journal. No uuid5 person ids, email matching or self-vouched proof. Pending/unproven accounts are quarantined. |
+| Group push | Read OWUI `group`/`group_member` joined to eligible `user` rows; create/map product group principals and write `control.principal_member` with mapped person refs. Rebuild the synthetic archive-admin group from admin roles. Missing person mappings stop reconciliation; do not manufacture links. |
+| Collections and grants | For nondeleted, nonexternal OWUI `knowledge` rows, preserve the KB id as `data.collection.key`, source kind, name, description and immutable embedding/chunking settings; map owner, readers and writers through the journal. Read `access_grant` for `resource_type=knowledge`: user `*` becomes the OWUI door audience, explicit users become persons, groups become mapped product groups; writers retain read access. Local KBs retain the explicitly configured service reader. Personal cloud KBs retain no product shares/service reader. Reuse matching existing platform rows, refuse conflicting ownership/type and missing owners. |
+| Folders | Read OWUI `knowledge_directory` and directory components of `knowledge_file.relative_path`; preserve local KB paths in `data.folder`, deduplicated by collection/path. Cloud trees come from their source; do not create empty legacy cloud folders. |
+| Cloud setup and coverage | Preserve existing `data.connection`, `control.connection_binding`, `custody.connection_custody`/`connection_secret`, `data.schedule`, `control.grant_config`/`"grant"`, and `data.collection_schedule`, rewriting all owner/source refs and scope bindings through the journal. For legacy OneDrive `knowledge.meta.onedrive_sync.sources` not yet represented, create pending owner-bound connection/binding and corpus/schedule/subscriber rows by SQL: one connection per owner/provider, content and ACL-refresh schedules per canonical drive/item scope, preserving single-file/descendant semantics and label/path, using `control.sync_policy` cadence. No usable custody or enabled grant without proven source identity and fresh consent. Reconnect through the user's normal login after reopening. Google Drive is parked; Confluence is excluded. Count covered KBs through `collection_schedule`, not the corpus key. |
+| Local KB re-ingest | Do not commission jobs through OWUI. Reconcile each OWUI `knowledge_file`/`file` against `data.collection`/`data.data_item` by collection key and source id. Copy existing documents, chunks in `data.chunk_<space.key>`, and original objects, preserving version, digest, paths, ACLs and embedding-space identity while restamping mapped principals. If only legacy originals/vectors exist, the cutover tooling must explicitly import them into those tables/object storage; SQL cannot create embeddings from bytes. Missing originals or incompatible vectors must be reported and block reopening until the conductor resolves them. |
+| Chat, folder and assistant uploads | Enumerate nondeleted `chat.chat` files at chat level, `history.messages[*].files` and legacy `messages[*].files`, plus `folder.data.files` and explicit `model.meta.knowledge` file entries. Exclude images, KB entries and reference attachments from byte import. Join `file`/`knowledge_file`/`user`; refuse assistant files not owned by the model owner. Populate `data.collection`/`data.data_item` plus matching chunks/original objects for `owui-attachments-<user id>`, `owui-assistant-<model id>` and shared `owui-folder-<folder id>` targets as appropriate, with mapped owner/audience. Rewrite retained File metadata (`collection_name`, `soev_collection_key`, `soev_job`) and imported thread attachment references consistently. Deduplicate existing documents; report gone rows, missing originals and failed/in-flight jobs; no autonomous impersonation or fabricated success. |
+| Memories | Delete re-embedding outright. Copy OWUI `memory` rows and existing `user-memory-<user id>` vectors into the platform memory contract with mapped ownership and owner-only labels; no known provenance means owner-only fallback. The step 7 memory unit owns destination DDL (not specified by this lane); use its schema, never invent a runtime door. Verify bge-m3 model identity, dimensions, ids and row/vector coverage per tenant; a mismatch fails the rehearsal. Drop local rows/vectors only after verified copy. |
+| Config/model rewrite and sign-out | Move the former local-only steps into the cutover transaction/journal: snapshot OWUI `config`; apply reviewed feature settings, retire inference settings; map model ids in `chat.chat`, `model.id`/`base_model_id`, model `access_grant.resource_id`, `user.settings`, automations and config model lists. Clear legacy default selections; preserve assistants and select the global system prompt explicitly when distinct prompts conflict. Retain existing `owui_v2_migration` state as historical evidence, not a runtime command. Invalidate OWUI sessions at reopening; platform access still requires each person's own Keycloak token. Rollback is the coordinated image/DB/object backup restore, not this removed CLI's `--restore`. |
+
+Before reopening, record durable phase completion in `control.cutover_phase`:
+zero unmapped principal-bearing values, exact per-collection source-id/path and
+row/vector/object coverage, all cloud subscription/binding relationships intact,
+all chat branches/attachments accounted for, no pending upload/OAuth sessions, and
+no migration-only privileges remaining. Never rerun the old API reconciliation
+as users. Actual counts and unresolved imports belong in the rehearsal report;
+this change does not perform a tenant cutover.

@@ -153,7 +153,7 @@ class ThreadClient:
         body: dict | None = None,
         etag: str | None = None,
     ) -> httpx.Response:
-        # Resolve the actual requester on every call, never acting_as or an owner hint.
+        # Resolve the actual requester on every call, without an owner override.
         token = await acting.user_token(acting.requester_ref())
         if not token:
             raise ThreadError(401, 'sign_in')
