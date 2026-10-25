@@ -218,7 +218,9 @@ lists as knowledge (`knowledge_store._collections`); `GET /api/v1/data-sources` 
 Data sources submenu switches each on or off per chat; each source and the submenu are pinnable. Switched-on ids
 persist and travel as `features.data_sources`; `agent_v2._knowledge` appends the readable ones to `input.knowledge`
 after the chat's, assistant's and folder's, dropping non-`ds:` ids and everything while the gate is closed. They are
-never chat `files`, so no chip and no notice.
+never chat `files`, so no chip and no notice. A citation's `/files/{source_id}/content` serves a catalog document's
+original as the user (`soev/catalog_content.py`); without one (404 or 409 `original_missing`), its retained markdown
+as inline `text/plain`, so text fragments still land; 404 when neither is readable.
 
 ### Live mail
 
