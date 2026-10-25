@@ -290,6 +290,36 @@ async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: C
     assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
 
 
+@pytest.mark.asyncio
+async def test_switched_on_data_sources_are_sent_as_knowledge_after_the_selected(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_v2.data_sources, 'allowed', AsyncMock(return_value=True))
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_collection(chat.api, 'ds:publications', 'Publicaties', 'Onderzoek')
+    seed_collection(chat.api, 'kb-private', 'Not a data source')
+    seed_hidden_collection(chat.api, 'ds:hidden', 'Hidden')
+    await chat.turn(
+        'question',
+        'a1',
+        files=[{'type': 'collection', 'id': 'kb-a'}],
+        features={'data_sources': ['ds:publications', 'kb-private', 'ds:hidden', 'ds:gone', 'ds:publications']},
+    )
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [
+        {'key': 'kb-a', 'name': 'Contracten'},
+        {'key': 'ds:publications', 'name': 'Publicaties', 'description': 'Onderzoek'},
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+async def test_data_sources_are_dropped_while_the_gate_is_closed(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_v2.data_sources, 'allowed', AsyncMock(return_value=False))
+    seed_collection(chat.api, 'ds:publications', 'Publicaties')
+    await chat.turn('question', 'a1', features={'data_sources': ['ds:publications']})
+    assert chat.mutations()[-1][1]['input']['knowledge'] == []
+
+
 def seed_hidden_collection(api: FakeSoevApi, key: str, name: str) -> None:
     """A knowledge base that exists, readable by OWUI's service principal but not by the user."""
     seed_collection(api, key, name)

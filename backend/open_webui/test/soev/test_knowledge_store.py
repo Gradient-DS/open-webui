@@ -1403,3 +1403,16 @@ async def test_a_synced_document_is_left_to_its_source(env):
     await env.store.reset_knowledge_by_id('kb', include_directories=False)
     deleted = [r.url.path for r in env.api.requests if r.method == 'DELETE']
     assert sorted(deleted) == ['/v1/collections/kb/documents/catalog', '/v1/collections/kb/documents/f1']
+
+
+@pytest.mark.asyncio
+async def test_data_sources_list_apart_from_knowledge_and_only_where_readable(env):
+    await seed(env, 'ds:publications', name='Publications')
+    env.api.collections['ds:publications'].update(visibility='public')
+    await seed(env, 'ds:internal', owner='bob', name='Internal')
+    assert [item.id for item in await env.store.get_knowledge_bases()] == ['kb']
+    assert [item.id for item in (await env.store.search_knowledge_bases('alice', {})).items] == ['kb']
+    assert [item.id for item in await env.store.get_knowledge_bases_by_user_id('alice', 'read')] == ['kb']
+    assert await env.store.accessible_collection_ids('alice', ['kb', 'ds:publications']) == {'kb'}
+    await env.identity.ensure_link('owui:user:carol', env.client)
+    assert [row['key'] for row in await env.store.data_sources('carol')] == ['ds:publications']

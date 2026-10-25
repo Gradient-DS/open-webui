@@ -14,6 +14,7 @@ from open_webui.soev.client import SoevApiError
 
 LIVE_DOCUMENTS = 'live_documents'
 LIVE_MAIL = 'live_mail'
+DATA_SOURCES = 'data_sources'
 CLOUD_SYNC = 'cloud_sync'
 MEETINGS = 'meetings'
 GROUPS_PUSH = 'groups_push'

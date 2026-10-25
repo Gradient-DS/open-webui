@@ -29,7 +29,15 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev import (
+    acting,
+    agent_threads,
+    assistant_files,
+    data_sources,
+    identity,
+    ingest,
+    live_documents,
+)
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -254,18 +262,20 @@ async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]],
 
 
 async def _knowledge(
-    metadata: dict[str, Any], folder: list[dict[str, Any]] = ()
+    metadata: dict[str, Any], folder: list[dict[str, Any]] = (), sources: list[str] = ()
 ) -> tuple[list[dict[str, str]], list[Skipped]]:
     """The selected knowledge bases with their current name and description, read at send time, and the ones the
     API does not show the user: deleted for everyone, or hidden from them. The folder's come after the chat's and the
-    assistant's, read as the user too."""
-    keys = _knowledge_keys(metadata, folder)
+    assistant's, read as the user too, and the switched-on data sources last; one the user cannot read is left out
+    without a notice."""
+    selected = _knowledge_keys(metadata, folder)
+    keys = list(dict.fromkeys([*selected, *sources]))
     if not keys:
         return [], []
     user_id = None if acting.acting_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     skipped = []
-    if missing := [key for key in keys if key not in described]:
+    if missing := [key for key in selected if key not in described]:
         existing = await Knowledges.existing_knowledge(missing)
         chosen = {
             item['id']: item.get('name')
@@ -2085,7 +2095,7 @@ async def _sent(
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
         folder, skipped_folders = await _folder_items(metadata)
-        knowledge, skipped = await _knowledge(metadata, folder)
+        knowledge, skipped = await _knowledge(metadata, folder, await data_sources.chosen(metadata.get('features')))
         attachments = await _attachments(metadata, folder)
         texts, skipped_texts = await _texts(entries, metadata['user_id'])
         more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)

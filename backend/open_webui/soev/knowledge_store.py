@@ -130,8 +130,10 @@ class SoevKnowledgeTable:
                 return None
             raise
 
-    async def _collections(self, *, user_id=None, as_service=False):
+    async def _collections(self, *, user_id=None, as_service=False, data_sources=False):
+        """The knowledge bases, or with `data_sources` only the data sources, which never list as knowledge."""
         from open_webui.soev import ingest
+        from open_webui.soev.data_sources import is_data_source
 
         rows, queued, running = await asyncio.gather(
             self._pages('/v1/collections', user_id=user_id, as_service=as_service),
@@ -146,7 +148,13 @@ class SoevKnowledgeTable:
             and not ingest.is_attachments_collection(row['key'])
             and not ingest.is_assistant_collection(row['key'])
             and not ingest.is_folder_collection(row['key'])
+            and is_data_source(row['key']) is data_sources
         ]
+
+    async def data_sources(self, user_id):
+        """The data sources the user can read, by name."""
+        rows = await self._collections(user_id=user_id, data_sources=True)
+        return sorted(rows, key=lambda row: (_sort_value(row['name']), row['key']))
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
