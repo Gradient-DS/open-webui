@@ -3,13 +3,14 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from open_webui.soev.chat_routes import ExportRoute
 from open_webui.config import ENABLE_DATA_EXPORT
 from open_webui.services.export.service import ExportService
 from open_webui.utils.auth import get_verified_user
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=ExportRoute)
 
 
 class ExportStatusResponse(BaseModel):

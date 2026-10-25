@@ -45,6 +45,8 @@ from starsessions import (
 )
 from starsessions.stores.redis import RedisStore
 
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.config import (
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
@@ -345,7 +347,7 @@ log = logging.getLogger(__name__)
 
 
 async def emit_chat_list_event(metadata: dict, chat_id: str):
-    if not is_saved_chat_id(chat_id):
+    if soev_threads.enabled() or not is_saved_chat_id(chat_id):
         return
 
     event_emitter = await get_event_emitter(metadata, update_db=False)
@@ -484,6 +486,10 @@ async def lifespan(app: FastAPI):
     # Store reference to main event loop for sync->async calls (e.g., embedding generation)
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
+
+    from open_webui.soev.thread_organizations import ThreadOrganizations
+
+    app.state.thread_organizations = ThreadOrganizations()
 
     # [Gradient] Register the same loop with the module-level bridge used by sync
     # background handlers that can't reach request.app.state (e.g. the
@@ -703,6 +709,15 @@ install(app)
 
 # Used by readiness checks to gate traffic until startup work is done.
 app.state.startup_complete = False
+
+
+@app.exception_handler(soev_threads.ThreadError)
+async def thread_error_handler(request: Request, error: soev_threads.ThreadError):
+    return JSONResponse(
+        {'state': error.state},
+        status_code=error.status,
+        headers={'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'},
+    )
 
 
 @app.exception_handler(SoevNotConfigured)
@@ -1204,6 +1219,21 @@ async def embeddings(request: Request, form_data: dict = Depends(embeddings_body
     return await generate_embeddings(request, form_data, user)
 
 
+async def thread_organizations(user_id: str) -> list[soev_threads.Organization]:
+    return await app.state.thread_organizations.list(user_id)
+
+
+async def create_thread_fork(user_id: str, thread_id: str, at: int) -> soev_threads.CreatedThread:
+    created = await soev_threads.build_client().fork(thread_id, at=at)
+    await app.state.thread_organizations.put(
+        user_id, soev_threads.Organization(id=created.thread_id, thread_id=created.thread_id)
+    )
+    return created
+
+
+app.include_router(create_thread_router(thread_organizations, create_fork=create_thread_fork), prefix='/api/v1/threads')
+
+
 @app.post('/api/chat/completions')
 @app.post('/api/v1/chat/completions')  # Experimental: Compatibility with OpenAI API
 async def chat_completion(
@@ -1347,7 +1377,11 @@ async def chat_completion(
         chat_id = form_data.pop('chat_id', None) or ''
         chat_variables = form_data.pop('chat_variables', None)
         if chat_variables is None:
-            existing_chat = await Chats.get_chat_by_id(chat_id) if is_saved_chat_id(chat_id) else None
+            existing_chat = (
+                await Chats.get_chat_by_id(chat_id)
+                if is_saved_chat_id(chat_id) and not soev_threads.enabled()
+                else None
+            )
             chat_variables = existing_chat.variables if existing_chat else {}
 
         chat_variables = normalize_chat_variables(chat_variables)
@@ -1432,12 +1466,15 @@ async def chat_completion(
 
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())
+        if soev_threads.enabled():
+            metadata['new_thread'] = is_new_chat or not chat_id
+            tasks = None
 
         initial_title_generation = None
         if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
             initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
 
-        if metadata.get('chat_id') and user:
+        if metadata.get('chat_id') and user and not soev_threads.enabled():
             chat_id = metadata['chat_id']
 
             if is_saved_chat_id(chat_id):
@@ -1764,7 +1801,7 @@ async def chat_completion(
             if split_assistant_id:
                 model = metadata['model']
             # Bind only opt-in requests, after the pre-placeholder conflict check.
-            if bind_assistant and chat_id_meta and not chat_id_meta.startswith('local:'):
+            if bind_assistant and chat_id_meta and not chat_id_meta.startswith('local:') and not soev_threads.enabled():
                 await Chats.bind_chat_assistant_by_id(chat_id_meta, split_assistant_id)
 
             metadata['route_to_agent'] = route_to_agent
@@ -1782,7 +1819,7 @@ async def chat_completion(
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get('chat_id') and metadata.get('message_id'):
                 try:
-                    if not metadata['chat_id'].startswith('local:'):
+                    if not soev_threads.enabled() and not metadata['chat_id'].startswith('local:'):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -1830,7 +1867,7 @@ async def chat_completion(
                     # [Gradient] trace_id (captured in chat_completion) rides
                     # along so an error report can deep-link to the Tempo trace.
                     error = {'content': error_detail, 'trace_id': metadata.get('trace_id')}
-                    if is_saved_chat_id(metadata.get('chat_id')):
+                    if not soev_threads.enabled() and is_saved_chat_id(metadata.get('chat_id')):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -1896,7 +1933,7 @@ async def chat_completion(
                     await cleanup_task(request.app.state.redis, task_id, chat_id)
                     if not await has_active_tasks(request.app.state.redis, chat_id):
                         event_emitter = await get_event_emitter(metadata, update_db=False)
-                        if event_emitter:
+                        if event_emitter and not soev_threads.enabled():
                             try:
                                 folder_id = metadata.get('folder_id') or await Chats.get_chat_folder_id(
                                     chat_id, user.id
@@ -1918,6 +1955,7 @@ async def chat_completion(
                 chat_id = metadata.get('chat_id')
                 if (
                     chat_id
+                    and not soev_threads.enabled()
                     and getattr(request.state, 'internal', False) is not True
                     and not await has_active_tasks(request.app.state.redis, chat_id)
                 ):
@@ -1941,6 +1979,14 @@ async def chat_completion(
                     )
             except Exception:
                 log.exception('Failed to process pending internal messages for chat %s', metadata.get('chat_id'))
+
+    if soev_threads.enabled():
+        metadata['message_id'] = message_ids[0]['message_id']
+        response = await process_chat(request, form_data, user, metadata, model)
+        if not isinstance(response, Response):
+            response = JSONResponse(response)
+        response.headers.update(NO_STORE)
+        return response
 
     # Fan out: one task per model
     if metadata.get('session_id') and metadata.get('chat_id'):
@@ -2042,6 +2088,10 @@ async def resolve_chat_message_tool_call(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    if soev_threads.enabled():
+        from open_webui.soev.thread_approvals import resolve
+
+        return await resolve(request.app.state.thread_organizations, id, form_data, user.id)
     resolution = await resolve_tool_call_output(id, message_id, form_data, user, db=db)
     payload = await build_tool_approval_resume_payload(id, message_id, chat=resolution['chat'])
     result = await chat_completion(request, payload, user)
@@ -2083,6 +2133,7 @@ async def chat_completed(
 ):
     """Deprecated: outlet filters now run inline during chat completion.
     Kept for backward compatibility with external integrations."""
+    refuse_local_content()
     await verify_chat_ownership(form_data.get('chat_id'), user)
 
     try:
@@ -2102,6 +2153,7 @@ async def chat_completed(
 async def chat_action(
     request: Request, action_id: str, form_data: dict = Depends(chat_completion_body), user=Depends(get_verified_user)
 ):
+    refuse_local_content()
     await verify_chat_ownership(form_data.get('chat_id'), user)
 
     try:
@@ -2139,8 +2191,14 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
         if owner_id != user.id:
             return {'task_ids': []}
     else:
-        chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id):
+        if soev_threads.enabled():
+            records = await request.app.state.thread_organizations.list(user.id)
+            if not any(record.id == chat_id for record in records):
+                raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+            chat = None
+        else:
+            chat = await Chats.get_chat_by_id(chat_id)
+        if not soev_threads.enabled() and (chat is None or chat.user_id != user.id):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2152,18 +2210,30 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     socket_id = get_temporary_chat_session_id(chat_id)
+    if soev_threads.enabled() and socket_id:
+        raise HTTPException(status_code=409, detail=ERROR_MESSAGES.NOT_FOUND)
     chat = None
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
-        chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id):
+        if soev_threads.enabled():
+            records = await request.app.state.thread_organizations.list(user.id)
+            if not any(record.id == chat_id for record in records):
+                raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+            chat = None
+        else:
+            chat = await Chats.get_chat_by_id(chat_id)
+        if not soev_threads.enabled() and (chat is None or chat.user_id != user.id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    if soev_threads.enabled():
+        record = next(record for record in records if record.id == chat_id)
+        await soev_threads.build_client().cancel(record.thread_id)
+        return {'status': True}
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 
-    if not socket_id and str(result.get('message', '')).startswith('No tasks found'):
+    if not soev_threads.enabled() and not socket_id and str(result.get('message', '')).startswith('No tasks found'):
         messages_map = await Chats.get_messages_map_by_chat_id(chat_id) or {}
         for message_id, message in messages_map.items():
             if message.get('role') != 'assistant' or message.get('done') is not False:
@@ -3217,6 +3287,7 @@ async def serve_cache_file(
     """
     # Authorize on the resolved path: a check on the raw path is bypassed by
     # dot segments (exports/<me>/../<other>/...) that resolve elsewhere.
+    refuse_local_content()
     cache_root = Path(CACHE_DIR).resolve()
     try:
         file_path = (cache_root / path).resolve()

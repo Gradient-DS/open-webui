@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
+from open_webui.soev import threads as soev_threads
 from open_webui.config import (
     CODE_INTERPRETER_BLOCKED_MODULES,
     CODE_INTERPRETER_PYODIDE_PROMPT,
@@ -2629,7 +2630,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # tracked in
     # thoughts/shared/research/2026-05-15-agent-document-generation-and-owui-rich-output.md (Part E)
     # and in thoughts/shared/plans/2026-05-17-soev-chat-manual-cluster-b-fixes.md.
-    if route_to_agent:
+    if route_to_agent and not soev_threads.enabled():
         features = form_data.get('features') or {}
         if features.get('image_generation'):
             route_to_agent = False
@@ -2682,7 +2683,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     chat_id = metadata.get('chat_id')
     user_message_id = metadata.get('user_message_id')
 
-    if is_saved_chat_id(chat_id) and user_message_id:
+    if not soev_threads.enabled() and is_saved_chat_id(chat_id) and user_message_id:
         db_messages = await load_messages_from_db(chat_id, user_message_id)
         if db_messages:
             # Continue: frontend sends assistant_message_id when continuing
@@ -2725,7 +2726,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # [Gradient] An agent owns its conversation history, so Open WebUI never compacts a chat routed to one: the
     # summary would land in the chat's system prompt, which the agent receives as the user's instructions.
-    if is_saved_chat_id(chat_id) and user_message_id and not route_to_agent:
+    if not soev_threads.enabled() and is_saved_chat_id(chat_id) and user_message_id and not route_to_agent:
         compaction_models = request.app.state.MODELS
 
         system_message = get_system_message(form_data.get('messages', []))
@@ -2809,7 +2810,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     chat_id = metadata.get('chat_id', None)
     folder_id = None
     if user and is_saved_chat_id(chat_id):
-        folder_id = await Chats.get_chat_folder_id(chat_id, user.id)
+        if soev_threads.enabled():
+            records = await request.app.state.thread_organizations.list(user.id)
+            folder_id = next((record.folder_id for record in records if record.id == chat_id), None)
+        else:
+            folder_id = await Chats.get_chat_folder_id(chat_id, user.id)
 
     # Fallback: use folder_id from metadata (temporary chats have no DB record)
     if not folder_id:
@@ -3052,7 +3057,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     available_skills = []
     view_skill_ids = []
     chat = None
-    if is_saved_chat_id(metadata.get('chat_id')):
+    if not soev_threads.enabled() and is_saved_chat_id(metadata.get('chat_id')):
         chat = await Chats.get_chat_by_id(metadata['chat_id'])
 
     is_note_chat = bool(chat and (chat.meta or {}).get('internal') is True and (chat.meta or {}).get('type') == 'note')
@@ -3484,6 +3489,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
 
 async def get_event_emitter_and_caller(metadata):
+    if soev_threads.enabled():
+        return None, None
     event_emitter = None
     event_caller = None
 
@@ -3604,6 +3611,8 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
 
 
 async def drain_approved_tool_calls(request, form_data, user, model, metadata) -> bool:
+    if soev_threads.enabled():
+        return False
     chat_id = metadata.get('chat_id')
     assistant_message_id = metadata.get('assistant_message_id')
     # Only a resume/continue payload re-enters an existing message; other paths mint a fresh id with nothing to drain.
@@ -3804,6 +3813,8 @@ async def drain_approved_tool_calls(request, form_data, user, model, metadata) -
 
 
 async def pause_for_tool_approval(chat_id: str, message_id: str, output: list[dict], form_data: dict, metadata: dict):
+    if soev_threads.enabled():
+        return None
     result_call_ids = {
         item.get('call_id') for item in output if item.get('type') == 'function_call_output' and item.get('call_id')
     }
@@ -4020,6 +4031,8 @@ async def get_system_oauth_token(request, user):
 
 
 async def background_tasks_handler(ctx):
+    if soev_threads.enabled():
+        return None
     request = ctx['request']
     form_data = ctx['form_data']
     user = ctx['user']
@@ -4128,7 +4141,7 @@ async def background_tasks_handler(ctx):
                     except Exception as e:
                         pass
 
-            if is_saved_chat_id(metadata.get('chat_id')):  # Only update titles and tags for saved chats
+            if is_saved_chat_id(metadata.get('chat_id')):
                 if TASKS.TITLE_GENERATION in tasks:
                     user_message = get_last_user_message(messages)
                     if user_message and len(user_message) > 100:
@@ -4254,6 +4267,8 @@ async def outlet_filter_handler(ctx):
 
     For temp/API chats, messages are built from form_data plus ctx['assistant_message'].
     """
+    if soev_threads.enabled():
+        return None
     request = ctx['request']
     user = ctx['user']
     model = ctx['model']
@@ -4408,7 +4423,7 @@ async def non_streaming_chat_response_handler(response, ctx):
         return response
 
     chat_id = metadata.get('chat_id') or ''
-    save_to_chat = is_saved_chat_id(chat_id)
+    save_to_chat = is_saved_chat_id(chat_id) and not soev_threads.enabled()
 
     if event_emitter:
         try:
@@ -4594,7 +4609,7 @@ async def streaming_chat_response_handler(response, ctx):
     event_emitter = ctx['event_emitter']
     event_caller = ctx['event_caller']
     chat_id = metadata.get('chat_id') or ''
-    save_to_chat = is_saved_chat_id(chat_id)
+    save_to_chat = is_saved_chat_id(chat_id) and not soev_threads.enabled()
 
     extra_params = {
         '__event_emitter__': event_emitter,

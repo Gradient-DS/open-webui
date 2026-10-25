@@ -1158,3 +1158,11 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}"
+description = "soev/thread_routes.py is dark behind ENABLE_V2_THREADS; the sealed stack leaves it off. The contract tests supply a fictional platform and caller-owned organisation repository."
+unseedable = "Thread ids are created by soev-api first turns or forks. The sealed stack has no soev-api service, so it cannot create a thread; isolated contract tests exercise the dark path with a fake platform."

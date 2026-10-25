@@ -1,4 +1,4 @@
-"""Unmounted browser boundary; 7f supplies the caller-owned organisation mapping."""
+"""Browser boundary, available only while the prepared thread path is enabled."""
 
 from collections.abc import Awaitable, Callable
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse, Response
 
 from open_webui.soev import threads
-from open_webui.soev.threads import Organization, ThreadError
+from open_webui.soev.threads import CreatedThread, Organization, ThreadError
 
 NO_STORE = {'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'}
 
@@ -40,6 +40,8 @@ class PrivateRoute(APIRoute):
 
 def create_thread_router(
     organizations: Callable[[str], Awaitable[list[Organization]]],
+    *,
+    create_fork: Callable[[str, str, int], Awaitable[CreatedThread]] | None = None,
 ) -> APIRouter:
     from open_webui.utils.auth import get_verified_user
 
@@ -72,6 +74,8 @@ def create_thread_router(
 
     @router.post('/{thread_id}/fork')
     async def fork(thread_id: str, form: ForkForm, user=Depends(require_enabled)):
+        if create_fork is not None:
+            return await create_fork(user.id, thread_id, form.at)
         return await threads.build_client().fork(thread_id, at=form.at)
 
     @router.get('/{thread_id}')

@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from open_webui.soev.chat_routes import NoteChatRoute
 from open_webui.config import (
     ENABLE_ADMIN_EXPORT,
 )
@@ -36,7 +37,7 @@ from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=NoteChatRoute)
 
 
 def _truncate_note_data(data: Optional[dict], max_length: int = 1000) -> Optional[dict]:

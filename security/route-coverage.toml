@@ -391,3 +391,23 @@ reason = "Backed by soev-solutions; security tested there. routers/agent_threads
 id = "POST /api/v1/files/onedrive/attach"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/threads"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "GET /api/v1/threads/{thread_id}"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "GET /api/v1/threads/{thread_id}/forks"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+[[waived]]
+id = "POST /api/v1/threads/{thread_id}/fork"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."

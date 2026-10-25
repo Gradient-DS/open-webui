@@ -59,6 +59,45 @@ class CreatedThread(WireModel):
     thread_id: str
 
 
+class FeedbackItem(WireModel):
+    thread_id: str
+    rating: Literal[-1, 1]
+    model: str
+    agent: str
+    time: str
+    comment: str | None
+
+
+class FeedbackPage(WireModel):
+    items: list[FeedbackItem]
+    next_cursor: str | None
+
+
+class FeedbackCount(WireModel):
+    model: str
+    agent: str
+    rating: Literal[-1, 1]
+    count: int = Field(ge=0)
+
+
+class FeedbackSummary(WireModel):
+    items: list[FeedbackCount]
+    next_cursor: str | None
+
+
+class Tokens(WireModel):
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+
+
+class UsageMetrics(WireModel):
+    model_outputs: int = Field(ge=0)
+    unknown_outputs: int = Field(ge=0)
+    known_tokens: Tokens
+    tokens: Tokens | None
+
+
 class Organization(WireModel):
     """Only the caller's organisational fields from the migration's thread mapping."""
 
@@ -68,6 +107,7 @@ class Organization(WireModel):
     pinned: bool = False
     archived: bool = False
     last_read_at: int | None = None
+    branch_thread_ids: list[str] = Field(default_factory=list, exclude=True)
 
 
 def join_index(page: IndexPage, records: list[Organization]) -> dict:
@@ -138,7 +178,7 @@ class ThreadClient:
             raise ThreadError(503, 'reconnect') from None
         if response.status_code == 304 and etag is not None:
             return response
-        if response.status_code == 200:
+        if response.status_code in {200, 201, 204}:
             return response
         status = response.status_code
         if status in {401, 403, 404, 422}:
@@ -215,11 +255,82 @@ class ThreadClient:
             CreatedThread,
         )
 
+    async def create(self, *, agent: str, input: JsonValue, model: str | None = None) -> CreatedThread:
+        response = await self._request(
+            'POST', '/v1/chat/threads', body={'agent': agent, 'input': input, 'model': model}
+        )
+        if response.status_code != 201:
+            raise ThreadError(502, 'reconnect')
+        try:
+            payload = response.json()
+            return CreatedThread.model_validate({'thread_id': _identifier(payload['thread_id'])})
+        except (ValueError, KeyError, TypeError):
+            raise ThreadError(502, 'reconnect') from None
+
+    async def delete(self, thread_id: str) -> None:
+        response = await self._request('DELETE', f'/v1/chat/threads/{_identifier(thread_id)}')
+        if response.status_code != 204:
+            raise ThreadError(502, 'reconnect')
+
+    async def answer(self, thread_id: str, *, answering: str, input: JsonValue) -> None:
+        await self._request(
+            'POST',
+            f'/v1/chat/threads/{_identifier(thread_id)}/inputs',
+            body={'input': input, 'answering': answering},
+        )
+
+    async def cancel(self, thread_id: str) -> None:
+        await self._request('POST', f'/v1/chat/threads/{_identifier(thread_id)}/cancel', body={})
+
+    async def feedback(
+        self,
+        thread_id: str,
+        *,
+        position: int,
+        rating: int,
+        comment: str | None = None,
+        comment_authored: bool = False,
+    ) -> None:
+        if position <= 0 or type(rating) is not int or rating not in {-1, 1}:
+            raise ThreadError(422, 'invalid_request')
+        if comment is not None and (not comment_authored or len(comment) > 2000):
+            raise ThreadError(422, 'invalid_request')
+        response = await self._request(
+            'POST',
+            f'/v1/threads/{_identifier(thread_id)}/feedback',
+            body={'position': position, 'rating': rating, 'comment': comment, 'comment_authored': comment_authored},
+        )
+        if response.status_code != 204:
+            raise ThreadError(502, 'reconnect')
+
+    async def feedbacks(self, *, limit: int = 50, cursor: str = '') -> FeedbackPage:
+        return self._parse(
+            await self._request(
+                'GET',
+                '/v1/feedback',
+                params={'limit': _page_size(limit), 'cursor': cursor},
+            ),
+            FeedbackPage,
+        )
+
+    async def feedback_summary(self, *, limit: int = 50, cursor: str = '') -> FeedbackSummary:
+        return self._parse(
+            await self._request(
+                'GET',
+                '/v1/feedback/summary',
+                params={'limit': _page_size(limit), 'cursor': cursor},
+            ),
+            FeedbackSummary,
+        )
+
+    async def usage(self) -> UsageMetrics:
+        return self._parse(await self._request('GET', '/v1/threads/usage'), UsageMetrics)
+
 
 def enabled() -> bool:
     from open_webui import config, env
 
-    return bool(config.ENABLE_V2_THREADS and env.AGENT_API_ENABLED and config.SOEV_API_URL)
+    return bool(getattr(config, 'ENABLE_V2_THREADS', False) and env.AGENT_API_ENABLED and config.SOEV_API_URL)
 
 
 def build_client() -> ThreadClient:

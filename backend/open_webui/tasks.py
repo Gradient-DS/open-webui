@@ -7,6 +7,7 @@ from uuid import uuid4
 from redis.asyncio import Redis
 
 from open_webui.env import REDIS_KEY_PREFIX, REDIS_RESPONSE_STREAM_TTL
+from open_webui.soev import threads as soev_threads
 from open_webui.utils.json_codec import JSONCodec, dumps_bytes
 
 log = logging.getLogger(__name__)
@@ -177,6 +178,9 @@ async def save_response_stream(
     content: str,
     output: list,
 ):
+    if soev_threads.enabled():
+        return
+
     if not task_id or not chat_id or not message_id:
         return
 
@@ -197,6 +201,9 @@ async def save_response_stream(
 
 
 async def get_response_streams_by_chat_id(redis, chat_id: str) -> list[dict]:
+    if soev_threads.enabled():
+        return []
+
     task_ids = await list_task_ids_by_item_id(redis, chat_id)
     if not task_ids:
         return []

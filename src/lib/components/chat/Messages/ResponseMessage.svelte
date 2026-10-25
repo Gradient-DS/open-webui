@@ -15,6 +15,7 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
+	import { submitThreadRating } from '$lib/utils/threadFeedback';
 	import { createNewFeedback, getFeedbackById, updateFeedbackById } from '$lib/apis/evaluations';
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
@@ -97,6 +98,8 @@
 	} from './structuredOutput';
 
 	interface MessageType {
+		position?: number;
+		feedbackId?: string;
 		action_required?: { kind: string; provider: string };
 		id: string;
 		model: string;
@@ -874,8 +877,34 @@
 	};
 
 	let feedbackLoading = false;
+	let threadRating: -1 | 1 | null = null;
 
 	const feedbackHandler = async (rating: number | null = null, details: object | null = null) => {
+		if ($config?.features?.enable_v2_threads) {
+			if (typeof message.position !== 'number') {
+				toast.error($i18n.t('This chat is unavailable'));
+				return;
+			}
+			const value = rating ?? threadRating;
+			if (value !== -1 && value !== 1) return;
+			feedbackLoading = true;
+			try {
+				const comment = (details as { comment?: string } | null)?.comment;
+				await submitThreadRating(localStorage.token, {
+					thread_id: chatId,
+					position: message.position,
+					rating: value,
+					...(comment ? { comment } : {})
+				});
+				threadRating = value;
+				if (!details) showRateComment = true;
+			} catch {
+				toast.error($i18n.t('This chat is unavailable'));
+			} finally {
+				feedbackLoading = false;
+			}
+			return;
+		}
 		feedbackLoading = true;
 		console.log('Feedback', rating, details);
 
@@ -975,7 +1004,7 @@
 				);
 				console.log(tags);
 
-				if (tags) {
+				if (tags && updatedMessage.feedbackId) {
 					updatedMessage.annotation.tags = tags;
 					feedbackItem.data.tags = tags;
 
