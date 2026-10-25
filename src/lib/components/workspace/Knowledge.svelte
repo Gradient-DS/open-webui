@@ -40,7 +40,6 @@
 	import ViewSelector from './common/ViewSelector.svelte';
 	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import TypeSelector from './common/TypeSelector.svelte';
-	import TagSelector from './common/TagSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
 	export let showCreateOnMount = false;
@@ -58,7 +57,6 @@
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let viewOption = '';
 	let typeFilter = '';
-	let sourceOption = '';
 	let sortKey = 'updated_at';
 	let sortDirection = 'desc';
 
@@ -73,7 +71,7 @@
 
 	$: if (loaded) {
 		// [Gradient] One debounce and stale-response guard covers every list filter.
-		void [viewOption, typeFilter, sourceOption, sortKey, sortDirection, query];
+		void [viewOption, typeFilter, sortKey, sortDirection, query];
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -136,7 +134,6 @@
 			query,
 			viewOption,
 			typeFilter,
-			sourceOption,
 			sortKey,
 			sortDirection
 		]);
@@ -166,7 +163,6 @@
 			viewOption,
 			page,
 			typeFilter || null,
-			sourceOption,
 			sortKey,
 			sortDirection
 		).catch(() => {
@@ -270,18 +266,6 @@
 
 		if (!item?.meta) return [fileCount, item.description].filter(Boolean).join(' · ');
 
-		if (item.meta.source === 'external') {
-			return [
-				fileCount,
-				item.meta.external?.provider,
-				item.meta.external?.source?.name,
-				item.meta.external?.auth_mode,
-				item.description
-			]
-				.filter(Boolean)
-				.join(' · ');
-		}
-
 		const metadata = Object.entries(item.meta)
 			.filter(([, value]) => value !== null && value !== undefined && value !== '')
 			.map(([key, value]) => {
@@ -298,7 +282,6 @@
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
-		sourceOption = localStorage?.workspaceKnowledgeSourceOption || '';
 
 		await tick();
 		loaded = true;
@@ -398,7 +381,7 @@
 						}}
 					/>
 
-					<!-- [Gradient] Provider type and upstream source are independent filters. -->
+					<!-- [Gradient] Filter by provider type. -->
 					{#if Object.keys($config?.integration_providers ?? {}).length > 0}
 						<TypeSelector
 							bind:value={typeFilter}
@@ -407,19 +390,6 @@
 							}}
 						/>
 					{/if}
-					<TagSelector
-						bind:value={sourceOption}
-						align="end"
-						placeholder={$i18n.t('All Sources')}
-						items={[
-							{ value: 'local', label: $i18n.t('Local') },
-							{ value: 'external', label: $i18n.t('Connected') }
-						]}
-						onChange={async () => {
-							localStorage.workspaceKnowledgeSourceOption = sourceOption;
-							await tick();
-						}}
-					/>
 				</div>
 			</div>
 
@@ -522,7 +492,7 @@
 														type={$config.integration_providers[item.type].badge_type}
 														content={$config.integration_providers[item.type].name}
 													/>
-												{:else if item?.meta?.source !== 'external'}
+												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}
 												{#if item.suspension_info}
@@ -535,15 +505,7 @@
 														<Badge type="warning" content={$i18n.t('Suspended')} />
 													</Tooltip>
 												{/if}
-												{#if item?.meta?.source === 'external'}
-													<Badge
-														type="muted"
-														content={item?.meta?.external?.provider ?? $i18n.t('Connected')}
-													/>
-													<Badge type="muted" content={$i18n.t('Read Only')} />
-												{/if}
-
-												{#if !item?.write_access && item?.meta?.source !== 'external'}
+												{#if !item?.write_access}
 													<Badge type="muted" content={$i18n.t('Read Only')} />
 												{/if}
 											</div>

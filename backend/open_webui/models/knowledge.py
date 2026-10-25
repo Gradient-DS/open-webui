@@ -469,9 +469,8 @@ class KnowledgeTable:
             # KnowledgeForm.type is Optional[str] = None while KnowledgeModel.type
             # is a required str defaulting to 'local'. Passing the None through
             # overrides that default and fails validation, so every caller that
-            # does not set a type got a 500 -- create_external_knowledge builds
-            # its form without one, so that route could never succeed. Drop the
-            # unset value and let the model supply its default.
+            # does not set a type got a 500. Drop the unset value and let the
+            # model supply its default.
             if payload.get('type') is None:
                 payload.pop('type', None)
             knowledge = KnowledgeModel(
@@ -570,18 +569,6 @@ class KnowledgeTable:
                     type_filter = filter.get('type')
                     if type_filter:
                         stmt = stmt.filter(Knowledge.type == type_filter)
-
-                    # Upstream external-knowledge source filter (adopted additively).
-                    source = filter.get('source')
-                    if source == 'external':
-                        stmt = stmt.filter(Knowledge.meta['source'].as_string() == 'external')
-                    elif source == 'local':
-                        stmt = stmt.filter(
-                            or_(
-                                Knowledge.meta.is_(None),
-                                Knowledge.meta['source'].as_string() != 'external',
-                            )
-                        )
 
                     stmt = AccessGrants.has_permission_filter(
                         db=db,

@@ -330,10 +330,6 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/v1/audio/transcriptions':
             # Multipart upstream too; the speech-to-text handler reads `text`.
             self._send({'text': 'stub transcription'})
-        elif path.startswith('/collections/') and path.endswith('/points/query'):
-            # The external-knowledge connection fixture is a Qdrant endpoint on this stub;
-            # the client reads result.points and returns None for anything else.
-            self._send({'result': {'points': []}, 'status': 'ok', 'time': 0})
         elif path == '/api/show':
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
         else:

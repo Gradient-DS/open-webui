@@ -241,7 +241,7 @@ class SoevKnowledgeTable:
     @staticmethod
     def _matches_collection(row, user_id, filters, owner, knowledge_type):
         owned = row.get('created_by') == f'owui:user:{user_id}'
-        if filters.get('type') not in (None, '', knowledge_type) or filters.get('source') == 'external':
+        if filters.get('type') not in (None, '', knowledge_type):
             return False
         if filters.get('view_option') == 'created' and not owned:
             return False

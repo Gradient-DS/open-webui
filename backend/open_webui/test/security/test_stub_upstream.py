@@ -196,17 +196,3 @@ def test_head_answers_headers_without_a_body(stub):
     head, _, body = data.partition(b'\r\n\r\n')
     assert b' 200 ' in head.split(b'\r\n')[0]
     assert body == b''
-
-
-def test_qdrant_point_queries_get_an_empty_result(stub):
-    # The external-knowledge connection fixture points at the stub. The Qdrant
-    # client reads result.points; the catch-all {"status": "ok"} made it return
-    # None and the connection test fail.
-    req = Request(
-        stub[1] + '/collections/attack/points/query',
-        data=json.dumps({'query': [0.1], 'limit': 1}).encode(),
-        method='POST',
-        headers={'Content-Type': 'application/json'},
-    )
-    with build_opener(ProxyHandler({})).open(req, timeout=5) as response:
-        assert json.loads(response.read())['result'] == {'points': []}

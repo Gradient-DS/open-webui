@@ -25,7 +25,6 @@
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
-	import ExternalKnowledge from './ExternalKnowledge.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
 
 	import {
@@ -345,13 +344,6 @@
 					toast.success($i18n.t('Integration providers saved'));
 				}}
 			/>
-
-			<AdminSettingSection
-				title={$i18n.t('Knowledge')}
-				first={!isFeatureEnabled('tool_servers') && !isFeatureEnabled('terminal_servers')}
-			>
-				<ExternalKnowledge />
-			</AdminSettingSection>
 		{:else}
 			<div class="flex h-full justify-center">
 				<div class="my-auto">
