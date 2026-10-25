@@ -319,7 +319,6 @@ def test_guard_result_shape():
 def _patch_config(monkeypatch, *, allowed=None, engine='external') -> None:
     values = {
         'rag.content_extraction_engine': engine,
-        'audio.stt.supported_content_types': [],
         'rag.file.allowed_extensions': allowed,
         'rag.file.max_size': None,
     }

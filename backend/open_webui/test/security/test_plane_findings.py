@@ -196,25 +196,6 @@ def test_embeddings_for_an_unknown_model_are_refused_not_crashed():
     assert 400 <= refused.value.status_code < 500
 
 
-@pytest.mark.parametrize('size', ['<img src=x>', '1x2x3', 'axb'])
-def test_an_image_size_that_is_not_width_x_height_is_refused(size, monkeypatch):
-    # PLANE-006: images/generations parsed the size with int() outside any try.
-    import asyncio
-
-    from fastapi import HTTPException
-    from open_webui.routers import images
-
-    async def config():
-        return SimpleNamespace(IMAGE_SIZE='512x512')
-
-    monkeypatch.setattr(images, 'get_image_config', config)
-    form = images.CreateImageForm(prompt='probe', size=size)
-    user = SimpleNamespace(id='control-user', role='admin')
-    with pytest.raises(HTTPException) as refused:
-        asyncio.run(images.image_generations(None, form, user=user))
-    assert refused.value.status_code == 400
-
-
 def test_conversation_feedback_is_answered(monkeypatch):
     # evaluations/feedback/conversation/{chat_id} called a FeedbackTable method the
     # v0.11.3 merge had dropped, and without await: every request answered 500.
@@ -248,7 +229,7 @@ def test_speech_refuses_a_body_that_is_not_an_object(body, monkeypatch):
     response = _client(_endpoint(audio.router, path), path).post(
         path, content=body.encode(), headers={'Content-Type': 'application/json'}
     )
-    assert response.status_code == 400, (response.status_code, response.text)
+    assert response.status_code == 422, (response.status_code, response.text)
 
 
 def test_a_legacy_webhook_url_the_guard_refuses_does_not_break_notifications(monkeypatch):

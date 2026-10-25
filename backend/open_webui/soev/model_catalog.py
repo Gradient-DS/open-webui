@@ -27,6 +27,11 @@ def is_v2() -> bool:
     return bool(env.AGENT_API_ENABLED and config.SOEV_API_URL)
 
 
+def require_custom_functions() -> None:
+    if is_v2():
+        raise HTTPException(status_code=403, detail='Custom functions are disabled under v2')
+
+
 async def catalog() -> list[dict]:
     """The client's chat models, per process for a minute; empty while soev-api cannot say."""
     if time.monotonic() < CATALOG_CACHE['expires_at']:

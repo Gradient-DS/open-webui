@@ -31,8 +31,7 @@
 		TTSWorker,
 		user
 	} from '$lib/stores';
-	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
-	import { imageGenerations } from '$lib/apis/images';
+	import { synthesizeSpeech } from '$lib/apis/audio';
 	import {
 		copyToClipboard as _copyToClipboard,
 		approximateToHumanReadable,
@@ -764,7 +763,7 @@
 				for (const [, sentence] of messageContentParts.entries()) {
 					if (signal.aborted) return;
 
-					const res = await synthesizeOpenAISpeech(localStorage.token, voiceId, sentence).catch(
+					const res = await synthesizeSpeech(localStorage.token, voiceId, sentence).catch(
 						(error) => {
 							console.error(error);
 							toast.error(`${error}`);

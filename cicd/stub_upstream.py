@@ -9,6 +9,8 @@ The bounded capture belongs to this disposable stub, never a production app.
 
 import base64
 import json
+import re
+import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
@@ -20,6 +22,9 @@ EMBEDDING_DIMENSION = 1536
 # A complete one-pixel PNG, returned inline so image generation needs no fetch.
 PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC'
 STREAM_DELTAS = ('stub ', 'streamed ', 'response')
+TASK_HOLD_SECONDS = 3600
+TASK_HEARTBEAT_SECONDS = 0.25
+TASK_HOLD_PATTERN = re.compile(r'\bowui_attack_task_hold:[0-9a-f]{24}\b')
 INJECTION_PROBE = 'owui_phase1_injection_probe'
 # OWUI uses <source id="..."> fences, not the sibling application's <bron>.
 # Deliberately unequal close/open counts: duplicating a balanced payload across
@@ -75,6 +80,18 @@ class Handler(BaseHTTPRequestHandler):
             snapshot = list(_RECORDED)
         self._send({'requests': snapshot, **({'cleared': True} if path.endswith('/reset') else {})})
         return True
+
+    def _send_audio(self, path):
+        if path == '/v1/audio/transcriptions':
+            # Multipart upstream; the speech-to-text handler reads `text`.
+            self._send({'text': 'stub transcription'})
+            return
+        body = b'ID3\x04\x00\x00\x00\x00\x00\x00stub audio'
+        self.send_response(200)
+        self.send_header('Content-Type', 'audio/mpeg')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         path = urlsplit(self.path).path
@@ -148,6 +165,35 @@ class Handler(BaseHTTPRequestHandler):
             encoded = json.dumps(data)
             self.wfile.write((encoded + '\n' if ollama else f'data: {encoded}\n\n').encode())
             self.wfile.flush()
+
+        # Keep the OWUI task fixture live through its ordinary v2 inference path.
+        # Empty deltas keep read timeouts alive without completing the answer;
+        # writes also discover cancellation/disconnect. A crashed driver is bounded.
+        if TASK_HOLD_PATTERN.search(json.dumps(payload.get('messages', []))):
+            deadline = time.monotonic() + TASK_HOLD_SECONDS
+            try:
+                while time.monotonic() < deadline:
+                    if ollama:
+                        frame(
+                            {
+                                'model': model,
+                                'done': False,
+                                **({'response': ''} if generate else {'message': {'role': 'assistant', 'content': ''}}),
+                            }
+                        )
+                    else:
+                        frame(
+                            {
+                                'id': 'chatcmpl-ci',
+                                'object': 'chat.completion.chunk',
+                                'created': 0,
+                                'model': model,
+                                'choices': [{'index': 0, 'delta': {'content': ''}, 'finish_reason': None}],
+                            }
+                        )
+                    time.sleep(TASK_HEARTBEAT_SECONDS)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         for index, delta in enumerate(STREAM_DELTAS):
             if ollama:
@@ -257,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
             '/extract',
             '/v1/rerank',
             '/v1/images/generations',
+            '/v1/audio/speech',
         } and not isinstance(payload, dict):
             self._send({'error': 'expected a JSON object'}, 400)
             return
@@ -327,9 +374,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/v1/images/edits':
             # Multipart upstream, so the body never parses as JSON; only the answer's shape matters.
             self._send({'created': 0, 'data': [{'b64_json': PNG_BASE64}]})
-        elif path == '/v1/audio/transcriptions':
-            # Multipart upstream too; the speech-to-text handler reads `text`.
-            self._send({'text': 'stub transcription'})
+        elif path in {'/v1/audio/transcriptions', '/v1/audio/speech'}:
+            self._send_audio(path)
         elif path == '/api/show':
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
         else:

@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 166
+    assert len(admin_gated_operations()) == 161
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -534,3 +534,22 @@ def test_subject_scoped_results_allow_independent_objects_but_still_catch_disclo
         resource_ids=['owner-resource'],
     )
     assert len(result.violations) == 2
+
+
+def test_seeded_task_list_distinguishes_owner_from_second_account_and_detects_leaks():
+    route = 'GET /api/tasks/chat/{chat_id}'
+    owner = plane.Outcome(200, True, '{"task_ids":["fictional-live-task"]}')
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"task_ids":[]}'),
+        owner,
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert not result.violations
+    assert result.controls[route] == 200
+    crossuser._check(result, route, owner, owner, (), admin_only=False, control=True)
+    assert result.violations[0]['reason'] == 'second account received the same nonempty object as the owner'

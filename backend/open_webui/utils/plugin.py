@@ -20,6 +20,7 @@ from open_webui.env import (
 )
 from open_webui.models.functions import FunctionModel, Functions
 from open_webui.models.tools import Tools
+from open_webui.soev import model_catalog
 
 log = logging.getLogger(__name__)
 
@@ -260,7 +261,7 @@ async def load_tool_module_by_id(tool_id, content=None):
 
 
 async def load_function_module_by_id(function_id: str, content: str | None = None):
-    if not ENABLE_PLUGINS:
+    if not ENABLE_PLUGINS or model_catalog.is_v2():
         raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
 
     frontmatter = None
@@ -381,6 +382,8 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
 async def get_function_module_from_cache(
     request, function_id, function: FunctionModel | None = None, load_from_db=True
 ):
+    if model_catalog.is_v2():
+        raise RuntimeError('Custom functions are disabled under v2')
     functions_cache = get_functions_cache(request)
     function_contents_cache = get_function_contents_cache(request)
     content = None
@@ -468,7 +471,7 @@ async def install_tool_and_function_dependencies():
         log.info('ENABLE_PLUGINS is disabled, skipping tool and function dependencies.')
         return
 
-    function_list = await Functions.get_functions(active_only=True)
+    function_list = [] if model_catalog.is_v2() else await Functions.get_functions(active_only=True)
     tool_list = await Tools.get_tools()
 
     all_dependencies = ''

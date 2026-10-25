@@ -90,25 +90,44 @@ v2 mode is on when `AGENT_API_ENABLED=true` and `SOEV_API_URL` is set. soev-api 
 - **Default.** `/api/config` serves the catalog entry marked `default` as `default_models`. `ui.default_models` (`DEFAULT_MODELS`) is ignored. A model the user saved or picked still wins.
 - **Tasks.** Titles, tags, follow-ups, emoji, queries, autocomplete, image prompts, MoA, context compaction, memory review and tool selection all go to `POST /v1/completions/task` as the acting user. soev-api runs them on the client's `task` model, so `TASK_MODEL`, `TASK_MODEL_EXTERNAL` and a direct LiteLLM connection are not needed. The prompt templates still come from Open WebUI.
 - **Memory embeddings.** Add, query, update and reindex use `POST /v1/embeddings` through `SoevClient`, with the product credential and requesting person's token. soev-api selects its embedding role; the runtime ignores OWUI's RAG embedding model, connection and prefixes for memories. Admin reindex authenticates as the requesting admin. Memory vectors still live in the existing per-user vector collections; this change does not migrate them or change their model automatically.
-- **Dictation.** `POST /api/v1/audio/transcriptions` sends the uploaded file, optional language and `response_format=json` to soev-api's `/v1/audio/transcriptions`. The platform selects its transcription role and enforces audio format and duration; OWUI bounds forwarding to 25 MiB. Voice and user STT permissions still apply. Dictation ignores `audio.stt.*`, `AUDIO_STT_*`, local Whisper and saved browser-engine overrides. The admin provider settings and user engine selector are hidden. OWUI creates no transcription cache files on this path. Both primitives propagate platform failures through the usual safe nl/en error handler, without a direct inference fallback.
+- **Dictation.** `POST /api/v1/audio/transcriptions` sends the uploaded file, optional language and `response_format=json` to soev-api's `/v1/audio/transcriptions`. The platform selects its transcription role and enforces audio format and duration; OWUI bounds forwarding to 25 MiB. Voice and user STT permissions still apply. Dictation has no provider settings or local Whisper fallback and ignores saved browser-engine overrides. The admin provider settings and user engine selector are hidden. OWUI creates no transcription cache files on this path. Both primitives propagate platform failures through the usual safe nl/en error handler, without a direct inference fallback.
 
 Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported` and the backend advertises `images`.
 
-### Remaining direct inference and credentials (8g-b follow-ups)
+### Direct inference and credentials
 
-This unit removes direct inference from runtime memories and dictation only. OWUI can still hold gateway credentials for these other paths; removing the tenant's LiteLLM key requires their cutover too. Configurable OpenAI-compatible destinations below can target LiteLLM; their presence alone does not prove a deployed call.
+No runtime gateway credential or direct image/audio inference surface remains.
+Memory embeddings, dictation and speech use soev-api's role primitives with the
+requesting person's login token, without a subject assertion or a direct-provider
+fallback. The product credential remains `SOEV_API_KEY`.
 
-| Remaining surface | Code / configuration |
-| --- | --- |
-| Loader-worker embeddings | `helm/open-webui-tenant/templates/loader-worker/{configmap,deployment}.yaml`: `LOADER_LITELLM_BASE_URL`, `LITELLM_API_KEY` from `openai-api-key`; `values.yaml`'s `loaderWorker.config.litellmBaseUrl`. Worker implementation is outside this repository. |
-| RAG embeddings and external reranking | `main.py`, `routers/retrieval.py`, `retrieval/utils.py`, `retrieval/models/external.py`: `rag.embedding_*`, `rag.openai.*`, external reranker URL/key; admin Documents settings. These serve non-memory retrieval and ingestion. |
-| Existing migration command | `soev/migrate_memories.py` retains its explicitly supplied RAG embedding function for offline reindex; `soev/migrate_config.py` and migration snapshots retain legacy connection configuration for restore. |
-| OpenAI-compatible connections, proxy routes and pipelines | `routers/{openai,pipelines}.py`, `utils/embeddings.py`, `config.py`: `openai.api_base_urls`, `openai.api_keys`, per-connection headers; admin Connections and saved user direct connections (`src/lib/{apis/openai,utils/connections.ts,components/chat/Settings/Connections.svelte}`). Catalog routing does not erase stored keys or retire every proxy endpoint. |
-| Custom function connections | `src/lib/components/admin/Functions/FunctionEditor.svelte` includes an OpenAI-compatible pipe template with its own base URL and API key valves. Installed custom functions can retain separately configured gateway credentials. |
-| Image generation and editing | `routers/images.py`: `image_generation.openai.*`, `images.edit.openai.*` and matching `IMAGES_*` env/settings. |
-| Speech output and legacy/file transcription | `routers/audio.py`: TTS provider URL/key settings remain. Non-v2 dictation and file ingestion (`routers/files.py` calling `transcribe`) retain legacy STT provider settings and credentials, including the `AUDIO_STT_*` env defaults. |
-| Chart credential storage and injection | `helm/open-webui-tenant/templates/{secrets,external-secrets}.yaml` retain `openai-api-key` and `rag-openai-api-key`; `_helpers.tpl` injects `OPENAI_API_KEY`, `IMAGES_OPENAI_API_KEY`, `RAG_OPENAI_API_KEY`. `templates/open-webui/configmap.yaml` and `values.yaml` retain their destinations; tenant `extraEnv` can still supply STT/TTS keys. No chart secrets or network policies are removed here. |
-| Development and CI fixture configuration | `.env.example`, `docker-compose.ci.yaml` and `test/security/test_runtime_egress.py` retain OpenAI/RAG/STT/TTS/image destination and key placeholders for legacy and stub coverage. |
+Speech forwards `input`, optional `voice`, and `response_format` to
+`POST /v1/audio/speech`, streaming the response without a shared disk cache.
+soev-api selects its speech role and default voice. OWUI exposes no speech
+provider URL, key or model settings and no provider model/voice discovery.
+The user's voice, playback rate and browser-local speech preferences remain.
+Read-aloud/voice-call feature gates and user TTS permissions still apply.
+
+Images are generated and edited only by the agent. OWUI's image routes,
+provider settings, admin controls and image playground are removed. The chat
+image toggle is available when v2 and the platform's `images` capability are on;
+generated images and attachments still render normally. Uploading an audio file
+uses ordinary file ingestion; OWUI never transcribes uploads.
+
+Custom-function routes return 403 under v2 (`AGENT_API_ENABLED` and
+`SOEV_API_URL`), their UI is hidden, and saved filters, actions, pipes and event
+functions do not execute. The gateway pipe template is removed. Custom functions
+keep their existing behavior outside v2; this does not enable a direct-provider
+fallback for images or audio.
+
+`test/soev/test_no_gateway_keys.py` scans backend source, frontend source and
+configuration, the chart and `.env.example` for explicitly listed gateway/key
+patterns. Its exceptions preserve the historical config-row Alembic migration
+and offline v1 snapshot/restore command. Tests may contain fictional legacy
+configuration; upstream locale dictionaries may retain unused labels, not
+settings. Existing raw config, user settings, custom-function rows and migration
+snapshots are not erased by this source cleanup. The sealed legacy CI fixture
+still has fictional provider placeholders; runtime code does not read them.
 
 ## Turn transport and verification
 
@@ -152,7 +171,7 @@ Rollback: redeploy the previous full image set and values, and restore the datab
 
 Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.
 
-## Retired inference surfaces and remaining credentials
+## Retired inference surfaces and credential boundaries
 
 The v2 image no longer mounts `/openai/*` or `/api/v1/pipelines/*`, or the main
 Anthropic messages and token-count proxies. Admin Connections, personal direct
@@ -168,7 +187,7 @@ their test and CRUD routes, and their admin/workspace controls are removed too;
 they depended on the same local embedding function. Knowledge is served by the platform. Provider model
 management and OpenAI-compatible model unloading are gone; Ollama management
 remains. Remote pipeline inlet/outlet calls are removed from chat and task
-processing; local custom-function filters remain. Single-file and batch ingestion use soev-api; web extraction returns
+processing; local custom-function filters are disabled under v2. Single-file and batch ingestion use soev-api; web extraction returns
 text without creating local embedding collections. Memory embeddings and dictation
 use the soev-api primitives. Memory re-embedding during migration uses the same
 platform primitive; connection snapshots and their byte-for-byte restore remain
@@ -177,40 +196,12 @@ runtime use and settings surfaces; it does not erase old values from migration
 snapshots or existing raw config/user-settings rows. A later user-settings save
 drops the retired direct-connection payload.
 
-The chart no longer supplies `OPENAI_API_KEY`, `RAG_OPENAI_API_KEY`,
-`RAG_EXTERNAL_RERANKER_API_KEY`, loader-worker `LITELLM_API_KEY` or
-`LOADER_LITELLM_BASE_URL`. It no longer defines the `openai-api-key` and
-`rag-openai-api-key` secrets. Image generation previously reused the first secret;
-it now uses `secrets.imagesOpenaiApiKey` / `images-openai-api-key`, with the matching
-`imagesOpenaiApiKey` field in the External Secrets item (enable
-`externalSecrets.onepassword.fields.imagesOpenaiApiKey` to read it). Migrate that field before
-upgrading a deployment that uses OWUI image generation.
-
-Part 1 deliberately leaves these provider credentials and direct inference paths
-pending decisions about images, speech and custom functions:
-
-- `routers/images.py`: image generation and editing, including `IMAGES_OPENAI_*`,
-  `IMAGES_EDIT_OPENAI_*`, Gemini, Automatic1111 and ComfyUI provider settings.
-- `routers/audio.py`: speech output (`AUDIO_TTS_*`) and legacy upload-file
-  transcription (`AUDIO_STT_*`). Dictation uses soev-api in v2; the upload path
-  still calls the existing transcription function.
-- `OPENAI_API_KEY` / `OPENAI_API_BASE_URL` remain compatibility defaults for those
-  image and audio settings only. Legacy `OPENAI_API_KEYS` / `OPENAI_API_BASE_URLS`
-  environment values are read only to preserve their original public-OpenAI
-  default-key selection; they no longer configure a connection or model. Their
-  runtime connection arrays/configuration and chart injection are removed. Deployments can still supply dedicated audio/image
-  credentials through existing provider settings or extra environment variables.
-  Deployments that inherited speech credentials from the old chart key must
-  populate their dedicated `AUDIO_TTS_OPENAI_API_KEY` / `AUDIO_STT_OPENAI_API_KEY`
-  settings before upgrading.
-- Admin-authored custom functions, including FunctionEditor's existing OpenAI
-  pipe template, can hold their own credentials. No function/template change is
-  included until the custom-function decision is made.
-- Legacy deployment examples and the sealed security test stack still contain
-  their fictional provider credentials. They do not supply production chart keys.
-
-`SOEV_API_KEY` is the product credential for soev-api, not a model-gateway key.
-The complete removal of every gateway credential awaits the decisions above.
+The chart defines no model-gateway key, destination, secret, or image-provider
+value. The interim image key and External Secrets field are removed too.
+`SOEV_API_KEY` authenticates the product to soev-api; it is not an inference
+gateway credential. No direct inference credentials remain in runtime settings.
+The historical migration and fictional test-fixture exceptions are described
+above and enforced by the no-gateway-key assertion.
 
 ## Prepared platform thread UI
 

@@ -45,12 +45,6 @@ from open_webui.models.notes import Notes
 from open_webui.models.users import UserModel
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.retrieval.utils import get_sources_from_items
-from open_webui.routers.images import (
-    CreateImageForm,
-    EditImageForm,
-    image_edits,
-    image_generations,
-)
 from open_webui.routers.retrieval import (
     SearchForm,
     process_web_search,
@@ -58,7 +52,6 @@ from open_webui.routers.retrieval import (
 from open_webui.routers.tasks import (
     generate_chat_tags,
     generate_follow_ups,
-    generate_image_prompt,
     generate_queries,
     generate_title,
 )
@@ -1999,226 +1992,6 @@ async def add_file_context(messages: list, chat_id: str, user) -> list:
     return messages
 
 
-async def chat_image_generation_handler(request: Request, form_data: dict, extra_params: dict, user):
-    metadata = extra_params.get('__metadata__', {})
-    chat_id = metadata.get('chat_id', None)
-    __event_emitter__ = extra_params.get('__event_emitter__', None)
-
-    if not chat_id or not isinstance(chat_id, str) or not __event_emitter__:
-        return form_data
-
-    image_metadata = {
-        'message_id': metadata.get('message_id', None),
-        'chat_id': chat_id,
-    }
-
-    if not is_saved_chat_id(chat_id):
-        message_list = form_data.get('messages', [])
-    else:
-        chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
-
-        messages_map = chat.chat.get('history', {}).get('messages', {})
-        message_id = chat.chat.get('history', {}).get('currentId')
-        message_list = get_message_list(messages_map, message_id)
-
-    user_message = get_last_user_message(message_list)
-
-    prompt = user_message
-    message_images = get_images_from_messages(message_list)
-
-    # Limit to first 2 sets of images
-    # We may want to change this in the future to allow more images
-    input_images = []
-    for idx, images in enumerate(message_images):
-        if idx >= 2:
-            break
-        for image in images:
-            input_images.append(image)
-
-    # Called directly, bypassing the /images routes that enforce these switches.
-    editing = len(input_images) > 0 and await Config.get('images.edit.enable')
-    if not editing and not await Config.get('image_generation.enable'):
-        return form_data
-
-    if is_saved_chat_id(chat_id):
-        await __event_emitter__(
-            {
-                'type': 'status',
-                'data': {'description': 'Creating image', 'done': False},
-            }
-        )
-
-    system_message_content = ''
-
-    if editing:
-        # Edit image(s)
-        try:
-            images = await image_edits(
-                request=request,
-                form_data=EditImageForm(**{'prompt': prompt, 'image': input_images}),
-                metadata=image_metadata,
-                user=user,
-            )
-
-            await __event_emitter__(
-                {
-                    'type': 'status',
-                    'data': {'description': 'Image created', 'done': True},
-                }
-            )
-
-            await __event_emitter__(
-                {
-                    'type': 'files',
-                    'data': {
-                        'files': [
-                            {
-                                'type': 'image',
-                                **image,
-                            }
-                            for image in images
-                        ]
-                    },
-                }
-            )
-
-            system_message_content = '<context>The requested image has been edited and created and is now being shown to the user. Let them know that it has been generated.</context>'
-        except Exception as e:
-            log.debug(e)
-
-            error_message = ''
-            if isinstance(e, HTTPException):
-                if e.detail and isinstance(e.detail, dict):
-                    error_message = e.detail.get('message', str(e.detail))
-                else:
-                    error_message = str(e.detail)
-
-            await __event_emitter__(
-                {
-                    'type': 'status',
-                    'data': {
-                        'description': f'An error occurred while generating an image',
-                        'done': True,
-                    },
-                }
-            )
-
-            system_message_content = f'<context>Image generation was attempted but failed. The system is currently unable to generate the image. Tell the user that the following error occurred: {error_message}</context>'
-
-    elif not await Config.get('image_generation.enable'):
-        await __event_emitter__(
-            {
-                'type': 'status',
-                'data': {
-                    'description': 'Image generation is disabled',
-                    'done': True,
-                },
-            }
-        )
-
-        system_message_content = '<context>Image generation was requested but the feature is currently disabled by the administrator, so no image was created. Let the user know that image generation is currently unavailable.</context>'
-
-    else:
-        # Create image(s)
-        if await Config.get('image_generation.prompt.enable'):
-            try:
-                res = await generate_image_prompt(
-                    request,
-                    {
-                        'model': form_data['model'],
-                        'messages': form_data['messages'],
-                        'chat_id': metadata.get('chat_id'),
-                    },
-                    user,
-                )
-
-                # Handle JSONResponse from error paths
-                if isinstance(res, JSONResponse):
-                    try:
-                        error_body = JSONCodec.loads(res.body)
-                        detail = error_body.get('detail', 'Image prompt generation failed')
-                    except Exception:
-                        detail = 'Image prompt generation failed'
-                    raise Exception(detail)
-
-                response = res['choices'][0]['message']['content']
-
-                try:
-                    bracket_start = response.rfind('{')
-                    bracket_end = response.rfind('}') + 1
-
-                    if bracket_start == -1 or bracket_end == -1:
-                        raise Exception('No JSON object found in the response')
-
-                    response = response[bracket_start:bracket_end]
-                    response = JSONCodec.loads(response)
-                    prompt = response.get('prompt', [])
-                except Exception as e:
-                    prompt = user_message
-
-            except Exception as e:
-                log.exception(e)
-                prompt = user_message
-
-        try:
-            images = await image_generations(
-                request=request,
-                form_data=CreateImageForm(**{'prompt': prompt}),
-                metadata=image_metadata,
-                user=user,
-            )
-
-            await __event_emitter__(
-                {
-                    'type': 'status',
-                    'data': {'description': 'Image created', 'done': True},
-                }
-            )
-
-            await __event_emitter__(
-                {
-                    'type': 'files',
-                    'data': {
-                        'files': [
-                            {
-                                'type': 'image',
-                                **image,
-                            }
-                            for image in images
-                        ]
-                    },
-                }
-            )
-
-            system_message_content = '<context>The requested image has been created by the system successfully and is now being shown to the user. Let the user know that the image they requested has been generated and is now shown in the chat.</context>'
-        except Exception as e:
-            log.debug(e)
-
-            error_message = ''
-            if isinstance(e, HTTPException):
-                if e.detail and isinstance(e.detail, dict):
-                    error_message = e.detail.get('message', str(e.detail))
-                else:
-                    error_message = str(e.detail)
-
-            await __event_emitter__(
-                {
-                    'type': 'status',
-                    'data': {
-                        'description': f'An error occurred while generating an image',
-                        'done': True,
-                    },
-                }
-            )
-
-            system_message_content = f'<context>Image generation was attempted but failed because of an error. The system is currently unable to generate the image. Tell the user that the following error occurred: {error_message}</context>'
-
-    if system_message_content:
-        form_data['messages'] = add_or_update_system_message(system_message_content, form_data['messages'])
-
-    return form_data
-
-
 async def chat_completion_files_handler(
     request: Request, body: dict, extra_params: dict, user: UserModel
 ) -> tuple[dict, dict[str, list]]:
@@ -2617,28 +2390,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # for callers that don't set the metadata key.
     route_to_agent = metadata.get('route_to_agent', AGENT_API_ENABLED)
 
-    # [Gradient] The soev agent does not register a `generate_image` tool
-    # today, so when the user has the image-generation toggle on we fall
-    # back to the non-agent path for this turn — that path either runs
-    # `chat_image_generation_handler` (non-native FC) or registers the
-    # builtin `generate_image` tool (native FC, via `utils/tools.py`).
-    # Routing to the agent here produces broken behaviour: the model
-    # either fakes an SVG (no tool registered) or hallucinates an
-    # `![alt](attachment://...)` markdown link around the real image
-    # that some other path delivered. Removing this short-circuit
-    # requires implementing image generation as an agent capability —
-    # tracked in
-    # thoughts/shared/research/2026-05-15-agent-document-generation-and-owui-rich-output.md (Part E)
-    # and in thoughts/shared/plans/2026-05-17-soev-chat-manual-cluster-b-fixes.md.
-    if route_to_agent and not soev_threads.enabled():
-        features = form_data.get('features') or {}
-        if features.get('image_generation'):
-            route_to_agent = False
-            metadata['route_to_agent'] = False
-
-    # Pipeline Inlet -> Filter Inlet -> Chat Memory -> Chat Web Search -> Chat Image Generation
-    # -> Chat Code Interpreter (Form Data Update) -> (Default) Chat Tools Function Calling
-    # -> Chat Files
+    # The agent owns image generation and editing.
 
     # Arena model resolution — pick the sub-model now so all downstream
     # processing (knowledge, capabilities, tools, params) uses its settings
@@ -2991,17 +2743,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 # [Gradient] The agent owns web search on routed requests.
                 if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
                     form_data = await chat_web_search_handler(request, form_data, extra_params, user)
-
-        if 'image_generation' in features and features['image_generation']:
-            # features is client-supplied; re-check the permission the direct /images routes enforce.
-            if getattr(user, 'role', None) == 'admin' or await has_permission(
-                getattr(user, 'id', ''),
-                'features.image_generation',
-                await Config.get('user.permissions'),
-            ):
-                # Skip forced image generation when native FC is enabled - model can use generate_image tool
-                if metadata.get('params', {}).get('function_calling') == 'legacy':
-                    form_data = await chat_image_generation_handler(request, form_data, extra_params, user)
 
         if 'code_interpreter' in features and features['code_interpreter']:
             engine = await Config.get('code_interpreter.engine', 'pyodide')

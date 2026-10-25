@@ -24,10 +24,6 @@ from open_webui.models.files import Files
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.routers.files import upload_file_handler
 from open_webui.utils.access_control.files import has_access_to_file
-from open_webui.routers.images import (
-    get_image_data,
-    upload_image,
-)
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import can_bypass_access_control
 
@@ -101,7 +97,12 @@ async def get_image_url_from_base64(request, base64_image_string, metadata, user
     if BASE64_IMAGE_URL_PREFIX.match(base64_image_string):
         image_url = ''
         # Extract base64 image data from the line
-        image_data, content_type = await get_image_data(base64_image_string)
+        header, encoded = base64_image_string.split(',', 1)
+        content_type = header.split(';')[0].removeprefix('data:')
+        try:
+            image_data = base64.b64decode(encoded)
+        except ValueError:
+            return ''
         if image_data is not None:
             _, image_file = await upload_image(
                 request,
@@ -237,3 +238,47 @@ async def get_image_base64_from_file_id(id: str, user=None) -> Optional[str]:
             return None
     except Exception:
         return None
+
+
+async def upload_image(request, image_data, content_type, metadata, user, db=None):
+    if image_data is None or content_type is None:
+        raise ValueError('Failed to retrieve image data from the generation backend')
+    image_format = mimetypes.guess_extension(content_type)
+    file = UploadFile(
+        file=io.BytesIO(image_data),
+        filename=f'generated-image{image_format}',  # will be converted to a unique ID on upload_file
+        headers={
+            'content-type': content_type,
+        },
+    )
+    file_item = await upload_file_handler(
+        request,
+        file=file,
+        metadata=metadata,
+        process=False,
+        user=user,
+        sniff_guard=False,  # server-generated image; not a user-supplied blob
+        count_cap_guard=False,  # server-generated image; not a user upload
+    )
+
+    if file_item and file_item.id:
+        # If chat_id and message_id are provided in metadata, link the file to the chat message
+        chat_id = metadata.get('chat_id')
+        message_id = metadata.get('message_id')
+
+        if chat_id and message_id:
+            await Chats.insert_chat_files(
+                chat_id=chat_id,
+                message_id=message_id,
+                file_ids=[file_item.id],
+                user_id=user.id,
+                db=db,
+            )
+
+    url = request.app.url_path_for('get_file_content_by_id', id=file_item.id)
+    return file_item, {
+        'id': file_item.id,
+        'url': url,
+        'name': (file_item.meta or {}).get('name') or file_item.filename,
+        'content_type': (file_item.meta or {}).get('content_type'),
+    }

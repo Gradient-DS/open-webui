@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
-from contextlib import AsyncExitStack, aclosing
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
@@ -255,6 +255,27 @@ class SoevClient:
             user_access_token=user_access_token,
         )
         return self._json_object(response)
+
+    @asynccontextmanager
+    async def speech(self, body: dict, *, user_access_token: str) -> AsyncIterator[httpx.Response]:
+        if self.is_service or not user_access_token:
+            raise ValueError('Speech requires the user token')
+        headers = await self._headers(user_access_token=user_access_token)
+        try:
+            async with _shared_client().stream(
+                'POST',
+                f'{self._base_url}/v1/audio/speech',
+                headers=headers,
+                json=body,
+                timeout=self._timeout,
+            ) as response:
+                if not response.is_success:
+                    await response.aread()
+                    raise _response_error(response)
+                yield response
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upstream_error', 'Speech stream failed') from None
 
     async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
         """Pass a streamed task completion's SSE bytes through unchanged."""

@@ -21,10 +21,11 @@ from open_webui.models.functions import (
     FunctionUserResponse,
     FunctionWithValvesModel,
 )
+from open_webui.soev.model_catalog import require_custom_functions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.plugin import (
-    get_functions_cache,
     get_function_module_from_cache,
+    get_functions_cache,
     load_function_module_by_id,
     replace_imports,
     resolve_valves_schema_options,
@@ -35,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 log = logging.getLogger(__name__)
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_custom_functions)])
 
 ############################
 # GetFunctions

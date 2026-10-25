@@ -221,13 +221,6 @@ v2-migrate Job so it runs with exactly the app's credentials.
       key: postgres-password
 - name: DATABASE_URL
   value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
-{{- if or .Values.secrets.imagesOpenaiApiKey .Values.externalSecrets.onepassword.fields.imagesOpenaiApiKey }}
-- name: IMAGES_OPENAI_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: images-openai-api-key
-{{- end }}
 # Google OAuth (only if configured)
 {{- if or .Values.secrets.googleClientSecret .Values.externalSecrets.onepassword.fields.googleClientSecret }}
 - name: GOOGLE_CLIENT_SECRET

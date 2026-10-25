@@ -656,28 +656,6 @@
         "title": "ArchiveListResponse",
         "type": "object"
       },
-      "AudioConfigUpdateForm": {
-        "properties": {
-          "stt": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/STTConfigForm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tts": {
-            "$ref": "#/components/schemas/TTSConfigForm"
-          }
-        },
-        "required": [
-          "tts"
-        ],
-        "title": "AudioConfigUpdateForm",
-        "type": "object"
-      },
       "AutomationData": {
         "properties": {
           "model_id": {
@@ -4418,68 +4396,6 @@
         "title": "CreateArchiveResponse",
         "type": "object"
       },
-      "CreateImageForm": {
-        "properties": {
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
-          "n": {
-            "default": 1,
-            "title": "N",
-            "type": "integer"
-          },
-          "negative_prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Negative Prompt"
-          },
-          "prompt": {
-            "title": "Prompt",
-            "type": "string"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "steps": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Steps"
-          }
-        },
-        "required": [
-          "prompt"
-        ],
-        "title": "CreateImageForm",
-        "type": "object"
-      },
       "CreateModelForm": {
         "additionalProperties": true,
         "description": "Payload for creating a new model via Modelfile.",
@@ -4702,89 +4618,6 @@
           "file_id"
         ],
         "title": "DeleteForm",
-        "type": "object"
-      },
-      "EditImageForm": {
-        "properties": {
-          "background": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Background"
-          },
-          "image": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              }
-            ],
-            "title": "Image"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
-          "n": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "N"
-          },
-          "negative_prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Negative Prompt"
-          },
-          "prompt": {
-            "title": "Prompt",
-            "type": "string"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          }
-        },
-        "required": [
-          "image",
-          "prompt"
-        ],
-        "title": "EditImageForm",
         "type": "object"
       },
       "EmailConfigForm": {
@@ -7169,241 +7002,6 @@
           }
         },
         "title": "ImageURL",
-        "type": "object"
-      },
-      "ImagesConfig": {
-        "properties": {
-          "AUTOMATIC1111_API_AUTH": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Automatic1111 Api Auth"
-          },
-          "AUTOMATIC1111_BASE_URL": {
-            "title": "Automatic1111 Base Url",
-            "type": "string"
-          },
-          "AUTOMATIC1111_PARAMS": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Automatic1111 Params"
-          },
-          "COMFYUI_API_KEY": {
-            "title": "Comfyui Api Key",
-            "type": "string"
-          },
-          "COMFYUI_BASE_URL": {
-            "title": "Comfyui Base Url",
-            "type": "string"
-          },
-          "COMFYUI_WORKFLOW": {
-            "title": "Comfyui Workflow",
-            "type": "string"
-          },
-          "COMFYUI_WORKFLOW_NODES": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Comfyui Workflow Nodes",
-            "type": "array"
-          },
-          "ENABLE_IMAGE_EDIT": {
-            "title": "Enable Image Edit",
-            "type": "boolean"
-          },
-          "ENABLE_IMAGE_GENERATION": {
-            "title": "Enable Image Generation",
-            "type": "boolean"
-          },
-          "ENABLE_IMAGE_PROMPT_GENERATION": {
-            "title": "Enable Image Prompt Generation",
-            "type": "boolean"
-          },
-          "IMAGES_EDIT_COMFYUI_API_KEY": {
-            "title": "Images Edit Comfyui Api Key",
-            "type": "string"
-          },
-          "IMAGES_EDIT_COMFYUI_BASE_URL": {
-            "title": "Images Edit Comfyui Base Url",
-            "type": "string"
-          },
-          "IMAGES_EDIT_COMFYUI_WORKFLOW": {
-            "title": "Images Edit Comfyui Workflow",
-            "type": "string"
-          },
-          "IMAGES_EDIT_COMFYUI_WORKFLOW_NODES": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Images Edit Comfyui Workflow Nodes",
-            "type": "array"
-          },
-          "IMAGES_EDIT_GEMINI_API_BASE_URL": {
-            "title": "Images Edit Gemini Api Base Url",
-            "type": "string"
-          },
-          "IMAGES_EDIT_GEMINI_API_KEY": {
-            "title": "Images Edit Gemini Api Key",
-            "type": "string"
-          },
-          "IMAGES_EDIT_OPENAI_API_BASE_URL": {
-            "title": "Images Edit Openai Api Base Url",
-            "type": "string"
-          },
-          "IMAGES_EDIT_OPENAI_API_KEY": {
-            "title": "Images Edit Openai Api Key",
-            "type": "string"
-          },
-          "IMAGES_EDIT_OPENAI_API_VERSION": {
-            "title": "Images Edit Openai Api Version",
-            "type": "string"
-          },
-          "IMAGES_GEMINI_API_BASE_URL": {
-            "title": "Images Gemini Api Base Url",
-            "type": "string"
-          },
-          "IMAGES_GEMINI_API_KEY": {
-            "title": "Images Gemini Api Key",
-            "type": "string"
-          },
-          "IMAGES_GEMINI_ENDPOINT_METHOD": {
-            "title": "Images Gemini Endpoint Method",
-            "type": "string"
-          },
-          "IMAGES_OPENAI_API_BASE_URL": {
-            "title": "Images Openai Api Base Url",
-            "type": "string"
-          },
-          "IMAGES_OPENAI_API_KEY": {
-            "title": "Images Openai Api Key",
-            "type": "string"
-          },
-          "IMAGES_OPENAI_API_PARAMS": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Images Openai Api Params"
-          },
-          "IMAGES_OPENAI_API_VERSION": {
-            "title": "Images Openai Api Version",
-            "type": "string"
-          },
-          "IMAGE_EDIT_ENGINE": {
-            "title": "Image Edit Engine",
-            "type": "string"
-          },
-          "IMAGE_EDIT_MODEL": {
-            "title": "Image Edit Model",
-            "type": "string"
-          },
-          "IMAGE_EDIT_SIZE": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Edit Size"
-          },
-          "IMAGE_GENERATION_ENGINE": {
-            "title": "Image Generation Engine",
-            "type": "string"
-          },
-          "IMAGE_GENERATION_MODEL": {
-            "title": "Image Generation Model",
-            "type": "string"
-          },
-          "IMAGE_SIZE": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Size"
-          },
-          "IMAGE_STEPS": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Steps"
-          }
-        },
-        "required": [
-          "ENABLE_IMAGE_GENERATION",
-          "ENABLE_IMAGE_PROMPT_GENERATION",
-          "IMAGE_GENERATION_ENGINE",
-          "IMAGE_GENERATION_MODEL",
-          "IMAGE_SIZE",
-          "IMAGE_STEPS",
-          "IMAGES_OPENAI_API_BASE_URL",
-          "IMAGES_OPENAI_API_KEY",
-          "IMAGES_OPENAI_API_VERSION",
-          "IMAGES_OPENAI_API_PARAMS",
-          "AUTOMATIC1111_BASE_URL",
-          "AUTOMATIC1111_API_AUTH",
-          "AUTOMATIC1111_PARAMS",
-          "COMFYUI_BASE_URL",
-          "COMFYUI_API_KEY",
-          "COMFYUI_WORKFLOW",
-          "COMFYUI_WORKFLOW_NODES",
-          "IMAGES_GEMINI_API_BASE_URL",
-          "IMAGES_GEMINI_API_KEY",
-          "IMAGES_GEMINI_ENDPOINT_METHOD",
-          "ENABLE_IMAGE_EDIT",
-          "IMAGE_EDIT_ENGINE",
-          "IMAGE_EDIT_MODEL",
-          "IMAGE_EDIT_SIZE",
-          "IMAGES_EDIT_OPENAI_API_BASE_URL",
-          "IMAGES_EDIT_OPENAI_API_KEY",
-          "IMAGES_EDIT_OPENAI_API_VERSION",
-          "IMAGES_EDIT_GEMINI_API_BASE_URL",
-          "IMAGES_EDIT_GEMINI_API_KEY",
-          "IMAGES_EDIT_COMFYUI_BASE_URL",
-          "IMAGES_EDIT_COMFYUI_API_KEY",
-          "IMAGES_EDIT_COMFYUI_WORKFLOW",
-          "IMAGES_EDIT_COMFYUI_WORKFLOW_NODES"
-        ],
-        "title": "ImagesConfig",
         "type": "object"
       },
       "ImportConfigForm": {
@@ -12240,105 +11838,6 @@
         "title": "ResponsesForm",
         "type": "object"
       },
-      "STTConfigForm": {
-        "properties": {
-          "ALLOWED_EXTENSIONS": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Allowed Extensions",
-            "type": "array"
-          },
-          "AZURE_API_KEY": {
-            "title": "Azure Api Key",
-            "type": "string"
-          },
-          "AZURE_BASE_URL": {
-            "title": "Azure Base Url",
-            "type": "string"
-          },
-          "AZURE_LOCALES": {
-            "title": "Azure Locales",
-            "type": "string"
-          },
-          "AZURE_MAX_SPEAKERS": {
-            "title": "Azure Max Speakers",
-            "type": "string"
-          },
-          "AZURE_REGION": {
-            "title": "Azure Region",
-            "type": "string"
-          },
-          "DEEPGRAM_API_KEY": {
-            "title": "Deepgram Api Key",
-            "type": "string"
-          },
-          "ENGINE": {
-            "title": "Engine",
-            "type": "string"
-          },
-          "MISTRAL_API_BASE_URL": {
-            "title": "Mistral Api Base Url",
-            "type": "string"
-          },
-          "MISTRAL_API_KEY": {
-            "title": "Mistral Api Key",
-            "type": "string"
-          },
-          "MISTRAL_USE_CHAT_COMPLETIONS": {
-            "title": "Mistral Use Chat Completions",
-            "type": "boolean"
-          },
-          "MODEL": {
-            "title": "Model",
-            "type": "string"
-          },
-          "OPENAI_API_BASE_URL": {
-            "title": "Openai Api Base Url",
-            "type": "string"
-          },
-          "OPENAI_API_KEY": {
-            "title": "Openai Api Key",
-            "type": "string"
-          },
-          "OPENAI_API_REQUEST_FORMAT": {
-            "default": "multipart",
-            "title": "Openai Api Request Format",
-            "type": "string"
-          },
-          "SUPPORTED_CONTENT_TYPES": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Supported Content Types",
-            "type": "array"
-          },
-          "WHISPER_MODEL": {
-            "title": "Whisper Model",
-            "type": "string"
-          }
-        },
-        "required": [
-          "OPENAI_API_BASE_URL",
-          "OPENAI_API_KEY",
-          "ENGINE",
-          "MODEL",
-          "WHISPER_MODEL",
-          "DEEPGRAM_API_KEY",
-          "AZURE_API_KEY",
-          "AZURE_REGION",
-          "AZURE_LOCALES",
-          "AZURE_BASE_URL",
-          "AZURE_MAX_SPEAKERS",
-          "MISTRAL_API_KEY",
-          "MISTRAL_API_BASE_URL",
-          "MISTRAL_USE_CHAT_COMPLETIONS"
-        ],
-        "title": "STTConfigForm",
-        "type": "object"
-      },
       "ScheduleForm": {
         "additionalProperties": false,
         "properties": {
@@ -13367,6 +12866,45 @@
         "title": "SnapshotData",
         "type": "object"
       },
+      "SpeechForm": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "minLength": 1,
+            "title": "Input",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "mp3",
+            "enum": [
+              "mp3",
+              "opus",
+              "aac",
+              "flac",
+              "wav",
+              "pcm"
+            ],
+            "title": "Response Format",
+            "type": "string"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "SpeechForm",
+        "type": "object"
+      },
       "SubagentsConfigForm": {
         "properties": {
           "ENABLE_SUBAGENTS": {
@@ -13528,86 +13066,6 @@
           "SYSTEM_PROMPT"
         ],
         "title": "SystemPromptForm",
-        "type": "object"
-      },
-      "TTSConfigForm": {
-        "properties": {
-          "API_KEY": {
-            "title": "Api Key",
-            "type": "string"
-          },
-          "AZURE_SPEECH_BASE_URL": {
-            "title": "Azure Speech Base Url",
-            "type": "string"
-          },
-          "AZURE_SPEECH_OUTPUT_FORMAT": {
-            "title": "Azure Speech Output Format",
-            "type": "string"
-          },
-          "AZURE_SPEECH_REGION": {
-            "title": "Azure Speech Region",
-            "type": "string"
-          },
-          "ENGINE": {
-            "title": "Engine",
-            "type": "string"
-          },
-          "MISTRAL_API_BASE_URL": {
-            "title": "Mistral Api Base Url",
-            "type": "string"
-          },
-          "MISTRAL_API_KEY": {
-            "title": "Mistral Api Key",
-            "type": "string"
-          },
-          "MODEL": {
-            "title": "Model",
-            "type": "string"
-          },
-          "OPENAI_API_BASE_URL": {
-            "title": "Openai Api Base Url",
-            "type": "string"
-          },
-          "OPENAI_API_KEY": {
-            "title": "Openai Api Key",
-            "type": "string"
-          },
-          "OPENAI_PARAMS": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Openai Params"
-          },
-          "SPLIT_ON": {
-            "title": "Split On",
-            "type": "string"
-          },
-          "VOICE": {
-            "title": "Voice",
-            "type": "string"
-          }
-        },
-        "required": [
-          "OPENAI_API_BASE_URL",
-          "OPENAI_API_KEY",
-          "API_KEY",
-          "ENGINE",
-          "MODEL",
-          "VOICE",
-          "SPLIT_ON",
-          "AZURE_SPEECH_REGION",
-          "AZURE_SPEECH_BASE_URL",
-          "AZURE_SPEECH_OUTPUT_FORMAT",
-          "MISTRAL_API_KEY",
-          "MISTRAL_API_BASE_URL"
-        ],
-        "title": "TTSConfigForm",
         "type": "object"
       },
       "TagEntry": {
@@ -19885,38 +19343,14 @@
         ]
       }
     },
-    "/api/v1/audio/config": {
-      "get": {
-        "operationId": "get_audio_config_api_v1_audio_config_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Audio Config",
-        "tags": [
-          "audio"
-        ]
-      }
-    },
-    "/api/v1/audio/config/update": {
+    "/api/v1/audio/speech": {
       "post": {
-        "operationId": "update_audio_config_api_v1_audio_config_update_post",
+        "operationId": "speech_api_v1_audio_speech_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AudioConfigUpdateForm"
+                "$ref": "#/components/schemas/SpeechForm"
               }
             }
           },
@@ -19940,54 +19374,6 @@
               }
             },
             "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Audio Config",
-        "tags": [
-          "audio"
-        ]
-      }
-    },
-    "/api/v1/audio/models": {
-      "get": {
-        "operationId": "get_models_api_v1_audio_models_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Models",
-        "tags": [
-          "audio"
-        ]
-      }
-    },
-    "/api/v1/audio/speech": {
-      "post": {
-        "operationId": "speech_api_v1_audio_speech_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
           }
         },
         "security": [
@@ -20040,30 +19426,6 @@
           }
         ],
         "summary": "Transcription",
-        "tags": [
-          "audio"
-        ]
-      }
-    },
-    "/api/v1/audio/voices": {
-      "get": {
-        "operationId": "get_voices_api_v1_audio_voices_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Voices",
         "tags": [
           "audio"
         ]
@@ -31553,212 +30915,6 @@
         "summary": "Remove Users From Group",
         "tags": [
           "groups"
-        ]
-      }
-    },
-    "/api/v1/images/config": {
-      "get": {
-        "operationId": "get_config_api_v1_images_config_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImagesConfig"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Config",
-        "tags": [
-          "images"
-        ]
-      }
-    },
-    "/api/v1/images/config/update": {
-      "post": {
-        "operationId": "update_config_api_v1_images_config_update_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImagesConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Config",
-        "tags": [
-          "images"
-        ]
-      }
-    },
-    "/api/v1/images/config/url/verify": {
-      "get": {
-        "operationId": "verify_url_api_v1_images_config_url_verify_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Verify Url",
-        "tags": [
-          "images"
-        ]
-      }
-    },
-    "/api/v1/images/edit": {
-      "post": {
-        "operationId": "edit_images_api_v1_images_edit_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EditImageForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Edit Images",
-        "tags": [
-          "images"
-        ]
-      }
-    },
-    "/api/v1/images/generations": {
-      "post": {
-        "operationId": "generate_images_api_v1_images_generations_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateImageForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Images",
-        "tags": [
-          "images"
-        ]
-      }
-    },
-    "/api/v1/images/models": {
-      "get": {
-        "operationId": "get_models_api_v1_images_models_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Models",
-        "tags": [
-          "images"
         ]
       }
     },

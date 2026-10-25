@@ -418,6 +418,7 @@ type Config = {
 		enable_citation_text_highlight?: boolean;
 		enable_memories: boolean;
 		enable_plugins?: boolean;
+		enable_functions?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;

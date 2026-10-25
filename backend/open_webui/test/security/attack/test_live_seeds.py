@@ -80,10 +80,16 @@ def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
 @pytest.mark.parametrize('template', LIVE_READS)
 def test_live_ids_address_real_resources(live_seeds, template):
     identities, resolved = live_seeds
+    from .crossuser import expected_refusals, refused_as_expected
+
     if seeds.route_waived(f'GET {template}'):
         pytest.skip('soev-solutions resource is waived in this runtime mode')
     path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
     result = identities.admin.request('GET', path)
+    refusal = expected_refusals().get(f'GET {template}')
+    if refusal:
+        assert refused_as_expected(refusal, result.status_code, result.text), (template, result.text)
+        return
     assert result.status_code == 200, f'{template}: HTTP {result.status_code}: {result.text[:200]}'
     if template.endswith('/validate'):
         assert result.json()['email'].startswith('attack-invite-token-')
@@ -114,3 +120,23 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
     result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared')
     assert result.status_code == 200
     assert result.json()['id'] not in (share_id, resolved['/api/v1/chats/{id}', 'id'])
+
+
+@pytest.mark.parametrize('role', ['admin', 'user'])
+def test_live_v2_function_routes_refuse_every_operation(live_seeds, role):
+    from .benign_requests import benign_request
+    from .crossuser import expected_refusals, refused_as_expected
+
+    if seeds.runtime_soev_backed() != 'drive':
+        pytest.skip('v2 custom-function refusals apply only to the private sweep')
+    identities, resolved = live_seeds
+    for route, declaration in expected_refusals().items():
+        method, template = route.split(' ', 1)
+        if not template.startswith('/api/v1/functions/'):
+            continue
+        target = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe=''), template)
+        response = getattr(identities, role).request(method, target, **benign_request(route, resolved))
+        try:
+            assert refused_as_expected(declaration, response.status_code, response.text), (route, response.text)
+        finally:
+            response.close()

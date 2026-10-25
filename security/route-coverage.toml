@@ -129,6 +129,13 @@ reason = "Not entered: routers/retrieval.py:reset_vector_db answers 403 unless u
 id = "POST /api/v1/retrieval/reset/uploads"
 reason = "Not entered: routers/retrieval.py:reset_upload_dir answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
 
+# --- Platform speech: local users have no platform login ---------------------
+
+[[waived]]
+id = "POST /api/v1/audio/speech"
+runtime_soev_backed = "waive"
+reason = "Observed in the actual-handler HTTP control: a verified local user with read_aloud enabled and a valid SpeechForm receives 403 scope_insufficient, constraint identity:platform_login, from soev/primitives.py:_login_token before upstream I/O. The public sealed stack has no platform login or soev-api speech role. Keep owner and cross-user probes enabled; private drive mode requires a successful handler hit. Closes when the public stack supplies a platform login and speech role."
+
 # --- Backed by soev-solutions: security tested there -------------------------
 # soev-api, soev-sync and soev-agents-api are closed source and never run in this
 # open-source repository's CI, not even as a stub. The plane skips every route
@@ -406,3 +413,91 @@ reason = "soev/thread_routes.py needs platform thread reads and forks. The seale
 id = "POST /api/v1/threads/{thread_id}/fork"
 backed_by = "soev-solutions"
 reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
+
+# --- v2 custom functions: refused by the router dependency ----------------------
+# Keep every route in the passes. A successful handler entry invalidates its waiver.
+
+[[waived]]
+id = "GET /api/v1/functions/"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/create"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/export"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/id/{id}"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "DELETE /api/v1/functions/id/{id}/delete"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/toggle"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/toggle/global"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/update"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/id/{id}/valves"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/id/{id}/valves/spec"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/valves/update"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/id/{id}/valves/user"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/id/{id}/valves/user/spec"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/valves/user/update"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/functions/list"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/load/url"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "POST /api/v1/functions/sync"
+runtime_soev_backed = "drive"
+reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
