@@ -457,8 +457,8 @@ def seed_totp_user(ctx, parameter):
 
 
 def seed_task(ctx, parameter):
-    model_id = _create_active_function(ctx, parameter, f'attack_task_{ctx.token}')
-    # Inlets run before routing, including private stacks with agent routing on.
+    model_id = f'attack_task_{ctx.token}'
+    # An ordinary assistant stays available under v2; no installed code or filters.
     ctx.request(
         'POST',
         '/api/v1/models/create',
@@ -467,7 +467,7 @@ def seed_task(ctx, parameter):
             'id': model_id,
             'name': model_id,
             'base_model_id': ctx.values['model'],
-            'meta': {'filterIds': [model_id]},
+            'meta': {},
             'params': {},
         },
     )
@@ -487,14 +487,14 @@ def seed_task(ctx, parameter):
             'chat_id': chat_id,
             'id': f'task_message_{ctx.token}',
             'session_id': f'attack_{ctx.token}',
-            'stream': False,
-            'messages': [{'role': 'user', 'content': 'Hold this attack fixture until cancelled.'}],
+            'stream': True,
+            'messages': [{'role': 'user', 'content': f'owui_attack_task_hold:{ctx.token}'}],
         },
     )
     task_id = _extract(result, 'task_ids.0', name=parameter['key'], via='POST /api/chat/completions')
     try:
         # A returned id alone may already have completed. Check after the
-        # background coroutine has had time to fail or enter its bounded wait.
+        # background coroutine has had time to fail or reach the held upstream.
         for _ in range(3):
             active = ctx.request('GET', f'/api/tasks/chat/{quote(chat_id, safe="")}', actor=ctx.admin)
             if task_id not in active.get('task_ids', []):
@@ -703,7 +703,9 @@ def resolve_parameters(
             failures[key] = f'Failed dependencies: {dependencies}'
             continue
         try:
-            if 'same_as' in p:
+            if runtime_soev_backed() == 'drive' and 'v2_refused_value' in p:
+                value = ctx.fill(p['v2_refused_value'], p)
+            elif 'same_as' in p:
                 value = ctx.values[p['same_as']]
             elif 'seeded_by' in p:
                 value = _SEEDERS[p['seeded_by']](ctx, p)
