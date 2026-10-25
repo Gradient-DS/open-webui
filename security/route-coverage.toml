@@ -129,6 +129,13 @@ reason = "Not entered: routers/retrieval.py:reset_vector_db answers 403 unless u
 id = "POST /api/v1/retrieval/reset/uploads"
 reason = "Not entered: routers/retrieval.py:reset_upload_dir answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
 
+# --- Platform speech: local users have no platform login ---------------------
+
+[[waived]]
+id = "POST /api/v1/audio/speech"
+runtime_soev_backed = "waive"
+reason = "Observed in the actual-handler HTTP control: a verified local user with read_aloud enabled and a valid SpeechForm receives 403 scope_insufficient, constraint identity:platform_login, from soev/primitives.py:_login_token before upstream I/O. The public sealed stack has no platform login or soev-api speech role. Keep owner and cross-user probes enabled; private drive mode requires a successful handler hit. Closes when the public stack supplies a platform login and speech role."
+
 # --- Backed by soev-solutions: security tested there -------------------------
 # soev-api, soev-sync and soev-agents-api are closed source and never run in this
 # open-source repository's CI, not even as a stub. The plane skips every route
