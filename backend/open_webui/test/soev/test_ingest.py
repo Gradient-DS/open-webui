@@ -1,5 +1,6 @@
 """Ingest submission through the shared fake API and real SQLite file rows."""
 
+import asyncio
 import base64
 import datetime as dt
 import hashlib
@@ -10,12 +11,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 FILE_BYTES = b'%PDF-1.7 stored file content'
@@ -93,11 +95,11 @@ async def submit(env, file, **kwargs):
 
 @pytest.mark.asyncio
 async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, monkeypatch):
-    """A file declaration supplies presigned headers and becomes queued only after its upload and commit."""
+    """A file declaration streams through the authenticated API before commit."""
     file = await new_file(env, name='Report.pdf', content_type='application/pdf')
     loop_thread = threading.get_ident()
     storage_threads, read_threads = [], []
-    get_file, read_bytes = env.module.Storage.get_file, Path.read_bytes
+    get_file, file_info = env.module.Storage.get_file, env.module._file_info
 
     def resolve(path):
         storage_threads.append(threading.get_ident())
@@ -105,10 +107,10 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
 
     def read(path):
         read_threads.append(threading.get_ident())
-        return read_bytes(path)
+        return file_info(path)
 
     monkeypatch.setattr(env.module.Storage, 'get_file', resolve)
-    monkeypatch.setattr(Path, 'read_bytes', read)
+    monkeypatch.setattr(env.module, '_file_info', read)
     job_id = await submit(env, file)
     assert len(storage_threads) == 1 and storage_threads == read_threads
     assert storage_threads[0] != loop_thread
@@ -116,7 +118,7 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
     digest = hashlib.sha256(FILE_BYTES).hexdigest()
     assert [(r.method, r.url.path) for r in env.api.requests] == [
         ('POST', '/v1/jobs'),
-        ('PUT', f'/uploads/{digest}'),
+        ('PUT', f'/v1/jobs/{job_id}/uploads/{file.id}'),
         ('POST', f'/v1/jobs/{job_id}/commit'),
     ]
     assert json.loads(create.content) == {
@@ -133,9 +135,11 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
             }
         ],
     }
-    assert str(upload.url) == f'https://soev.invalid/uploads/{digest}'
+    assert str(upload.url) == f'https://soev.invalid/v1/jobs/{job_id}/uploads/{file.id}'
     assert upload.headers['Content-Length'] == str(len(FILE_BYTES))
-    assert upload.headers['x-amz-checksum-sha256'] == base64.b64encode(hashlib.sha256(FILE_BYTES).digest()).decode()
+    assert upload.headers['Content-Type'] == 'application/pdf'
+    assert upload.headers['Authorization'] == create.headers['Authorization']
+    assert 'x-amz-checksum-sha256' not in upload.headers
     assert upload.content == FILE_BYTES and env.api.uploads[job_id, file.id] == FILE_BYTES
     assert create.headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{digest}:1'
     assert commit.headers['Idempotency-Key'] == create.headers['Idempotency-Key'] + ':commit'
@@ -224,7 +228,7 @@ async def test_submit_over_the_inline_budget_uploads_the_text_bytes(env, monkeyp
 
 @pytest.mark.asyncio
 async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
-    """Default clients mint the explicit user's assertion for create and commit and keep the PUT credential free."""
+    """Create, upload and commit each carry the acting user with a fresh assertion."""
     file = await new_file(env)
     builds = []
     build_client = env.identity.build_client
@@ -236,12 +240,13 @@ async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
     monkeypatch.setattr(env.identity, 'build_client', build)
     await env.module.submit(file, collection_key='kb', user_id='alice')
     create, upload, commit = env.api.requests
-    for request in (create, commit):
+    for request in (create, upload, commit):
         encoded = request.headers['X-Soev-Subject'].split('.')[1]
         claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
         assert claims['sub'] == 'owui:user:alice'
     assert create.headers['X-Soev-Subject'] != commit.headers['X-Soev-Subject']
-    assert 'X-Soev-Subject' not in upload.headers and 'Authorization' not in upload.headers
+    assert len({r.headers['X-Soev-Subject'] for r in (create, upload, commit)}) == 3
+    assert upload.headers['Authorization'] == create.headers['Authorization']
     await env.module.cancel(file)
     assert len(builds) == 2
 
@@ -639,3 +644,92 @@ async def test_rendition_without_soev_uses_only_stored_content(env, monkeypatch,
     assert await env.module.rendition_of(file, 'alice') == (content or None)
     build.assert_not_called()
     assert not env.api.requests
+
+
+class _ChunkReader:
+    def __init__(self, source, limit, loop_thread):
+        self.source = source
+        self.limit = limit
+        self.loop_thread = loop_thread
+        self.reads = 0
+        self.closed = False
+
+    def read(self, limit):
+        assert 0 < limit <= self.limit
+        assert threading.get_ident() != self.loop_thread
+        self.reads += 1
+        return self.source.read(limit)
+
+    def close(self):
+        self.closed = True
+        self.source.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+@pytest.mark.asyncio
+async def test_large_upload_reads_bounded_chunks_only_as_the_transport_pulls(env, monkeypatch):
+    from open_webui.soev.client import close_client
+
+    file = await new_file(env)
+    size = 100 * 1024 * 1024
+    path = Path(file.path)
+    with path.open('wb') as target:
+        target.truncate(size)
+    original_open = Path.open
+    readers = []
+    loop_thread = threading.get_ident()
+
+    def opened(target, *args, **kwargs):
+        source = original_open(target, *args, **kwargs)
+        if target == path:
+            reader = _ChunkReader(source, env.module.UPLOAD_CHUNK_BYTES, loop_thread)
+            readers.append(reader)
+            return reader
+        return source
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            if request.method != 'PUT':
+                return env.api.handle(request)
+            env.api.requests.append(request)
+            assert len(readers) == 1 and readers[0].closed
+            digest, received, chunks = hashlib.sha256(), 0, 0
+            async for chunk in request.stream:
+                assert len(readers) == 2
+                assert readers[1].reads == chunks + 1
+                assert not readers[1].closed
+                assert 0 < len(chunk) <= env.module.UPLOAD_CHUNK_BYTES
+                received += len(chunk)
+                chunks += 1
+                digest.update(chunk)
+                await asyncio.sleep(0)
+                assert readers[1].reads == chunks
+            job = next(iter(env.api.jobs.values()))
+            document = job['documents'][0]
+            assert received == document['size'] == size
+            assert digest.hexdigest() == document['sha256']
+            assert chunks > 1
+            with pytest.raises(httpx.RequestNotRead):
+                _ = request.content
+            env.api.uploads[job['job_id'], file.id] = b'counted by streaming transport'
+            return httpx.Response(204)
+
+    await close_client()
+    original_client = AsyncClient
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient',
+        lambda **kwargs: original_client(
+            transport=Transport(),
+            **kwargs,
+        ),
+    )
+    monkeypatch.setattr(Path, 'open', opened)
+    monkeypatch.setattr(Path, 'read_bytes', Mock(side_effect=AssertionError('Whole-file read')))
+    job_id = await submit(env, file)
+    assert env.api.jobs[job_id]['status'] == 'QUEUED'
+    assert len(readers) == 2 and all(reader.closed for reader in readers)

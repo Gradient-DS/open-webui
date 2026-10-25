@@ -5,6 +5,7 @@ import datetime as dt
 import hashlib
 import posixpath
 import time
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ ATTACHMENTS_PREFIX = 'owui-attachments-'
 ASSISTANT_PREFIX = 'owui-assistant-'
 FOLDER_PREFIX = 'owui-folder-'
 ATTACHMENTS_TAG = 'chat-attachments'
+UPLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class IngestBusy(Exception):
@@ -91,8 +93,41 @@ async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | No
         raise
 
 
-def _read_file(file_path: str) -> bytes:
-    return Path(Storage.get_file(file_path)).read_bytes()
+def _file_info(file_path: str) -> tuple[Path, int, str]:
+    path = Path(Storage.get_file(file_path))
+    digest, size = hashlib.sha256(), 0
+    with path.open('rb') as source:
+        while chunk := source.read(UPLOAD_CHUNK_BYTES):
+            digest.update(chunk)
+            size += len(chunk)
+    return path, size, digest.hexdigest()
+
+
+async def _file_chunks(path: Path) -> AsyncIterator[bytes]:
+    source = await asyncio.to_thread(path.open, 'rb')
+    try:
+        while chunk := await asyncio.to_thread(source.read, UPLOAD_CHUNK_BYTES):
+            yield chunk
+    finally:
+        await asyncio.to_thread(source.close)
+
+
+def _encoded_text(text: str) -> Iterator[bytes]:
+    for offset in range(0, len(text), UPLOAD_CHUNK_BYTES // 4):
+        yield text[offset : offset + UPLOAD_CHUNK_BYTES // 4].encode()
+
+
+def _text_info(text: str) -> tuple[int, str]:
+    digest, size = hashlib.sha256(), 0
+    for chunk in _encoded_text(text):
+        digest.update(chunk)
+        size += len(chunk)
+    return size, digest.hexdigest()
+
+
+async def _text_chunks(text: str) -> AsyncIterator[bytes]:
+    for chunk in _encoded_text(text):
+        yield chunk
 
 
 async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str:
@@ -146,9 +181,11 @@ async def submit(
     if current is not None and (current.meta or {}).get('soev_job') is not None:
         raise IngestBusy(file.id)
     client = client if client is not None else identity.build_client()
-    body = text.encode() if text is not None else await asyncio.to_thread(_read_file, file.path)
-    digest = hashlib.sha256(body).hexdigest()
-    inline = text is not None and len(body) <= config.SOEV_API_INLINE_DOCUMENT_BYTES
+    if text is None:
+        file_path, size, digest = await asyncio.to_thread(_file_info, file.path)
+    else:
+        size, digest = await asyncio.to_thread(_text_info, text)
+    inline = text is not None and size <= config.SOEV_API_INLINE_DOCUMENT_BYTES
     meta = file.meta or {}
     name = meta.get('name') or file.filename
     path = posixpath.dirname(meta.get('relative_path') or '') or None
@@ -162,7 +199,7 @@ async def submit(
         document['path'] = path
     if file.created_at is not None:
         document['created_at'] = dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat().replace('+00:00', 'Z')
-    document.update({'text': text} if inline else {'size': len(body), 'sha256': digest})
+    document.update({'text': text} if inline else {'size': size, 'sha256': digest})
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
     ref = None if client.is_service else await _as_user(user_id, client)
     response = await client.send(
@@ -185,8 +222,14 @@ async def submit(
     await Files.update_file_metadata_by_id(file.id, {'soev_job': job, 'soev_collection_key': collection_key})
     await Files.set_status(file.id, 'processing')
     if not inline:
-        for upload in response['uploads']:
-            await client.put_bytes(upload['url'], headers=upload['headers'], body=body)
+        await client.upload_document(
+            job_id,
+            file.id,
+            _file_chunks(file_path) if text is None else _text_chunks(text),
+            size=size,
+            content_type=document['content_type'],
+            as_user=ref,
+        )
         await client.send('POST', f'/v1/jobs/{job_id}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit')
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}})
     return job_id

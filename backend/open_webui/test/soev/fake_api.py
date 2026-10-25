@@ -6,7 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import re
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from uuid import uuid4
 
 import httpx
@@ -56,14 +56,14 @@ class FakeSoevApi:
             return httpx.Response(error.status, json=body, headers={'Content-Type': 'application/problem+json'})
 
     def _handle(self, request):
-        if request.method == 'PUT' and request.url.host == 'soev.invalid' and request.url.path.startswith('/uploads/'):
-            return self._upload(request)
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
         subject = self._assertion(request.headers['X-Soev-Subject']) if 'X-Soev-Subject' in request.headers else None
         if subject and subject not in self.links:
             raise Problem(401, 'identity_not_linked')
+        if request.method == 'PUT' and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path):
+            return self._upload(request, credential)
         body = json.loads(request.content) if request.content else None
         if (
             request.method == 'GET'
@@ -109,27 +109,25 @@ class FakeSoevApi:
         if '*' not in capabilities and capability not in capabilities:
             raise Problem(403, 'scope_insufficient', f'capability:{capability}')
 
-    def _upload(self, request):
-        if 'Authorization' in request.headers:
-            raise Problem(400, 'bearer_on_presigned_put')
-        digest = request.url.path.removeprefix('/uploads/')
-        targets = [
-            (job['job_id'], document)
-            for job in self.jobs.values()
-            for document in job.get('documents', [])
-            if document.get('sha256') == digest
-        ]
-        if not targets:
-            raise Problem(404, 'upload_not_found')
-        if any(request.headers.get('Content-Length') != str(document['size']) for _, document in targets):
-            raise Problem(400, 'upload_length_mismatch')
-        if any(len(request.content) != document['size'] for _, document in targets):
-            raise Problem(400, 'upload_length_mismatch')
-        if hashlib.sha256(request.content).hexdigest() != digest:
-            raise Problem(400, 'upload_digest_mismatch')
-        for job_id, document in targets:
-            self.uploads[job_id, document['source_id']] = request.content
-        return httpx.Response(200)
+    def _upload(self, request, credential):
+        self._require(credential, 'ingest')
+        _, _, _, job_id, _, source_id = request.url.path.split('/', 5)
+        job = self.jobs.get(job_id)
+        if job is None or self.job_owners[job_id] != credential or job['status'] != 'AWAITING_UPLOAD':
+            raise Problem(404, 'not_found')
+        if dt.datetime.fromisoformat(self.now) >= dt.datetime.fromisoformat(job['created_at']) + dt.timedelta(
+            minutes=15
+        ):
+            raise Problem(404, 'not_found')
+        document = next((doc for doc in job.get('documents', []) if doc['source_id'] == source_id), None)
+        if document is None or 'size' not in document:
+            raise Problem(404, 'not_found')
+        if len(request.content) != document['size']:
+            raise Problem(400, 'upload_missing')
+        if hashlib.sha256(request.content).hexdigest() != document['sha256']:
+            raise Problem(400, 'upload_missing')
+        self.uploads[job_id, source_id] = request.content
+        return httpx.Response(204)
 
     def _assertion(self, token):
         try:
@@ -529,7 +527,7 @@ class FakeSoevApi:
             {
                 'source_id': document['source_id'],
                 'method': 'PUT',
-                'url': 'https://soev.invalid/uploads/' + document['sha256'],
+                'url': f'/v1/jobs/{job["job_id"]}/uploads/{quote(document["source_id"], safe="")}',
                 'headers': {
                     'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
                     'Content-Length': str(document['size']),

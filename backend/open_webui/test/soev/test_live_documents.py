@@ -1,5 +1,6 @@
 """Reference attachments use durable Files, the job poller and user-scoped originals."""
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -108,17 +109,19 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
     file = await live_documents.register_attachment('alice', attachment())
     calls, closed = [], []
 
-    async def stream(path, *, as_user):
+    @asynccontextmanager
+    async def stream(path, *, as_user, range_header=None):
         calls.append((path, as_user))
         try:
             if denied:
                 raise SoevApiError(403, 'forbidden', 'Access revoked')
-            yield b'original'
-            yield b' bytes'
+            import httpx
+
+            yield httpx.Response(200, content=b'original bytes')
         finally:
             closed.append(True)
 
-    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
+    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream_response=stream))
     monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
     storage = Mock(side_effect=AssertionError('Reference originals must not use OWUI storage'))
     monkeypatch.setattr(files.Storage, 'get_file', storage)
@@ -151,11 +154,12 @@ async def test_missing_original_while_processing_is_a_conflict(env, monkeypatch)
 
     file = await live_documents.register_attachment('alice', attachment())
 
-    async def stream(path, *, as_user):
+    @asynccontextmanager
+    async def stream(path, *, as_user, range_header=None):
         raise SoevApiError(404, 'not_found', 'Document not found')
         yield b''
 
-    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
+    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream_response=stream))
     monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
     user = SimpleNamespace(id='alice', role='user')
     with pytest.raises(HTTPException) as error:

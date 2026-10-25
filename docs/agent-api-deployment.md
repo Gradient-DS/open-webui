@@ -52,8 +52,11 @@ For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes th
 access token when needed and forwards it as `X-Soev-User-Token` beside the product
 credential in `Authorization`. Other providers, password users, API-key requests
 and calls started without a user request send no user token. Chat tasks started
-by a user request inherit that request's token context. Presigned storage requests
-use only their presigned credentials. `X-Soev-Subject` remains during this
+by a user request inherit that request's token context. Document downloads follow
+one redirect to `/v1/downloads/{code}` on the configured soev-api origin, carrying
+the same admission headers. Preview requests preserve Range and partial responses.
+File uploads stream through authenticated `PUT /v1/jobs/{job_id}/uploads/{source_id}`
+with bounded reads; browsers receive no object-store URL. `X-Soev-Subject` remains during this
 integration step and is removed in the person-identity cutover (step 2).
 
 ## Optional platform capabilities

@@ -6,12 +6,11 @@ from urllib.parse import quote, urlsplit
 from weakref import WeakValueDictionary
 
 from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
-from starlette.background import BackgroundTask
 
 from open_webui.models.files import FileForm, FileModel, Files
 from open_webui.soev import identity, ingest
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.downloads import proxy_download
 
 
 class AttachmentMismatch(Exception):
@@ -94,38 +93,20 @@ def chat_file(file: FileModel) -> dict:
 ORIGINAL_PROCESSING = 'original_processing'
 
 
-async def stream_original(file: FileModel, user, *, attachment: bool):
+async def stream_original(file: FileModel, user, *, attachment: bool, range_header: str | None = None):
     client = identity.build_client()
     ref = await identity.acting_ref(user, client)
     collection = quote(file.meta['collection_name'], safe='')
     path = f'/v1/collections/{collection}/documents/{quote(file.id, safe="")}/original'
-    stream = client.stream(path, as_user=ref)
     try:
-        first = await anext(stream, b'')
+        return await proxy_download(
+            client.stream_response(path, as_user=ref, range_header=range_header),
+            filename=file.filename,
+            content_type=file.meta.get('content_type') or 'application/octet-stream',
+            attachment=attachment,
+        )
     except SoevApiError as error:
-        await stream.aclose()
-        # [Gradient] The original exists only once the reference job lands; say so, so previews wait.
+        # The original exists only once the reference job lands; previews wait.
         if error.status == 404 and file.meta.get('status') in ('pending', 'processing'):
             raise HTTPException(status_code=409, detail=ORIGINAL_PROCESSING) from None
         raise HTTPException(status_code=error.status, detail=error.detail) from None
-    content_type = file.meta.get('content_type') or 'application/octet-stream'
-    disposition = (
-        'inline'
-        if not attachment and (content_type == 'application/pdf' or content_type.startswith('image/'))
-        else 'attachment'
-    )
-
-    async def chunks():
-        try:
-            yield first
-            async for chunk in stream:
-                yield chunk
-        finally:
-            await stream.aclose()
-
-    return StreamingResponse(
-        chunks(),
-        media_type=content_type,
-        headers={'Content-Disposition': f"{disposition}; filename*=UTF-8''{quote(file.filename, safe='')}"},
-        background=BackgroundTask(stream.aclose),
-    )

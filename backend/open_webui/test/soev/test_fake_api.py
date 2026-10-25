@@ -341,8 +341,8 @@ def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_con
     assert response.json()['code'] == 'credential_invalid'
 
 
-def test_a_file_document_opens_an_awaiting_upload_job_with_a_presigned_put(api):
-    """File proposals publish an absolute PUT URL with S3 checksum and length headers."""
+def test_a_file_document_opens_an_awaiting_upload_job_with_an_authenticated_put(api):
+    """File proposals publish a relative streaming PUT route and the declared length."""
     fake, client = api
     seed(client)
     document = file_document()
@@ -355,7 +355,7 @@ def test_a_file_document_opens_an_awaiting_upload_job_with_a_presigned_put(api):
         {
             'source_id': 'file',
             'method': 'PUT',
-            'url': 'https://soev.invalid/uploads/' + document['sha256'],
+            'url': f'/v1/jobs/{job["job_id"]}/uploads/file',
             'headers': {
                 'x-amz-checksum-sha256': base64.b64encode(hashlib.sha256(FILE_BYTES).digest()).decode(),
                 'Content-Length': str(len(FILE_BYTES)),
@@ -449,35 +449,43 @@ def test_a_replayed_job_create_returns_no_uploads(api):
     assert len(fake.jobs) == 1
 
 
-def test_the_presigned_put_refuses_a_bearer(api):
-    """Presigned uploads reject authorization even when it names a valid credential."""
+def test_the_upload_put_requires_a_bearer(api):
+    """Streaming uploads require the product credential."""
     fake, client = api
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
     response = client.put(
         upload['url'],
         content=FILE_BYTES,
-        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+        headers=upload['headers'],
     )
-    assert response.status_code == 400
-    assert response.json()['code'] == 'bearer_on_presigned_put'
+    assert response.status_code == 401
+    assert response.json()['code'] == 'invalid_credential'
     assert not fake.uploads
 
 
 @pytest.mark.parametrize(
     'length,content,code',
     [
-        ('1', FILE_BYTES, 'upload_length_mismatch'),
-        (str(len(FILE_BYTES)), b'short', 'upload_length_mismatch'),
-        (str(len(FILE_BYTES)), b'x' * len(FILE_BYTES), 'upload_digest_mismatch'),
+        (str(len(FILE_BYTES)), FILE_BYTES + b'extra', 'upload_missing'),
+        (str(len(FILE_BYTES)), b'short', 'upload_missing'),
+        (str(len(FILE_BYTES)), b'x' * len(FILE_BYTES), 'upload_missing'),
     ],
 )
-def test_the_presigned_put_checks_length_and_digest(api, length, content, code):
-    """Neither a dishonest length nor bytes with another digest can land."""
+def test_the_upload_put_checks_length_and_digest(api, length, content, code):
+    """Neither a mismatched size nor bytes with another digest can land."""
     fake, client = api
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
-    response = client.put(upload['url'], content=content, headers={**upload['headers'], 'Content-Length': length})
+    response = client.put(
+        upload['url'],
+        content=content,
+        headers={
+            **upload['headers'],
+            'Content-Length': length,
+            'Authorization': 'Bearer soev_test_cred-runtime_test-secret',
+        },
+    )
     assert response.status_code == 400
     assert response.json()['code'] == code
     assert not fake.uploads
@@ -495,13 +503,17 @@ def test_commit_before_upload_is_409_upload_missing(api):
 
 
 def test_commit_after_upload_queues_the_job(api):
-    """A valid absolute PUT stores bytes and commit only queues the mixed batch."""
+    """An authenticated PUT stores bytes and commit only queues the mixed batch."""
     fake, client = api
     seed(client)
     job = ingest(client, file_document(), inline_document()).json()
     upload = job['uploads'][0]
-    response = client.put(upload['url'], content=FILE_BYTES, headers=upload['headers'])
-    assert response.status_code == 200 and response.content == b''
+    response = client.put(
+        upload['url'],
+        content=FILE_BYTES,
+        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+    )
+    assert response.status_code == 204 and response.content == b''
     assert fake.uploads[job['job_id'], 'file'] == FILE_BYTES
     operation = str(uuid4())
     response = send(client, 'POST', f'/v1/jobs/{job["job_id"]}/commit', operation=operation)
@@ -766,12 +778,19 @@ def test_the_fake_never_advances_a_job_on_its_own(api):
     seed(client)
     file_job = ingest(client, file_document()).json()
     inline_job = ingest(client, inline_document()).json()
+    upload = file_job['uploads'][0]
+    assert (
+        client.put(
+            upload['url'],
+            content=FILE_BYTES,
+            headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+        ).status_code
+        == 204
+    )
     fake.now = '2030-01-01T00:00:00Z'
     for _ in range(3):
         assert send(client, 'GET', f'/v1/jobs/{file_job["job_id"]}').json()['status'] == 'AWAITING_UPLOAD'
         assert send(client, 'GET', f'/v1/jobs/{inline_job["job_id"]}').json()['status'] == 'QUEUED'
-    upload = file_job['uploads'][0]
-    assert client.put(upload['url'], content=FILE_BYTES, headers=upload['headers']).status_code == 200
     for job in (file_job, inline_job):
         for _ in range(3):
             response = send(client, 'POST', f'/v1/jobs/{job["job_id"]}/commit')
