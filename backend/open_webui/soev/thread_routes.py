@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse, Response
 
 from open_webui.soev import threads
-from open_webui.soev.thread_sharing import require_header_mutation
 from open_webui.soev.threads import CreatedThread, Organization, ThreadError
 
 NO_STORE = {'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'}
@@ -83,12 +82,6 @@ def create_thread_router(
         user=Depends(require_enabled),
     ):
         return await threads.build_client().forks(thread_id, at=at, limit=limit, cursor=cursor)
-
-    @router.post('/{thread_id}/context:import', dependencies=[Depends(require_header_mutation)])
-    async def import_context(thread_id: str, form: threads.ImportContext, user=Depends(require_enabled)):
-        # The platform must bind this call to a live destination turn. Never
-        # substitute an ordinary projection when that authority is unavailable.
-        return await threads.build_client().import_context(thread_id, form)
 
     @router.post('/{thread_id}/fork')
     async def fork(thread_id: str, form: ForkForm, user=Depends(require_enabled)):

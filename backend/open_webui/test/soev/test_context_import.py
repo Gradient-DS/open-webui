@@ -1,4 +1,4 @@
-"""Prepared import relay; platform turn admission remains required."""
+"""Chat references travel as turn inputs; only the runtime imports their content."""
 
 import json
 from types import SimpleNamespace
@@ -7,168 +7,159 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI, Request
-from open_webui.soev import acting, threads
+from open_webui.soev import threads
 from open_webui.soev.thread_routes import create_thread_router
-from open_webui.soev.threads import ImportContext, ThreadClient, ThreadError
-from open_webui.utils.auth import get_verified_user
+from open_webui.soev.threads import Organization, ThreadClient
+from open_webui.test.soev import test_thread_organizations
+from open_webui.utils import agent_v2
+from starlette.responses import JSONResponse
+
+organization_store = test_thread_organizations.organization_store
 
 
 @pytest.fixture
-def context_http(chat_http, monkeypatch):
-    token = acting._requester_ref.set('owui:user:fictional-fern')
-    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login:owui:user:fictional-fern'))
-    client = ThreadClient('https://soev.invalid', 'soev_test_cred-runtime_test-secret')
-    monkeypatch.setattr(threads, 'enabled', lambda: True)
-    monkeypatch.setattr(threads, 'build_client', lambda: client)
-    yield chat_http, client
-    acting._token_resolver.reset(resolver)
-    acting._requester_ref.reset(token)
+def context_turn(chat_http, organization_store, monkeypatch):
+    repository, _, statements = organization_store
+    local_calls = []
 
+    async def forbidden(*args, **kwargs):
+        local_calls.append((args, kwargs))
+        raise AssertionError('Local chat content must not be read')
 
-def imported():
-    return {
-        'source_thread_id': 'fictional-source',
-        'generation': 'fictional-generation',
-        'version': 'fictional-version',
-        'through': 7,
-        'messages': [
+    for name, method in vars(type(agent_v2.Chats)).items():
+        if not name.startswith('__') and callable(method):
+            monkeypatch.setattr(agent_v2.Chats, name, forbidden)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='fictional-fern')))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2, '_documents_allowed', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=None))
+
+    async def turn(files=(), knowledge=(), *, new=True):
+        return await agent_v2.call_agent_v2(
+            {'stream': False},
             {
-                'position': 7,
-                'content': {'text': 'Fictional context', 'citations': [{'id': 'fictional-citation'}]},
-                'finished': True,
-                'version': 'fictional-message-version',
-            }
-        ],
-    }
-
-
-def admit(fake, result=None):
-    fake.thread_contexts['owui:user:fictional-fern', 'fictional-destination', 'fictional-source'] = (
-        imported() if result is None else result
-    )
-
-
-@pytest.mark.asyncio
-async def test_import_preserves_positions_citations_and_requester_authority(context_http):
-    fake, client = context_http
-    admit(fake)
-    for _ in range(2):
-        result = await client.import_context(
-            'fictional-destination', ImportContext(source_thread_id='fictional-source')
+                'chat_id': 'fictional-destination',
+                'message_id': 'fictional-answer',
+                'user_id': 'fictional-fern',
+                'user_message': {'content': 'Fictional new question'},
+                'new_thread': new,
+                'files': list(files),
+                'knowledge': list(knowledge),
+            },
+            agent='fictional-agent',
+            organizations=repository,
         )
-        assert result.model_dump() == imported()
-    assert len(fake.requests) == 2  # Retries always reach platform authorization.
-    for request in fake.requests:
-        assert request.url.path == '/v1/threads/fictional-destination/context:import'
-        assert json.loads(request.content) == {'source_thread_id': 'fictional-source'}
+
+    yield SimpleNamespace(turn=turn, api=chat_http, repository=repository, statements=statements)
+    assert not local_calls
+    assert not any('chat_message' in sql or 'summary' in sql for sql in statements)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('origin', ['chat', 'assistant', 'both'])
+async def test_v2_turn_sends_only_source_thread_ids(context_turn, origin):
+    context = context_turn
+    await context.repository.put(
+        'fictional-other-owner', Organization(id='fictional-source-chat', thread_id='fictional-source-thread')
+    )
+    entry = {
+        'type': 'chat',
+        'id': 'fictional-source-chat',
+        'name': 'Fictional private title',
+        'text': 'Fictional private conversation',
+        'thread_id': 'fictional-stale-thread',
+    }
+    for new in (True, False):
+        result = await context.turn(
+            [entry] if origin in ('chat', 'both') else [],
+            [entry] if origin in ('assistant', 'both') else [],
+            new=new,
+        )
+        assert not isinstance(result, JSONResponse), result.body if isinstance(result, JSONResponse) else result
+    sent = [request for request in context.api.requests if request.method == 'POST']
+    assert [request.url.path for request in sent] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    for request in sent:
+        body = json.loads(request.content)
+        assert body['input']['chats'] == [{'thread_id': 'fictional-source-thread'}]
+        assert body['input']['text'] == 'Fictional new question'
+        assert 'texts' not in body['input']
+        assert 'Fictional private' not in request.content.decode()
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fictional-fern'
-        assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-        assert 'X-Soev-' + 'Subject' not in request.headers
-        assert 'Idempotency-Key' not in request.headers
 
 
 @pytest.mark.asyncio
-async def test_missing_invisible_revoked_and_wrong_destination_release_nothing(context_http):
-    fake, client = context_http
-    admit(fake)
-    for destination, source in [
-        ('fictional-destination', 'fictional-invisible'),
-        ('fictional-destination', 'fictional-missing'),
-        ('fictional-other', 'fictional-source'),
-    ]:
-        with pytest.raises(ThreadError) as error:
-            await client.import_context(destination, ImportContext(source_thread_id=source))
-        assert (error.value.status, error.value.state) == (404, 'unavailable')
-    fake.thread_contexts.clear()
-    with pytest.raises(ThreadError, match='unavailable'):
-        await client.import_context('fictional-destination', ImportContext(source_thread_id='fictional-source'))
+async def test_shared_thread_reference_needs_no_local_chat(context_turn):
+    result = await context_turn.turn(
+        [{'type': 'chat', 'id': 'fictional-shared-thread', 'thread_id': 'fictional-shared-thread'}]
+    )
+    assert not isinstance(result, JSONResponse)
+    body = json.loads(context_turn.api.chat.requests[-1].content)
+    assert body['input']['chats'] == [{'thread_id': 'fictional-shared-thread'}]
 
 
 @pytest.mark.asyncio
-async def test_tokenless_import_never_calls_platform(context_http):
-    fake, client = context_http
-    acting._token_resolver.get().return_value = None
-    with pytest.raises(ThreadError, match='sign_in'):
-        await client.import_context('fictional-destination', ImportContext(source_thread_id='fictional-source'))
-    assert not fake.requests
+@pytest.mark.parametrize('origin', ['chat', 'assistant'])
+@pytest.mark.parametrize('source', ['fictional-legacy', 'fictional-missing'])
+async def test_chat_without_v2_thread_id_refuses_before_sending(context_turn, origin, source):
+    entry = {'type': 'chat', 'id': source}
+    result = await context_turn.turn([entry] if origin == 'chat' else [], [entry] if origin == 'assistant' else [])
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 409
+    assert not context_turn.api.requests
 
 
 @pytest.mark.asyncio
-async def test_import_retry_reauthorizes_after_account_change_and_platform_failure(context_http):
-    fake, client = context_http
-    admit(fake)
-    form = ImportContext(source_thread_id='fictional-source')
-    await client.import_context('fictional-destination', form)
-    acting._token_resolver.get().return_value = 'fictional-login:owui:user:fictional-elm'
-    with pytest.raises(ThreadError, match='unavailable'):
-        await client.import_context('fictional-destination', form)
-    acting._token_resolver.get().return_value = 'fictional-login:owui:user:fictional-fern'
-    fake.failures.append(503)
-    with pytest.raises(ThreadError, match='reconnect'):
-        await client.import_context('fictional-destination', form)
-    assert len(fake.requests) == 3
+async def test_references_deduplicate_by_platform_thread_id(context_turn):
+    await context_turn.repository.put(
+        'fictional-fern', Organization(id='fictional-source', thread_id='fictional-source-thread')
+    )
+    result = await context_turn.turn(
+        [{'type': 'chat', 'id': 'fictional-source'}],
+        [{'type': 'chat', 'id': 'fictional-source-thread', 'thread_id': 'fictional-source-thread'}],
+    )
+    assert not isinstance(result, JSONResponse)
+    body = json.loads(context_turn.api.chat.requests[-1].content)
+    assert body['input']['chats'] == [{'thread_id': 'fictional-source-thread'}]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['source', 'head', 'duplicate', 'order', 'shape'])
-async def test_invalid_platform_result_releases_nothing(context_http, failure):
-    fake, client = context_http
-    result = imported()
-    if failure == 'source':
-        result['source_thread_id'] = 'fictional-other'
-    elif failure == 'head':
-        result['through'] = 6
-    elif failure == 'duplicate':
-        result['messages'] *= 2
-    elif failure == 'order':
-        result['messages'].append({**result['messages'][0], 'position': 6})
-    else:
-        result['raw_log'] = 'Fictional private data'
-    admit(fake, result)
-    with pytest.raises(ThreadError, match='reconnect'):
-        await client.import_context('fictional-destination', ImportContext(source_thread_id='fictional-source'))
-
-
-@pytest.mark.asyncio
-async def test_browser_import_requires_json_bearer_and_is_private(context_http, monkeypatch):
-    fake, _ = context_http
+async def test_browser_has_no_context_import_relay():
     app = FastAPI()
     app.include_router(create_thread_router(AsyncMock(return_value=[])), prefix='/api/v1/threads')
-    app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern')
-    from open_webui.soev.client import _shared_client
-
-    async with type(_shared_client())(
-        transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid'
-    ) as browser:
-        path = '/api/v1/threads/fictional-destination/context:import'
-        form = {'source_thread_id': 'fictional-source'}
-        cookie_only = await browser.post(path, json=form)
-        assert cookie_only.status_code == 401
-        wrong_type = await browser.post(path, content=json.dumps(form), headers={'Authorization': 'Bearer fictional'})
-        assert wrong_type.status_code == 415
-        assert not fake.requests
-        headers = {'Authorization': 'Bearer fictional'}
-        refused = await browser.post(path, json=form, headers=headers)
-        assert refused.status_code == 404
-        assert refused.json() == {'state': 'unavailable'}
-        admit(fake)
-        accepted = await browser.post(path, json=form, headers=headers)
-        assert accepted.json() == imported()
-        invalid = await browser.post(path, json={**form, 'subject': 'fictional-other'}, headers=headers)
-        assert invalid.status_code == 422
-        monkeypatch.setattr(threads, 'enabled', lambda: False)
-        disabled = await browser.post(path, json=form, headers=headers)
-        assert disabled.status_code == 404
-        assert len(fake.requests) == 2
-        for response in (cookie_only, wrong_type, refused, accepted, invalid, disabled):
-            assert response.headers['Cache-Control'] == 'private, no-store'
-            assert response.headers['Vary'] == 'Authorization, Cookie'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as browser:
+        response = await browser.post(
+            '/api/v1/threads/fictional-destination/context:import',
+            json={'source_thread_id': 'fictional-source'},
+            headers={'Authorization': 'Bearer fictional'},
+        )
+    assert response.status_code == 404
+    assert not hasattr(ThreadClient, 'import_context')
 
 
 @pytest.mark.asyncio
-async def test_v2_tools_and_attachment_expansion_never_read_local_chats(monkeypatch):
+@pytest.mark.parametrize('origin', ['chat', 'assistant'])
+@pytest.mark.parametrize('count', [10, 11])
+async def test_chat_references_keep_existing_attachment_limits(context_turn, origin, count):
+    entries = [
+        {'type': 'chat', 'id': f'fictional-thread-{index}', 'thread_id': f'fictional-thread-{index}'}
+        for index in range(count)
+    ]
+    result = await context_turn.turn(entries if origin == 'chat' else [], entries if origin == 'assistant' else [])
+    if origin == 'chat' and count > 10:
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 422
+        assert not context_turn.api.requests
+    else:
+        assert not isinstance(result, JSONResponse)
+        body = json.loads(context_turn.api.chat.requests[-1].content)
+        assert body['input']['chats'] == [{'thread_id': entry['thread_id']} for entry in entries[:10]]
+        assert 'texts' not in body['input']
+
+
+@pytest.mark.asyncio
+async def test_v2_chat_tools_remain_disabled(monkeypatch):
     from open_webui.tools import builtin
-    from open_webui.utils import agent_v2, tools
+    from open_webui.utils import tools
 
     monkeypatch.setattr(threads, 'enabled', lambda: True)
     local = AsyncMock(side_effect=AssertionError('Local chat content must not be read'))
@@ -181,8 +172,6 @@ async def test_v2_tools_and_attachment_expansion_never_read_local_chats(monkeypa
     search = await builtin.search_chats('Fictional', __request__=request, __user__=user)
     read = await builtin.view_chat('fictional-source', __request__=request, __user__=user)
     assert json.loads(search) == json.loads(read) == {'error': 'Chat not found or access denied'}
-    with pytest.raises(ThreadError, match='unavailable'):
-        await agent_v2._texts([{'type': 'chat', 'id': 'fictional-source'}], user['id'])
     monkeypatch.setattr(tools.Config, 'get_many', AsyncMock(return_value={}))
     available = await tools.get_builtin_tools(request, {'__user__': user})
     assert 'search_chats' not in available and 'view_chat' not in available

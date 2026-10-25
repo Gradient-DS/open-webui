@@ -419,11 +419,6 @@ id = "POST /api/v1/threads:authorize"
 backed_by = "soev-solutions"
 reason = "soev/thread_routes.py relays current cache authorization using only the requester's login token. Isolated fake-platform contract tests cover tokenless refusal and private headers; the sealed stack has no soev-api. ENABLE_V2_THREADS remains off until activation."
 
-[[waived]]
-id = "POST /api/v1/threads/{thread_id}/context:import"
-backed_by = "soev-solutions"
-reason = "Prepared context import requires the platform's live destination-turn authority. The sealed stack has no soev-api; isolated fake-platform tests cover JSON/Bearer admission, tokenless refusal, uniform refusal without content and private headers. Chat context consumers remain disabled pending turn admission."
-
 # --- v2 custom functions: refused by the router dependency ----------------------
 # Keep every route in the passes. A successful handler entry invalidates its waiver.
 

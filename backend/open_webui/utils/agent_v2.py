@@ -20,8 +20,6 @@ from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
-from open_webui.soev import threads
-from open_webui.soev.chat_paths import Organizations
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
@@ -32,22 +30,21 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
-from open_webui.soev.policy_jobs import v2_enabled
+from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents, threads
+from open_webui.soev.chat_paths import Organizations
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.mail_status import mail_search_status
-
 from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
 from starlette.responses import JSONResponse, StreamingResponse
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 _ROOT = '/v1/chat/threads'
@@ -631,11 +628,32 @@ async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
         await Chats.update_chat_by_id(chat_id, {'files': kept}, touch=False)
 
 
+async def _add_chat(
+    entry: dict[str, Any], chats: list[dict[str, str]] | None, organizations: Organizations | None
+) -> None:
+    item_id = entry.get('id')
+    thread_id = await organizations.context_thread_id(item_id) if organizations and item_id else None
+    # Shared platform threads use their thread id as the UI id and may have no organization row.
+    if thread_id is None and entry.get('thread_id') == item_id:
+        thread_id = entry.get('thread_id')
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id) or chats is None:
+        raise threads.ThreadError(409, 'unavailable')
+    ref = {'thread_id': thread_id}
+    if ref not in chats:
+        chats.append(ref)
+
+
 async def _texts(
-    entries: list[dict[str, Any]], user_id: str, *, origin: str = 'chat'
+    entries: list[dict[str, Any]],
+    user_id: str,
+    *,
+    origin: str = 'chat',
+    chats: list[dict[str, str]] | None = None,
+    organizations: Organizations | None = None,
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Gradient] Read attached notes and chats (`origin` chat), a folder's notes or an assistant's notes and chats with
-    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out."""
+    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out.
+    Under v2, chats contribute only thread references for the runtime to authorize and import."""
     if not entries:
         return [], []
     user = await Users.get_user_by_id(user_id)
@@ -662,7 +680,8 @@ async def _texts(
             )
             continue
         if threads.enabled() and kind == 'chat':
-            raise threads.ThreadError(409, 'unavailable')
+            await _add_chat(entry, chats, organizations)
+            continue
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(
             item and user and (item.user_id == user.id or (kind == 'note' and can_bypass_access_control(user)))
@@ -703,7 +722,12 @@ TEXTS = 10
 
 
 async def _more_texts(
-    folder: list[dict[str, Any]], entries: list[dict[str, Any]], metadata: dict[str, Any]
+    folder: list[dict[str, Any]],
+    entries: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    *,
+    chats: list[dict[str, str]] | None = None,
+    organizations: Organizations | None = None,
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Claude] The folder's notes, then the assistant's notes and chats, not attached in the chat too, in the room
     the chat's own texts leave; the rest are skipped, never refusing the turn."""
@@ -721,7 +745,9 @@ async def _more_texts(
             if (item['type'], item['id']) not in taken:
                 taken.add((item['type'], item['id']))
                 fresh.append(item)
-        read, more = await _texts(fresh[:room], metadata['user_id'], origin=origin)
+        read, more = await _texts(
+            fresh[:room], metadata['user_id'], origin=origin, chats=chats, organizations=organizations
+        )
         texts += read
         skipped += more
         skipped += [
@@ -1441,6 +1467,9 @@ class AgentTurn:
     def failed(self, error: Exception) -> dict[str, Any]:
         """[Claude] The error chunk for a turn that raised; soev-api's detail reaches a refusal only on a 4xx."""
         language = self.metadata.get('user_language')
+        if isinstance(error, threads.ThreadError):
+            self.fail(error.status, error.state)
+            return _error(error.state, language=language)
         if not isinstance(error, SoevApiError):
             self.fail(500, type(error).__name__)
             return _error('service_unavailable', language=language)
@@ -2125,11 +2154,14 @@ async def _sent(
         turn.fail(422, 'attachments_unavailable')
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
+        chats: list[dict[str, str]] = []
         folder, skipped_folders = await _folder_items(metadata)
         knowledge, skipped = await _knowledge(metadata, folder)
         attachments = await _attachments(metadata, folder)
-        texts, skipped_texts = await _texts(entries, metadata['user_id'])
-        more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)
+        texts, skipped_texts = await _texts(entries, metadata['user_id'], chats=chats, organizations=turn.organizations)
+        more_texts, skipped_more_texts = await _more_texts(
+            folder, entries, metadata, chats=chats, organizations=turn.organizations
+        )
         images = await _images(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
@@ -2176,10 +2208,9 @@ async def _sent(
             'documents': documents,
         }
     }
-    if images:
-        body['input']['images'] = images
-    if texts:
-        body['input']['texts'] = texts
+    for key, value in (('images', images), ('texts', texts), ('chats', chats)):
+        if value:
+            body['input'][key] = value
     if isinstance(model, str) and model:
         body['model'] = model
     return turn.run(body, agent)
