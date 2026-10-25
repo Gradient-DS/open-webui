@@ -1875,7 +1875,6 @@ USER_PERMISSIONS_FEATURES_FOLDERS = os.getenv('USER_PERMISSIONS_FEATURES_FOLDERS
 
 USER_PERMISSIONS_FEATURES_NOTES = os.getenv('USER_PERMISSIONS_FEATURES_NOTES', 'True').lower() == 'true'
 
-USER_PERMISSIONS_FEATURES_CHANNELS = os.getenv('USER_PERMISSIONS_FEATURES_CHANNELS', 'True').lower() == 'true'
 
 USER_PERMISSIONS_FEATURES_API_KEYS = os.getenv('USER_PERMISSIONS_FEATURES_API_KEYS', 'False').lower() == 'true'
 
@@ -1963,7 +1962,6 @@ DEFAULT_USER_PERMISSIONS = {
         'api_keys': USER_PERMISSIONS_FEATURES_API_KEYS,
         'notes': USER_PERMISSIONS_FEATURES_NOTES,
         'folders': USER_PERMISSIONS_FEATURES_FOLDERS,
-        'channels': USER_PERMISSIONS_FEATURES_CHANNELS,
         'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         # Chat features
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
@@ -1986,9 +1984,6 @@ ENABLE_FOLDERS = os.getenv('ENABLE_FOLDERS', 'True').lower() == 'true'
 
 FOLDER_MAX_FILE_COUNT = os.getenv('FOLDER_MAX_FILE_COUNT', '')
 
-ENABLE_CHANNELS = os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true'
-
-CHANNEL_MODEL_RESPONSE_MODE = os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread')
 
 # [Gradient] No deployment-defaults doc exists yet; opt-in is via Helm values in soev-gitops (tenants/*/helmrelease.yaml).
 # [Gradient] Gradient default: False (upstream: True) — opt-in via Helm; see soev-gitops/docs/.
@@ -3290,8 +3285,6 @@ DEFAULT_CONFIG = {
     'user.permissions': USER_PERMISSIONS,
     'folders.enable': ENABLE_FOLDERS,
     'folders.max_file_count': FOLDER_MAX_FILE_COUNT,
-    'channels.enable': ENABLE_CHANNELS,
-    'channels.model_response_mode': CHANNEL_MODEL_RESPONSE_MODE,
     'calendar.enable': ENABLE_CALENDAR,
     'automations.enable': ENABLE_AUTOMATIONS,
     'subagents.enable': ENABLE_SUBAGENTS,

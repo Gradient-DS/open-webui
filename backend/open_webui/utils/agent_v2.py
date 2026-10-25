@@ -44,7 +44,7 @@ from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
 from starlette.responses import JSONResponse, StreamingResponse
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 _ROOT = '/v1/chat/threads'
@@ -660,12 +660,7 @@ async def _texts(
             continue
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(
-            item
-            and user
-            and (
-                item.user_id == user.id
-                or (can_bypass_access_control(user) if kind == 'note' else can_access_admin_chats(user))
-            )
+            item and user and (item.user_id == user.id or (kind == 'note' and can_bypass_access_control(user)))
         )
         # A shared_chat grant covers the share snapshot only, never the live chat.
         if item and user and not allowed and kind == 'note':

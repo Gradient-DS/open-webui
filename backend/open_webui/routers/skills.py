@@ -183,7 +183,7 @@ async def create_new_skill(
         )
 
     # Strip public/user grants the requesting user is not permitted to assign
-    # (matches the channel/notes/calendar pattern). Without this, a user with
+    # (matches the notes/calendar pattern). Without this, a user with
     # workspace.skills permission could attach principal_id='*' read/write
     # grants in the create payload, bypassing the sharing.public_skills gate
     # that the dedicated /access/update endpoint already enforces.
@@ -305,7 +305,7 @@ async def update_skill_by_id(
         )
 
     # Strip public/user grants the requesting user is not permitted to assign
-    # (matches the channel/notes/calendar pattern). The access check above only
+    # (matches the notes/calendar pattern). The access check above only
     # restricts WHO can write to the skill; this filter restricts WHICH grants
     # they may set, so a non-admin owner cannot make their own skill publicly
     # readable/writable without sharing.public_skills permission.

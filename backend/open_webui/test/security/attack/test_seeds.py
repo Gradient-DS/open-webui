@@ -544,7 +544,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     entries = {p['key']: p for p in seeds.SURFACE['parameter']}
     for chain in [
         ('folder', 'chat', 'chat_message', 'share'),
-        ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
         ('knowledge', 'directory'),
         ('calendar', 'event'),
         ('prompt', 'prompt_history'),
@@ -554,7 +553,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     order = {p['key']: i for i, p in enumerate(seeds.dependency_order(seeds.SURFACE))}
     for key, gate in [
         ('folder', 'folders.enable'),
-        ('channel', 'channels.enable'),
         ('calendar', 'calendar.enable'),
         ('automation', 'automations.enable'),
         ('memory', 'memories.enable'),
@@ -657,7 +655,9 @@ def test_totp_code_matches_rfc_6238_sha1_vectors():
     assert seeds.totp_code(secret.rstrip('=').lower(), at=59) == '287082'
 
 
-def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch):
+@pytest.mark.parametrize('oidc_mode', [False, True])
+def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch, oidc_mode):
+    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
     sessions = []
 
     class Enrolee:
@@ -682,6 +682,7 @@ def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch):
     assert sessions == ['totp-session']
     add, setup, enable = ctx.request.call_args_list
     assert add.kwargs['actor'] is ctx.admin and add.kwargs['json']['role'] == 'user'
+    assert add.kwargs['password_identity'] is True
     assert setup.args == ('POST', '/api/v1/auths/2fa/totp/setup') and setup.kwargs['actor'] is not ctx.admin
     assert enable.kwargs['json'] == {'password': parameter['password'], 'secret': 'SECRET', 'code': 'code-for-SECRET'}
     # Not the shared {user}: the exporter signs in with that user's password.
@@ -947,9 +948,6 @@ LIVE_READS = [
     '/api/v1/chats/{id}',
     '/api/v1/chats/share/{share_id}',
     '/api/v1/chats/shared/{id}/access',
-    '/api/v1/channels/{id}',
-    '/api/v1/channels/{id}/messages/{message_id}',
-    '/api/v1/channels/{id}/webhooks',
     '/api/v1/knowledge/{id}',
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',

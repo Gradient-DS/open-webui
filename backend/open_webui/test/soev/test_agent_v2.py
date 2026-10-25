@@ -684,10 +684,11 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         )
     agent_v2.AccessGrants.has_access.return_value = access == 'grant'
     chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Stale title'}])
-    if access == 'grant' and kind == 'chat':
-        # A share grant reaches the snapshot only, never the live chat.
+    assert not any('error' in chunk for chunk in chunks)
+    if access != 'owner' and kind == 'chat':
+        # Neither admin status nor a snapshot grant gives access to the live chat.
         assert 'texts' not in chat.mutations()[-1][1]['input']
-        assert notices(chat)[0]['notices'] == ["Chat 'Stale title' is not accessible and was skipped."]
+        assert notices(chat) == [{'notices': ["Chat 'Stale title' is not accessible and was skipped."], 'removed': []}]
         agent_v2.AccessGrants.has_access.assert_not_awaited()
         return
     if access == 'admin' and kind == 'note' and not bypass:
@@ -700,7 +701,6 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
             permission='read',
         )
         return
-    assert not any('error' in chunk for chunk in chunks)
     assert chat.mutations()[-1][1]['input']['texts'] == [
         {'id': f'{kind}:{item_id}', 'kind': kind, 'title': item.title, 'text': text, 'length': len(text)}
     ]

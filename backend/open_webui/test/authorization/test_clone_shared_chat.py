@@ -57,6 +57,15 @@ def stored_meta(seeded, chat_id: str, message_id: str) -> dict:
 @pytest.mark.parametrize('principal', ('reader', 'admin'))
 def test_a_clone_of_another_users_chat_bookmarks_no_thread(seeded, principal):
     share_id = seed_shared_chat(seeded)
+    if principal == 'admin':
+        from open_webui.models.access_grants import AccessGrants
+
+        seeded.run(
+            AccessGrants.set_access_grants,
+            'shared_chat',
+            'target',
+            [*GRANTS, {'principal_type': 'user', 'principal_id': 'admin', 'permission': 'read'}],
+        )
 
     response = seeded.client.post(f'/api/v1/chats/{share_id}/clone/shared', headers=seeded.headers(principal))
 
@@ -77,3 +86,21 @@ def test_the_owners_clone_of_their_own_shared_chat_keeps_its_threads(seeded):
 
     assert response.status_code == 200, response.text
     assert response.json()['chat']['history']['messages']['a1']['meta']['agent_v2'] == BOOKMARK
+
+
+def test_admin_without_a_share_grant_cannot_read_or_clone(seeded, monkeypatch):
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    share_id = seed_shared_chat(seeded)
+    for path in ('/target', f'/share/{share_id}', '/share/target'):
+        response = seeded.client.get('/api/v1/chats' + path, headers=seeded.headers('admin'))
+        assert response.status_code in (401, 404), response.text
+        assert 'Zonnebloem' not in response.text
+    for id in (share_id, 'target'):
+        response = seeded.client.post(f'/api/v1/chats/{id}/clone/shared', headers=seeded.headers('admin'))
+        assert response.status_code in (401, 404), response.text
+        assert 'Zonnebloem' not in response.text
+    response = seeded.client.get('/api/v1/chats/search?text=Zonnebloem', headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert response.json() == []

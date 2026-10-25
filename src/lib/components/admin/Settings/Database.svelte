@@ -2,11 +2,9 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { downloadDatabase, exportDatabaseJson } from '$lib/apis/utils';
 	import { onMount, getContext } from 'svelte';
 	import { config, user } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
-	import { getAllUserChats } from '$lib/apis/chats';
 	import { getAllUsers } from '$lib/apis/users';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
 	import {
@@ -61,13 +59,6 @@
 	let configImportInputElement: HTMLInputElement;
 	const actionButtonClass =
 		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
-
-	const exportAllUserChats = async () => {
-		let blob = new Blob([JSON.stringify(await getAllUserChats(localStorage.token))], {
-			type: 'application/json'
-		});
-		saveAs(blob, `all-chats-export-${Date.now()}.json`);
-	};
 
 	const exportUsers = async () => {
 		const users = await getAllUsers(localStorage.token);
@@ -272,32 +263,6 @@
 
 		{#if $config?.features.enable_admin_export ?? true}
 			<AdminSettingSection title={$i18n.t('Export')}>
-				<AdminSettingRow
-					label={$i18n.t('Database')}
-					description={$i18n.t('Download the application database when supported.')}
-				>
-					<button
-						class={actionButtonClass}
-						on:click={() => {
-							downloadDatabase(localStorage.token).catch((error) => {
-								toast.error(`${error}`);
-							});
-						}}
-						type="button"
-					>
-						{$i18n.t('Database')}
-					</button>
-				</AdminSettingRow>
-
-				<AdminSettingRow
-					label={$i18n.t('All Chats')}
-					description={$i18n.t("Download every user's chat history as JSON.")}
-				>
-					<button class={actionButtonClass} on:click={exportAllUserChats} type="button">
-						{$i18n.t('Export')}
-					</button>
-				</AdminSettingRow>
-
 				<AdminSettingRow
 					label={$i18n.t('Users')}
 					description={$i18n.t('Download all users as CSV.')}
@@ -557,7 +522,7 @@
 									</div>
 								</div>
 								<div class="flex gap-1 ml-2">
-									{#if $config?.features?.enable_admin_chat_access || archive.user_id === $user?.id}
+									{#if archive.user_id === $user?.id}
 										<button
 											type="button"
 											class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"

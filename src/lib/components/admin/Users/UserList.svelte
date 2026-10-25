@@ -22,7 +22,6 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import EditUserModal from '$lib/components/admin/Users/UserList/EditUserModal.svelte';
-	import UserChatsModal from '$lib/components/admin/Users/UserList/UserChatsModal.svelte';
 	import AddUserModal from '$lib/components/admin/Users/UserList/AddUserModal.svelte';
 
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -33,7 +32,7 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Banner from '$lib/components/common/Banner.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import ProfilePreview from '$lib/components/channel/Messages/Message/ProfilePreview.svelte';
+	import ProfilePreview from '$lib/components/common/ProfilePreview.svelte';
 	import UserPreviewModal from '$lib/components/admin/UserPreviewModal.svelte';
 
 	const i18n = getContext('i18n');
@@ -53,7 +52,6 @@
 	let showDeleteConfirmDialog = false;
 	let showAddUserModal = false;
 
-	let showUserChatsModal = false;
 	let showEditUserModal = false;
 	let showUserPreviewModal = false;
 
@@ -249,10 +247,6 @@
 		getUserList();
 	}}
 />
-
-{#if selectedUser}
-	<UserChatsModal bind:show={showUserChatsModal} user={selectedUser} />
-{/if}
 
 {#if ($config?.license_metadata?.seats ?? null) !== null && total && total > $config?.license_metadata?.seats}
 	<div class=" mt-1 mb-2 text-xs text-red-500">
@@ -495,21 +489,6 @@
 
 						<td class="px-3 py-1 text-right">
 							<div class="flex justify-end w-full">
-								{#if $config.features.enable_admin_chat_access && user.role !== 'admin'}
-									<Tooltip content={$i18n.t('Chats')}>
-										<button
-											class="self-center w-fit p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
-											aria-label={$i18n.t('Chats')}
-											on:click={async () => {
-												showUserChatsModal = !showUserChatsModal;
-												selectedUser = user;
-											}}
-										>
-											<ChatBubbles className="size-3.5" />
-										</button>
-									</Tooltip>
-								{/if}
-
 								{#if user.role !== 'admin'}
 									<Tooltip content={$i18n.t('Preview Access')}>
 										<button

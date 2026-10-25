@@ -23,11 +23,11 @@ import requests
 from hostile_corpus import fetch_payloads
 from openapi_surface import writable_string_fields
 
-from . import plane, seeds
+from . import oidc, plane, seeds
 from .authorization_inventory import admin_gated_operations, platform_operations
 from .benign_requests import benign_request
 from .client import AttackClient, login
-from .identities import PASSWORD
+from .identities import PASSWORD, create_oidc_identity
 from .pass_support import pass_run
 
 # Violation kinds a [[shared]] declaration in the attack surface may allow for
@@ -205,23 +205,30 @@ def _actor(admin, actor, destructive):
         disposable = plane._throwaway(admin)
     else:
         email = f'attack-crossuser-{uuid4().hex}@example.com'
-        response = admin.request(
-            'POST',
-            '/api/v1/auths/add',
-            json={'email': email, 'password': PASSWORD, 'name': 'Attack authorization', 'role': 'user'},
-        )
-        disposable = AttackClient(admin.base_url)
-        try:
-            disposable.authenticate(response, email, role='user')
-        except Exception:
-            disposable.close()
-            raise
-        finally:
-            response.close()
+        disposable = _disposable_user(admin, email)
     try:
         yield disposable
     finally:
         disposable.close()
+
+
+def _disposable_user(admin: AttackClient, email: str) -> AttackClient:
+    if oidc.enabled():
+        return create_oidc_identity(admin, email=email, password=PASSWORD, name='Attack authorization', role='user')
+    response = admin.request(
+        'POST',
+        '/api/v1/auths/add',
+        json={'email': email, 'password': PASSWORD, 'name': 'Attack authorization', 'role': 'user'},
+    )
+    disposable = AttackClient(admin.base_url)
+    try:
+        disposable.authenticate(response, email, role='user')
+        return disposable
+    except Exception:
+        disposable.close()
+        raise
+    finally:
+        response.close()
 
 
 def _request(admin, actor, route, target, tally, kwargs):

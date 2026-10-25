@@ -24,7 +24,6 @@
 		pinnedChats,
 		pinnedNotes,
 		temporaryChatEnabled,
-		channels,
 		socket,
 		config,
 		isApp,
@@ -77,9 +76,6 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
 	import SharedFolderItem from './Sidebar/SharedFolderItem.svelte';
-	import { getChannels, createNewChannel } from '$lib/apis/channels';
-	import ChannelModal from './Sidebar/ChannelModal.svelte';
-	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import SearchModal from './SearchModal.svelte';
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
@@ -119,8 +115,6 @@
 	// chatId, so this reactive only re-runs once chatId catches up to the same value.
 	$: selectedChatId = $chatId || null;
 
-	let showCreateChannel = false;
-
 	// Pagination variables
 	let chatListLoading = false;
 	let chatListReady = false;
@@ -130,7 +124,6 @@
 
 	let showPinnedModels = true;
 	let showPinnedNotes = false;
-	let showChannels = false;
 	let showFolders = false;
 	let showSharedFolders = false;
 	let showChatsMenu = false;
@@ -279,22 +272,6 @@
 		}
 	};
 
-	const initChannels = async () => {
-		// default (none), group, dm type
-		const res = await getChannels(localStorage.token).catch((error) => {
-			return null;
-		});
-
-		if (res) {
-			await channels.set(
-				res.sort(
-					(a, b) =>
-						['', null, 'group', 'dm'].indexOf(a.type) - ['', null, 'group', 'dm'].indexOf(b.type)
-				)
-			);
-		}
-	};
-
 	const initChatList = async () => {
 		// Reset pagination variables
 		console.log('initChatList');
@@ -327,16 +304,7 @@
 	const initSidebarData = async () => {
 		// [Gradient] Hidden unless soev-api lists the meeting agent; failures keep it hidden.
 		checkMeetingsAvailable(localStorage.token);
-
-		// [Gradient] Channels and chats load together instead of channels first.
-		await Promise.all([
-			// Only fetch channels if the feature is enabled and user has permission
-			$config?.features?.enable_channels &&
-			($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))
-				? initChannels()
-				: null,
-			initChatList()
-		]);
+		await initChatList();
 	};
 
 	const refreshChatRows = async () => {
@@ -760,46 +728,6 @@
 
 	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
-
-<ChannelModal
-	bind:show={showCreateChannel}
-	onSubmit={async (payload: any) => {
-		let { type, name, is_private, access_grants, group_ids, user_ids } = payload ?? {};
-		name = name?.trim();
-
-		if (type === 'dm') {
-			if (!user_ids || user_ids.length === 0) {
-				toast.error($i18n.t('Please select at least one user for Direct Message channel.'));
-				return;
-			}
-		} else {
-			if (!name) {
-				toast.error($i18n.t('Channel name cannot be empty.'));
-				return;
-			}
-		}
-
-		const res = await createNewChannel(localStorage.token, {
-			type: type,
-			name: name,
-			is_private: is_private,
-			access_grants: access_grants,
-			group_ids: group_ids,
-			user_ids: user_ids
-		}).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			$socket.emit('join-channels', { auth: { token: $user?.token } });
-			await initChannels();
-			showCreateChannel = false;
-			showChannels = true;
-			goto(`/channels/${res.id}`);
-		}
-	}}
-/>
 
 <FolderModal
 	bind:show={showCreateFolderModal}
@@ -1573,39 +1501,6 @@
 							onAddLabel={$i18n.t('New Note')}
 						>
 							<PinnedNoteList bind:selectedChatId />
-						</SidebarSection>
-					{/if}
-
-					{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
-						<SidebarSection
-							id="sidebar-channels"
-							bind:open={showChannels}
-							name={$i18n.t('Channels')}
-							dragAndDrop={false}
-							onAdd={$user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true)
-								? async () => {
-										await tick();
-
-										setTimeout(() => {
-											showCreateChannel = true;
-										}, 0);
-									}
-								: null}
-							onAddLabel={$i18n.t('Create Channel')}
-						>
-							{#each $channels as channel, channelIdx (`${channel?.id}`)}
-								<ChannelItem
-									{channel}
-									onUpdate={async () => {
-										await initChannels();
-									}}
-								/>
-
-								{#if channelIdx < $channels.length - 1 && channel.type !== $channels[channelIdx + 1]?.type}<hr
-										class=" border-gray-100/40 dark:border-gray-800/10 my-1.5 w-full"
-									/>
-								{/if}
-							{/each}
 						</SidebarSection>
 					{/if}
 

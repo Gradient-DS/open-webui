@@ -76,8 +76,6 @@ from open_webui.tools.builtin import (
     replace_memory_content,
     replace_note_content,
     search_calendar_events,
-    search_channel_messages,
-    search_channels,
     search_chats,
     search_knowledge_bases,
     search_knowledge_files,
@@ -90,8 +88,6 @@ from open_webui.tools.builtin import (
     update_calendar_event,
     update_memory,
     update_task,
-    view_channel_message,
-    view_channel_thread,
     view_chat,
     view_file,
     view_knowledge_file,
@@ -550,7 +546,6 @@ async def get_builtin_tools(
         'images.edit.enable',
         'code_interpreter.enable',
         'notes.enable',
-        'channels.enable',
         'automations.enable',
         'calendar.enable',
         'ui.enable_user_webhooks',
@@ -721,23 +716,12 @@ async def get_builtin_tools(
     ):
         builtin_functions.extend([search_notes, view_note, write_note, replace_note_content])
 
-    # Channels tools - search channels and messages
-    if is_builtin_tool_enabled('channels') and config.get('channels.enable') and await has_user_permission('channels'):
-        builtin_functions.extend(
-            [
-                search_channels,
-                search_channel_messages,
-                view_channel_thread,
-                view_channel_message,
-            ]
-        )
-
     # Skills tools - view_skill allows model to load full skill instructions on demand
     if extra_params.get('__skill_ids__'):
         builtin_functions.append(view_skill)
 
     # Task management - break down complex work into trackable steps
-    # Task state is stored on the chats row; local/channel IDs do not have one.
+    # Task state is stored on the chats row; temporary IDs do not have one.
     if is_builtin_tool_enabled('tasks') and is_saved_chat_id(metadata.get('chat_id')):
         builtin_functions.extend([create_tasks, update_task])
 

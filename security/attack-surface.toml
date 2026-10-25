@@ -51,7 +51,7 @@ description = "routers/configs.py:import_config/get_config_namespace. Enable cre
 seeded_by = "prepare_configuration"
 depends_on = []
 actor = "admin"
-config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
+config = { "folders.enable" = true, "memories.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
 
 [[parameter]]
 key = "user"
@@ -111,7 +111,7 @@ actor = "admin"
 key = "chat_message"
 name = "message_id"
 prefix = "/api/v1/chats/{id}/messages/{message_id}"
-description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; it is not a channel message. Read as the admin chat owner."
+description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; Read as the admin chat owner."
 via = "GET /api/v1/chats/{chat}"
 extract = "chat.history.currentId"
 depends_on = ["chat"]
@@ -131,7 +131,7 @@ actor = "admin"
 key = "shared_clone"
 name = "id"
 prefix = "/api/v1/chats/{id}/clone/shared"
-description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_by_share_id(id), unlike other /chats/{id} operations. Use the share snapshot id even though admins can fall back to a chat id; that fallback would hide a broken ordinary-user fixture."
+description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_by_share_id(id), unlike other /chats/{id} operations. Use the share snapshot id; a chat id never bypasses share authorization."
 same_as = "share"
 
 [[parameter]]
@@ -147,20 +147,6 @@ name = "folder_id"
 prefix = "/api/v1/chats/folder/{folder_id}"
 description = "routers/chats.py:get_chats_by_folder_id uses Folders.id; the seeded chat already belongs to this folder."
 same_as = "folder"
-
-[[parameter]]
-key = "chat_user"
-name = "user_id"
-prefix = "/api/v1/chats/list/user/{user_id}"
-description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
-same_as = "user"
-
-[[parameter]]
-key = "channel_user"
-name = "user_id"
-prefix = "/api/v1/channels/users/{user_id}"
-description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
-same_as = "user"
 
 [[parameter]]
 key = "archive_user"
@@ -196,56 +182,6 @@ name = "model_id"
 prefix = "/api/v1/evaluations/leaderboard/{model_id}"
 description = "routers/evaluations.py leaderboard history uses the model registry identifier."
 same_as = "model"
-
-[[parameter]]
-key = "channel"
-name = "id"
-prefix = "/api/v1/channels/{id}"
-description = "routers/channels.py:create_new_channel creates a group and inserts its owner as a member; group avoids the standard-channel admin-only branch. Admin avoids features.channels; group creation enrolls this actor, which message posting requires even for admins."
-via = "POST /api/v1/channels/create"
-body = { "name" = "attack-{token}", "type" = "group", "user_ids" = [] }
-extract = "id"
-depends_on = ["namespace"]
-actor = "admin"
-
-[[parameter]]
-key = "channel_message"
-name = "message_id"
-prefix = "/api/v1/channels/{id}/messages/{message_id}"
-description = "routers/channels.py:post_new_message/new_message_handler inserts Messages.id for this channel. Use the admin member created with the group; the membership check has no admin exemption."
-via = "POST /api/v1/channels/{channel}/messages/post"
-body = { "content" = "Attack channel message {token}", "data" = {  } }
-extract = "id"
-depends_on = ["channel"]
-actor = "admin"
-
-[[parameter]]
-key = "channel_webhook"
-name = "webhook_id"
-prefix = "/api/v1/channels/{id}/webhooks/{webhook_id}"
-description = "routers/channels.py:create_channel_webhook returns ChannelWebhookModel with both id and token. Admin satisfies the manager check and avoids features.channels."
-via = "POST /api/v1/channels/{channel}/webhooks/create"
-body = { "name" = "attack-{token}" }
-extract = "id"
-depends_on = ["channel"]
-actor = "admin"
-
-[[parameter]]
-key = "public_channel_webhook"
-name = "webhook_id"
-prefix = "/api/v1/channels/webhooks/{webhook_id}"
-description = "The public hook endpoint reads the very same ChannelWebhook row."
-same_as = "channel_webhook"
-
-[[parameter]]
-key = "webhook_token"
-name = "token"
-prefix = "/api/v1/channels/webhooks/{webhook_id}/{token}"
-description = "routers/channels.py:get_channel_webhooks returns tokens to the channel manager. A fresh channel has exactly our one webhook. Admin satisfies the manager check and avoids features.channels."
-via = "GET /api/v1/channels/{channel}/webhooks"
-extract = "0.token"
-depends_on = ["channel", "channel_webhook"]
-actor = "admin"
 
 [[parameter]]
 key = "event_webhook"
@@ -612,7 +548,7 @@ name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
 description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. The inlet also works in private stacks with agent routing enabled. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
 seeded_by = "seed_task"
-depends_on = ["model", "chat", "prompt_history", "channel_message", "terminal_path"]
+depends_on = ["model", "chat", "prompt_history", "terminal_path"]
 content = """
 import asyncio
 
@@ -972,11 +908,6 @@ description = "The embeddings proxy needs a model the Ollama connection lists an
 json = { "model" = "{upstream_model}", "input" = "Attack probe {token}" }
 
 [[field]]
-route = "POST /api/v1/channels/{id}/members/active"
-description = "routers/channels.py:update_is_active_member_by_id_and_user_id sets the caller's own membership active flag. The benign body's false deactivated the owner's membership, and every later message route answered 403 to the owner (the five channel owner-control gaps)."
-json = { "is_active" = true }
-
-[[field]]
 route = "POST /api/v1/automations/{id}/update"
 description = "The benign body's placeholder RRULE failed to parse (400); the automation fixture's own name, prompt, model and RRULE update it in place."
 json = { "name" = "attack-{token}", "data.prompt" = "Attack automation", "data.model_id" = "{model}", "data.rrule" = "FREQ=DAILY;INTERVAL=30" }
@@ -1131,16 +1062,6 @@ reason = "routers/groups.py:get_group_info_by_id serves a group's name, descript
 route = "GET /api/v1/invites/{token}/validate"
 allow = ["owner-marker", "same-object"]
 reason = "Unauthenticated on purpose: the token in the path is the credential, and the invitee sees who invited them before signing up."
-
-[[shared]]
-route = "GET /api/v1/channels/webhooks/{webhook_id}/profile/image"
-allow = ["same-object"]
-reason = "A channel webhook's avatar, shown on its messages to any verified user."
-
-[[shared]]
-route = "POST /api/v1/channels/webhooks/{webhook_id}/{token}"
-allow = ["write"]
-reason = "An incoming webhook: the token in the path is the credential, so whoever holds it posts, by design."
 
 [[shared]]
 route = "GET /api/v1/terminals/{server_id}/{path}"

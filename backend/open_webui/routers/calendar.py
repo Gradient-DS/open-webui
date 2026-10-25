@@ -115,7 +115,7 @@ async def create_calendar(request: Request, form_data: CalendarForm, user: UserM
     """Create a new user calendar."""
     await check_calendar_permission(request, user)
     # Strip public/user grants the requesting user is not permitted to assign
-    # (matches the channel/notes/models pattern). Without this, any verified user
+    # (matches the notes/models pattern). Without this, any verified user
     # could create a calendar with `principal_id='*' permission='read'|'write'`,
     # making their events readable or writable by any other verified user.
     form_data.access_grants = await filter_allowed_access_grants(
@@ -407,7 +407,7 @@ async def update_calendar(
         raise HTTPException(status_code=403, detail='Only owner can manage sharing')
 
     # Strip public/user grants the requesting user is not permitted to assign
-    # (matches the channel/notes/models pattern). The owner-only check above
+    # (matches the notes/models pattern). The owner-only check above
     # only restricts WHO can set grants; this filter restricts WHICH grants
     # they may set, so a non-admin owner cannot make their calendar
     # publicly readable/writable without the corresponding sharing permission.

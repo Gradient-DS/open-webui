@@ -22,7 +22,7 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui import config
-from open_webui.utils.access_control import can_access_admin_chats
+from open_webui.utils.access_control import can_access_admin_feedback
 
 log = logging.getLogger(__name__)
 
@@ -372,7 +372,7 @@ async def delete_all_feedbacks(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not can_access_admin_chats(user):
+    if not can_access_admin_feedback(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     success = await Feedbacks.delete_all_feedbacks(db=db)
@@ -444,7 +444,7 @@ async def get_feedbacks(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not can_access_admin_chats(user):
+    if not can_access_admin_feedback(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     limit = PAGE_ITEM_COUNT
@@ -498,7 +498,7 @@ async def create_feedback(
 
 @router.get('/feedback/{id}', response_model=FeedbackModel)
 async def get_feedback_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if can_access_admin_chats(user):
+    if can_access_admin_feedback(user):
         feedback = await Feedbacks.get_feedback_by_id(id=id, db=db)
     else:
         feedback = await Feedbacks.get_feedback_by_id_and_user_id(id=id, user_id=user.id, db=db)
@@ -517,7 +517,7 @@ async def update_feedback_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if can_access_admin_chats(user):
+    if can_access_admin_feedback(user):
         feedback = await Feedbacks.update_feedback_by_id(id=id, form_data=form_data, db=db)
     else:
         feedback = await Feedbacks.update_feedback_by_id_and_user_id(id=id, user_id=user.id, form_data=form_data, db=db)
@@ -542,7 +542,7 @@ async def delete_feedback_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if can_access_admin_chats(user):
+    if can_access_admin_feedback(user):
         success = await Feedbacks.delete_feedback_by_id(id=id, db=db)
     else:
         success = await Feedbacks.delete_feedback_by_id_and_user_id(id=id, user_id=user.id, db=db)

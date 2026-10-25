@@ -44,7 +44,7 @@ from open_webui.retrieval.web.utils import get_web_loader
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.misc import get_content_from_message, get_message_list
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -1060,7 +1060,7 @@ async def get_sources_from_items(
             # Chat Attached
             chat = await Chats.get_chat_by_id(item.get('id'))
             # A shared_chat grant covers the share snapshot only, never the live chat.
-            has_read_access = bool(chat and (can_access_admin_chats(user) or chat.user_id == user.id))
+            has_read_access = bool(chat and chat.user_id == user.id)
 
             if chat and not has_read_access and chat.folder_id:
                 folder = await Folders.get_folder_by_id(chat.folder_id)

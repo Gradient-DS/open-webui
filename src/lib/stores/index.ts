@@ -57,9 +57,6 @@ export const TTSWorker = writable(null);
 export const chatId = writable('');
 export const chatTitle = writable('');
 
-export const channels = writable([]);
-export const channelId = writable(null);
-
 export { chats, pinnedChats } from './chatList';
 export const pinnedNotes = writable([]);
 export const tags = writable([]);
@@ -412,7 +409,6 @@ type Config = {
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_data_export: boolean;
-		enable_admin_chat_access: boolean;
 		enable_admin_analytics: boolean;
 		enable_context_compaction?: boolean;
 		enable_tool_permissions?: boolean;
@@ -458,7 +454,6 @@ type Config = {
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
 		feature_user_demographics?: boolean;
-		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
 		enable_document_writer?: boolean;

@@ -18,7 +18,6 @@ LEGACY_EVENTS = {'chat.finished', 'chat.failed'}
 VALID_DELIVERY = {'away', 'always'}
 CHAT_FINISHED_EVENT = 'chat.finished'
 CHAT_FAILED_EVENT = 'chat.failed'
-CHANNEL_MESSAGE_EVENT = 'channel.message'
 CALENDAR_ALERT_EVENT = 'calendar.alert'
 
 DEFAULT_TARGET_ID = 'webhook'
@@ -311,23 +310,6 @@ def _notification_webhook_content(event: Any) -> tuple[str, str, dict[str, Any],
             body,
         )
 
-    if event.event == CHANNEL_MESSAGE_EVENT:
-        channel_name = str(data.get('title') or event.message or 'Channel')
-        content = str(data.get('content') or data.get('message') or '')
-        url = str(data.get('url') or '')
-        body = '\n'.join(part for part in (content, url) if part)
-        return (
-            f'**#{channel_name}**',
-            body,
-            {
-                'action': 'channel',
-                'message': content,
-                'title': channel_name,
-                'url': url,
-            },
-            body,
-        )
-
     if event.event == CALENDAR_ALERT_EVENT:
         title = str(data.get('title') or event.message or 'Calendar alert')
         starts_in = str(data.get('starts_in') or '')
@@ -410,7 +392,7 @@ async def dispatch_notification_event(app: Any, event: Any) -> None:
     for user_id in event_user_ids(event):
         try:
             notifications = await _load_notifications(user_id)
-            is_active = False if event.event == CHANNEL_MESSAGE_EVENT else await Users.is_user_active(user_id)
+            is_active = await Users.is_user_active(user_id)
 
             for target in notifications.get('targets') or []:
                 if not target.get('enabled', True):

@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 
 # Columns: admin, owner, reader, writer (read + write), outsider, other_group, public.
 # A = allow, D = deny; public uses a separate wildcard-read copy of the object.
-# Admin columns are explicit for bypass off/on. Chat read uses ENABLE_ADMIN_CHAT_ACCESS.
+# Chat content is owner-only regardless of administrator settings.
 # Grants are exact permissions, not an implicit write-implies-read hierarchy.
 PRINCIPALS = ('admin', 'owner', 'reader', 'writer', 'outsider', 'other_group', 'public')
 MATRIX = [
     # object     action    bypass off  bypass on
-    ('chat', 'read', 'DADDDDD', 'AADDDDD'),
+    ('chat', 'read', 'DADDDDD', 'DADDDDD'),
     ('chat', 'update', 'DADDDDD', 'DADDDDD'),
-    ('chat', 'delete', 'DADDDDD', 'AADDDDD'),
+    ('chat', 'delete', 'DADDDDD', 'DADDDDD'),
     ('chat', 'share', 'DADDDDD', 'DADDDDD'),  # Native chats are owner-only; snapshots have grants.
     ('file', 'read', 'DAAADDA', 'AAAADDA'),
     ('file', 'update', 'DADADDD', 'AADADDD'),
@@ -41,10 +41,6 @@ MATRIX = [
     ('tool', 'update', 'DADADDD', 'AADADDD'),
     ('tool', 'delete', 'DADADDD', 'AADADDD'),
     ('tool', 'share', 'DADADDD', 'AADADDD'),
-    ('channel', 'read', 'DAAADDA', 'AAAADDA'),
-    ('channel', 'update', 'DADDDDD', 'AADDDDD'),  # Write grants permit messages, not channel administration.
-    ('channel', 'delete', 'DADDDDD', 'AADDDDD'),
-    ('channel', 'share', 'DADDDDD', 'AADDDDD'),
     ('knowledge', 'read', 'DAAADDA', 'AAAADDA'),
     ('knowledge', 'update', 'DADADDD', 'AADADDD'),
     ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
@@ -62,7 +58,6 @@ FUNCTION_MATRIX = [
     ('AccessGrants.has_access', 'DDAADDA', 'DDDADDD'),
     ('has_access_to_file', 'DAAADDA', 'DADADDD'),
     ('has_folder_access', 'DAAADDA', 'DADADDD'),
-    ('channel_has_access', 'DDAADDA', 'DDDADDD'),
 ]
 
 GRANTS = [
@@ -91,7 +86,6 @@ async def seed_resource(seeded, kind, public=False):
             'Skill',
             {'name': 'original', 'content': 'original', 'description': 'original', 'meta': {}},
         ),
-        'channel': ('channels', 'Channel', {'name': 'original'}),
         'knowledge': ('knowledge', 'Knowledge', {'name': 'original', 'description': 'original'}),
     }
     module, name, fields = names[kind]
@@ -126,7 +120,6 @@ def request_for(kind, action):
         'prompt': 'prompts',
         'tool': 'tools',
         'skill': 'skills',
-        'channel': 'channels',
     }[kind]
     path = f'/api/v1/{plural}'
     if kind == 'model':
@@ -145,7 +138,6 @@ def request_for(kind, action):
         'prompt': {'command': '/original', 'name': 'changed', 'content': 'changed'},
         'tool': {'id': 'target', 'name': 'changed', 'content': TOOL_CODE, 'meta': {}},
         'skill': {'id': 'target', 'name': 'changed', 'description': 'changed', 'content': 'changed', 'meta': {}},
-        'channel': {'name': 'changed'},
         'knowledge': {'name': 'changed', 'description': 'changed'},
     }[kind]
     if action == 'read':
@@ -156,7 +148,7 @@ def request_for(kind, action):
         return 'DELETE', path + ('' if kind in ('chat', 'file', 'folder') else '/delete'), None
     if kind == 'chat':
         return 'POST', path + '/share', None
-    return 'POST', path + ('/update' if kind == 'channel' else '/access/update'), {'access_grants': []}
+    return 'POST', path + '/access/update', {'access_grants': []}
 
 
 CASES = [
@@ -175,7 +167,6 @@ def test_http_matrix(seeded, monkeypatch, kind, action, principal, bypass, allow
     from open_webui import config
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
     monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', bypass)
     model = seeded.run(seed_resource, seeded, kind, principal == 'public')
     from open_webui.models.access_grants import AccessGrants
@@ -219,9 +210,7 @@ def test_function_matrix(seeded, helper, read, write, principal, permission):
         from open_webui.utils.access_control.files import has_access_to_file
         from open_webui.utils.access_control.folders import has_folder_access
 
-        kind = {'has_access_to_file': 'file', 'has_folder_access': 'folder', 'channel_has_access': 'channel'}.get(
-            helper, 'note'
-        )
+        kind = {'has_access_to_file': 'file', 'has_folder_access': 'folder'}.get(helper, 'note')
         await seed_resource(seeded, kind, principal == 'public')
         async with seeded.sessions() as db:
             if helper == 'has_access':
@@ -238,11 +227,5 @@ def test_function_matrix(seeded, helper, read, write, principal, permission):
                 return await has_folder_access(
                     principal, await Folders.get_folder_by_id('target', db=db), permission, db
                 )
-            from open_webui.models.channels import Channels
-            from open_webui.routers.channels import channel_has_access
-
-            return await channel_has_access(
-                principal, await Channels.get_channel_by_id('target', db=db), permission, db=db
-            )
 
     assert seeded.run(check) is ((read if permission == 'read' else write)[PRINCIPALS.index(principal)] == 'A')

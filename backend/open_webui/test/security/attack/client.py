@@ -50,14 +50,14 @@ _NOT_ENTERED_MARKERS = (
     RefusalMarker((403,), '2FA verification required', 'utils/auth.py', 'get_current_user', 407),
     RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user', 430, 'INVALID_TOKEN', 59),
     RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user_by_api_key', 486, 'INVALID_TOKEN', 59),
-    RefusalMarker((401,), _EXPIRED, 'routers/auths.py', 'get_session_user', 354, 'INVALID_TOKEN', 59),
+    RefusalMarker((401,), _EXPIRED, 'routers/auths.py', 'get_session_user', 352, 'INVALID_TOKEN', 59),
     RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_verified_user', 544, 'ACCESS_PROHIBITED', 70),
     RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_admin_user', 621, 'ACCESS_PROHIBITED', 70),
     RefusalMarker(
         (401, 403), _PROHIBITED, 'utils/auth.py', 'get_current_user_by_api_key', 519, 'ACCESS_PROHIBITED', 70
     ),
-    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 1002, 'RATE_LIMIT_EXCEEDED', 87),
-    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 1057, 'INVALID_CRED', 60),
+    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 1000, 'RATE_LIMIT_EXCEEDED', 87),
+    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 1055, 'INVALID_CRED', 60),
     RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 416, 'UNAUTHORIZED', 69),
     RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 462, 'UNAUTHORIZED', 69),
     RefusalMarker((401,), 'User mismatch. Please sign in again.', 'utils/auth.py', 'get_current_user', 438),
@@ -182,6 +182,7 @@ class AttackClient:
         self.session = requests.Session()
         self.session.trust_env = False  # No ambient proxy or .netrc credentials.
         self.token = token
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
         retry = ConnectionRetry(
@@ -237,6 +238,12 @@ class AttackClient:
             raise ValueError('AttackClient uses bearer headers only')
         if self.token and 'Authorization' not in headers:
             headers['Authorization'] = f'Bearer {self.token}'
+        if (
+            self.oauth_session_id
+            and headers.get('Authorization') == f'Bearer {self.token}'
+            and 'x-api-key' not in headers
+        ):
+            kwargs['cookies'] = {'oauth_session_id': self.oauth_session_id}
         if kwargs.pop('allow_redirects', False):
             raise ValueError('AttackClient never follows redirects')
         self.session.cookies.clear()
@@ -260,6 +267,7 @@ class AttackClient:
 
     def authenticate(self, response: requests.Response, email: str, *, role: str | None = None):
         self.token = None
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
         body = session_body(response, email)
@@ -287,12 +295,13 @@ class AttackClient:
             raise AuthenticationError('Only an authenticated client can reauthenticate')
         expected_id, expected_role = self.identity['id'], self.identity['role']
         self.token = None
+        self.oauth_session_id = None
         self.identity = None
         self._probe_cache = None
-        result = self.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
-        self.authenticate(result, email, role=expected_role)
+        _login(self, email, password, role=expected_role)
         if self.identity['id'] != expected_id:
             self.token = None
+            self.oauth_session_id = None
             self.identity = None
             raise AuthenticationError('Reauthentication returned a different user')
         return self
@@ -329,11 +338,19 @@ class AttackClient:
 def login(email: str, password: str, *, base_url: str | None = None, role: str | None = None) -> AttackClient:
     client = AttackClient(base_url)
     try:
-        result = client.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
-        return client.authenticate(result, email, role=role)
+        return _login(client, email, password, role=role)
     except Exception:
         client.close()
         raise
+
+
+def _login(client: AttackClient, email: str, password: str, *, role: str | None = None) -> AttackClient:
+    from . import oidc
+
+    if oidc.enabled():
+        return oidc.authenticate(client, email, password, role=role)
+    result = client.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
+    return client.authenticate(result, email, role=role)
 
 
 def totp_code(secret: str, *, at: float | None = None) -> str:

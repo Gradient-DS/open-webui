@@ -14,6 +14,10 @@ Signin counts attempts by email (routers/auths.py:999; utils/rate_limit.py:47).
 Repair temporarily changes an identity's email through the admin update API,
 signs in using that fresh bucket, then restores its stable email. IDs and
 resource ownership stay intact. No Redis keys or application limits are changed.
+
+With ATTACK_OIDC_LOGIN=1, Keycloak provisions every actor and login uses OWUI's
+OIDC flow. Repair keeps the stable email: OWUI's password throttle is unrelated
+to that flow. Local passwords remain available for explicit password/2FA probes.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, login
 
 PASSWORD = 'Attack-Plane-Passw0rd!'
@@ -74,7 +79,26 @@ def _save(path, state):
         temporary.unlink(missing_ok=True)
 
 
+def _save_recovery(path: Path, state: dict, recovery: AttackClient) -> None:
+    state['recovery_token'] = recovery.token
+    if oidc.enabled():
+        state['recovery_oauth_session_id'] = recovery.oauth_session_id
+    _save(path, state)
+
+
 def _bootstrap(base_url):
+    if oidc.enabled():
+        oidc.provision(ADMIN_EMAIL, PASSWORD, 'Attack admin')
+        admin = login(ADMIN_EMAIL, PASSWORD, base_url=base_url, role='admin')
+        try:
+            _update(admin, admin.user_id, password=PASSWORD)
+            _wait_out_the_revoked_second()
+            admin.reauthenticate(ADMIN_EMAIL, PASSWORD)
+            _wait_out_the_first_second()
+            return admin
+        except Exception:
+            admin.close()
+            raise
     client = AttackClient(base_url)
     try:
         result = client.request(
@@ -139,6 +163,14 @@ def _wait_out_the_revoked_second():
 
 @contextmanager
 def signin_alias(admin, user_id, email, **fields):
+    if oidc.enabled():
+        _update(admin, user_id, email=email, **fields)
+        if fields.get('password'):
+            _wait_out_the_revoked_second()
+            if user_id == admin.user_id:
+                admin.reauthenticate(email, fields['password'])
+        yield email
+        return
     alias = f'attack-signin-{uuid4().hex}@example.com'
     try:
         _update(admin, user_id, email=alias, **fields)
@@ -174,7 +206,7 @@ def _fresh_login(admin, user_id, email, role):
                 # and the previous pass is still holding one while its teardown
                 # runs, so an unconditional reset strands that pass. A throttle
                 # or a 2FA challenge is not a credential the reset would fix.
-                if error.status != 400:
+                if oidc.enabled() or error.status != 400:
                     raise
                 _restore_password(admin, user_id, alias)
                 client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
@@ -224,6 +256,9 @@ def _find_or_create(admin, state, label, email):
             if body.get('id') != user_id:
                 raise RuntimeError('Identity lookup returned a different user')
             return user_id
+    if oidc.enabled():
+        with create_oidc_identity(admin, email=email, password=PASSWORD, name=f'Attack {label}', role='user') as client:
+            return client.user_id
     user_id = _find_by_email(admin, email)
     if user_id:
         return user_id
@@ -245,10 +280,26 @@ def _find_or_create(admin, state, label, email):
     return body['id']
 
 
+def create_oidc_identity(admin: AttackClient, *, email: str, password: str, name: str, role: str) -> AttackClient:
+    oidc.provision(email, password, name)
+    with login(email, password, base_url=admin.base_url) as initial:
+        user_id = initial.user_id
+        # Keep local password/2FA endpoint probes usable while actors log in via OIDC.
+        _update(admin, user_id, email=email, name=name, role=role, password=password)
+    _wait_out_the_revoked_second()
+    client = login(email, password, base_url=admin.base_url, role=role)
+    if client.user_id != user_id:
+        client.close()
+        raise AuthenticationError('OIDC provisioning returned a different user')
+    return client
+
+
 def _recover_admin(base_url, state):
     token = os.getenv('ATTACK_RECOVERY_TOKEN') or state.get('recovery_token')
     if token:
         recovery = AttackClient(base_url, token=token)
+        if oidc.enabled() and token == state.get('recovery_token'):
+            recovery.oauth_session_id = state.get('recovery_oauth_session_id')
         try:
             recovery.verify_identity(role='admin', user_id=state['ids'].get('admin'))
             return recovery
@@ -284,20 +335,17 @@ def ensure_identities(base_url=None, *, state_path: Path | None = None) -> Attac
         if state['ids'].get('admin') != admin_id:
             state['ids'] = {}
         state['ids']['admin'] = admin_id
-        state['recovery_token'] = recovery.token
-        _save(state_path, state)
+        _save_recovery(state_path, state, recovery)
         renewed = _fresh_login(recovery, admin_id, ADMIN_EMAIL, 'admin')
         recovery.close()
         recovery = renewed
-        state['recovery_token'] = recovery.token
-        _save(state_path, state)
+        _save_recovery(state_path, state, recovery)
         # Every pass receives a different jti from the private recovery JWT.
         clients.append(_fresh_login(recovery, admin_id, ADMIN_EMAIL, 'admin'))
         # Repairing the admin revoked the recovery JWT saved above and minted a
         # replacement in place. Persisting the dead one would send the next
         # setup down the bootstrap path, spending the stable email's throttle.
-        state['recovery_token'] = recovery.token
-        _save(state_path, state)
+        _save_recovery(state_path, state, recovery)
         for label, email in (('user', USER_EMAIL), ('intruder', INTRUDER_EMAIL)):
             user_id = _find_or_create(recovery, state, label, email)
             state['ids'][label] = user_id

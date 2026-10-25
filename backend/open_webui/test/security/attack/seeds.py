@@ -21,8 +21,10 @@ from urllib.parse import quote
 
 import requests
 
+from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
+from .identities import create_oidc_identity
 
 ROOT = Path(__file__).resolve().parents[5]
 SURFACE_PATH = ROOT / 'security/attack-surface.toml'
@@ -224,9 +226,17 @@ class SeedContext:
             raise RuntimeError(f'{parameter["key"]}: does not declare that it provides {name}')
         self.values[name] = _extract({'value': value}, 'value', name=name, via=parameter['key'])
 
-    def request(self, method, path, *, actor=None, **kwargs):
+    def request(self, method, path, *, actor=None, password_identity=False, **kwargs):
         if is_destructive(method, path, self.surface):
             raise RuntimeError(f'Destructive route cannot seed fixtures: {method} {path}')
+        if oidc.enabled() and not password_identity and method == 'POST' and path == '/api/v1/auths/add':
+            with create_oidc_identity(self.admin, **kwargs['json']) as client:
+                return {
+                    **client.identity,
+                    'token': client.token,
+                    'token_type': 'Bearer',
+                    'oauth_session_id': client.oauth_session_id,
+                }
         response = (actor or self.client).request(method, path, **kwargs)
         if not 200 <= response.status_code < 300:
             raise RuntimeError(f'Seeding {method} {path} failed (HTTP {response.status_code})')
@@ -314,6 +324,8 @@ def seed_export(ctx, parameter):
     # /auths/add returns a real session for the newly created disposable user.
     token = _extract(ctx.payloads['user'], 'token', name='export identity', via='POST /api/v1/auths/add')
     with AttackClient(ctx.client.base_url, token=token) as exporter:
+        if oidc.enabled():
+            exporter.oauth_session_id = ctx.payloads['user']['oauth_session_id']
         exporter.verify_identity(user_id=ctx.values['user'], role='user')
         ctx.request('POST', '/api/v1/export/data', actor=exporter)
         deadline = time.monotonic() + 60
@@ -406,6 +418,7 @@ def seed_totp_user(ctx, parameter):
         'POST',
         '/api/v1/auths/add',
         actor=ctx.admin,
+        password_identity=True,
         json={
             'email': f'attack-totp-{ctx.token}@example.com',
             'name': f'Attack TOTP {ctx.token}',

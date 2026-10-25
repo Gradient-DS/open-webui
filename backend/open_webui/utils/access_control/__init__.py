@@ -21,7 +21,8 @@ def can_bypass_access_control(user: UserModel | dict) -> bool:
     return role == 'admin' and bool(config.BYPASS_ADMIN_ACCESS_CONTROL)
 
 
-def can_access_admin_chats(user: UserModel) -> bool:
+def can_access_admin_feedback(user: UserModel) -> bool:
+    # Feedback retains its legacy policy until the thread feedback contract lands.
     return user.role == 'admin' and bool(config.ENABLE_ADMIN_CHAT_ACCESS)
 
 

@@ -12,37 +12,27 @@
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import Hashtag from '$lib/components/icons/Hashtag.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let target_type: 'chat' | 'channel' = 'chat';
-	export let channel_id = '';
 	export let folder_id = '';
 	export let folders: any[] = [];
-	export let channels: any[] = [];
 	export let side: 'top' | 'bottom' = 'top';
 	export let align: 'start' | 'end' = 'start';
 	export let onChange: () => void = () => {};
 
 	let show = false;
-	let tab: '' | 'folders' | 'channels' = '';
+	let tab: '' | 'folders' = '';
 	let folderSearch = '';
-	let channelSearch = '';
 
 	const folderName = (folder: any) => decodeString(folder?.name ?? $i18n.t('Folder'));
-	const channelName = (channel: any) => channel?.name || $i18n.t('Channel');
 
 	$: folderOptions = [...((folders ?? []) as any[])]
 		.filter((folder) => folder?.id && !folder?.shared)
 		.sort((a, b) => folderName(a).localeCompare(folderName(b)));
 	$: folderById = new Map(folderOptions.map((folder) => [folder.id, folder]));
-	$: channelOptions = (channels ?? [])
-		.filter((channel) => channel?.id && channel.type !== 'dm')
-		.sort((a, b) => channelName(a).localeCompare(channelName(b)));
 	$: selectedFolder = folderOptions.find((folder) => folder.id === folder_id);
-	$: selectedChannel = channelOptions.find((channel) => channel.id === channel_id);
 
 	const folderPath = (folder: any) => {
 		const names: string[] = [];
@@ -60,30 +50,14 @@
 		return names.join(' / ');
 	};
 
-	$: destinationLabel =
-		target_type === 'channel'
-			? selectedChannel
-				? `#${channelName(selectedChannel)}`
-				: $i18n.t('Choose channel')
-			: selectedFolder
-				? folderName(selectedFolder)
-				: $i18n.t('New chat');
+	$: destinationLabel = selectedFolder ? folderName(selectedFolder) : $i18n.t('New chat');
 	$: normalizedFolderSearch = folderSearch.trim().toLowerCase();
 	$: filteredFolderOptions = normalizedFolderSearch
 		? folderOptions.filter((folder) =>
 				`${folderName(folder)} ${folderPath(folder)}`.toLowerCase().includes(normalizedFolderSearch)
 			)
 		: folderOptions;
-	$: normalizedChannelSearch = channelSearch.trim().toLowerCase();
-	$: filteredChannelOptions = normalizedChannelSearch
-		? channelOptions.filter((channel) =>
-				channelName(channel).toLowerCase().includes(normalizedChannelSearch)
-			)
-		: channelOptions;
-
 	const selectChat = () => {
-		target_type = 'chat';
-		channel_id = '';
 		folder_id = '';
 		show = false;
 		tab = '';
@@ -91,22 +65,10 @@
 	};
 
 	const selectFolder = (id: string) => {
-		target_type = 'chat';
-		channel_id = '';
 		folder_id = id;
 		show = false;
 		tab = '';
 		folderSearch = '';
-		onChange();
-	};
-
-	const selectChannel = (id: string) => {
-		target_type = 'channel';
-		channel_id = id;
-		folder_id = '';
-		show = false;
-		tab = '';
-		channelSearch = '';
 		onChange();
 	};
 </script>
@@ -119,7 +81,6 @@
 		if (!state) {
 			tab = '';
 			folderSearch = '';
-			channelSearch = '';
 		}
 	}}
 >
@@ -127,9 +88,7 @@
 		type="button"
 		class="relative h-8 max-w-[11rem] flex items-center gap-1.5 px-2.5 py-1.5 bg-transparent rounded-2xl text-xs font-normal text-gray-600 transition hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
 	>
-		{#if target_type === 'channel'}
-			<Hashtag className="size-3.5 shrink-0" />
-		{:else if folder_id}
+		{#if folder_id}
 			<Folder className="size-3.5 shrink-0" />
 		{:else}
 			<ChatBubble className="size-3.5 shrink-0" />
@@ -147,8 +106,7 @@
 				>
 					<button
 						type="button"
-						class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {target_type ===
-							'chat' && !folder_id
+						class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {!folder_id
 							? 'text-gray-900 dark:text-gray-100'
 							: 'text-gray-700 dark:text-gray-300'}"
 						on:click={selectChat}
@@ -157,15 +115,14 @@
 							<ChatBubble className="size-3.5 shrink-0" />
 							<span class="min-w-0 truncate">{$i18n.t('New chat')}</span>
 						</div>
-						{#if target_type === 'chat' && !folder_id}
+						{#if !folder_id}
 							<Check className="size-3.5 shrink-0" strokeWidth="2" />
 						{/if}
 					</button>
 
 					<button
 						type="button"
-						class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {target_type ===
-							'chat' && folder_id
+						class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {folder_id
 							? 'text-gray-900 dark:text-gray-100'
 							: 'text-gray-700 dark:text-gray-300'}"
 						on:click={() => (tab = 'folders')}
@@ -177,29 +134,7 @@
 							</span>
 						</div>
 						<div class="flex shrink-0 items-center gap-1 text-gray-500">
-							{#if target_type === 'chat' && folder_id}
-								<Check className="size-3.5" strokeWidth="2" />
-							{/if}
-							<ChevronRight />
-						</div>
-					</button>
-
-					<button
-						type="button"
-						class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {target_type ===
-						'channel'
-							? 'text-gray-900 dark:text-gray-100'
-							: 'text-gray-700 dark:text-gray-300'}"
-						on:click={() => (tab = 'channels')}
-					>
-						<div class="flex min-w-0 items-center gap-1.5">
-							<Hashtag className="size-3.5 shrink-0" />
-							<span class="min-w-0 truncate">
-								{selectedChannel ? channelName(selectedChannel) : $i18n.t('Channel')}
-							</span>
-						</div>
-						<div class="flex shrink-0 items-center gap-1 text-gray-500">
-							{#if target_type === 'channel'}
+							{#if folder_id}
 								<Check className="size-3.5" strokeWidth="2" />
 							{/if}
 							<ChevronRight />
@@ -233,8 +168,8 @@
 							{@const path = folderPath(folder)}
 							<button
 								type="button"
-								class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {target_type ===
-									'chat' && folder_id === folder.id
+								class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {folder_id ===
+								folder.id
 									? 'text-gray-900 dark:text-gray-100'
 									: 'text-gray-700 dark:text-gray-300'}"
 								title={path ? `${path} / ${folderName(folder)}` : folderName(folder)}
@@ -251,60 +186,13 @@
 										</span>
 									{/if}
 								</div>
-								{#if target_type === 'chat' && folder_id === folder.id}
+								{#if folder_id === folder.id}
 									<Check className="size-3.5 shrink-0" strokeWidth="2" />
 								{/if}
 							</button>
 						{:else}
 							<div class="px-2 py-1 text-[0.6875rem] text-gray-500 dark:text-gray-400">
 								{folderOptions.length > 0 ? $i18n.t('No results found') : $i18n.t('No folders')}
-							</div>
-						{/each}
-					</div>
-				</div>
-			{:else if tab === 'channels'}
-				<div class="flex max-h-72 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
-					<button
-						type="button"
-						class="flex h-[1.6875rem] w-full shrink-0 cursor-pointer items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
-						on:click={() => (tab = '')}
-					>
-						<ChevronLeft />
-						<span>{$i18n.t('Channels')}</span>
-					</button>
-
-					<div class="flex shrink-0 items-center gap-1.5 px-2 py-1">
-						<Search className="size-3.5 shrink-0" strokeWidth="2.5" />
-						<input
-							bind:value={channelSearch}
-							class="w-full bg-transparent text-[0.8125rem] outline-hidden"
-							placeholder={$i18n.t('Search channels')}
-							autocomplete="off"
-							on:click|stopPropagation
-						/>
-					</div>
-
-					<div class="overflow-y-auto scrollbar-thin">
-						{#each filteredChannelOptions as channel (channel.id)}
-							<button
-								type="button"
-								class="flex h-[1.6875rem] w-full cursor-pointer items-center justify-between gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 {target_type ===
-									'channel' && channel_id === channel.id
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-700 dark:text-gray-300'}"
-								on:click={() => selectChannel(channel.id)}
-							>
-								<div class="flex min-w-0 items-center gap-1.5">
-									<Hashtag className="size-3.5 shrink-0" />
-									<span class="min-w-0 truncate">{channelName(channel)}</span>
-								</div>
-								{#if target_type === 'channel' && channel_id === channel.id}
-									<Check className="size-3.5 shrink-0" strokeWidth="2" />
-								{/if}
-							</button>
-						{:else}
-							<div class="px-2 py-1 text-[0.6875rem] text-gray-500 dark:text-gray-400">
-								{channelOptions.length > 0 ? $i18n.t('No results found') : $i18n.t('No channels')}
 							</div>
 						{/each}
 					</div>

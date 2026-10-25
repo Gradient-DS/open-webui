@@ -1,6 +1,10 @@
 """Live sealed-stack checks; run only by runtime-security.yml."""
 
+from uuid import uuid4
+
 import pytest
+
+from . import oidc
 from .client import (
     AttackClient,
     AuthenticationError,
@@ -47,8 +51,11 @@ def test_wrong_password_is_a_loud_400(identities):
 
     user = identities.user
     with signin_alias(identities.admin, user.identity['id'], user.identity['email']) as email:
-        with pytest.raises(AuthenticationError, match='HTTP 400'):
-            login(email, 'wrong-password', base_url=user.base_url)
+        # This probes OWUI's password endpoint even when the actors use OIDC.
+        with pytest.MonkeyPatch.context() as password_mode:
+            password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
+            with pytest.raises(AuthenticationError, match='HTTP 400'):
+                login(email, 'wrong-password', base_url=user.base_url)
 
 
 @pytest.mark.parametrize('challenge', ['requires_2fa', 'requires_2fa_setup'])
@@ -62,7 +69,18 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
     original = admin.request('GET', config_path)
     assert original.status_code == 200, original.text
     enrolled = False
+    local_user = None
     try:
+        if oidc.enabled():
+            # OWUI rejects TOTP setup for accounts linked to an SSO provider.
+            email = f'attack-2fa-{uuid4().hex}@example.com'
+            local_user = AttackClient(admin.base_url)
+            with admin.request(
+                'POST',
+                '/api/v1/auths/add',
+                json={'email': email, 'password': PASSWORD, 'name': 'Attack 2FA', 'role': 'user'},
+            ) as created:
+                user = local_user.authenticate(created, email, role='user')
         configured = admin.request(
             'POST',
             config_path,
@@ -103,14 +121,18 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
             with pytest.raises(AuthenticationError, match='2FA'):
                 anonymous.authenticate(result, email)
             assert anonymous.token is None
-            with pytest.raises(AuthenticationError, match='2FA'):
-                login(email, PASSWORD, base_url=user.base_url)
+            with pytest.MonkeyPatch.context() as password_mode:
+                password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
+                with pytest.raises(AuthenticationError, match='2FA'):
+                    login(email, PASSWORD, base_url=user.base_url)
     finally:
         try:
             if enrolled:
                 disabled = user.request('POST', '/api/v1/auths/2fa/totp/disable', json={'password': PASSWORD})
                 assert disabled.status_code == 200, disabled.text
         finally:
+            if local_user:
+                local_user.close()
             restored = admin.request('POST', config_path, json=original.json())
             assert restored.status_code == 200, restored.text
 

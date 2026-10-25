@@ -2,9 +2,9 @@
 
 RUN-TAG: owui-phase7a-plane-core
 
-The committed document has 577 operations, 214 writable routes and 2260
-derived string fields. At 63 payloads, all-fields alone costs about 15,000
-requests; unconditional leave-one-out costs another ~170,000 before
+The committed document has 547 operations, 203 writable routes and 2230
+derived string fields. At 63 payloads, all-fields alone costs about 13,000
+requests; unconditional leave-one-out costs another ~140,000 before
 single-field retries.
 Default PR mode therefore samples ONE payload per field using SHA-256 of the
 route id and field path. This is stable across processes and field traversal
@@ -52,9 +52,10 @@ from hostile_corpus import REFLECTION_PROBE, fetch_payloads
 from openapi_surface import body_skeletons, constrained_string_fields, writable_string_fields
 
 from . import client as transport
+from . import oidc
 from .configuration import preserve_configuration
 from .hits_path import hits_path
-from .identities import PASSWORD
+from .identities import PASSWORD, create_oidc_identity
 from .seeds import (
     DESTRUCTIVE,
     METHODS,
@@ -413,6 +414,8 @@ def _fill(path, parameters):
 
 def _throwaway(admin):
     email = f'attack-plane-throwaway-{uuid4().hex}@example.com'
+    if oidc.enabled():
+        return create_oidc_identity(admin, email=email, password=PASSWORD, name='Attack throwaway', role='admin')
     response = admin.request(
         'POST',
         '/api/v1/auths/add',

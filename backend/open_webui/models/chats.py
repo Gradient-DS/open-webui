@@ -1816,11 +1816,6 @@ class ChatTable:
         if not chat:
             return None
 
-        from open_webui.utils.access_control import can_access_admin_chats
-
-        if can_access_admin_chats(user):
-            return chat
-
         # A shared_chat grant covers the share snapshot only, never the live chat.
         if chat.folder_id:
             from open_webui.utils.access_control.folders import has_folder_access
