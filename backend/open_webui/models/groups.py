@@ -18,6 +18,7 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    true,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +84,9 @@ def _sqlite_database_time(element: DatabaseTime, compiler: SQLCompiler, **kwargs
 
 def snapshot_is_fresh() -> ColumnElement[bool]:
     from open_webui import config
+
+    if not config.SOEV_API_URL:
+        return true()
 
     return (
         select(GroupSnapshot.id)

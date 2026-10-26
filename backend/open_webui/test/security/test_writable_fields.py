@@ -45,8 +45,10 @@ def test_derived_counts(surface):
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
         194,
-        2134,
-    ), f'Expected 194 routes / 2134 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        2135,
+    ), f'Expected 194 routes / 2135 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    # Membership edits remain in the attack surface even though the handler refuses them.
+    assert 'user_ids[]' in fields['POST /api/v1/groups/id/{id}/update']
     assert 'POST /api/v1/threads/{thread_id}/context:import' not in fields
     assert fields['POST /api/v1/threads:authorize'] == [
         'context_epoch',

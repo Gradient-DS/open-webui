@@ -6952,6 +6952,7 @@
         "type": "object"
       },
       "GroupUpdateForm": {
+        "additionalProperties": false,
         "properties": {
           "data": {
             "anyOf": [
@@ -6966,12 +6967,26 @@
             "title": "Data"
           },
           "description": {
-            "title": "Description",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "name": {
-            "title": "Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "permissions": {
             "anyOf": [
@@ -6984,12 +6999,22 @@
               }
             ],
             "title": "Permissions"
+          },
+          "user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Ids"
           }
         },
-        "required": [
-          "name",
-          "description"
-        ],
         "title": "GroupUpdateForm",
         "type": "object"
       },

@@ -274,6 +274,8 @@ start plus the bound, including through precomputed ids; absent or expired evide
 snapshots refresh evidence without rewriting memberships. Database and network waits are bounded; fencing refuses
 superseded pullers. The application database role can forge evidence, an accepted risk because it can already write
 access grants.
+Without `SOEV_API_URL`, local memberships remain authoritative for OWUI grants and product permissions;
+they do not require platform snapshot evidence. Group identity and membership writes remain read-only.
 Snapshot refs and stored person bindings are canonical UUID refs, with unique person bindings enforced in storage. Non-admin
 directory reads show only member groups and shared memberships. Only the mirror writes group identity or
 membership; group routes and OAuth/SCIM/LDAP management refuse `403 platform_groups_read_only`.

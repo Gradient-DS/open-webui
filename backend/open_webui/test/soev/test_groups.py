@@ -102,6 +102,50 @@ async def test_empty_snapshot_deletes_stale_groups_and_members(group_db, monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('configured', [False, True], ids=['local', 'platform'])
+@pytest.mark.parametrize('evidence', ['fresh', 'missing', 'expired'])
+async def test_group_authority_depends_on_configuration_and_snapshot(
+    group_db, monkeypatch, snapshot_clock, configured, evidence
+):
+    from open_webui import config
+    from open_webui.models.access_grants import AccessGrant, AccessGrantsTable
+    from open_webui.models.groups import GroupSnapshot
+    from open_webui.utils.access_control import get_permissions
+    from sqlalchemy import delete
+
+    group_id = row()['id']
+    group_db.add(
+        AccessGrant(
+            id='meadow-read',
+            resource_type='note',
+            resource_id='meadow',
+            principal_type='group',
+            principal_id=group_id,
+            permission='read',
+            created_at=1,
+        )
+    )
+    if evidence == 'missing':
+        await group_db.execute(delete(GroupSnapshot))
+    elif evidence == 'expired':
+        snapshot_clock[0] += 5
+    await group_db.commit()
+    if not configured:
+        monkeypatch.setattr(config, 'SOEV_API_URL', '')
+        monkeypatch.setattr(config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', None)
+
+    allowed = not configured or evidence == 'fresh'
+    assert bool(await Groups.get_groups_by_member_id('fern', db=group_db)) is allowed
+    assert await get_permissions('fern', {'workspace': {'knowledge': False}}, db=group_db) == {
+        'workspace': {'knowledge': allowed}
+    }
+    grants = AccessGrantsTable()
+    for precomputed in (None, {group_id}):
+        assert await grants.has_access('fern', 'note', 'meadow', user_group_ids=precomputed, db=group_db) is allowed
+        assert not await grants.has_access('unlinked', 'note', 'meadow', user_group_ids=precomputed, db=group_db)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     'method,args',
     [
