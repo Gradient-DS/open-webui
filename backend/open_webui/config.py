@@ -2687,11 +2687,21 @@ if SOEV_API_URL and (
     or not SOEV_ARCHIVE_READERS_GROUP_REF.removeprefix('platform:group:')
 ):
     raise ValueError('SOEV_ARCHIVE_READERS_GROUP_REF must be a seeded platform group ref')
-SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS = os.environ.get('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS')
-if SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS is not None:
-    SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS = float(SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS)
-if SOEV_API_URL and SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS != 5:
-    raise ValueError('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS is required and must equal the platform revocation bound (5)')
+
+
+def soev_group_snapshot_max_age(raw: str | None, *, soev_enabled: bool) -> float | None:
+    """Parse the group snapshot bound; with soev it must equal the platform revocation bound."""
+    value = None if raw is None else float(raw)
+    if soev_enabled and value != 5:
+        raise ValueError(
+            'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS is required and must equal the platform revocation bound (5)'
+        )
+    return value
+
+
+SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS = soev_group_snapshot_max_age(
+    os.environ.get('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS'), soev_enabled=bool(SOEV_API_URL)
+)
 SOEV_GROUP_RECONCILE_MINUTES = int(os.environ.get('SOEV_GROUP_RECONCILE_MINUTES', '15'))
 if SOEV_GROUP_RECONCILE_MINUTES <= 0:
     raise ValueError('SOEV_GROUP_RECONCILE_MINUTES must be positive')

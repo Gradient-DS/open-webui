@@ -650,25 +650,13 @@ async def test_slow_pull_cannot_extend_evidence_validity(group_db, monkeypatch, 
 
 
 @pytest.mark.parametrize('value', [None, '0', '4', '6', 'nan'])
-def test_snapshot_bound_is_required_and_matches_platform(monkeypatch, value):
-    import os
-    from pathlib import Path
+def test_snapshot_bound_is_required_and_matches_platform(value):
+    from open_webui.config import soev_group_snapshot_max_age
 
-    from open_webui import config
-
-    if value is None:
-        monkeypatch.delenv('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', raising=False)
-    else:
-        monkeypatch.setenv('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', value)
-    source = Path(config.__file__).read_text()
-    start = source.index('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS =')
-    end = source.index('SOEV_GROUP_RECONCILE_MINUTES =', start)
     with pytest.raises(ValueError):
-        exec(source[start:end], {'os': os, 'SOEV_API_URL': 'https://soev.invalid'})
-    monkeypatch.setenv('SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', '5')
-    settings = {'os': os, 'SOEV_API_URL': 'https://soev.invalid'}
-    exec(source[start:end], settings)
-    assert settings['SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS'] == 5
+        soev_group_snapshot_max_age(value, soev_enabled=True)
+    assert soev_group_snapshot_max_age('5', soev_enabled=True) == 5
+    assert soev_group_snapshot_max_age(value if value != 'nan' else None, soev_enabled=False) in {None, 0, 4, 6}
 
 
 def test_snapshot_migration_starts_unverified_and_downgrades():
