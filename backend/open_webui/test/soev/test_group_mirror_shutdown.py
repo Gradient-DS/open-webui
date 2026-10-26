@@ -2,10 +2,10 @@
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-
-from open_webui.soev import group_sync
+from open_webui.soev import group_mirror
 
 
 @pytest.mark.asyncio
@@ -14,7 +14,7 @@ async def test_stop_ends_a_reconciler_whose_cancellation_is_swallowed(monkeypatc
     started = asyncio.Event()
     calls = 0
 
-    async def swallowing_reconcile(table, **kwargs):
+    async def swallowing_reconcile(**kwargs):
         nonlocal calls
         calls += 1
         started.set()
@@ -23,17 +23,16 @@ async def test_stop_ends_a_reconciler_whose_cancellation_is_swallowed(monkeypatc
         except asyncio.CancelledError:
             pass
 
-    async def no_retry(table, **kwargs):
-        return None
-
-    monkeypatch.setattr(group_sync, 'reconcile', swallowing_reconcile)
-    monkeypatch.setattr(group_sync, 'retry_pending', no_retry)
+    monkeypatch.setattr(group_mirror, 'reconcile', swallowing_reconcile)
+    monkeypatch.setattr(group_mirror, '_pull_due', AsyncMock(return_value=True))
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://directory.invalid')
+    monkeypatch.setattr('open_webui.config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
     monkeypatch.setattr('open_webui.config.SOEV_GROUP_RECONCILE_MINUTES', 0)
     app = SimpleNamespace(state=SimpleNamespace())
-    group_sync.start_reconciler(app)
+    group_mirror.start_reconciler(app)
     await asyncio.wait_for(started.wait(), 5)
 
-    await asyncio.wait_for(group_sync.stop_reconciler(app, timeout=5), 6)
+    await asyncio.wait_for(group_mirror.stop_reconciler(app, timeout=5), 6)
 
     assert app.state.soev_group_reconciler.done()
     finished = calls

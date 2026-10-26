@@ -238,7 +238,7 @@ async def test_previews(soev_state, monkeypatch, preview):
     monkeypatch.setattr(module.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value={'kb'}))
     monkeypatch.setattr(module.Knowledges, 'get_knowledge_bases', AsyncMock(return_value=[kb]))
     handler = users.get_user_preview if preview == 'user' else groups.preview_group_access
-    result = await handler('target', user=None, db=None)
+    result = await handler('target', user=SimpleNamespace(id='admin', role='admin'), db=None)
     assert result['knowledge'] == {
         'items': [{'id': 'kb', 'name': 'Knowledge'}] if soev_state else [],
         'total': int(soev_state),

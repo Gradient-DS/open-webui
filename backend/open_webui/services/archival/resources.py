@@ -16,14 +16,13 @@ from open_webui.services.deletion.offboarding_store import (
     delete_resource_dependents,
     delete_storage_files,
 )
-from open_webui.soev import group_sync
+from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
 from open_webui.soev.client import SoevApiError, SoevClient
-from open_webui.soev.group_sync import ARCHIVE_OWNER
 
 
 async def set_expiry(archive: UserArchiveModel, *, client: SoevClient) -> None:
     """Publish an archive's new retention before committing its local metadata."""
-    body = {'owner': ARCHIVE_OWNER, 'readers': [f'owui:group:{group_sync.ADMIN_ARCHIVE_GROUP}']}
+    body = {'owner': ARCHIVE_OWNER, 'readers': [archive_group_ref()]}
     if archive.expires_at is not None and not archive.never_delete:
         body['expires_at'] = dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     for key in archive.data.get('collections', []):

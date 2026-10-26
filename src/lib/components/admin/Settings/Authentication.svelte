@@ -10,7 +10,6 @@
 		updateOAuthConfig,
 		updateAdminConfig
 	} from '$lib/apis/auths';
-	import { getGroups } from '$lib/apis/groups';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -26,7 +25,6 @@
 	const i18n: any = getContext('i18n');
 
 	let adminConfig: any = null;
-	let groups: any[] = [];
 
 	let ENABLE_LDAP = false;
 	let LDAP_SERVER = {
@@ -112,9 +110,6 @@
 				adminConfig = await getAdminConfig(localStorage.token);
 			})(),
 			(async () => {
-				groups = await getGroups(localStorage.token);
-			})(),
-			(async () => {
 				// Merge into the defaults so any key the backend omits (e.g. an
 				// older backend without the group settings) keeps its default.
 				LDAP_SERVER = { ...LDAP_SERVER, ...(await getLdapServer(localStorage.token)) };
@@ -148,21 +143,6 @@
 						<option value="pending">{$i18n.t('pending')}</option>
 						<option value="user">{$i18n.t('user')}</option>
 						<option value="admin">{$i18n.t('admin')}</option>
-					</SettingsSelect>
-				</AdminSettingRow>
-
-				<AdminSettingRow
-					label={$i18n.t('Default Group')}
-					description={$i18n.t('Group assigned to new users by default.')}
-				>
-					<SettingsSelect
-						bind:value={adminConfig.DEFAULT_GROUP_ID}
-						placeholder={$i18n.t('Select a group')}
-					>
-						<option value={''}>None</option>
-						{#each groups as group}
-							<option value={group.id}>{group.name}</option>
-						{/each}
 					</SettingsSelect>
 				</AdminSettingRow>
 
@@ -492,36 +472,6 @@
 				<!-- LICENSE covers this Open WebUI wordmark.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
 					https://docs.openwebui.com/license. -->
-				<AdminSettingRow
-					label={$i18n.t('Group Mapping')}
-					description={$i18n.t('Map LDAP groups to Open WebUI groups.')}
-					let:labelId
-				>
-					<Switch bind:state={LDAP_SERVER.enable_group_management} ariaLabelledbyId={labelId} />
-				</AdminSettingRow>
-
-				{#if LDAP_SERVER.enable_group_management}
-					<AdminSettingRow
-						label={$i18n.t('Auto-Create Groups')}
-						description={$i18n.t('Create missing groups from LDAP groups.')}
-						let:labelId
-					>
-						<Switch bind:state={LDAP_SERVER.enable_group_creation} ariaLabelledbyId={labelId} />
-					</AdminSettingRow>
-
-					<AdminSettingField
-						label={$i18n.t('Group Attribute')}
-						description={$i18n.t('LDAP attribute containing the user group memberships.')}
-					>
-						<Tooltip content={$i18n.t('Default to memberOf')} placement="top-start">
-							<input
-								class={inputClass}
-								placeholder="memberOf"
-								bind:value={LDAP_SERVER.attribute_for_groups}
-							/>
-						</Tooltip>
-					</AdminSettingField>
-				{/if}
 			{/if}
 		</AdminSettingSection>
 
@@ -755,54 +705,6 @@
 						<!-- LICENSE covers this Open WebUI wordmark.
 						Do not alter, remove, obscure, or replace it except as LICENSE permits:
 						https://docs.openwebui.com/license. -->
-						<AdminSettingRow
-							label={$i18n.t('Group Mapping')}
-							description={$i18n.t('Map OAuth claims to Open WebUI groups.')}
-							let:labelId
-						>
-							<Switch
-								bind:state={oauthConfig.ENABLE_OAUTH_GROUP_MANAGEMENT}
-								ariaLabelledbyId={labelId}
-							/>
-						</AdminSettingRow>
-
-						{#if oauthConfig.ENABLE_OAUTH_GROUP_MANAGEMENT}
-							<AdminSettingRow
-								label={$i18n.t('Auto-Create Groups')}
-								description={$i18n.t('Create missing groups from OAuth claims.')}
-								let:labelId
-							>
-								<Switch
-									bind:state={oauthConfig.ENABLE_OAUTH_GROUP_CREATION}
-									ariaLabelledbyId={labelId}
-								/>
-							</AdminSettingRow>
-
-							<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-								<AdminSettingField
-									label={$i18n.t('Group Claim')}
-									description={$i18n.t('Claim containing provider groups.')}
-								>
-									<input
-										class={inputClass}
-										placeholder="groups"
-										bind:value={oauthConfig.OAUTH_GROUP_CLAIM}
-									/>
-								</AdminSettingField>
-
-								<AdminSettingField
-									label={$i18n.t('Blocked Groups')}
-									description={$i18n.t('Provider groups blocked from signing in.')}
-								>
-									<input
-										class={inputClass}
-										placeholder={$i18n.t('Comma-separated group names')}
-										bind:value={oauthConfig.OAUTH_BLOCKED_GROUPS}
-									/>
-								</AdminSettingField>
-							</div>
-						{/if}
-
 						<AdminSettingRow
 							label={$i18n.t('Update Email')}
 							description={$i18n.t('Refresh the account email from OAuth on sign-in.')}

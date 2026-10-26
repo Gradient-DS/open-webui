@@ -12,7 +12,7 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import Select from '$lib/components/common/Select.svelte';
-	import { createNewGroup, getGroups } from '$lib/apis/groups';
+	import { getGroups } from '$lib/apis/groups';
 	import { getUserDefaultPermissions, updateUserDefaultPermissions } from '$lib/apis/users';
 
 	const i18n = getContext('i18n');
@@ -55,29 +55,10 @@
 	/** @type {any} */
 	let defaultPermissions = {};
 
-	let showAddGroupModal = false;
 	let showDefaultPermissionsModal = false;
 
 	const setGroups = async () => {
 		groups = await getGroups(localStorage.token);
-	};
-
-	/** @param {any} updatedGroup */
-	const updateGroup = (updatedGroup) => {
-		groups = groups.map((group) => (group.id === updatedGroup.id ? updatedGroup : group));
-	};
-
-	/** @param {any} group */
-	const addGroupHandler = async (group) => {
-		const res = await createNewGroup(localStorage.token, group).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t('Group created successfully'));
-			await setGroups();
-		}
 	};
 
 	/** @param {any} group */
@@ -110,14 +91,7 @@
 </script>
 
 {#if loaded}
-	<EditGroupModal
-		bind:show={showAddGroupModal}
-		edit={false}
-		tabs={['general', 'permissions']}
-		permissions={defaultPermissions}
-		onSubmit={addGroupHandler}
-	/>
-
+	<p class="mb-3 text-sm text-gray-500">{$i18n.t('Groups are managed in the platform console.')}</p>
 	<div>
 		<div class="sticky top-0 z-10 bg-white dark:bg-gray-900">
 			<div class="flex h-8 flex-1 items-center w-full gap-2">
@@ -170,22 +144,13 @@
 						</div>
 					</svelte:fragment>
 				</Select>
-
-				<button
-					class="ml-1 shrink-0 rounded-lg bg-gray-50 px-2.5 py-1 text-xs text-gray-900 transition ring-1 ring-gray-200 hover:bg-gray-100 dark:bg-gray-850 dark:text-gray-100 dark:ring-gray-800 dark:hover:bg-gray-800"
-					on:click={() => {
-						showAddGroupModal = !showAddGroupModal;
-					}}
-				>
-					{$i18n.t('New Group')}
-				</button>
 			</div>
 		</div>
 
 		{#if filteredGroups.length !== 0}
 			<div class="mt-1 grid grid-cols-1">
 				{#each filteredGroups as group, idx (group.id)}
-					<GroupItem {group} {setGroups} {updateGroup} {defaultPermissions} />
+					<GroupItem {group} {setGroups} {defaultPermissions} />
 					{#if idx < filteredGroups.length - 1}
 						<hr class="border-gray-50 dark:border-gray-850/40" />
 					{/if}

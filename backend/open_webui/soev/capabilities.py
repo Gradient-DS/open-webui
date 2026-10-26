@@ -16,7 +16,6 @@ LIVE_DOCUMENTS = 'live_documents'
 LIVE_MAIL = 'live_mail'
 CLOUD_SYNC = 'cloud_sync'
 MEETINGS = 'meetings'
-GROUPS_PUSH = 'groups_push'
 IMAGES = 'images'
 
 TTL_SECONDS = 60

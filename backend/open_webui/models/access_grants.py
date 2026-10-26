@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_async_db_context
+from open_webui.models.groups import group_membership_matches
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Text, UniqueConstraint, and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
@@ -602,6 +603,7 @@ class AccessGrantsTable:
                 conditions.append(
                     and_(
                         AccessGrant.principal_type == 'group',
+                        group_membership_matches(AccessGrant.principal_id, user_id),
                         AccessGrant.principal_id.in_(user_group_ids),
                     )
                 )
@@ -658,6 +660,7 @@ class AccessGrantsTable:
                 conditions.append(
                     and_(
                         AccessGrant.principal_type == 'group',
+                        group_membership_matches(AccessGrant.principal_id, user_id),
                         AccessGrant.principal_id.in_(user_group_ids),
                     )
                 )
@@ -773,6 +776,7 @@ class AccessGrantsTable:
             principal_conditions.append(
                 and_(
                     AccessGrant.principal_type == 'group',
+                    group_membership_matches(AccessGrant.principal_id, user_id),
                     AccessGrant.principal_id.in_(group_ids),
                 )
             )
@@ -809,6 +813,7 @@ class AccessGrantsTable:
                         [
                             and_(
                                 AccessGrant.principal_type == 'group',
+                                group_membership_matches(AccessGrant.principal_id, user_id),
                                 AccessGrant.principal_id.in_(group_ids),
                             )
                         ]
@@ -876,6 +881,7 @@ class AccessGrantsTable:
                         [
                             and_(
                                 AccessGrant.principal_type == 'group',
+                                group_membership_matches(AccessGrant.principal_id, user_id),
                                 AccessGrant.principal_id.in_(group_ids),
                             )
                         ]
@@ -913,6 +919,7 @@ class AccessGrantsTable:
                         [
                             and_(
                                 AccessGrant.principal_type == 'group',
+                                group_membership_matches(AccessGrant.principal_id, user_id),
                                 AccessGrant.principal_id.in_(group_ids),
                             )
                         ]

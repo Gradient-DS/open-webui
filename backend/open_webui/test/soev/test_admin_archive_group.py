@@ -1,4 +1,4 @@
-"""Archive readership follows the current admin role."""
+"""Local administrator roles do not author platform archive readership."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,55 +7,21 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_admin_demotion_narrows_before_role_commit(role_store, monkeypatch):
-    from open_webui.soev import group_sync
-
+async def test_admin_role_changes_never_publish_groups(role_store, monkeypatch):
     store = role_store
-    monkeypatch.setattr(store.identity, 'build_client', lambda: SimpleNamespace(send=AsyncMock()))
-    await store.users.update_user_role_by_id('fern', 'admin', db=store.db)
-    narrow = AsyncMock(side_effect=store.identity.SoevApiError(503, 'offline', 'Offline'))
-    monkeypatch.setattr(group_sync, 'narrow', narrow)
-    with pytest.raises(store.identity.SoevApiError):
-        await store.users.update_user_role_by_id('fern', 'user', db=store.db)
-    assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'admin'
-    narrow.assert_awaited_once_with('admins-archive', [], db=store.db)
-
-
-@pytest.mark.asyncio
-async def test_admin_promotion_retries_archive_group_from_current_roles(role_store, monkeypatch):
-    from open_webui.soev import group_sync
-
-    store = role_store
-    monkeypatch.setattr(store.identity, 'build_client', lambda: SimpleNamespace(send=AsyncMock()))
-    monkeypatch.setattr(group_sync, '_pending', {})
-    push = AsyncMock(side_effect=[store.identity.SoevApiError(503, 'offline', 'Offline'), None])
-    monkeypatch.setattr(group_sync, 'push', push)
-    await store.users.update_user_role_by_id('fern', 'admin', db=store.db)
-    assert 'admins-archive' in group_sync.pending_groups()
-    table = SimpleNamespace()
-    await group_sync.retry_pending(table, now=float('inf'), db=store.db)
-    assert push.await_args.args == ('admins-archive', ['fern'])
-    assert not group_sync.pending_groups()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_always_publishes_admin_archive_group(role_store, monkeypatch):
-    from open_webui.soev import group_sync
-
-    store = role_store
-    client = SimpleNamespace(send=AsyncMock(), get=AsyncMock(return_value={'groups': [], 'next_cursor': None}))
+    client = SimpleNamespace(send=AsyncMock())
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     await store.users.update_user_role_by_id('fern', 'admin', db=store.db)
-    client.send.reset_mock()
-    from open_webui.models.users import User
-    from sqlalchemy import update
+    await store.users.update_user_role_by_id('fern', 'user', db=store.db)
+    assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'user'
+    assert all('/groups' not in call.args[1] for call in client.send.await_args_list)
 
-    person_id = 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'
-    await store.db.execute(update(User).where(User.id == 'fern').values(person_id=person_id))
-    await store.db.commit()
-    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
-    await group_sync.reconcile(SimpleNamespace(get_all_groups=AsyncMock(return_value=[])), db=store.db)
-    assert any(
-        'owui%3Agroup%3Aadmins-archive' in call.args[1] and call.args[2] == {'members': [person_id]}
-        for call in client.send.await_args_list
-    )
+
+@pytest.mark.parametrize('ref', ['', 'owui:group:admins-archive', 'platform:group:'])
+def test_archive_requires_seeded_platform_ref(identity_config, monkeypatch, ref):
+    from open_webui.soev.archive import archive_group_ref
+
+    identity, _ = identity_config
+    monkeypatch.setattr(identity.config, 'SOEV_ARCHIVE_READERS_GROUP_REF', ref)
+    with pytest.raises(ValueError):
+        archive_group_ref()

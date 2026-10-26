@@ -11,14 +11,13 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.internal.db import get_async_db_context
-from open_webui.models.groups import Groups
 from open_webui.models.user_archives import UserArchive
 from open_webui.models.users import Users
 from open_webui.services.deletion import offboarding_store as store
-from open_webui.soev import group_sync, identity, ingest
+from open_webui.soev import identity, ingest
+from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui.soev.group_sync import ARCHIVE_OWNER
 from open_webui.soev.policy_jobs import refuse_offboarding
 
 
@@ -92,8 +91,7 @@ async def offboard_user(
     """Complete remote steps before atomically removing or reassigning local rows."""
     refuse_offboarding()
     async with get_async_db_context(db) as session:
-        async with group_sync.membership_lock(session):
-            return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
+        return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
 
 
 async def _offboard(
@@ -108,9 +106,6 @@ async def _offboard(
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
-    if not await Groups.remove_user_from_all_groups(user_id, db=db):
-        raise SoevApiError(503, 'group_sync_unavailable', 'Group membership update failed')
-    await store.narrow_owned_groups(user_id, db=db)
     await apply_collections(owned, options=options, archive=archive, as_user=as_user)
     await delete_external_user_data(user_id, options=options, db=db)
     try:
@@ -166,7 +161,7 @@ async def apply_collections(
             continue
         body = {'owner': f'owui:user:{options.transfer_to}'}
         if options.mode == 'archive':
-            body = {'owner': ARCHIVE_OWNER, 'readers': [f'owui:group:{group_sync.ADMIN_ARCHIVE_GROUP}']}
+            body = {'owner': ARCHIVE_OWNER, 'readers': [archive_group_ref()]}
             if archive.expires_at is not None:
                 body['expires_at'] = (
                     dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')

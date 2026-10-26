@@ -119,46 +119,36 @@ async def test_mixed_case_patch_envelope_cannot_hide_suspension(admin_app, monke
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['POST', 'PUT', 'PATCH'])
-async def test_group_resources_accept_mixed_case_attributes(admin_app, monkeypatch, method):
-    from open_webui.models.groups import GroupForm, Groups
+async def test_group_resources_refuse_mixed_case_mutations(admin_app, monkeypatch, method):
     from open_webui.routers import scim
 
-    monkeypatch.setattr(scim.Users, 'get_super_admin_user', AsyncMock(return_value=admin_app.ctx.user))
-    monkeypatch.setattr(scim, 'publish_event', AsyncMock())
-    if method == 'POST':
-        path = '/scim/v2/Groups'
-    else:
-        group = await Groups.insert_new_group('elm', GroupForm(name='Willow', description=''), db=admin_app.db)
-        path = f'/scim/v2/Groups/{group.id}'
+    writes = []
+    for name in ('insert_new_group', 'update_group_by_id', 'set_group_user_ids_by_id'):
+        write = AsyncMock()
+        monkeypatch.setattr(scim.Groups, name, write)
+        writes.append(write)
+    publish = AsyncMock()
+    monkeypatch.setattr(scim, 'publish_event', publish)
+    path = '/scim/v2/Groups' if method == 'POST' else '/scim/v2/Groups/cedar'
     body = {'DISPLAYNAME': 'Cedar', 'MEMBERS': [{'VALUE': 'elm', 'DISPLAY': 'Elm', '$REF': '/Users/elm'}]}
     if method == 'PATCH':
         body = {'OPERATIONS': [{'OP': 'replace', 'PATH': path, 'VALUE': value} for path, value in body.items()]}
 
     response = await admin_app.ctx.browser.request(method, path, json=body)
 
-    assert response.status_code == (201 if method == 'POST' else 200), response.text
-    resource = response.json()
-    assert resource['displayName'] == 'Cedar'
-    assert [member['value'] for member in resource['members']] == ['elm']
+    assert response.status_code == 403, response.text
+    assert response.json()['detail']['code'] == 'platform_groups_read_only'
+    for write in writes:
+        write.assert_not_awaited()
+    publish.assert_not_awaited()
+    assert admin_app.ctx.requests == []
+    admin_app.resolve.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_group_patch_preserves_case_in_quoted_member_ids(admin_app, monkeypatch):
-    from open_webui.models.groups import GroupForm, Groups
-    from open_webui.routers import scim
+def test_group_patch_path_normalization_preserves_case_in_quoted_member_ids():
+    from open_webui.routers.scim import normalize_scim_path
 
-    group = await Groups.insert_new_group('elm', GroupForm(name='Cedar', description=''), db=admin_app.db)
-    remove = AsyncMock()
-    monkeypatch.setattr(Groups, 'remove_users_from_group', remove)
-    monkeypatch.setattr(scim, 'publish_event', AsyncMock())
-
-    response = await admin_app.ctx.browser.patch(
-        f'/scim/v2/Groups/{group.id}',
-        json={'OPERATIONS': [{'OP': 'remove', 'PATH': 'MEMBERS[VALUE eq "DISPLAYNAME"]'}]},
-    )
-
-    assert response.status_code == 200, response.text
-    remove.assert_awaited_once_with(group.id, ['DISPLAYNAME'], db=admin_app.db)
+    assert normalize_scim_path('MEMBERS[VALUE eq "DISPLAYNAME"]') == 'members[value eq "DISPLAYNAME"]'
 
 
 @pytest.mark.asyncio

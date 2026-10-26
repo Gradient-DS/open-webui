@@ -401,20 +401,12 @@ async def test_oauth_role_management_surfaces_suspension_as_403(admin_app, monke
 @pytest.mark.asyncio
 @pytest.mark.parametrize('before,after', [('admin', 'user'), ('pending', 'user')])
 async def test_role_changes_without_platform_custody_still_work(admin_app, monkeypatch, before, after):
-    from open_webui.soev import group_sync
-
     store = admin_app
     target = await store.db.get(store.user_table, 'elm')
     target.role = before
     await store.db.commit()
-    narrow = AsyncMock()
-    monkeypatch.setattr(group_sync, 'narrow_admin', narrow)
     response = await store.ctx.browser.post('/api/v1/users/elm/update', json={'role': after})
     assert response.status_code == 200
     await store.db.refresh(target)
     assert target.role == after
     assert store.ctx.requests == []
-    if before == 'admin':
-        narrow.assert_awaited_once_with('elm', db=store.db)
-    else:
-        narrow.assert_not_awaited()

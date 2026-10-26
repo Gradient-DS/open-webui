@@ -760,13 +760,15 @@ async def event_target_matches(
     if not target_group_ids:
         return False
 
-    if user_group_ids is None:
-        from open_webui.models.groups import Groups
+    from open_webui.models.groups import Groups
 
-        groups_by_user = await Groups.get_groups_by_member_ids(list(user_ids))
-        user_group_ids = {user_id: {group.id for group in groups} for user_id, groups in groups_by_user.items()}
-
-    return any(group_ids.intersection(target_group_ids) for group_ids in user_group_ids.values())
+    groups_by_user = await Groups.get_groups_by_member_ids(list(user_ids))
+    current_ids = {user_id: {group.id for group in groups} for user_id, groups in groups_by_user.items()}
+    if user_group_ids is not None:
+        current_ids = {
+            user_id: group_ids & user_group_ids.get(user_id, set()) for user_id, group_ids in current_ids.items()
+        }
+    return any(group_ids.intersection(target_group_ids) for group_ids in current_ids.values())
 
 
 async def event_webhook_matches(webhook: dict[str, Any], event: 'Event') -> bool:

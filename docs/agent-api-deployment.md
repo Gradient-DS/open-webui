@@ -15,6 +15,31 @@ Set `AGENT_API_ENABLED=true` and configure:
 | `SOEV_API_KEY` | `secrets.soevApiKey` | Platform caller credential |
 | `SOEV_API_SERVICE_PRINCIPAL` | `soevApi.servicePrincipal` | Declared Open WebUI service principal |
 
+`SOEV_ARCHIVE_READERS_GROUP_REF` is required whenever `SOEV_API_URL` is set.
+Set it to the seeded `platform:group:<id>` for **Archive readers** through the
+chart's existing extra environment variables. There is no default. Local admin
+roles do not grant archive readership.
+
+Groups and flattened person memberships are pulled from paged `GET /v1/groups`
+at startup and at most every third of the snapshot lifetime (5/3 seconds), measured
+from the start of each pull. One worker holds a database lease of 5/3 seconds,
+renewed by heartbeats while fetching; the others poll the lease and schedule row.
+`SOEV_GROUP_RECONCILE_MINUTES` (default 15) may shorten that interval. The product
+credential needs directory read. A failed or invalid page preserves the previous
+complete snapshot without renewing its validity; retries use the same bound. The console manages
+group names and membership. OWUI admins can edit local feature permissions and
+sharing settings, keyed by platform group id; these never grant platform actions.
+OAuth, LDAP, SCIM, trusted-header and signup defaults cannot manage memberships.
+Disable OAuth/LDAP group management before reopening; attempts return
+`403 platform_groups_read_only`.
+
+The cutover Job can call `soev.migrate_groups.cutover_groups(session, group_map)`
+with 9g's OWUI-id to platform-group-ref mapping before starting the mirror. It
+rewrites groups, memberships and group access grants in the caller's transaction,
+preserves product settings, returns changed-row counts, and refuses unmapped ids
+or conflicting targets. The caller commits or rolls back; the function makes no
+network calls.
+
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
 With External Secrets enabled and a platform URL set, provide `soevApiKey` in the configured 1Password item instead of inline secrets.
 Startup validates the product credential when the platform URL is set. Missing platform
@@ -102,7 +127,6 @@ features remain disabled. Changing the backend URL or API key resets the cache.
 | `live_mail` | Outlook mail search and reads |
 | `cloud_sync` | Bulk sync policy, schedules, usage and sync actions |
 | `meetings` | Meeting routes, UI availability and meeting attachments |
-| `groups_push` | Publishing local group memberships to the platform directory |
 | `images` | Chat image upload and the catalog's UI vision availability |
 
 The existing deployment and user settings still apply. Capabilities narrow their
@@ -250,3 +274,23 @@ server-side page. The window always requests fresh projections; persistent
 browser caching and authorization-before-cache-display belong to the cache unit.
 The initial window is provisionally 20, the draft contract default; the measurement
 unit chooses the production size from measured first-paint and paging times.
+
+The directory mirror requires `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS=5` when
+`SOEV_API_URL` is set, matching the platform grant-context revocation bound.
+Group authorization checks the database clock in the SQL that reads memberships:
+`clock_timestamp() < fetch_started_at + bound`. The claim records each attempt's
+start in database time before fetching, and successful replacement publishes that
+start atomically with the memberships. An absent or expired snapshot grants no
+membership; startup needs no worker baseline. Worker clocks and delayed reads
+cannot extend validity. Failed or slow pulls do not renew evidence. Unchanged
+snapshots refresh evidence without rewriting memberships. The refresh interval is
+capped at one third of the bound, including retries; `SOEV_GROUP_RECONCILE_MINUTES`
+may shorten it. Database waits and the complete network fetch have timeouts within
+the remaining validity, and a fencing token prevents superseded pullers from
+committing. Note and collaborative document events recheck each recipient on its
+delivery worker and evict readers who lost access, including when a group snapshot
+expires.
+
+The application database role can forge mirror evidence. This is an accepted
+residual risk: the same role can already write access grants directly. A separate
+publisher role is not part of this design.

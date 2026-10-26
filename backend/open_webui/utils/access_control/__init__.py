@@ -137,23 +137,20 @@ async def has_access(
     if not access_grants:
         return False
 
-    if user_group_ids is None:
-        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
-        user_group_ids = {group.id for group in user_groups}
-
+    group_ids = set()
     for grant in access_grants:
-        if not isinstance(grant, dict):
-            continue
-        if grant.get('permission') != permission:
+        if not isinstance(grant, dict) or grant.get('permission') != permission:
             continue
         principal_type = grant.get('principal_type')
         principal_id = grant.get('principal_id')
         if principal_type == 'user' and (principal_id == '*' or principal_id == user_id):
             return True
-        if principal_type == 'group' and user_group_ids and principal_id in user_group_ids:
-            return True
-
-    return False
+        if principal_type == 'group' and (user_group_ids is None or principal_id in user_group_ids):
+            group_ids.add(principal_id)
+    if not group_ids:
+        return False
+    current_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user_id, db=db)}
+    return bool(group_ids & current_group_ids)
 
 
 async def has_connection_access(

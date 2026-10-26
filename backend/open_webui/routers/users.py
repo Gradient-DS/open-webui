@@ -822,12 +822,15 @@ async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSe
 async def get_user_info_by_id(
     user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    user = await Users.get_user_by_id(user_id, db=db)
-    if user:
+    target = await Users.get_user_by_id(user_id, db=db)
+    if target:
         groups = await Groups.get_groups_by_member_id(user_id, db=db)
+        if user.role != 'admin':
+            visible_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+            groups = [group for group in groups if group.id in visible_ids]
         return UserInfoResponse(
             **{
-                **user.model_dump(),
+                **target.model_dump(),
                 'groups': [{'id': group.id, 'name': group.name} for group in groups],
                 'is_active': await Users.is_user_active(user_id, db=db),
             }

@@ -46,13 +46,13 @@ async def env(identity_config, fake_api, monkeypatch):
             'name': 'Research',
             'description': 'Notes',
             'visibility': 'restricted',
-            'principals': [SERVICE, 'owui:group:readers', 'owui:group:writers'],
-            'writers': ['owui:group:writers'],
+            'principals': [SERVICE, 'platform:group:readers', 'platform:group:writers'],
+            'writers': ['platform:group:writers'],
         },
         as_user='owui:user:owner',
         idempotency_key='seed:collection',
     )
-    api.groups.update({'owui:group:readers': ['owui:user:reader'], 'owui:group:writers': ['owui:user:writer']})
+    api.groups.update({'platform:group:readers': ['owui:user:reader'], 'platform:group:writers': ['owui:user:writer']})
     api.requests.clear()
     return SimpleNamespace(api=api, table=table, store=store, models=models, module=module)
 
@@ -136,12 +136,12 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
     """Group previews match explicit principals without inheriting the request user's audience."""
     base = env.api.collections['kb']
     for key, readers, writers in (
-        ('read-only', ['owui:group:readers'], []),
-        ('write-only', [], ['owui:group:writers']),
-        ('unrelated', ['owui:group:other'], ['owui:group:other']),
-        ('unrequested', ['owui:group:readers'], ['owui:group:writers']),
+        ('read-only', ['platform:group:readers'], []),
+        ('write-only', [], ['platform:group:writers']),
+        ('unrelated', ['platform:group:other'], ['platform:group:other']),
+        ('unrequested', ['platform:group:readers'], ['platform:group:writers']),
         ('public', [], []),
-        ('deleted', ['owui:group:readers'], ['owui:group:writers']),
+        ('deleted', ['platform:group:readers'], ['platform:group:writers']),
     ):
         env.api.collections[key] = {
             **base,
@@ -221,12 +221,12 @@ async def test_setting_grants_commissions_one_atomic_access_job(env):
     assert json.loads(writes[0].content) == {
         'visibility': 'restricted',
         'principals': sorted(
-            [SERVICE, 'owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
+            [SERVICE, 'platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
         ),
-        'writers': sorted(['owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
+        'writers': sorted(['platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
     }
     assert all(subject(request) == 'owui:user:owner' for request in writes)
-    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
+    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
     assert len(env.api.jobs) == 1
     env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
     projected = await env.table.get_grants_by_resource('knowledge', 'kb')
@@ -245,7 +245,7 @@ async def test_revoke_all_access_returns_to_owner_only(env):
     """Revocation keeps the owner as writer and restores restricted readers through the access job."""
     removed = await env.table.revoke_all_access('knowledge', 'kb')
     assert removed == 3
-    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
+    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
     job_id = next(iter(env.api.jobs))
     assert env.api.job_effects[job_id] == {
         'visibility': 'restricted',
@@ -272,12 +272,32 @@ async def test_every_other_resource_type_is_untouched(identity_config, resource_
 
     monkeypatch.setattr(models, 'get_async_db_context', context)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    groups = importlib.import_module('open_webui.models.groups')
     statements = []
     event.listen(engine.sync_engine, 'before_cursor_execute', lambda *args: statements.append(args[2]))
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(models.AccessGrant.__table__.create)
+            await connection.run_sync(
+                lambda db: models.Base.metadata.create_all(
+                    db,
+                    tables=[
+                        models.AccessGrant.__table__,
+                        groups.Group.__table__,
+                        groups.GroupMember.__table__,
+                        groups.GroupSnapshot.__table__,
+                    ],
+                )
+            )
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            import time
+
+            db.add(
+                groups.GroupSnapshot(
+                    id='directory', fetched_at=time.time(), completed_at=time.time(), fetch_started_at=time.time()
+                )
+            )
+            db.add(groups.GroupMember(id='membership', group_id='team', user_id='user', created_at=1, updated_at=1))
+            await db.commit()
             grants = [{'principal_type': 'group', 'principal_id': 'team', 'permission': 'write'}]
             saved = await table.set_access_grants(resource_type, 'resource', grants, db=db)
             assert len(saved) == 1

@@ -49,18 +49,7 @@ def check_role_change(user: UserModel, role: str) -> None:
 async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = None) -> AsyncIterator[None]:
     """Refuse suspension before changing platform membership or the local role."""
     check_role_change(user, role)
-    if not config.SOEV_API_URL or user.role == role:
-        yield
-        return
-    from open_webui.soev import group_sync
-
-    if user.role == 'admin' and role != 'admin':
-        await group_sync.narrow_admin(user.id, db=db)
     yield
-    if role == 'admin':
-        from open_webui.models.groups import Groups
-
-        await group_sync.publish(Groups, [group_sync.ADMIN_ARCHIVE_GROUP], db=db)
 
 
 def build_client(*, timeout: float = 30.0) -> SoevClient:

@@ -129,7 +129,7 @@ def seeded(template, application, monkeypatch, tmp_path):
     from open_webui.internal import db as database
     from open_webui.models.access_grants import AccessGrants, AccessGrantsTable
     from open_webui.models.config import Config
-    from open_webui.models.groups import Groups, GroupTable
+    from open_webui.models.groups import DatabaseTime, Groups, GroupSnapshot, GroupTable
     from open_webui.models.knowledge import Knowledges, KnowledgeTable
     from open_webui.utils import features
     from open_webui.utils.auth import create_token
@@ -157,6 +157,17 @@ def seeded(template, application, monkeypatch, tmp_path):
     from open_webui import config as owui_config
 
     monkeypatch.setattr(owui_config, 'SOEV_API_URL', 'http://soev-api.test')
+    monkeypatch.setattr(owui_config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
+    # These configured group memberships represent a successfully pulled directory.
+    with engine.begin() as connection:
+        connection.execute(
+            GroupSnapshot.__table__.insert().values(
+                id='directory',
+                fetched_at=DatabaseTime(),
+                completed_at=DatabaseTime(),
+                fetch_started_at=DatabaseTime(),
+            )
+        )
     from open_webui.soev import ingest
 
     # Renditions live in soev-api; a file read serves its own row, authorization stays real.

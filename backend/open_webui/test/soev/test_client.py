@@ -450,6 +450,8 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_KEY': 'test-api-key-never-persist',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
+        'SOEV_ARCHIVE_READERS_GROUP_REF': 'platform:group:acb96241-0178-4089-b438-fae30a08d3ee',
+        'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS': '5',
     }
     environment = {key: value for key, value in os.environ.items() if key not in settings}
     environment.update(
@@ -481,7 +483,8 @@ for name in ('SOEV_API_KEY',):
         assert value not in repr(config.DEFAULT_CONFIG)
         assert value not in output.getvalue()
 """
-    expected = settings if configured else dict.fromkeys(settings, '')
+    expected = dict(settings) if configured else dict.fromkeys(settings, '')
+    expected['SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS'] = 5 if configured else None
     result = subprocess.run(
         [sys.executable, '-c', code, json.dumps(expected)],
         env=environment,

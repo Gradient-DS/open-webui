@@ -12,7 +12,6 @@
 		updateLdapServer
 	} from '$lib/apis/auths';
 	import { getBanners, setBanners } from '$lib/apis/configs';
-	import { getGroups } from '$lib/apis/groups';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import InterfaceSettings from '$lib/components/common/InterfaceSettings.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
@@ -47,8 +46,6 @@
 	let adminConfig: any = null;
 	let defaultInterfaceSettings: Record<string, any> = {};
 	let showUserUiDefaults = false;
-
-	let groups = [];
 
 	let banners: Banner[] = [];
 
@@ -132,8 +129,6 @@
 	onMount(async () => {
 		adminConfig = await getAdminConfig(localStorage.token);
 		defaultInterfaceSettings = getDefaultInterfaceSettings();
-
-		groups = await getGroups(localStorage.token);
 
 		LDAP_SERVER = await getLdapServer(localStorage.token);
 		const ldapConfig = await getLdapConfig(localStorage.token);
@@ -295,21 +290,6 @@
 						<option value="pending">{$i18n.t('pending')}</option>
 						<option value="user">{$i18n.t('user')}</option>
 						<option value="admin">{$i18n.t('admin')}</option>
-					</SettingsSelect>
-				</AdminSettingRow>
-
-				<AdminSettingRow
-					label={$i18n.t('Default Group')}
-					description={$i18n.t('Group assigned to new users by default.')}
-				>
-					<SettingsSelect
-						bind:value={adminConfig.DEFAULT_GROUP_ID}
-						placeholder={$i18n.t('Select a group')}
-					>
-						<option value={''}>None</option>
-						{#each groups as group}
-							<option value={group.id}>{group.name}</option>
-						{/each}
 					</SettingsSelect>
 				</AdminSettingRow>
 

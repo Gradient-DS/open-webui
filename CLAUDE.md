@@ -265,10 +265,23 @@ The folder share modal lists the items a folder share leaves out with why (`clou
 `GET /folders/{id}/sharing` (owner only), nl/en. That route also says whether the reader may change the folder's
 access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 
-`soev/groups.py` narrows platform membership before local writes and publishes widening afterward.
-`soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup
-and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
-Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
+`soev/group_mirror.py` pulls platform groups and flattened person memberships from paged `GET /v1/groups`
+at startup and every third of `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS` from pull start (required as 5 with
+`SOEV_API_URL`, the platform revocation bound); `SOEV_GROUP_RECONCILE_MINUTES` may shorten that interval. A database
+lease of bound/3 selects one puller, renewed by heartbeats while fetching. Each attempt records its start on the
+database clock, published atomically with memberships on success. Membership SQL checks database time against that
+start plus the bound, including through precomputed ids; absent or expired evidence grants nothing. Unchanged
+snapshots refresh evidence without rewriting memberships. Database and network waits are bounded; fencing refuses
+superseded pullers. The application database role can forge evidence, an accepted risk because it can already write
+access grants.
+Without `SOEV_API_URL`, local memberships remain authoritative for OWUI grants and product permissions;
+they do not require platform snapshot evidence. Group identity and membership writes remain read-only.
+Snapshot refs and stored person bindings are canonical UUID refs, with unique person bindings enforced in storage. Non-admin
+directory reads show only member groups and shared memberships. Only the mirror writes group identity or
+membership; group routes and OAuth/SCIM/LDAP management refuse `403 platform_groups_read_only`.
+OWUI admins may edit per-group product settings, keyed by platform group id; they never grant platform actions.
+The session-only `soev/migrate_groups.cutover_groups` rewrites groups, memberships and group access grants
+through the cutover's verified group map. See `docs/cutover-handoff.md`.
 
 An assistant's files (explicit `file` entries of a model's `meta.knowledge`) must be files the model owner owns: a
 save holding anyone else's is refused (403), and file access, sync and migration ignore such an entry; another's file
@@ -316,21 +329,21 @@ inside the owner's next authenticated request using their token. The removed off
 CLI and chart Job are replaced by platform cutover tooling; see `docs/cutover-handoff.md`.
 Role demotion and offboarding remain subject to the console boundary in `soev/policy_jobs.py`.
 
-`owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
-narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.
+Archive readership comes from the console-managed platform Archive readers group, configured through
+`SOEV_ARCHIVE_READERS_GROUP_REF` (required with `SOEV_API_URL`, no default). Local admin roles never confer it.
 
 Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
 `confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
-`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody with the departing person's own login token,
-narrows groups, disposes resources, then commits local erasure/reassignment together.
+`mode=archive`. `services/deletion/offboarding.py` requires console offboarding under the v2 runtime before
+any remote or local changes.
+The legacy disposition path disposes resources, then commits local erasure/reassignment together.
 Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
 resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,
 and archive deletion/expiry removes the resources before dropping the snapshot. Retention edits publish
 the KB expiry before the local update. A failed remote step preserves local content/account rows.
 
-Pending users have already lost cloud custody on demotion. Their offboarding skips subject revocation,
-uses service authority for collection inventory/disposition, and keeps group narrowing and
-local erasure fail-closed. Demotion and offboarding share `soev/cloud_sync.revoke_cloud`.
+The legacy pending-user disposition path uses service authority for collection inventory/disposition and
+keeps local erasure fail-closed. The v2 runtime refuses it through the same console offboarding boundary.
 There is no archive restore endpoint; archived KBs return to a person through the collection ownership
 transfer path (`POST /v1/collections/{key}/owner`).
 

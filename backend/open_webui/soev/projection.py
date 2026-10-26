@@ -19,7 +19,6 @@ from open_webui.models.knowledge import (
     KnowledgeUserModel,
 )
 
-
 #: The key under the collection's client-owned ``meta`` that holds OWUI's knowledge meta; other clients own the rest.
 META_NAMESPACE = 'owui'
 
@@ -78,7 +77,13 @@ def access_of(grants: list[dict], *, service_principal: str) -> tuple[str, list[
             continue
         if principal_id == '*' and principal_type != 'user':
             continue
-        ref = 'platform:pseudo:owui' if principal_id == '*' else f'owui:{principal_type}:{principal_id}'
+        ref = (
+            'platform:pseudo:owui'
+            if principal_id == '*'
+            else f'platform:group:{principal_id}'
+            if principal_type == 'group'
+            else f'owui:user:{principal_id}'
+        )
         if permission in ('read', 'write'):
             readers.add(ref)
         if permission == 'write':
@@ -98,7 +103,7 @@ def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantMo
                 continue
             source, _, rest = ref.partition(':')
             principal_type, _, principal_id = rest.partition(':')
-            if source != 'owui' or principal_type not in ('user', 'group') or principal_id in ('', '*'):
+            if (source, principal_type) not in {('owui', 'user'), ('platform', 'group')} or principal_id in ('', '*'):
                 continue
             identities.add((principal_type, principal_id, permission))
     if collection['visibility'] == 'public':
