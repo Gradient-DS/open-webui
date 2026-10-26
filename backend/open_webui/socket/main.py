@@ -3,15 +3,12 @@ import logging
 import random
 import sys
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pycrdt as Y
 import socketio
-from socketio.packet import Packet
-
-from open_webui.soev.thread_content import legacy_event_emitter
-from open_webui.soev import threads as soev_threads
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
@@ -38,7 +35,10 @@ from open_webui.models.groups import Groups
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import Users
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
+from open_webui.soev import threads as soev_threads
+from open_webui.soev.thread_content import legacy_event_emitter
 from open_webui.tasks import create_task, stop_item_tasks
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import SOCKETIO_JSON
@@ -48,7 +48,7 @@ from open_webui.utils.redis import (
     get_redis_connection,
     get_sentinels_from_env,
 )
-from open_webui.utils.access_control import can_bypass_access_control
+from socketio.packet import Packet
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -64,6 +64,28 @@ SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
 def get_room_sid_map(manager, namespace: str, room: str):
     """Return this process's Socket.IO sid map for a room, without copying it."""
     return manager.rooms.get(namespace, {}).get(room)
+
+
+class NoteAsyncManager(socketio.AsyncManager):
+    async def emit(self, event, data, namespace=None, room=None, skip_sid=None, callback=None, to=None, **kwargs):
+        room = to or room
+        if _event_note_id(data, room) is None:
+            return await super().emit(event, data, namespace, room, skip_sid, callback, **kwargs)
+        async for sid in _authorized_note_recipients(self.server, data, room, namespace or '/', skip_sid):
+            await super().emit(event, data, namespace or '/', room=sid, callback=callback, **kwargs)
+
+
+class NoteRedisManager(socketio.AsyncRedisManager):
+    async def _handle_emit(self, message: dict) -> None:
+        data = message['data'][0] if len(message['data']) == 1 else None
+        room = message.get('room')
+        if _event_note_id(data, room) is None:
+            return await super()._handle_emit(message)
+        # This runs on both the publisher and each subscriber, immediately before local delivery.
+        async for sid in _authorized_note_recipients(
+            self.server, data, room, message.get('namespace') or '/', message.get('skip_sid')
+        ):
+            await super()._handle_emit({**message, 'room': sid, 'skip_sid': None})
 
 
 class JSONOnlyPacket(Packet):
@@ -90,6 +112,7 @@ class JSONOnlyPacket(Packet):
 # different from the one uvicorn later used to serve requests. See
 # thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
 sio = socketio.AsyncServer(
+    client_manager=NoteAsyncManager(),
     cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
     async_mode='asgi',
     json=SOCKETIO_JSON,
@@ -119,13 +142,13 @@ async def init_websocket_redis_manager() -> None:
         return
 
     if WEBSOCKET_SENTINEL_HOSTS:
-        mgr = socketio.AsyncRedisManager(
+        mgr = NoteRedisManager(
             build_sentinel_url(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
             redis_options=WEBSOCKET_REDIS_OPTIONS,
             json=SOCKETIO_JSON,
         )
     else:
-        mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS, json=SOCKETIO_JSON)
+        mgr = NoteRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS, json=SOCKETIO_JSON)
 
     mgr.set_server(sio)
     sio.manager = mgr
@@ -553,6 +576,41 @@ async def has_note_access(user, note, permission: str) -> bool:
     )
 
 
+def _event_note_id(data: Any, room: str | None) -> str | None:
+    if isinstance(room, str):
+        for prefix in ('note:', 'doc_note:'):
+            if room.startswith(prefix):
+                return room[len(prefix) :]
+    document_id = data.get('document_id') if isinstance(data, dict) else None
+    if isinstance(document_id, str) and document_id.startswith('note:'):
+        return document_id.split(':', 1)[1]
+    return None
+
+
+async def _authorized_note_recipients(
+    server: socketio.AsyncServer,
+    data: Any,
+    room: str,
+    namespace: str,
+    skip_sid: str | list[str] | None,
+) -> AsyncIterator[str]:
+    note_id = _event_note_id(data, room)
+    note = await Notes.get_note_by_id(note_id)
+    skipped = set(skip_sid if isinstance(skip_sid, list) else [skip_sid])
+    for sid, _ in list(server.manager.get_participants(namespace, room)):
+        if sid in skipped:
+            continue
+        try:
+            session_user = (await server.get_session(sid)).get('user')
+        except KeyError:
+            session_user = None
+        user = await Users.get_user_by_id(session_user['id']) if session_user else None
+        if note and user and await has_note_access(user, note, 'read'):
+            yield sid
+        else:
+            await _leave_note_rooms(note_id, [sid], server=server)
+
+
 def _read_principals(grants) -> set[tuple[str, str]]:
     return {(grant.principal_type, grant.principal_id) for grant in grants if grant.permission == 'read'}
 
@@ -570,11 +628,14 @@ async def _principal_user_ids(principals: set[tuple[str, str]]) -> set[str] | No
     return user_ids
 
 
-async def _leave_note_rooms(note_id: str, session_ids: list[str]) -> None:
+async def _leave_note_rooms(
+    note_id: str, session_ids: list[str], *, server: socketio.AsyncServer | None = None
+) -> None:
     """Take sessions out of the note's rooms on whichever worker holds them."""
+    server = server or sio
     for sid in session_ids:
-        await sio.leave_room(sid, f'note:{note_id}')
-        await sio.leave_room(sid, f'doc_note:{note_id}')
+        await server.leave_room(sid, f'note:{note_id}')
+        await server.leave_room(sid, f'doc_note:{note_id}')
         await YDOC_MANAGER.remove_user(document_id=f'note:{note_id}', user_id=sid)
 
 

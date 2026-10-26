@@ -87,7 +87,7 @@ async def test_a_shared_folder_gets_a_collection_its_members_read_holding_the_ow
     await folder_files.sync('project')
     collection = folder.api.collections[KEY]
     assert collection['created_by'] == 'owui:user:dana'
-    assert {'owui:user:frank', 'owui:group:team', 'owui:user:dana'} <= set(collection['principals'])
+    assert {'owui:user:frank', 'platform:group:team', 'owui:user:dana'} <= set(collection['principals'])
     assert collection['writers'] == ['owui:user:dana']
     assert folder.submitted == [('f-dana', KEY, 'dana')]
 

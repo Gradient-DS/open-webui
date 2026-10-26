@@ -1,0 +1,2 @@
+# False positive: a lease-token column assignment (no secret) in an intermediate 9h commit.
+caffc53bb0b3b500d01ab7598c06943421aa6fb5:backend/open_webui/soev/group_mirror.py:generic-api-key:93

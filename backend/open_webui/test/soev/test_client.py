@@ -61,51 +61,50 @@ async def test_the_product_key_and_login_token_are_sent_without_a_subject(record
 
 
 @pytest.mark.asyncio
-async def test_put_bytes_sends_the_presigned_headers_and_no_bearer(recorded_http):
-    """Presigned uploads send raw bytes and supplied headers without minting an assertion."""
+async def test_upload_document_sends_chunks_with_the_callers_admission(recorded_http):
     requests, responses = recorded_http
-    responses.append(httpx.Response(200))
-    client = SoevClient('https://soev.invalid', 'test-api-key', timeout=7.0)
-    url = 'https://s3.invalid/bucket/file?X-Amz-Signature=private-signature'
-    body = b'\x00uploaded bytes\xff'
-    headers = {'x-amz-checksum-sha256': 'test-checksum', 'Content-Length': str(len(body))}
+    responses.append(httpx.Response(204))
+    client = SoevClient('https://soev.invalid', 'fictional-key', timeout=7.0)
 
-    assert await client.put_bytes(url, headers=headers, body=body) is None
+    async def chunks():
+        yield b'fictional-'
+        yield b'upload'
 
-    assert len(requests) == 1
-    request = requests[0]
+    assert (
+        await client.upload_document(
+            'fictional-job', 'fictional/source', chunks(), size=16, content_type='text/plain', as_user='owui:user:fern'
+        )
+        is None
+    )
+    (request,) = requests
     assert request.method == 'PUT'
-    assert str(request.url) == url
-    assert request.content == body
-    for name, value in headers.items():
-        assert request.headers[name] == value
-    for name in ('Authorization', 'X-Soev-' + 'Subject', 'Idempotency-Key'):
-        assert name not in request.headers
+    assert request.url.raw_path == b'/v1/jobs/fictional-job/uploads/fictional%2Fsource'
+    assert request.content == b'fictional-upload'
+    assert request.headers['Content-Length'] == '16'
+    assert request.headers['Content-Type'] == 'text/plain'
+    assert request.headers['Authorization'] == 'Bearer fictional-key'
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
+    assert 'X-Soev-' + 'Subject' not in request.headers
+    assert 'Idempotency-Key' not in request.headers
     assert request.extensions['timeout']['read'] == 7.0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('status', [403, 302])
-async def test_put_bytes_maps_a_rejected_upload_to_a_soev_api_error(recorded_http, status):
-    """Rejected uploads expose only their status and never follow redirects."""
+async def test_upload_refusals_are_sanitized_and_never_follow_redirects(recorded_http, status):
     requests, responses = recorded_http
-    url = 'https://s3.invalid/bucket/file?X-Amz-Signature=private-signature'
-    responses.append(
-        httpx.Response(
-            status,
-            text=f'<Error><Code>AccessDenied</Code><Resource>{url}</Resource></Error>',
-            headers={'Content-Type': 'application/xml', 'Location': 'https://other.invalid/'},
+    responses.append(httpx.Response(status, text='private-detail', headers={'Location': 'https://other.invalid/'}))
+
+    async def chunks():
+        yield b'upload'
+
+    with pytest.raises(SoevApiError) as error:
+        await SoevClient('https://soev.invalid', 'fictional-key').upload_document(
+            'job', 'source', chunks(), size=6, content_type='text/plain'
         )
-    )
-
-    with pytest.raises(SoevApiError) as caught:
-        await SoevClient('https://soev.invalid', 'test-api-key').put_bytes(url, headers={}, body=b'upload')
-
-    assert caught.value.status == 502
-    assert caught.value.code == 'upload_failed'
-    assert str(status) in caught.value.detail
-    assert url not in str(caught.value)
-    assert 'private-signature' not in str(caught.value)
+    assert error.value.status == status
+    assert error.value.code == 'upstream_error'
+    assert 'private-detail' not in str(error.value)
     assert len(requests) == 1
 
 
@@ -368,6 +367,25 @@ async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_upload_without_a_token_is_refused_before_reading(recorded_http, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    requests, _ = recorded_http
+    monkeypatch.setattr('open_webui.soev.client.user_token', AsyncMock(return_value=None))
+
+    async def chunks():
+        pytest.fail('A refused upload must not read its source')
+        yield b'fictional-upload'
+
+    with pytest.raises(SoevApiError) as caught:
+        await SoevClient('https://soev.invalid', 'fictional-key').upload_document(
+            'job', 'source', chunks(), size=16, content_type='text/plain', as_user='owui:user:fern'
+        )
+    assert (caught.value.status, caught.value.code) == (401, 'sign_in')
+    assert requests == []
+
+
+@pytest.mark.asyncio
 async def test_a_no_content_mutation_returns_none(recorded_http):
     """Directory membership replacement accepts the contract's empty 204 response."""
     requests, responses = recorded_http
@@ -395,21 +413,27 @@ async def test_an_invalid_problem_uses_a_safe_fallback(recorded_http, body, stat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('error_type, status', [(httpx.ConnectError, 502), (httpx.ReadTimeout, 504)])
-@pytest.mark.parametrize('method', ['get', 'get_text', 'put_bytes', 'post_bytes'])
+@pytest.mark.parametrize('method', ['get', 'get_text', 'upload_document', 'post_bytes'])
 async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, caplog, error_type, status, method):
     """Transport exceptions cannot expose credentials or replay a subject assertion."""
     requests, responses = recorded_http
     responses.append(error_type('private-transport-detail test-api-key test-assertion'))
     with caplog.at_level(logging.DEBUG), pytest.raises(SoevApiError) as caught:
         client = SoevClient('https://soev.invalid', 'test-api-key')
-        if method == 'put_bytes':
-            await client.put_bytes('https://s3.invalid/file?signature=private-signature', headers={}, body=b'upload')
+        if method == 'upload_document':
+
+            async def chunks():
+                yield b'upload'
+
+            await client.upload_document(
+                'job', 'source', chunks(), size=6, content_type='text/plain', as_user='owui:user:alice'
+            )
         elif method == 'post_bytes':
             await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
         else:
             await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
     assert caught.value.status == status
-    assert caught.value.code == ('upload_failed' if method == 'put_bytes' else 'upstream_error')
+    assert caught.value.code == 'upstream_error'
     assert len(requests) == 1
     assert caught.value.__suppress_context__
     assert 'private-transport-detail' not in str(caught.value) + caplog.text
@@ -444,6 +468,8 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_KEY': 'test-api-key-never-persist',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
+        'SOEV_ARCHIVE_READERS_GROUP_REF': 'platform:group:acb96241-0178-4089-b438-fae30a08d3ee',
+        'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS': '5',
     }
     environment = {key: value for key, value in os.environ.items() if key not in settings}
     environment.update(
@@ -475,7 +501,8 @@ for name in ('SOEV_API_KEY',):
         assert value not in repr(config.DEFAULT_CONFIG)
         assert value not in output.getvalue()
 """
-    expected = settings if configured else dict.fromkeys(settings, '')
+    expected = dict(settings) if configured else dict.fromkeys(settings, '')
+    expected['SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS'] = 5 if configured else None
     result = subprocess.run(
         [sys.executable, '-c', code, json.dumps(expected)],
         env=environment,
@@ -505,7 +532,7 @@ async def test_original_stream_is_incremental_and_closes_on_disconnect(recorded_
     body = Body()
     responses.extend(
         [
-            httpx.Response(303, headers={'Location': 'https://storage.invalid/original'}),
+            httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'}),
             httpx.Response(200, stream=body),
         ]
     )
@@ -515,9 +542,10 @@ async def test_original_stream_is_incremental_and_closes_on_disconnect(recorded_
     assert body.delivered == 1 and not body.closed
     await stream.aclose()
     assert body.closed and body.delivered == 1
-    assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
-    assert 'X-Soev-' + 'Subject' not in requests[1].headers
-    assert 'Authorization' not in requests[1].headers
+    for request in requests:
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+        assert 'X-Soev-' + 'Subject' not in request.headers
+        assert request.headers['Authorization'] == 'Bearer test-api-key'
 
 
 @pytest.mark.asyncio
@@ -525,7 +553,7 @@ async def test_original_stream_follows_only_one_redirect(recorded_http):
     requests, responses = recorded_http
     responses.extend(
         [
-            httpx.Response(303, headers={'Location': 'https://storage.invalid/original'}),
+            httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'}),
             httpx.Response(303, headers={'Location': 'https://elsewhere.invalid/original'}),
         ]
     )
@@ -600,7 +628,7 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
         [
             httpx.Response(200, json={}, headers={'Set-Cookie': 'session=private; Path=/'}),
             httpx.Response(200, json={}),
-            httpx.Response(303, headers={'Location': 'https://soev.invalid/presigned'}),
+            httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'}),
             httpx.Response(200, content=b'original'),
             httpx.Response(200),
         ]
@@ -611,7 +639,11 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
     transport = _shared_client()
     await bob.get('/v1/collections')
     assert b''.join([chunk async for chunk in alice.stream('/original', as_user='alice')]) == b'original'
-    await bob.put_bytes('https://soev.invalid/upload', headers={}, body=b'upload')
+
+    async def chunks():
+        yield b'upload'
+
+    await bob.upload_document('job', 'source', chunks(), size=6, content_type='text/plain')
     assert _shared_client() is transport
     assert not transport.is_closed
     assert len(requests) == 5
@@ -619,9 +651,11 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
     assert 'X-Soev-' + 'Subject' not in requests[1].headers
     assert [request.extensions['timeout']['read'] for request in requests] == [7, 11, 7, 7, 11]
     assert all('cookie' not in request.headers for request in requests)
-    for request in requests[3:]:
-        assert 'Authorization' not in request.headers
-        assert 'X-Soev-' + 'Subject' not in request.headers
+    assert requests[3].headers['Authorization'] == 'Bearer alice-key'
+    assert requests[3].headers['X-Soev-User-Token'] == 'fictional-login:alice'
+    assert 'X-Soev-' + 'Subject' not in requests[3].headers
+    assert requests[4].headers['Authorization'] == 'Bearer bob-key'
+    assert 'X-Soev-' + 'Subject' not in requests[4].headers
     await close_client()
     assert transport.is_closed
     await close_client()
@@ -699,3 +733,77 @@ async def test_post_bytes_uses_shared_problem_handling(recorded_http, status):
     assert caught.value.status == status
     assert caught.value.code == 'image_error'
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'location',
+    [
+        'https://other.invalid/v1/downloads/code',
+        '//other.invalid/v1/downloads/code',
+        'http://soev.invalid/v1/downloads/code',
+        'https://soev.invalid:8443/v1/downloads/code',
+        'https://soev.invalid/v1/collections',
+        '/v1/downloads',
+        '/v1/downloads/',
+        '/v1/downloads/code/extra',
+        '/v1/downloads/%2e%2e',
+        '/v1/downloads/code?secret=value',
+        'https://user:password@soev.invalid/v1/downloads/code',
+        'https://[invalid',
+        '',
+    ],
+)
+async def test_download_redirect_refuses_unsafe_destinations_without_sending_credentials(recorded_http, location):
+    requests, responses = recorded_http
+    responses.append(httpx.Response(303, headers={'Location': location}))
+    client = SoevClient('https://soev.invalid', 'fictional-key')
+    with pytest.raises(SoevApiError) as error:
+        await anext(client.stream('/original', as_user='owui:user:fern'))
+    assert error.value.status == 502
+    assert len(requests) == 1
+    assert requests[0].url.host == 'soev.invalid'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('location', ['/v1/downloads/code', 'https://soev.invalid/v1/downloads/code'])
+async def test_markdown_redemption_keeps_the_same_admission(recorded_http, location):
+    requests, responses = recorded_http
+    responses.extend(
+        [httpx.Response(303, headers={'Location': location}), httpx.Response(200, text='# Fictional café')]
+    )
+    client = SoevClient('https://soev.invalid', 'fictional-key')
+    assert await client.get_text('/content', as_user='owui:user:fern') == '# Fictional café'
+    assert requests[0].headers['Authorization'] == requests[1].headers['Authorization']
+    for request in requests:
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
+        assert 'X-Soev-' + 'Subject' not in request.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancelled', [False, True])
+async def test_interrupted_upload_closes_its_source_without_reading_ahead(monkeypatch, cancelled):
+    delivered, closed = [], []
+
+    async def chunks():
+        try:
+            delivered.append(True)
+            yield b'first'
+            pytest.fail('The transport did not request another chunk')
+        finally:
+            closed.append(True)
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            assert await anext(request.stream.__aiter__()) == b'first'
+            if cancelled:
+                raise asyncio.CancelledError
+            raise httpx.WriteError('fictional-transport-failure')
+
+    async with httpx.AsyncClient(transport=Transport()) as transport:
+        monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: transport)
+        with pytest.raises(asyncio.CancelledError if cancelled else SoevApiError):
+            await SoevClient('https://soev.invalid', 'fictional-key').upload_document(
+                'job', 'source', chunks(), size=10, content_type='text/plain'
+            )
+    assert delivered == closed == [True]

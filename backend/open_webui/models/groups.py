@@ -1,29 +1,31 @@
 import logging
 import time
-import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from open_webui.env import DEFAULT_GROUP_SHARE_PERMISSION
-from open_webui.internal.db import Base, JSONField, get_async_db_context
-from open_webui.models.files import FileMetadataResponse
+from open_webui.internal.db import Base, get_async_db_context
+from open_webui.soev.group_policy import refuse_group_write
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
     JSON,
     BigInteger,
     Column,
+    Float,
     ForeignKey,
     Index,
-    String,
     Text,
     and_,
-    cast,
-    delete,
     func,
     or_,
     select,
+    true,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.compiler import SQLCompiler
+from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.functions import FunctionElement
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +52,50 @@ class Group(Base):
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+
+
+class GroupSnapshot(Base):
+    __tablename__ = 'soev_group_snapshot'
+
+    id = Column(Text, primary_key=True)
+    fetched_at = Column(Float, nullable=False)
+    completed_at = Column(Float, nullable=False)
+    fetch_started_at = Column(Float, nullable=True)
+    pull_started_at = Column(Float, nullable=True)
+    lease_token = Column(Text, nullable=True)
+    lease_until = Column(Float, nullable=False, default=0)
+    next_pull_at = Column(Float, nullable=False, default=0)
+
+
+class DatabaseTime(FunctionElement):
+    type = Float()
+    inherit_cache = True
+
+
+@compiles(DatabaseTime)
+def _database_time(element: DatabaseTime, compiler: SQLCompiler, **kwargs: Any) -> str:
+    return 'EXTRACT(epoch FROM clock_timestamp())'
+
+
+@compiles(DatabaseTime, 'sqlite')
+def _sqlite_database_time(element: DatabaseTime, compiler: SQLCompiler, **kwargs: Any) -> str:
+    return "ROUND((julianday('now') - 2440587.5) * 86400, 3)"
+
+
+def snapshot_is_fresh() -> ColumnElement[bool]:
+    from open_webui import config
+
+    if not config.SOEV_API_URL:
+        return true()
+
+    return (
+        select(GroupSnapshot.id)
+        .where(
+            GroupSnapshot.id == 'directory',
+            DatabaseTime() < GroupSnapshot.fetch_started_at + (config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS or 0),
+        )
+        .exists()
+    )
 
 
 class GroupModel(BaseModel):
@@ -84,6 +130,13 @@ class GroupMember(Base):
     user_id = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=True)
     updated_at = Column(BigInteger, nullable=True)
+
+
+def group_membership_matches(group_id: ColumnElement[str], user_id: str | None = None) -> ColumnElement[bool]:
+    conditions = [snapshot_is_fresh()]
+    if user_id:
+        conditions.append(group_id.in_(select(GroupMember.group_id).where(GroupMember.user_id == user_id)))
+    return and_(*conditions)
 
 
 class GroupMemberModel(BaseModel):
@@ -124,8 +177,14 @@ class UserIdsForm(BaseModel):
     user_ids: Optional[list[str]] = None
 
 
-class GroupUpdateForm(GroupForm):
-    pass
+class GroupUpdateForm(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    permissions: Optional[dict] = None
+    data: Optional[dict] = None
+    user_ids: Optional[list[str]] = None
+
+    model_config = ConfigDict(extra='forbid')
 
 
 class GroupListResponse(BaseModel):
@@ -147,30 +206,7 @@ class GroupTable:
     async def insert_new_group(
         self, user_id: str, form_data: GroupForm, db: Optional[AsyncSession] = None
     ) -> Optional[GroupModel]:
-        async with get_async_db_context(db) as db:
-            group_data = self._ensure_default_share_config(form_data.model_dump(exclude_none=True))
-            group = GroupModel(
-                **{
-                    **group_data,
-                    'id': str(uuid.uuid4()),
-                    'user_id': user_id,
-                    'created_at': int(time.time()),
-                    'updated_at': int(time.time()),
-                }
-            )
-
-            try:
-                result = Group(**group.model_dump())
-                db.add(result)
-                await db.commit()
-                await db.refresh(result)
-                if result:
-                    return GroupModel.model_validate(result)
-                else:
-                    return None
-
-            except Exception:
-                return None
+        refuse_group_write()
 
     async def get_all_groups(self, db: Optional[AsyncSession] = None) -> list[GroupModel]:
         async with get_async_db_context(db) as db:
@@ -188,7 +224,7 @@ class GroupTable:
         async with get_async_db_context(db) as db:
             member_count = (
                 select(func.count(GroupMember.user_id))
-                .where(GroupMember.group_id == Group.id)
+                .where(GroupMember.group_id == Group.id, snapshot_is_fresh())
                 .correlate(Group)
                 .scalar_subquery()
                 .label('member_count')
@@ -199,7 +235,17 @@ class GroupTable:
                 if 'query' in filter:
                     stmt = stmt.filter(Group.name.ilike(f'%{filter["query"]}%'))
 
-                # When share filter is present, member check is handled in the share logic
+                if 'member_id' in filter:
+                    stmt = stmt.filter(
+                        Group.id.in_(
+                            select(GroupMember.group_id).where(
+                                snapshot_is_fresh(),
+                                GroupMember.user_id == filter['member_id'],
+                            )
+                        )
+                    )
+
+                # Sharing settings can narrow the caller's membership scope.
                 if 'share' in filter:
                     share_value = filter['share']
                     member_id = filter.get('member_id')
@@ -216,7 +262,9 @@ class GroupTable:
                         )
 
                         if member_id:
-                            member_groups_select = select(GroupMember.group_id).where(GroupMember.user_id == member_id)
+                            member_groups_select = select(GroupMember.group_id).where(
+                                snapshot_is_fresh(), GroupMember.user_id == member_id
+                            )
                             members_only_and_is_member = and_(
                                 json_share_lower == 'members',
                                 Group.id.in_(member_groups_select),
@@ -226,13 +274,6 @@ class GroupTable:
                             stmt = stmt.filter(anyone_can_share)
                     else:
                         stmt = stmt.filter(and_(Group.data.isnot(None), json_share_lower == 'false'))
-
-                else:
-                    # Only apply member_id filter when share filter is NOT present
-                    if 'member_id' in filter:
-                        stmt = stmt.filter(
-                            Group.id.in_(select(GroupMember.group_id).where(GroupMember.user_id == filter['member_id']))
-                        )
 
             result = await db.execute(stmt.order_by(Group.updated_at.desc()))
             rows = result.all()
@@ -262,7 +303,11 @@ class GroupTable:
                     stmt = stmt.filter(Group.name.ilike(f'%{filter["query"]}%'))
                 if 'member_id' in filter:
                     stmt = stmt.filter(
-                        Group.id.in_(select(GroupMember.group_id).where(GroupMember.user_id == filter['member_id']))
+                        Group.id.in_(
+                            select(GroupMember.group_id).where(
+                                snapshot_is_fresh(), GroupMember.user_id == filter['member_id']
+                            )
+                        )
                     )
 
                 if 'share' in filter:
@@ -275,7 +320,7 @@ class GroupTable:
 
             member_count = (
                 select(func.count(GroupMember.user_id))
-                .where(GroupMember.group_id == Group.id)
+                .where(GroupMember.group_id == Group.id, snapshot_is_fresh())
                 .correlate(Group)
                 .scalar_subquery()
                 .label('member_count')
@@ -307,13 +352,11 @@ class GroupTable:
             result = await db.execute(
                 select(Group)
                 .join(GroupMember, GroupMember.group_id == Group.id)
-                .filter(GroupMember.user_id == user_id)
+                .filter(GroupMember.user_id == user_id, snapshot_is_fresh())
                 .order_by(Group.updated_at.desc())
             )
             groups = [GroupModel.model_validate(group) for group in result.scalars().all()]
-            from open_webui.soev.group_sync import archive_groups_for_users
-
-            return groups + (await archive_groups_for_users([user_id], db=db)).get(user_id, [])
+            return groups
 
     async def get_groups_by_member_ids(
         self, user_ids: list[str], db: Optional[AsyncSession] = None
@@ -324,7 +367,7 @@ class GroupTable:
             result = await db.execute(
                 select(GroupMember.user_id, Group)
                 .join(Group, Group.id == GroupMember.group_id)
-                .filter(GroupMember.user_id.in_(user_ids))
+                .filter(GroupMember.user_id.in_(user_ids), snapshot_is_fresh())
                 .order_by(Group.updated_at.desc())
             )
             rows = result.all()
@@ -334,10 +377,6 @@ class GroupTable:
             for user_id, group in rows:
                 user_groups[user_id].append(GroupModel.model_validate(group))
 
-            from open_webui.soev.group_sync import archive_groups_for_users
-
-            for user_id, groups in (await archive_groups_for_users(user_ids, db=db)).items():
-                user_groups[user_id].extend(groups)
             return user_groups
 
     async def get_group_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[GroupModel]:
@@ -351,7 +390,9 @@ class GroupTable:
 
     async def get_group_user_ids_by_id(self, id: str, db: Optional[AsyncSession] = None) -> list[str]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(GroupMember.user_id).filter(GroupMember.group_id == id))
+            result = await db.execute(
+                select(GroupMember.user_id).filter(GroupMember.group_id == id, snapshot_is_fresh())
+            )
             members = result.all()
 
             if not members:
@@ -364,7 +405,9 @@ class GroupTable:
     ) -> dict[str, list[str]]:
         async with get_async_db_context(db) as db:
             result = await db.execute(
-                select(GroupMember.group_id, GroupMember.user_id).filter(GroupMember.group_id.in_(group_ids))
+                select(GroupMember.group_id, GroupMember.user_id).filter(
+                    GroupMember.group_id.in_(group_ids), snapshot_is_fresh()
+                )
             )
             members = result.all()
 
@@ -378,29 +421,13 @@ class GroupTable:
     async def set_group_user_ids_by_id(
         self, group_id: str, user_ids: list[str], db: Optional[AsyncSession] = None
     ) -> None:
-        async with get_async_db_context(db) as db:
-            # Delete existing members
-            await db.execute(delete(GroupMember).filter(GroupMember.group_id == group_id))
-
-            # Insert new members
-            now = int(time.time())
-            new_members = [
-                GroupMember(
-                    id=str(uuid.uuid4()),
-                    group_id=group_id,
-                    user_id=user_id,
-                    created_at=now,
-                    updated_at=now,
-                )
-                for user_id in user_ids
-            ]
-
-            db.add_all(new_members)
-            await db.commit()
+        refuse_group_write()
 
     async def get_group_member_count_by_id(self, id: str, db: Optional[AsyncSession] = None) -> int:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(func.count(GroupMember.user_id)).filter(GroupMember.group_id == id))
+            result = await db.execute(
+                select(func.count(GroupMember.user_id)).filter(GroupMember.group_id == id, snapshot_is_fresh())
+            )
             count = result.scalar()
             return count if count else 0
 
@@ -410,7 +437,7 @@ class GroupTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(
                 select(GroupMember.group_id, func.count(GroupMember.user_id))
-                .filter(GroupMember.group_id.in_(ids))
+                .filter(GroupMember.group_id.in_(ids), snapshot_is_fresh())
                 .group_by(GroupMember.group_id)
             )
             rows = result.all()
@@ -423,6 +450,8 @@ class GroupTable:
         overwrite: bool = False,
         db: Optional[AsyncSession] = None,
     ) -> Optional[GroupModel]:
+        if {'name', 'description', 'user_ids'} & form_data.model_fields_set:
+            refuse_group_write()
         try:
             async with get_async_db_context(db) as db:
                 await db.execute(
@@ -440,143 +469,24 @@ class GroupTable:
             return None
 
     async def delete_group_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        try:
-            async with get_async_db_context(db) as db:
-                await db.execute(delete(Group).filter_by(id=id))
-                await db.commit()
-                return True
-        except Exception:
-            return False
+        refuse_group_write()
 
     async def delete_all_groups(self, db: Optional[AsyncSession] = None) -> bool:
-        async with get_async_db_context(db) as db:
-            try:
-                await db.execute(delete(Group))
-                await db.commit()
-
-                return True
-            except Exception:
-                return False
+        refuse_group_write()
 
     async def remove_user_from_all_groups(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
-        async with get_async_db_context(db) as db:
-            try:
-                # Find all groups the user belongs to
-                result = await db.execute(
-                    select(Group)
-                    .join(GroupMember, GroupMember.group_id == Group.id)
-                    .filter(GroupMember.user_id == user_id)
-                )
-                groups = result.scalars().all()
-
-                # Remove the user from each group
-                for group in groups:
-                    await db.execute(
-                        delete(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == user_id)
-                    )
-
-                    await db.execute(update(Group).filter_by(id=group.id).values(updated_at=int(time.time())))
-
-                await db.commit()
-                return True
-
-            except Exception:
-                await db.rollback()
-                return False
+        refuse_group_write()
 
     async def create_groups_by_group_names(
         self, user_id: str, group_names: list[str], db: Optional[AsyncSession] = None
     ) -> list[GroupModel]:
         # check for existing groups
-        existing_groups = await self.get_all_groups(db=db)
-        existing_group_names = {group.name for group in existing_groups}
-
-        new_groups = []
-
-        async with get_async_db_context(db) as db:
-            for group_name in group_names:
-                if group_name not in existing_group_names:
-                    new_group = GroupModel(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        name=group_name,
-                        description='',
-                        data={
-                            'config': {
-                                'share': DEFAULT_GROUP_SHARE_PERMISSION,
-                            }
-                        },
-                        created_at=int(time.time()),
-                        updated_at=int(time.time()),
-                    )
-                    try:
-                        result = Group(**new_group.model_dump())
-                        db.add(result)
-                        await db.commit()
-                        await db.refresh(result)
-                        new_groups.append(GroupModel.model_validate(result))
-                    except Exception as e:
-                        log.exception(e)
-                        continue
-            return new_groups
+        refuse_group_write()
 
     async def sync_groups_by_group_names(
         self, user_id: str, group_names: list[str], db: Optional[AsyncSession] = None
     ) -> bool:
-        async with get_async_db_context(db) as db:
-            try:
-                now = int(time.time())
-
-                # 1. Groups that SHOULD contain the user
-                result = await db.execute(select(Group).filter(Group.name.in_(group_names)))
-                target_groups = result.scalars().all()
-                target_group_ids = {g.id for g in target_groups}
-
-                # 2. Groups the user is CURRENTLY in
-                result = await db.execute(
-                    select(Group)
-                    .join(GroupMember, GroupMember.group_id == Group.id)
-                    .filter(GroupMember.user_id == user_id)
-                )
-                existing_group_ids = {g.id for g in result.scalars().all()}
-
-                # 3. Determine adds + removals
-                groups_to_add = target_group_ids - existing_group_ids
-                groups_to_remove = existing_group_ids - target_group_ids
-
-                # 4. Remove in one bulk delete
-                if groups_to_remove:
-                    await db.execute(
-                        delete(GroupMember).filter(
-                            GroupMember.user_id == user_id,
-                            GroupMember.group_id.in_(groups_to_remove),
-                        )
-                    )
-
-                    await db.execute(update(Group).filter(Group.id.in_(groups_to_remove)).values(updated_at=now))
-
-                # 5. Bulk insert missing memberships
-                for group_id in groups_to_add:
-                    db.add(
-                        GroupMember(
-                            id=str(uuid.uuid4()),
-                            group_id=group_id,
-                            user_id=user_id,
-                            created_at=now,
-                            updated_at=now,
-                        )
-                    )
-
-                if groups_to_add:
-                    await db.execute(update(Group).filter(Group.id.in_(groups_to_add)).values(updated_at=now))
-
-                await db.commit()
-                return True
-
-            except Exception as e:
-                log.exception(e)
-                await db.rollback()
-                return False
+        refuse_group_write()
 
     async def add_users_to_group(
         self,
@@ -584,40 +494,7 @@ class GroupTable:
         user_ids: Optional[list[str]] = None,
         db: Optional[AsyncSession] = None,
     ) -> Optional[GroupModel]:
-        try:
-            async with get_async_db_context(db) as db:
-                result = await db.execute(select(Group).filter_by(id=id))
-                group = result.scalars().first()
-                if not group:
-                    return None
-
-                now = int(time.time())
-
-                for user_id in user_ids or []:
-                    try:
-                        db.add(
-                            GroupMember(
-                                id=str(uuid.uuid4()),
-                                group_id=id,
-                                user_id=user_id,
-                                created_at=now,
-                                updated_at=now,
-                            )
-                        )
-                        await db.flush()  # Detect unique constraint violation early
-                    except Exception:
-                        await db.rollback()  # Clear failed INSERT
-                        continue  # Duplicate → ignore
-
-                group.updated_at = now
-                await db.commit()
-                await db.refresh(group)
-
-                return GroupModel.model_validate(group)
-
-        except Exception as e:
-            log.exception(e)
-            return None
+        refuse_group_write()
 
     async def remove_users_from_group(
         self,
@@ -625,43 +502,10 @@ class GroupTable:
         user_ids: Optional[list[str]] = None,
         db: Optional[AsyncSession] = None,
     ) -> Optional[GroupModel]:
-        try:
-            async with get_async_db_context(db) as db:
-                result = await db.execute(select(Group).filter_by(id=id))
-                group = result.scalars().first()
-                if not group:
-                    return None
-
-                if not user_ids:
-                    return GroupModel.model_validate(group)
-
-                # Remove users from group_member in batch
-                await db.execute(
-                    delete(GroupMember).filter(GroupMember.group_id == id, GroupMember.user_id.in_(user_ids))
-                )
-
-                # Update group timestamp
-                group.updated_at = int(time.time())
-
-                await db.commit()
-                await db.refresh(group)
-                return GroupModel.model_validate(group)
-
-        except Exception as e:
-            log.exception(e)
-            return None
+        refuse_group_write()
 
     async def delete_groups_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
-        """Delete all groups owned by a user."""
-        try:
-            async with get_async_db_context(db) as db:
-                await db.execute(delete(Group).filter(Group.user_id == user_id))
-                await db.commit()
-                return True
-        except Exception:
-            return False
+        refuse_group_write()
 
 
-from open_webui.soev.groups import SoevGroupTable  # noqa: E402
-
-Groups = SoevGroupTable()
+Groups = GroupTable()

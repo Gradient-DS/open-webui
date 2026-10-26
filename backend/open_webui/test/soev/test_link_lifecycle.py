@@ -51,7 +51,6 @@ async def test_invalid_role_refuses_before_remote_or_local_write(
     role_store, monkeypatch, before, role, method, configured
 ):
     from open_webui.models.users import User
-    from open_webui.soev import group_sync
 
     store = role_store
     if not configured:
@@ -62,8 +61,6 @@ async def test_invalid_role_refuses_before_remote_or_local_write(
     client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
-    narrow = AsyncMock()
-    monkeypatch.setattr(group_sync, 'narrow_admin', narrow)
     with pytest.raises(store.identity.SoevApiError) as caught:
         if method == 'role':
             await store.users.update_user_role_by_id('fern', role, db=store.db)
@@ -73,7 +70,6 @@ async def test_invalid_role_refuses_before_remote_or_local_write(
     await store.db.refresh(target)
     assert (target.role, target.name) == (before, 'Fern')
     client.send.assert_not_awaited()
-    narrow.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -83,9 +79,6 @@ async def test_approval_never_links_and_suspension_never_unlinks(role_store, mon
     client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
-    from open_webui.soev import group_sync
-
-    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
     await store.users.update_user_role_by_id('fern', role, db=store.db)
     assert all('/v1/identity/' not in c.args[1] for c in client.send.await_args_list)
     client.send.reset_mock()
@@ -97,18 +90,11 @@ async def test_approval_never_links_and_suspension_never_unlinks(role_store, mon
 
 
 @pytest.mark.asyncio
-async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(
-    role_store, monkeypatch, platform_capabilities
-):
-    from open_webui.soev import group_sync
+async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(group_db, monkeypatch):
+    from open_webui.soev import group_mirror
 
-    store = role_store
-    client = SimpleNamespace(send=AsyncMock(), get=AsyncMock(return_value={'groups': [], 'next_cursor': None}))
-    client.as_service = lambda: client
-    monkeypatch.setattr(store.identity, 'build_client', lambda: client)
-    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
-    await store.users.insert_new_user('lark', 'Lark', 'lark@example.invalid', role='user', db=store.db)
-    table = SimpleNamespace(get_all_groups=AsyncMock(return_value=[]))
-    await group_sync.reconcile(table, db=store.db)
-    assert all('/v1/identity/' not in call.args[1] for call in client.send.await_args_list)
-    await group_sync.retry_pending(table, now=float('inf'), db=store.db)
+    client = SimpleNamespace(send=AsyncMock(), get=AsyncMock(return_value={'data': [], 'next_cursor': None}))
+    monkeypatch.setattr(group_mirror, 'build_service_client', lambda: client)
+    await group_mirror.reconcile(db=group_db)
+    client.get.assert_awaited_once_with('/v1/groups', params={'limit': 200})
+    client.send.assert_not_awaited()

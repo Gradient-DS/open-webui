@@ -146,3 +146,74 @@ def test_person_column_migration_preserves_existing_users_and_downgrades():
         assert connection.execute(sa.text('SELECT id, name FROM user')).one() == ('fern', 'Fern')
         assert 'person_id' not in {column['name'] for column in sa.inspect(connection).get_columns('user')}
     engine.dispose()
+
+
+def test_canonical_person_migration_clears_collisions_and_enforces_storage(caplog):
+    migration = importlib.import_module('open_webui.migrations.versions.b86d2f09a137_canonical_person_bindings')
+    unique_person = '63643f13-46eb-4ecf-baa9-9b91bdab907c'
+    engine = sa.create_engine('sqlite:///:memory:')
+    with engine.begin() as connection:
+        connection.execute(sa.text('CREATE TABLE user (id TEXT PRIMARY KEY, person_id TEXT, email TEXT)'))
+        connection.execute(sa.text('CREATE UNIQUE INDEX user_person_id_idx ON user (person_id)'))
+        connection.execute(
+            sa.text('CREATE UNIQUE INDEX uq_user_email_lower ON user (lower(email)) WHERE email IS NOT NULL')
+        )
+        connection.execute(
+            sa.text('INSERT INTO user (id, person_id) VALUES (:id, :person)'),
+            [
+                {'id': 'fern', 'person': PERSON},
+                {'id': 'lark', 'person': PERSON.removeprefix('platform:user:')},
+                {'id': 'reed', 'person': unique_person.upper()},
+                {'id': 'moss', 'person': 'invalid'},
+                {'id': 'wren', 'person': None},
+            ],
+        )
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+            assert dict(connection.execute(sa.text('SELECT id, person_id FROM user')).all()) == {
+                'fern': None,
+                'lark': None,
+                'reed': f'platform:user:{unique_person}',
+                'moss': None,
+                'wren': None,
+            }
+            collision = next(r for r in caplog.records if r.message == 'ambiguous person binding cleared')
+            assert collision.user_ids == ['fern', 'lark']
+            for invalid in [
+                unique_person,
+                f'platform:user:{unique_person.upper()}',
+                'platform:user:invalid',
+                PERSON.replace('-', ''),
+            ]:
+                with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+                    connection.execute(
+                        sa.text('UPDATE user SET person_id=:person WHERE id=:id'), {'id': 'wren', 'person': invalid}
+                    )
+            with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+                connection.execute(
+                    sa.text('UPDATE user SET person_id=:person WHERE id=:id'),
+                    {'id': 'wren', 'person': f'platform:user:{unique_person}'},
+                )
+            connection.execute(sa.text("UPDATE user SET email='reed@example.invalid' WHERE id='reed'"))
+            with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+                connection.execute(sa.text("UPDATE user SET email='REED@example.invalid' WHERE id='fern'"))
+            migration.downgrade()
+            assert connection.execute(
+                sa.text("SELECT sql FROM sqlite_master WHERE name='uq_user_email_lower'")
+            ).scalar()
+            connection.execute(sa.text("UPDATE user SET person_id='unconstrained' WHERE id='wren'"))
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    'person',
+    [
+        PERSON.removeprefix('platform:user:'),
+        PERSON.upper(),
+        PERSON.replace('-', ''),
+        'platform:user:{8a12d036-55dd-46a8-a852-8e22489f1ace}',
+    ],
+)
+def test_person_discovery_requires_canonical_ref(person):
+    with pytest.raises(SoevApiError):
+        persons._person_id({'person_id': person})

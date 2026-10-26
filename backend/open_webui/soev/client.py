@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
@@ -29,7 +30,7 @@ def _shared_client() -> httpx.AsyncClient:
     global _http_client
     loop = asyncio.get_running_loop()
     if _http_client is None or _http_client[0] is not loop:
-        # Credentials remain request-local, including on presigned downloads.
+        # Credentials remain request-local, including on download redemption.
         # No connection cap: long chat streams must not queue other soev-api calls.
         client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=20),
@@ -389,17 +390,46 @@ class SoevClient:
 
     async def get_text(self, path: str, *, as_user: str | None = None) -> str:
         """Read API text with the same authority and error handling as JSON reads."""
-        response = await self._request('GET', path, as_user=as_user)
-        return response.text
+        async with self.stream_response(path, as_user=as_user) as response:
+            await response.aread()
+            return response.text
 
     async def stream(self, path: str, *, as_user: str) -> AsyncIterator[bytes]:
-        """Stream original bytes, following one presigned redirect without API credentials."""
-        if not path.startswith('/') or path.startswith('//'):
-            raise ValueError('An API path must start with a single slash')
+        """Stream bytes with the caller's admission on one download redemption."""
         if not as_user:
             raise ValueError('Acting as a user requires an acting user')
+        async with self.stream_response(path, as_user=as_user) as response:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+
+    def _download_url(self, location: str) -> httpx.URL:
+        try:
+            origin = httpx.URL(self._base_url)
+            target = origin.join(location)
+            if (
+                not location
+                or (target.scheme, target.host, target.port) != (origin.scheme, origin.host, origin.port)
+                or target.userinfo
+                or target.query
+                or target.fragment
+                or not re.fullmatch(rb'/v1/downloads/[A-Za-z0-9_-]+', target.raw_path)
+            ):
+                raise ValueError
+        except (httpx.InvalidURL, ValueError):
+            raise SoevApiError(502, 'upstream_error', 'Invalid download URL') from None
+        return target
+
+    @asynccontextmanager
+    async def stream_response(
+        self, path: str, *, as_user: str | None = None, range_header: str | None = None
+    ) -> AsyncIterator[httpx.Response]:
+        """Expose download status and headers while keeping the upstream open."""
+        if not path.startswith('/') or path.startswith('//'):
+            raise ValueError('An API path must start with a single slash')
         await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
+        if range_header is not None:
+            headers['Range'] = range_header
         try:
             async with AsyncExitStack() as stack:
                 client = _shared_client()
@@ -407,30 +437,37 @@ class SoevClient:
                     client.stream('GET', f'{self._base_url}{path}', headers=headers, timeout=self._timeout)
                 )
                 if response.status_code == 303:
-                    location = response.headers.get('Location', '')
-                    if not location.startswith(('https://', 'http://')):
-                        raise SoevApiError(502, 'upstream_error', 'Invalid original download URL')
-                    response = await stack.enter_async_context(client.stream('GET', location, timeout=self._timeout))
-                    if not response.is_success:
-                        raise SoevApiError(502, 'upstream_error', 'Original download failed')
-                elif not response.is_success:
+                    location = self._download_url(response.headers.get('Location', ''))
+                    await response.aclose()
+                    response = await stack.enter_async_context(
+                        client.stream('GET', location, headers=headers, timeout=self._timeout)
+                    )
+                    if response.is_redirect:
+                        raise SoevApiError(502, 'upstream_error', 'Download redirected more than once')
+                if not response.is_success and not (range_header is not None and response.status_code == 416):
                     await response.aread()
                     raise _response_error(response)
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+                yield response
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             raise SoevApiError(status, 'upstream_error', 'Original download failed') from None
 
-    async def put_bytes(self, url: str, *, headers: dict[str, str], body: bytes) -> None:
-        """Upload bytes using the presigned URL as the sole credential."""
-        try:
-            response = await _shared_client().put(url, headers=headers, content=body, timeout=self._timeout)
-        except httpx.TransportError as error:
-            status = 504 if isinstance(error, httpx.TimeoutException) else 502
-            raise SoevApiError(status, 'upload_failed', 'File upload failed') from None
-        if not response.is_success:
-            raise SoevApiError(502, 'upload_failed', f'File upload returned HTTP {response.status_code}')
+    async def upload_document(
+        self,
+        job_id: str,
+        source_id: str,
+        chunks: AsyncIterator[bytes],
+        *,
+        size: int,
+        content_type: str,
+        as_user: str | None = None,
+    ) -> None:
+        """Stream a declared file to its authenticated API route without retrying."""
+        path = f'/v1/jobs/{quote(job_id, safe="")}/uploads/{quote(source_id, safe="")}'
+        async with aclosing(chunks):
+            await self._request(
+                'PUT', path, content=chunks, as_user=as_user, content_type=content_type, content_length=size
+            )
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items with fresh admission for every cursor request."""
@@ -478,7 +515,9 @@ class SoevClient:
         path: str,
         *,
         body: dict | None = None,
-        content: bytes | None = None,
+        content: bytes | AsyncIterator[bytes] | None = None,
+        content_type: str | None = None,
+        content_length: int | None = None,
         files: dict | None = None,
         data: dict | None = None,
         as_user: str | None = None,
@@ -496,6 +535,10 @@ class SoevClient:
             if admission_headers is not None
             else await self._headers(as_user, user_access_token=user_access_token)
         )
+        if content_type is not None:
+            headers['Content-Type'] = content_type
+        if content_length is not None:
+            headers['Content-Length'] = str(content_length)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()

@@ -145,8 +145,8 @@ def test_readers_always_include_the_service_principal(projection, grants):
     [
         ('user', 'reader', 'read', 'owui:user:reader'),
         ('user', 'writer', 'write', 'owui:user:writer'),
-        ('group', 'readers', 'read', 'owui:group:readers'),
-        ('group', 'writers', 'write', 'owui:group:writers'),
+        ('group', 'readers', 'read', 'platform:group:readers'),
+        ('group', 'writers', 'write', 'platform:group:writers'),
         ('user', '*', 'read', 'platform:pseudo:owui'),
         ('user', '*', 'write', 'platform:pseudo:owui'),
     ],
@@ -219,7 +219,7 @@ def test_write_grants_become_writers_and_back(projection, collection):
     assert collection == before
 
 
-def test_group_grants_use_the_owui_group_namespace(projection, collection):
+def test_group_grants_use_the_platform_group_namespace(projection, collection):
     """Keep user and group identities and read and write permissions distinct in both directions."""
     grants = [
         {'principal_type': principal_type, 'principal_id': 'staff', 'permission': permission}
@@ -228,8 +228,8 @@ def test_group_grants_use_the_owui_group_namespace(projection, collection):
     ]
     visibility, readers, writers = projection.access_of(grants * 2, service_principal=SERVICE)
     assert visibility == 'restricted'
-    assert readers == ['owui:group:staff', SERVICE, 'owui:user:staff']
-    assert writers == ['owui:group:staff', 'owui:user:staff']
+    assert readers == [SERVICE, 'owui:user:staff', 'platform:group:staff']
+    assert writers == ['owui:user:staff', 'platform:group:staff']
     collection.update(visibility=visibility, principals=readers, writers=writers)
     result = projection.grants_of(collection, service_principal=SERVICE)
     assert {(g.principal_type, g.principal_id, g.permission) for g in result} == {

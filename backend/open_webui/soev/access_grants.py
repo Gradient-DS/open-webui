@@ -30,7 +30,7 @@ class SoevAccessGrantsTable(AccessGrantsTable):
         if not resource_ids:
             return set()
         if not user_id and user_group_ids is not None:
-            principals = {f'owui:group:{group_id}' for group_id in user_group_ids}
+            principals = {f'platform:group:{group_id}' for group_id in user_group_ids}
             field = {'read': 'principals', 'write': 'writers'}.get(permission)
             if not principals or field is None:
                 return set()

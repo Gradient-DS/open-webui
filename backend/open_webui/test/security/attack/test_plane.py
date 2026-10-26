@@ -57,7 +57,7 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
 
 def test_body_builder_can_plant_each_derived_field():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (194, 2134)
+    assert (len(fields), sum(map(len, fields.values()))) == (194, 2135)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name

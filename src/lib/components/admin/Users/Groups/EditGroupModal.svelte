@@ -18,8 +18,6 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	export let onSubmit: Function = () => {};
-	export let onDelete: Function = () => {};
-	export let onMemberChange: Function = () => {};
 
 	export let show = false;
 	export let edit = false;
@@ -33,7 +31,6 @@
 
 	let selectedTab = 'general';
 	let loading = false;
-	let showDeleteConfirmDialog = false;
 	let showResetConfirmDialog = false;
 
 	let userCount = 0;
@@ -48,8 +45,6 @@
 		loading = true;
 
 		const group = {
-			name,
-			description,
 			data,
 			permissions
 		};
@@ -112,14 +107,6 @@
 		init();
 	});
 </script>
-
-<ConfirmDialog
-	bind:show={showDeleteConfirmDialog}
-	on:confirm={() => {
-		onDelete();
-		show = false;
-	}}
-/>
 
 <ConfirmDialog
 	bind:show={showResetConfirmDialog}
@@ -269,19 +256,11 @@
 						<div class="flex-1 mt-1 lg:mt-1 lg:h-[30rem] lg:max-h-[30rem] flex flex-col">
 							<div class="w-full h-full overflow-y-auto scrollbar-hidden">
 								{#if selectedTab == 'general'}
-									<General
-										bind:name
-										bind:description
-										bind:data
-										{edit}
-										onDelete={() => {
-											showDeleteConfirmDialog = true;
-										}}
-									/>
+									<General bind:name bind:description bind:data />
 								{:else if selectedTab == 'permissions'}
 									<Permissions bind:permissions {defaultPermissions} />
 								{:else if selectedTab == 'users'}
-									<Users bind:userCount groupId={group?.id} {onMemberChange} />
+									<Users bind:userCount groupId={group?.id} />
 								{:else if selectedTab == 'preview'}
 									<GroupPreviewPanel groupId={group?.id} />
 								{/if}

@@ -20,7 +20,6 @@ from open_webui.models.feedbacks import Feedback
 from open_webui.models.files import File
 from open_webui.models.folders import Folder
 from open_webui.models.functions import Function
-from open_webui.models.groups import Group, GroupMember
 from open_webui.models.knowledge import Knowledge, KnowledgeDirectory, KnowledgeFile
 from open_webui.models.memories import Memory
 from open_webui.models.models import Model
@@ -33,7 +32,8 @@ from open_webui.models.tools import Tool
 from open_webui.models.user_archives import UserArchive
 from open_webui.models.users import ApiKey, User, UserModel
 from open_webui.services.archival.service import ArchiveService
-from open_webui.soev import group_sync, identity
+from open_webui.soev import identity
+from open_webui.soev.archive import archive_group_ref
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.thread_content import refuse_local_content
@@ -152,13 +152,6 @@ def _archive_record(
     )
 
 
-async def narrow_owned_groups(user_id: str, *, db: AsyncSession) -> None:
-    """Clear owned directory groups before their local rows are deleted."""
-    ids = (await db.execute(select(Group.id).where(Group.user_id == user_id))).scalars()
-    for group_id in ids:
-        await group_sync.narrow(group_id, [])
-
-
 async def delete_external_user_data(user_id: str, *, options: OffboardingOptions, db: AsyncSession) -> None:
     """Erase memory vectors, disposable files and bookmarked threads before unlinking."""
     await _delete_memory_vectors(user_id)
@@ -229,15 +222,6 @@ async def finalize_local(
     for table in DELETE_USER_TABLES:
         await db.execute(delete(table).where(table.user_id == user_id))
     await db.execute(
-        delete(GroupMember).where(
-            or_(
-                GroupMember.user_id == user_id,
-                GroupMember.group_id.in_(select(Group.id).where(Group.user_id == user_id)),
-            )
-        )
-    )
-    await db.execute(delete(Group).where(Group.user_id == user_id))
-    await db.execute(
         delete(AccessGrant).where(AccessGrant.principal_type == 'user', AccessGrant.principal_id == user_id)
     )
     await db.execute(delete(Auth).where(Auth.id == user_id))
@@ -246,7 +230,7 @@ async def finalize_local(
 
 
 async def _dispose_resources(user_id: str, *, options: OffboardingOptions, db: AsyncSession) -> None:
-    from open_webui.soev.group_sync import ARCHIVE_OWNER
+    from open_webui.soev.archive import ARCHIVE_OWNER
 
     owner = ARCHIVE_OWNER if options.mode == 'archive' else options.transfer_to
     await _delete_cloud_rows(user_id, db=db)
@@ -309,7 +293,7 @@ async def _archive_grants(kind: str, ids: list[str], *, db: AsyncSession) -> Non
                 resource_type=kind,
                 resource_id=resource_id,
                 principal_type='group',
-                principal_id=group_sync.ADMIN_ARCHIVE_GROUP,
+                principal_id=archive_group_ref().removeprefix('platform:group:'),
                 permission='read',
                 created_at=int(time.time()),
             )

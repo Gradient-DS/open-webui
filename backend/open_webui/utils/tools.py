@@ -637,7 +637,9 @@ async def get_builtin_tools(
             )
 
     # Chats tools - search and fetch user's chat history
-    if is_builtin_tool_enabled('chats'):
+    from open_webui.soev import threads
+
+    if is_builtin_tool_enabled('chats') and not threads.enabled():
         builtin_functions.extend([search_chats, view_chat])
 
     if (

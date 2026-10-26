@@ -59,8 +59,8 @@ _NOT_ENTERED_MARKERS = (
     RefusalMarker(
         (401, 403), _PROHIBITED, 'utils/auth.py', 'get_current_user_by_api_key', 519, 'ACCESS_PROHIBITED', 70
     ),
-    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 1000, 'RATE_LIMIT_EXCEEDED', 87),
-    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 1055, 'INVALID_CRED', 60),
+    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 1004, 'RATE_LIMIT_EXCEEDED', 87),
+    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 1059, 'INVALID_CRED', 60),
     RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 416, 'UNAUTHORIZED', 69),
     RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 462, 'UNAUTHORIZED', 69),
     RefusalMarker((401,), 'User mismatch. Please sign in again.', 'utils/auth.py', 'get_current_user', 438),

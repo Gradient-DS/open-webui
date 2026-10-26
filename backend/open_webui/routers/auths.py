@@ -695,6 +695,10 @@ async def ldap_auth(
     LDAP_VALIDATE_CERT = CERT_REQUIRED if await Config.get('ldap.server.validate_cert') else CERT_NONE
     LDAP_CIPHERS = await Config.get('ldap.server.ciphers') if await Config.get('ldap.server.ciphers') else 'ALL'
 
+    if await Config.get('ldap.group.enable_management'):
+        from open_webui.soev.group_policy import refuse_group_write
+
+        refuse_group_write()
     try:
         tls = Tls(
             validate=LDAP_VALIDATE_CERT,

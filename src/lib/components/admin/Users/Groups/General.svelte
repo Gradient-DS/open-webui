@@ -1,17 +1,12 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let name = '';
-	export let color = '';
 	export let description = '';
 	export let data = {};
-
-	export let edit = false;
-	export let onDelete: Function = () => {};
 </script>
 
 <div class="flex gap-2">
@@ -25,7 +20,7 @@
 				bind:value={name}
 				placeholder={$i18n.t('Group Name')}
 				autocomplete="off"
-				required
+				readonly
 			/>
 		</div>
 	</div>
@@ -58,6 +53,7 @@
 		<Textarea
 			className="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden resize-none"
 			rows={4}
+			readonly
 			bind:value={description}
 			placeholder={$i18n.t('Group Description')}
 		/>
@@ -100,19 +96,3 @@
 		</div>
 	</div>
 </div>
-
-{#if edit}
-	<div class="flex flex-col w-full mt-2">
-		<div class=" mb-0.5 text-xs text-gray-500">{$i18n.t('Actions')}</div>
-
-		<div class="flex-1">
-			<button
-				class="text-xs bg-transparent hover:underline cursor-pointer"
-				type="button"
-				on:click={() => onDelete()}
-			>
-				{$i18n.t('Delete')}
-			</button>
-		</div>
-	</div>
-{/if}
