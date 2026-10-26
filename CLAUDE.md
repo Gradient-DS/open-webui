@@ -268,9 +268,12 @@ access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 `soev/group_mirror.py` pulls platform groups and flattened person memberships from paged `GET /v1/groups`
 at startup and every third of `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS` from pull start (required as 5 with
 `SOEV_API_URL`, the platform revocation bound); `SOEV_GROUP_RECONCILE_MINUTES` may shorten that interval. A database
-lease selects one puller; other workers observe the committed generation. Process-local monotonic deadlines
-confer no membership before a new generation or after expiry, including through precomputed ids; failed pulls
-and repeated observations never renew it. Unchanged snapshots renew the generation without rewriting memberships.
+lease of bound/3 selects one puller, renewed by heartbeats while fetching. Each attempt records its start on the
+database clock, published atomically with memberships on success. Membership SQL checks database time against that
+start plus the bound, including through precomputed ids; absent or expired evidence grants nothing. Unchanged
+snapshots refresh evidence without rewriting memberships. Database and network waits are bounded; fencing refuses
+superseded pullers. The application database role can forge evidence, an accepted risk because it can already write
+access grants.
 Snapshot refs and stored person bindings are canonical UUID refs, with unique person bindings enforced in storage. Non-admin
 directory reads show only member groups and shared memberships. Only the mirror writes group identity or
 membership; group routes and OAuth/SCIM/LDAP management refuse `403 platform_groups_read_only`.

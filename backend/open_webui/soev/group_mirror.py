@@ -3,19 +3,16 @@
 import asyncio
 import logging
 import time
-from time import monotonic
 from uuid import uuid4
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ValidationError, model_validator
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from open_webui import config
 from open_webui.internal.db import get_async_db_context
-from open_webui.models import groups as group_models
-from open_webui.models.groups import Group, GroupMember, GroupSnapshot, GroupTable, require_snapshot_verification
+from open_webui.models.groups import DatabaseTime, Group, GroupMember, GroupSnapshot, GroupTable
 from open_webui.models.users import User
 from open_webui.soev.client import SoevApiError, build_service_client
 from open_webui.soev.principal_refs import is_canonical_person_ref, is_canonical_uuid
@@ -48,28 +45,125 @@ def _interval() -> float:
     return min(config.SOEV_GROUP_RECONCILE_MINUTES * 60, config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS / 3)
 
 
-def _database_now(session: AsyncSession) -> ColumnElement[float]:
+async def _database_timeouts(session: AsyncSession, seconds: float) -> None:
     if session.bind.dialect.name == 'postgresql':
-        return func.extract('epoch', func.clock_timestamp())
-    return (func.julianday('now') - 2440587.5) * 86400
-
-
-async def observe_generation(*, db: AsyncSession | None = None) -> bool:
-    async with get_async_db_context(db) as session:
-        now = _database_now(session)
-        row = (
-            await session.execute(
-                select(
-                    GroupSnapshot.generation,
-                    GroupSnapshot.pull_seconds,
-                    (GroupSnapshot.lease_until <= now) & (GroupSnapshot.next_pull_at <= now),
-                ).where(GroupSnapshot.id == 'directory')
+        milliseconds = str(max(1, int(seconds * 1000)))
+        await session.execute(
+            select(
+                func.set_config('statement_timeout', milliseconds, True),
+                func.set_config('lock_timeout', milliseconds, True),
             )
-        ).one_or_none()
-        if row is None:
-            return False
-        group_models._snapshot_verification.observe(row[0], row[1])
-        return bool(row[2])
+        )
+
+
+async def _pull_due(*, db: AsyncSession | None = None) -> bool:
+    async with asyncio.timeout(_interval()), get_async_db_context(db) as session:
+        await _database_timeouts(session, _interval())
+        return bool(
+            await session.scalar(
+                select(GroupSnapshot.id).where(
+                    GroupSnapshot.id == 'directory',
+                    GroupSnapshot.lease_until <= DatabaseTime(),
+                    GroupSnapshot.next_pull_at <= DatabaseTime(),
+                )
+            )
+        )
+
+
+async def _renew_lease(session: AsyncSession, token: str) -> None:
+    bound = config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS
+    lease = bound / 3
+    async with asyncio.timeout(lease):
+        await _database_timeouts(session, lease)
+        renewed = await session.scalar(
+            update(GroupSnapshot)
+            .where(
+                GroupSnapshot.id == 'directory',
+                GroupSnapshot.lease_token == token,
+                GroupSnapshot.lease_until > DatabaseTime(),
+                GroupSnapshot.pull_started_at + bound > DatabaseTime(),
+            )
+            .values(lease_until=DatabaseTime() + lease)
+            .returning(GroupSnapshot.id)
+            .execution_options(synchronize_session=False)
+        )
+        if renewed is None:
+            raise RuntimeError('Directory pull exceeded its lease or validity bound')
+        await session.commit()
+
+
+async def _heartbeat(session: AsyncSession, token: str, stop: asyncio.Event) -> None:
+    sessions = async_sessionmaker(session.bind, expire_on_commit=False)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS / 9)
+        except TimeoutError:
+            async with sessions() as heartbeat_session:
+                await _renew_lease(heartbeat_session, token)
+
+
+async def _fetch_with_heartbeat(session: AsyncSession, token: str) -> dict[str, PlatformGroup]:
+    stop = asyncio.Event()
+    fetch = asyncio.create_task(_fetch_groups())
+    heartbeat = asyncio.create_task(_heartbeat(session, token, stop))
+    try:
+        done, _ = await asyncio.wait({fetch, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
+        if heartbeat in done:
+            await heartbeat
+        return await fetch
+    finally:
+        stop.set()
+        fetch.cancel()
+        heartbeat.cancel()
+        await asyncio.gather(fetch, heartbeat, return_exceptions=True)
+
+
+async def _publish_snapshot(
+    session: AsyncSession, token: str, started: float, groups: dict[str, PlatformGroup]
+) -> None:
+    bound = config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS
+    # Lock the fencing row before any membership writes. A successor cannot claim
+    # the row until the entire replacement commits or rolls back.
+    fenced = await session.scalar(
+        update(GroupSnapshot)
+        .where(
+            GroupSnapshot.id == 'directory',
+            GroupSnapshot.lease_token == token,
+            GroupSnapshot.lease_until > DatabaseTime(),
+            DatabaseTime() < started + bound,
+        )
+        .values(lease_until=DatabaseTime() + bound / 3)
+        .returning(GroupSnapshot.id)
+        .execution_options(synchronize_session=False)
+    )
+    if fenced is None:
+        raise RuntimeError('Directory pull exceeded its lease or validity bound')
+    remaining = await session.scalar(select(started + bound - DatabaseTime()))
+    publish_seconds = max(0, min(remaining, bound / 3))
+    async with asyncio.timeout(publish_seconds):
+        await _database_timeouts(session, publish_seconds)
+        await _replace_snapshot(session, groups)
+        published = await session.scalar(
+            update(GroupSnapshot)
+            .where(
+                GroupSnapshot.id == 'directory',
+                GroupSnapshot.lease_token == token,
+                GroupSnapshot.lease_until > DatabaseTime(),
+                DatabaseTime() < started + bound,
+            )
+            .values(
+                fetch_started_at=started,
+                fetched_at=started,
+                completed_at=DatabaseTime(),
+                lease_token=None,
+                lease_until=0,
+            )
+            .returning(GroupSnapshot.id)
+            .execution_options(synchronize_session=False)
+        )
+        if published is None:
+            raise RuntimeError('Directory pull exceeded its lease or validity bound')
+        await session.commit()
 
 
 async def reconcile(*, db: AsyncSession | None = None, scheduled: bool = False) -> None:
@@ -82,56 +176,47 @@ async def reconcile(*, db: AsyncSession | None = None, scheduled: bool = False) 
     async with _lock[1], get_async_db_context(db) as session:
         token = str(uuid4())
         bound = config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS
-        now = _database_now(session)
-        conditions = [GroupSnapshot.id == 'directory', GroupSnapshot.lease_until <= now]
+        conditions = [GroupSnapshot.id == 'directory', GroupSnapshot.lease_until <= DatabaseTime()]
         if scheduled:
-            conditions.append(GroupSnapshot.next_pull_at <= now)
+            conditions.append(GroupSnapshot.next_pull_at <= DatabaseTime())
         try:
-            claimed = await session.scalar(
-                update(GroupSnapshot)
-                .where(*conditions)
-                .values(lease_token=token, lease_until=now + bound * 2, next_pull_at=now + _interval())
-                .returning(GroupSnapshot.generation)
-                .execution_options(synchronize_session=False)
-            )
-            await session.commit()
-            if claimed is None:
-                return
-            started = monotonic()
-            fetched_at = time.time()
-            groups = await asyncio.wait_for(_fetch_groups(), timeout=bound)
-            await _replace_snapshot(session, groups)
-            pull_seconds = monotonic() - started
-            # The token fences a slow or abandoned pull after another worker takes over.
-            generation = await session.scalar(
-                update(GroupSnapshot)
-                .where(
-                    GroupSnapshot.id == 'directory', GroupSnapshot.lease_token == token, GroupSnapshot.lease_until > now
-                )
-                .values(
-                    generation=GroupSnapshot.generation + 1,
-                    fetched_at=fetched_at,
-                    completed_at=time.time(),
-                    pull_seconds=pull_seconds,
-                    lease_token=None,
-                    lease_until=0,
-                )
-                .returning(GroupSnapshot.generation)
-                .execution_options(synchronize_session=False)
-            )
-            if generation is None or pull_seconds >= bound:
-                raise RuntimeError('Directory pull exceeded its lease or validity bound')
-            await session.commit()
-            group_models._snapshot_verification.verify(generation, started + bound)
+            # This timeout includes acquisition, network work and publication. The
+            # database timestamp, rather than this local timer, authorizes readers.
+            async with asyncio.timeout(bound):
+                async with asyncio.timeout(bound / 3):
+                    await _database_timeouts(session, bound / 3)
+                    started = await session.scalar(
+                        update(GroupSnapshot)
+                        .where(*conditions)
+                        .values(
+                            lease_token=token,
+                            lease_until=DatabaseTime() + bound / 3,
+                            pull_started_at=DatabaseTime(),
+                            next_pull_at=DatabaseTime() + _interval(),
+                        )
+                        .returning(GroupSnapshot.pull_started_at)
+                        .execution_options(synchronize_session=False)
+                    )
+                    await session.commit()
+                if started is None:
+                    return
+                remaining = await session.scalar(select(started + bound - DatabaseTime()))
+                async with asyncio.timeout(max(0, remaining)):
+                    groups = await _fetch_with_heartbeat(session, token)
+                    await _database_timeouts(session, remaining)
+                    await _publish_snapshot(session, token, started, groups)
         except BaseException:
-            await session.rollback()
-            await session.execute(
-                update(GroupSnapshot)
-                .where(GroupSnapshot.id == 'directory', GroupSnapshot.lease_token == token)
-                .values(lease_token=None, lease_until=0)
-                .execution_options(synchronize_session=False)
-            )
-            await session.commit()
+            # Cleanup is bounded too; a failed cleanup leaves only a short lease.
+            async with asyncio.timeout(bound / 3):
+                await session.rollback()
+                await _database_timeouts(session, bound / 3)
+                await session.execute(
+                    update(GroupSnapshot)
+                    .where(GroupSnapshot.id == 'directory', GroupSnapshot.lease_token == token)
+                    .values(lease_token=None, lease_until=0)
+                    .execution_options(synchronize_session=False)
+                )
+                await session.commit()
             raise
 
 
@@ -222,10 +307,10 @@ async def _run(stop: asyncio.Event) -> None:
     try:
         while not stop.is_set():
             try:
-                if await observe_generation():
+                if await _pull_due():
                     await reconcile(scheduled=True)
             except Exception:
-                # Only a complete pull renews evidence; observing a lease never does.
+                # Only a complete pull renews evidence.
                 log.warning('soev-api group reconciliation unavailable')
             await asyncio.sleep(poll_interval)
     except asyncio.CancelledError:
@@ -233,7 +318,6 @@ async def _run(stop: asyncio.Event) -> None:
 
 
 def start_reconciler(app: FastAPI) -> None:
-    require_snapshot_verification()
     app.state.soev_group_reconciler_stop = asyncio.Event()
     app.state.soev_group_reconciler = asyncio.create_task(_run(app.state.soev_group_reconciler_stop))
 

@@ -1,8 +1,6 @@
 import logging
 import time
-from dataclasses import dataclass
-from time import monotonic
-from typing import Optional
+from typing import Any, Optional
 
 from open_webui.env import DEFAULT_GROUP_SHARE_PERMISSION
 from open_webui.internal.db import Base, get_async_db_context
@@ -17,14 +15,16 @@ from sqlalchemy import (
     Index,
     Text,
     and_,
-    bindparam,
     func,
     or_,
     select,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.compiler import SQLCompiler
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.functions import FunctionElement
 
 log = logging.getLogger(__name__)
 
@@ -59,62 +59,38 @@ class GroupSnapshot(Base):
     id = Column(Text, primary_key=True)
     fetched_at = Column(Float, nullable=False)
     completed_at = Column(Float, nullable=False)
-    generation = Column(BigInteger, nullable=False, default=0)
-    pull_seconds = Column(Float, nullable=False, default=0)
+    fetch_started_at = Column(Float, nullable=True)
+    pull_started_at = Column(Float, nullable=True)
     lease_token = Column(Text, nullable=True)
     lease_until = Column(Float, nullable=False, default=0)
     next_pull_at = Column(Float, nullable=False, default=0)
 
 
-@dataclass
-class SnapshotVerification:
-    observed_generation: int | None = None
-    observed_at: float = 0.0
-    accepted_generation: int = -1
-    verified_until: float = 0.0
-
-    def verify(self, generation: int, verified_until: float) -> None:
-        if generation != self.accepted_generation:
-            self.accepted_generation = generation
-            self.verified_until = verified_until
-        self.observed_generation = generation
-        self.observed_at = monotonic()
-
-    def observe(self, generation: int, pull_seconds: float) -> None:
-        from open_webui import config
-
-        now = monotonic()
-        bound = config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS or 0
-        # The first poll establishes a baseline, never evidence from a past process.
-        # A delayed poll cannot give an old generation a new full lifetime.
-        if self.observed_generation is not None and generation > self.observed_generation:
-            self.verify(generation, min(self.observed_at + bound, now + bound - pull_seconds))
-        self.observed_generation = generation
-        self.observed_at = now
-
-    def current_generation(self) -> int | None:
-        return self.accepted_generation if monotonic() < self.verified_until else None
+class DatabaseTime(FunctionElement):
+    type = Float()
+    inherit_cache = True
 
 
-_snapshot_verification = SnapshotVerification()
+@compiles(DatabaseTime)
+def _database_time(element: DatabaseTime, compiler: SQLCompiler, **kwargs: Any) -> str:
+    return 'EXTRACT(epoch FROM clock_timestamp())'
 
 
-def require_snapshot_verification() -> None:
-    global _snapshot_verification
-    _snapshot_verification = SnapshotVerification()
+@compiles(DatabaseTime, 'sqlite')
+def _sqlite_database_time(element: DatabaseTime, compiler: SQLCompiler, **kwargs: Any) -> str:
+    return "ROUND((julianday('now') - 2440587.5) * 86400, 3)"
 
 
 def snapshot_is_fresh() -> ColumnElement[bool]:
-    generation = bindparam(
-        'group_snapshot_generation',
-        callable_=lambda: _snapshot_verification.current_generation(),
-        type_=BigInteger,
-        unique=True,
-    )
+    from open_webui import config
+
     return (
-        # Atomic replacement can use the existing deadline until the next poll; it
-        # never renews that deadline and membership queries read the replacement.
-        select(GroupSnapshot.id).where(GroupSnapshot.id == 'directory', GroupSnapshot.generation >= generation).exists()
+        select(GroupSnapshot.id)
+        .where(
+            GroupSnapshot.id == 'directory',
+            DatabaseTime() < GroupSnapshot.fetch_started_at + (config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS or 0),
+        )
+        .exists()
     )
 
 

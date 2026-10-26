@@ -24,7 +24,7 @@ async def test_stop_ends_a_reconciler_whose_cancellation_is_swallowed(monkeypatc
             pass
 
     monkeypatch.setattr(group_mirror, 'reconcile', swallowing_reconcile)
-    monkeypatch.setattr(group_mirror, 'observe_generation', AsyncMock(return_value=True))
+    monkeypatch.setattr(group_mirror, '_pull_due', AsyncMock(return_value=True))
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://directory.invalid')
     monkeypatch.setattr('open_webui.config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
     monkeypatch.setattr('open_webui.config.SOEV_GROUP_RECONCILE_MINUTES', 0)

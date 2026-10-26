@@ -267,7 +267,6 @@ async def test_archive_assistant_follows_platform_readers_not_local_admins(offbo
     from open_webui.models.users import Users
 
     store = offboard_store
-    monkeypatch.setattr(groups, '_snapshot_verification', groups.SnapshotVerification())
     store.db.add(groups.GroupSnapshot(id='directory', fetched_at=0, completed_at=0))
     await Users.insert_new_user('rook', 'Rook', 'rook@example.invalid', role='admin', db=store.db)
     await store.module.offboard_user(

@@ -119,12 +119,8 @@ async def role_store(identity_config, monkeypatch, platform_capabilities):
 
 @pytest.fixture
 def snapshot_clock(monkeypatch):
-    from open_webui.models import groups
-
-    now = [100.0]
-    monkeypatch.setattr(groups, 'monotonic', lambda: now[0])
-    monkeypatch.setattr(groups, '_snapshot_verification', groups.SnapshotVerification())
-    return now
+    # SQLite's SQL clock is controlled independently of every worker clock.
+    return [100.0]
 
 
 @pytest_asyncio.fixture
@@ -142,6 +138,7 @@ async def group_db(identity_config, monkeypatch, snapshot_clock):
     @event.listens_for(engine.sync_engine, 'connect')
     def enable_foreign_keys(connection, _):
         connection.execute('PRAGMA foreign_keys=ON')
+        connection.create_function('julianday', 1, lambda _: snapshot_clock[0] / 86400 + 2440587.5)
 
     async with engine.begin() as conn:
         await conn.run_sync(
@@ -201,12 +198,7 @@ async def group_db(identity_config, monkeypatch, snapshot_clock):
             ]
         )
         await db.flush()
-        import time
-
-        db.add(GroupSnapshot(id='directory', fetched_at=time.time(), completed_at=time.time(), generation=1))
-        from open_webui.models import groups
-
-        groups._snapshot_verification.verify(1, snapshot_clock[0] + 5)
+        db.add(GroupSnapshot(id='directory', fetched_at=100, completed_at=100, fetch_started_at=100))
         db.add(
             GroupMember(
                 id='membership',

@@ -22,8 +22,8 @@ roles do not grant archive readership.
 
 Groups and flattened person memberships are pulled from paged `GET /v1/groups`
 at startup and at most every third of the snapshot lifetime (5/3 seconds), measured
-from the start of each pull. One worker holds a database lease; the others poll
-the committed generation row.
+from the start of each pull. One worker holds a database lease of 5/3 seconds,
+renewed by heartbeats while fetching; the others poll the lease and schedule row.
 `SOEV_GROUP_RECONCILE_MINUTES` (default 15) may shorten that interval. The product
 credential needs directory read. A failed or invalid page preserves the previous
 complete snapshot without renewing its validity; retries use the same bound. The console manages
@@ -277,12 +277,20 @@ unit chooses the production size from measured first-paint and paging times.
 
 The directory mirror requires `SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS=5` when
 `SOEV_API_URL` is set, matching the platform grant-context revocation bound.
-Group authorization fails closed until this worker commits a complete pull or
-observes a new committed generation after establishing its startup baseline. Each worker uses a process-local monotonic deadline, with pull latency
-consuming the bound. Reobserving the same generation never renews it, and clock
-steps cannot revive expired membership. Failed or slow pulls do not renew validity.
-Unchanged snapshots advance the generation without rewriting memberships. The
-refresh interval is capped at one third of the bound, including retries;
-`SOEV_GROUP_RECONCILE_MINUTES` may shorten it. Note and collaborative document
-events recheck each recipient on its delivery worker and evict readers who lost
-access, including when a group snapshot expires.
+Group authorization checks the database clock in the SQL that reads memberships:
+`clock_timestamp() < fetch_started_at + bound`. The claim records each attempt's
+start in database time before fetching, and successful replacement publishes that
+start atomically with the memberships. An absent or expired snapshot grants no
+membership; startup needs no worker baseline. Worker clocks and delayed reads
+cannot extend validity. Failed or slow pulls do not renew evidence. Unchanged
+snapshots refresh evidence without rewriting memberships. The refresh interval is
+capped at one third of the bound, including retries; `SOEV_GROUP_RECONCILE_MINUTES`
+may shorten it. Database waits and the complete network fetch have timeouts within
+the remaining validity, and a fencing token prevents superseded pullers from
+committing. Note and collaborative document events recheck each recipient on its
+delivery worker and evict readers who lost access, including when a group snapshot
+expires.
+
+The application database role can forge mirror evidence. This is an accepted
+residual risk: the same role can already write access grants directly. A separate
+publisher role is not part of this design.

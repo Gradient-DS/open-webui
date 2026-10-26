@@ -225,7 +225,7 @@ async def test_product_permissions_are_local_configuration_only(group_db, monkey
 async def test_startup_periodic_and_failure_retry(monkeypatch):
     calls = AsyncMock(side_effect=[RuntimeError('offline'), None, asyncio.CancelledError])
     monkeypatch.setattr(group_mirror, 'reconcile', calls)
-    monkeypatch.setattr(group_mirror, 'observe_generation', AsyncMock(return_value=True))
+    monkeypatch.setattr(group_mirror, '_pull_due', AsyncMock(return_value=True))
     monkeypatch.setattr(group_mirror.config, 'SOEV_API_URL', 'https://directory.invalid')
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_RECONCILE_MINUTES', 1)
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
@@ -369,7 +369,7 @@ async def test_platform_group_pull_over_real_http(group_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('state', ['never', 'restart', 'expired', 'unobserved'])
+@pytest.mark.parametrize('state', ['never', 'expired', 'unverified'])
 async def test_unverified_snapshots_grant_no_membership(group_db, snapshot_clock, state):
 
     from open_webui.models import groups as model
@@ -382,12 +382,10 @@ async def test_unverified_snapshots_grant_no_membership(group_db, snapshot_clock
     snapshot = await group_db.get(model.GroupSnapshot, 'directory')
     if state == 'never':
         await group_db.execute(delete(model.GroupSnapshot))
-    elif state == 'restart':
-        model.require_snapshot_verification()
     elif state == 'expired':
         snapshot_clock[0] += 5
     else:
-        model._snapshot_verification = model.SnapshotVerification(observed_generation=snapshot.generation)
+        snapshot.fetch_started_at = None
     group_db.add_all(
         [
             AccessGrant(
@@ -543,12 +541,10 @@ async def test_refresh_revocation_overrides_precomputed_memberships(group_db, mo
 
 @pytest.mark.asyncio
 async def test_failed_refresh_never_renews_snapshot(group_db, monkeypatch):
-    from open_webui.models import groups as model
     from open_webui.models.groups import GroupSnapshot
 
     before = await group_db.get(GroupSnapshot, 'directory')
-    before_times = before.fetched_at, before.completed_at, before.generation
-    deadline = model._snapshot_verification.verified_until
+    before_times = before.fetched_at, before.completed_at, before.fetch_started_at
     monkeypatch.setattr(
         group_mirror,
         'build_service_client',
@@ -560,8 +556,7 @@ async def test_failed_refresh_never_renews_snapshot(group_db, monkeypatch):
         with pytest.raises(group_mirror.SoevApiError):
             await group_mirror.reconcile(db=group_db)
         current = await group_db.get(GroupSnapshot, 'directory', populate_existing=True)
-        assert (current.fetched_at, current.completed_at, current.generation) == before_times
-        assert model._snapshot_verification.verified_until == deadline
+        assert (current.fetched_at, current.completed_at, current.fetch_started_at) == before_times
 
 
 @pytest.mark.asyncio
@@ -594,28 +589,19 @@ async def test_snapshot_and_memberships_rollback_together(group_db, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_slow_pull_cannot_extend_evidence_validity(group_db, monkeypatch):
-    import time
-
+async def test_slow_pull_cannot_extend_evidence_validity(group_db, monkeypatch, snapshot_clock):
     from open_webui.models.groups import GroupSnapshot
 
-    started = time.time()
-    clock = [started]
-    elapsed = [0.0]
-    monkeypatch.setattr(group_mirror, 'monotonic', lambda: elapsed[0])
-    monkeypatch.setattr(group_mirror.time, 'time', lambda: clock[0])
-
     async def fetch():
-        clock[0] += 6
-        elapsed[0] += 6
-        return {'13b95f20-57d8-48c6-9a13-042bcf78d021': group_mirror.PlatformGroup.model_validate(row())}
+        snapshot_clock[0] += 6
+        return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
 
     monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
-    before = (await group_db.get(GroupSnapshot, 'directory')).generation
+    before = (await group_db.get(GroupSnapshot, 'directory')).fetch_started_at
     with pytest.raises(RuntimeError, match='validity bound'):
         await group_mirror.reconcile(db=group_db)
     snapshot = await group_db.get(GroupSnapshot, 'directory')
-    assert snapshot.generation == before
+    assert snapshot.fetch_started_at == before
     assert await Groups.get_groups_by_member_id('lark', db=group_db) == []
 
 
@@ -857,12 +843,9 @@ async def test_event_targets_recheck_precomputed_membership(group_db, snapshot_c
 @pytest.mark.parametrize('failure', [False, True])
 async def test_refresh_and_retry_cadence_respect_snapshot_bound(group_db, monkeypatch, snapshot_clock, failure):
     from open_webui.models import groups as model
-    from sqlalchemy import literal
 
     now = snapshot_clock
     attempted_at = []
-    monkeypatch.setattr(group_mirror, 'monotonic', lambda: now[0])
-    monkeypatch.setattr(group_mirror, '_database_now', lambda session: literal(now[0]))
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_RECONCILE_MINUTES', 15)
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
 
@@ -880,10 +863,10 @@ async def test_refresh_and_retry_cadence_respect_snapshot_bound(group_db, monkey
         if not failure:
             assert await group_db.scalar(select(model.snapshot_is_fresh()))
 
-    reconcile, observe = group_mirror.reconcile, group_mirror.observe_generation
+    reconcile, observe = group_mirror.reconcile, group_mirror._pull_due
     monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
     monkeypatch.setattr(group_mirror, 'reconcile', lambda **kwargs: reconcile(db=group_db, **kwargs))
-    monkeypatch.setattr(group_mirror, 'observe_generation', lambda: observe(db=group_db))
+    monkeypatch.setattr(group_mirror, '_pull_due', lambda: observe(db=group_db))
     monkeypatch.setattr(group_mirror.asyncio, 'sleep', pause)
     await group_mirror._run(asyncio.Event())
     assert len(attempted_at) >= 4
@@ -955,7 +938,7 @@ async def test_tool_write_access_rechecks_membership_after_list_read(group_db, m
 
 
 @pytest.mark.asyncio
-async def test_startup_requires_a_new_successful_pull(group_db, monkeypatch):
+async def test_startup_uses_database_freshness_without_worker_baseline(group_db, monkeypatch):
     from open_webui.models import groups as model
 
     assert await Groups.get_groups_by_member_id('fern', db=group_db)
@@ -969,8 +952,8 @@ async def test_startup_requires_a_new_successful_pull(group_db, monkeypatch):
     app = SimpleNamespace(state=SimpleNamespace())
     group_mirror.start_reconciler(app)
     try:
-        assert not await group_db.scalar(cached_query)
-        assert await Groups.get_groups_by_member_id('fern', db=group_db) == []
+        assert await group_db.scalar(cached_query)
+        assert await Groups.get_groups_by_member_id('fern', db=group_db)
         monkeypatch.setattr(
             group_mirror,
             'build_service_client',
@@ -995,63 +978,34 @@ async def test_backward_wall_clock_never_revives_or_extends_snapshot(group_db, m
     assert await group_db.scalar(cached)
     snapshot_clock[0] += 0.1
     assert not await group_db.scalar(cached)
-    await group_mirror.observe_generation(db=group_db)
+    await group_mirror._pull_due(db=group_db)
     assert not await group_db.scalar(cached)
     monkeypatch.setattr(group_mirror.time, 'time', lambda: 0)
-    await group_mirror.observe_generation(db=group_db)
+    await group_mirror._pull_due(db=group_db)
     assert not await group_db.scalar(cached)
 
 
 @pytest.mark.asyncio
-async def test_workers_accept_only_new_generations_and_never_renew_same_generation(
-    group_db, monkeypatch, snapshot_clock
-):
+async def test_delayed_worker_cannot_revive_expired_database_evidence(group_db, snapshot_clock):
     from open_webui.models import groups as model
-    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    reader = model.SnapshotVerification()
-    monkeypatch.setattr(model, '_snapshot_verification', reader)
-    await group_mirror.observe_generation(db=group_db)
-    assert not await group_db.scalar(select(model.snapshot_is_fresh()))
-    snapshot_clock[0] += 0.1
-    await group_db.execute(update(model.GroupSnapshot).values(generation=2, pull_seconds=1))
-    await group_db.commit()
-    await group_mirror.observe_generation(db=group_db)
-    assert await group_db.scalar(select(model.snapshot_is_fresh()))
-    until = reader.verified_until
-    snapshot_clock[0] = until
-    for _ in range(3):
-        await group_mirror.observe_generation(db=group_db)
-        assert reader.verified_until == until
-        assert not await group_db.scalar(select(model.snapshot_is_fresh()))
-    await group_db.execute(update(model.GroupSnapshot).values(generation=3, pull_seconds=0))
-    await group_db.commit()
-    await group_mirror.observe_generation(db=group_db)
-    assert await group_db.scalar(select(model.snapshot_is_fresh()))
-
-
-@pytest.mark.asyncio
-async def test_delayed_worker_cannot_revive_an_old_generation(group_db, monkeypatch, snapshot_clock):
-    from open_webui.models import groups as model
-    from sqlalchemy import update
-
-    monkeypatch.setattr(model, '_snapshot_verification', model.SnapshotVerification())
-    await group_mirror.observe_generation(db=group_db)
-    await group_db.execute(update(model.GroupSnapshot).values(generation=2))
-    await group_db.commit()
+    sessions = async_sessionmaker(group_db.bind, expire_on_commit=False)
     snapshot_clock[0] += 6
-    await group_mirror.observe_generation(db=group_db)
-    assert not await group_db.scalar(select(model.snapshot_is_fresh()))
+    async with sessions() as follower:
+        for _ in range(3):
+            await group_mirror._pull_due(db=follower)
+            assert not await follower.scalar(select(model.snapshot_is_fresh()))
+            assert await Groups.get_groups_by_member_id('fern', db=follower) == []
 
 
 @pytest.mark.asyncio
-async def test_unchanged_snapshot_renews_generation_without_rewriting_memberships(
+async def test_unchanged_snapshot_refreshes_validity_without_rewriting_memberships(
     group_db, monkeypatch, snapshot_clock
 ):
     from open_webui.models import groups as model
     from sqlalchemy import event
 
-    monkeypatch.setattr(group_mirror, 'monotonic', lambda: snapshot_clock[0])
     monkeypatch.setattr(
         group_mirror,
         '_fetch_groups',
@@ -1059,12 +1013,12 @@ async def test_unchanged_snapshot_renews_generation_without_rewriting_membership
     )
     await group_mirror.reconcile(db=group_db)
     before = (await group_db.execute(select(GroupMember.id, GroupMember.created_at))).all()
-    generation = await group_db.scalar(select(model.GroupSnapshot.generation))
+    started = await group_db.scalar(select(model.GroupSnapshot.fetch_started_at))
     statements = []
     event.listen(group_db.bind.sync_engine, 'before_cursor_execute', lambda *args: statements.append(args[2]))
     snapshot_clock[0] += 4
     await group_mirror.reconcile(db=group_db)
-    assert await group_db.scalar(select(model.GroupSnapshot.generation)) == generation + 1
+    assert await group_db.scalar(select(model.GroupSnapshot.fetch_started_at)) == started + 4
     assert (await group_db.execute(select(GroupMember.id, GroupMember.created_at))).all() == before
     assert not any(
         statement.startswith(
@@ -1079,12 +1033,10 @@ async def test_unchanged_snapshot_renews_generation_without_rewriting_membership
 @pytest.mark.asyncio
 async def test_shared_lease_deduplicates_pulls_and_recovers_after_expiry(group_db, monkeypatch, snapshot_clock):
     from open_webui.models import groups as model
-    from sqlalchemy import literal, update
+    from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     now = snapshot_clock
-    monkeypatch.setattr(group_mirror, 'monotonic', lambda: now[0])
-    monkeypatch.setattr(group_mirror, '_database_now', lambda session: literal(now[0]))
     sessions = async_sessionmaker(group_db.bind, expire_on_commit=False)
     other_worker_observed = []
 
@@ -1093,7 +1045,7 @@ async def test_shared_lease_deduplicates_pulls_and_recovers_after_expiry(group_d
             # Simulate another process, which has its own asyncio lock.
             monkeypatch.setattr(group_mirror, '_lock', None)
             await group_mirror.reconcile(db=other, scheduled=True)
-            other_worker_observed.append(await group_mirror.observe_generation(db=other))
+            other_worker_observed.append(await group_mirror._pull_due(db=other))
         return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
 
     fetch_mock = AsyncMock(side_effect=fetch)
@@ -1105,14 +1057,13 @@ async def test_shared_lease_deduplicates_pulls_and_recovers_after_expiry(group_d
     assert fetch_mock.await_count == 1
     # A dead process's outstanding lease blocks pulls, then expires.
     await group_db.execute(
-        update(model.GroupSnapshot).values(lease_token='fictional-dead-worker', lease_until=now[0] + 10)
+        update(model.GroupSnapshot).values(lease_token='fictional-dead-worker', lease_until=now[0] + 5 / 3)
     )
     await group_db.commit()
-    now[0] += 6
+    now[0] += 1.6
     await group_mirror.reconcile(db=group_db, scheduled=True)
     assert fetch_mock.await_count == 1
-    assert await Groups.get_groups_by_member_id('lark', db=group_db) == []
-    now[0] += 4
+    now[0] += 0.067
     await group_mirror.reconcile(db=group_db, scheduled=True)
     assert fetch_mock.await_count == 2
     assert await Groups.get_groups_by_member_id('lark', db=group_db)
@@ -1304,24 +1255,6 @@ async def test_note_broadcast_revalidates_each_recipient(
 
 
 @pytest.mark.asyncio
-async def test_generation_replacement_keeps_existing_deadline_without_renewing(group_db, snapshot_clock):
-    from open_webui.models import groups as model
-    from sqlalchemy import delete, update
-
-    deadline = model._snapshot_verification.verified_until
-    await group_db.execute(update(model.GroupSnapshot).values(generation=2))
-    await group_db.commit()
-    # A peer's commit must not cause a read outage while this worker is still fresh.
-    assert await Groups.get_groups_by_member_id('fern', db=group_db)
-    await group_db.execute(delete(GroupMember).where(GroupMember.user_id == 'fern'))
-    await group_db.commit()
-    assert await Groups.get_groups_by_member_id('fern', db=group_db) == []
-    assert model._snapshot_verification.verified_until == deadline
-    snapshot_clock[0] = deadline
-    assert not await group_db.scalar(select(model.snapshot_is_fresh()))
-
-
-@pytest.mark.asyncio
 async def test_lease_loss_prevents_stale_snapshot_publication(group_db, monkeypatch):
     from open_webui.models import groups as model
     from sqlalchemy import update
@@ -1338,7 +1271,7 @@ async def test_lease_loss_prevents_stale_snapshot_publication(group_db, monkeypa
     monkeypatch.setattr(group_mirror, '_fetch_groups', fetch_after_takeover)
     with pytest.raises(RuntimeError, match='lease or validity bound'):
         await group_mirror.reconcile(db=group_db)
-    assert await group_db.scalar(select(model.GroupSnapshot.generation)) == 1
+    assert await group_db.scalar(select(model.GroupSnapshot.fetch_started_at)) == 100
     assert await group_db.scalar(select(model.GroupSnapshot.lease_token)) == 'fictional-successor'
     assert await Groups.get_group_user_ids_by_id(row()['id'], db=group_db) == ['fern']
 
@@ -1348,8 +1281,226 @@ async def test_disabled_directory_reconciler_stays_idle(monkeypatch):
     monkeypatch.setattr(group_mirror.config, 'SOEV_API_URL', '')
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', None)
     observe, reconcile = AsyncMock(), AsyncMock()
-    monkeypatch.setattr(group_mirror, 'observe_generation', observe)
+    monkeypatch.setattr(group_mirror, '_pull_due', observe)
     monkeypatch.setattr(group_mirror, 'reconcile', reconcile)
     await group_mirror._run(asyncio.Event())
     observe.assert_not_awaited()
     reconcile.assert_not_awaited()
+
+
+def test_database_clock_sql_uses_live_postgresql_time(identity_config):
+    from open_webui.models.groups import snapshot_is_fresh
+    from sqlalchemy.dialects import postgresql
+
+    sql = str(select(snapshot_is_fresh()).compile(dialect=postgresql.dialect()))
+    assert 'clock_timestamp()' in sql
+    assert 'fetch_started_at' in sql
+    assert 'CURRENT_TIMESTAMP' not in sql
+
+
+def test_database_clock_migration_invalidates_worker_evidence():
+    import importlib
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    initial = importlib.import_module('open_webui.migrations.versions.da27c90f4b61_add_group_snapshot_freshness')
+    generations = importlib.import_module('open_webui.migrations.versions.c7e4a9b26d10_group_snapshot_generations')
+    clock = importlib.import_module('open_webui.migrations.versions.e2f6a1c93d84_group_snapshot_database_clock')
+    engine = sa.create_engine('sqlite:///:memory:')
+    with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
+        initial.upgrade()
+        generations.upgrade()
+        connection.execute(
+            sa.text("UPDATE soev_group_snapshot SET fetched_at=100, generation=7, lease_token='rook', lease_until=999")
+        )
+        clock.upgrade()
+        evidence = connection.execute(
+            sa.text(
+                'SELECT fetch_started_at, pull_started_at, lease_token, lease_until, next_pull_at '
+                'FROM soev_group_snapshot'
+            )
+        ).one()
+        assert tuple(evidence) == (None, None, None, 0, 0)
+        assert not {'generation', 'pull_seconds'} & {
+            column['name'] for column in sa.inspect(connection).get_columns('soev_group_snapshot')
+        }
+        clock.downgrade()
+        assert connection.execute(sa.text('SELECT generation, pull_seconds FROM soev_group_snapshot')).one() == (0, 0)
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_claim_records_database_start_before_network_without_renewing_evidence(
+    group_db, monkeypatch, snapshot_clock
+):
+    from open_webui.models.groups import GroupSnapshot
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    snapshot_clock[0] += 4
+    sessions = async_sessionmaker(group_db.bind, expire_on_commit=False)
+
+    async def fetch():
+        async with sessions() as follower:
+            snapshot = await follower.get(GroupSnapshot, 'directory')
+            assert snapshot.pull_started_at == 104
+            assert snapshot.fetch_started_at == 100
+            assert snapshot.lease_until == pytest.approx(104 + 5 / 3)
+            assert snapshot.next_pull_at == pytest.approx(104 + 5 / 3)
+            snapshot_clock[0] += 1
+            assert await Groups.get_groups_by_member_id('fern', db=follower) == []
+        return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
+
+    monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
+    await group_mirror.reconcile(db=group_db)
+    assert await group_db.scalar(select(GroupSnapshot.fetch_started_at)) == 104
+    snapshot_clock[0] = 109
+    assert await Groups.get_groups_by_member_id('lark', db=group_db) == []
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_keeps_live_puller_past_initial_lease(group_db, monkeypatch, snapshot_clock):
+    from open_webui.models.groups import GroupSnapshot
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    renewed = asyncio.Event()
+    renew = group_mirror._renew_lease
+    renewals = []
+
+    async def track_renewal(session, token):
+        snapshot_clock[0] += 0.6
+        await renew(session, token)
+        renewals.append(snapshot_clock[0])
+        if len(renewals) == 3:
+            renewed.set()
+
+    async def fetch():
+        await asyncio.wait_for(renewed.wait(), timeout=3)
+        sessions = async_sessionmaker(group_db.bind, expire_on_commit=False)
+        async with sessions() as contender:
+            monkeypatch.setattr(group_mirror, '_lock', None)
+            await group_mirror.reconcile(db=contender, scheduled=True)
+        return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
+
+    fetch_mock = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(group_mirror, '_renew_lease', track_renewal)
+    monkeypatch.setattr(group_mirror, '_fetch_groups', fetch_mock)
+    await group_mirror.reconcile(db=group_db)
+    assert len(renewals) == 3
+    assert renewals[-1] > 100 + 5 / 3
+    assert fetch_mock.await_count == 1
+    assert await group_db.scalar(select(GroupSnapshot.fetch_started_at)) == 100
+    assert await Groups.get_groups_by_member_id('lark', db=group_db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['claim', 'fetch', 'replace'])
+async def test_pull_timeouts_bound_database_and_network_waits(group_db, monkeypatch, phase):
+    from open_webui.models.groups import GroupSnapshot
+
+    monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 0.15)
+    cancelled = asyncio.Event()
+
+    async def block(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    fetch = AsyncMock(return_value={row()['id']: group_mirror.PlatformGroup.model_validate(row())})
+    monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
+    if phase == 'claim':
+        original = group_db.scalar
+
+        async def stall_claim(statement, *args, **kwargs):
+            if statement.is_update:
+                await block()
+            return await original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(group_db, 'scalar', stall_claim)
+    elif phase == 'fetch':
+        monkeypatch.setattr(group_mirror, '_fetch_groups', block)
+    else:
+        monkeypatch.setattr(group_mirror, '_replace_snapshot', block)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(group_mirror.reconcile(db=group_db), timeout=1)
+    assert cancelled.is_set()
+    assert await group_db.scalar(select(GroupSnapshot.fetch_started_at)) == 100
+    assert await group_db.scalar(select(GroupSnapshot.lease_token)) is None
+    assert (await group_db.execute(select(GroupMember.user_id))).scalars().all() == ['fern']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('elapsed', [2, 5])
+async def test_expiry_during_replacement_rolls_back_memberships_and_evidence(
+    group_db, monkeypatch, snapshot_clock, elapsed
+):
+    from open_webui.models.groups import GroupSnapshot
+
+    replace = group_mirror._replace_snapshot
+
+    async def expire_after_writes(session, groups):
+        await replace(session, groups)
+        snapshot_clock[0] += elapsed
+
+    monkeypatch.setattr(group_mirror, '_replace_snapshot', expire_after_writes)
+    monkeypatch.setattr(
+        group_mirror,
+        '_fetch_groups',
+        AsyncMock(return_value={row()['id']: group_mirror.PlatformGroup.model_validate(row())}),
+    )
+    with pytest.raises(RuntimeError, match='validity bound'):
+        await group_mirror.reconcile(db=group_db)
+    assert await group_db.scalar(select(GroupSnapshot.fetch_started_at)) == 100
+    assert (await group_db.scalars(select(GroupMember.user_id))).all() == ['fern']
+
+
+@pytest.mark.asyncio
+async def test_superseded_puller_cannot_overwrite_successor_snapshot(group_db, monkeypatch, snapshot_clock):
+    from open_webui.models.groups import GroupSnapshot
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    sessions = async_sessionmaker(group_db.bind, expire_on_commit=False)
+    pulls = 0
+
+    async def fetch():
+        nonlocal pulls
+        pulls += 1
+        if pulls == 1:
+            snapshot_clock[0] += 5 / 3 + 0.001
+            async with sessions() as successor:
+                monkeypatch.setattr(group_mirror, '_lock', None)
+                await group_mirror.reconcile(db=successor, scheduled=True)
+            return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
+        return {row()['id']: group_mirror.PlatformGroup.model_validate(row(members=[]))}
+
+    monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
+    with pytest.raises(RuntimeError, match='lease or validity bound'):
+        await group_mirror.reconcile(db=group_db)
+    assert pulls == 2
+    assert await group_db.scalar(select(GroupSnapshot.fetch_started_at)) == pytest.approx(snapshot_clock[0], abs=0.001)
+    assert (await group_db.scalars(select(GroupMember.user_id))).all() == []
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_lease_loss_cancels_network_fetch(group_db, monkeypatch, snapshot_clock):
+    cancelled = asyncio.Event()
+    renew = group_mirror._renew_lease
+
+    async def lose_lease(session, token):
+        snapshot_clock[0] += 2
+        await renew(session, token)
+
+    async def fetch():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(group_mirror, '_renew_lease', lose_lease)
+    monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
+    with pytest.raises(RuntimeError, match='lease or validity bound'):
+        await group_mirror.reconcile(db=group_db)
+    assert cancelled.is_set()
+    assert (await group_db.scalars(select(GroupMember.user_id))).all() == ['fern']
