@@ -4,6 +4,7 @@ on:
   push:
     branches: [dev]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - dev
       - test
@@ -26,7 +27,7 @@ jobs:
   # --force && npm run build` (Node 22, 8 GB heap) on the same tree in
   # security.yml's image job on every PR, and vitest does not need its output.
   frontend-build:
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     name: Frontend Build & Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -47,7 +48,7 @@ jobs:
         run: npm run test:frontend
 
   backend-format:
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     name: Backend Format (Ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -91,7 +92,7 @@ jobs:
 
   changes:
     needs: reuse
-    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -118,7 +119,7 @@ jobs:
   backend-tests:
     name: Backend Unit Tests
     needs: [reuse, changes]
-    if: always()
+    if: ${{ always() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -209,7 +210,7 @@ jobs:
         run: docker rm -f backend-tests-postgres 2>/dev/null || true
 
   helm-lint:
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     name: Helm Chart Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -275,6 +276,7 @@ jobs:
       && needs.frontend-build.result == 'success'
       && needs.backend-format.result == 'success'
       && needs.helm-lint.result == 'success'
+      && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

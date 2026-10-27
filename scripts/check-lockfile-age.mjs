@@ -22,6 +22,19 @@ const CONCURRENCY = 10;
 const REGISTRY = 'https://registry.npmjs.org';
 // Our own scope — always exempt, never subject to the cooldown.
 const ALLOWLIST_PREFIXES = ['@gradient-ds/'];
+// Security fixes too young for the cooldown: exact name@version, until the
+// date the version ages out. An entry past its expiry fails the run, so it is
+// deleted rather than left to exempt later versions by accident.
+const SECURITY_EXEMPTIONS = {
+	'undici@7.30.1': {
+		reason: 'GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c',
+		expires: '2026-10-30'
+	},
+	'markdown-it@14.3.3': {
+		reason: 'GHSA-gfr2-rv44-r23c, GHSA-vfgh-jcmw-g37q',
+		expires: '2026-10-31'
+	}
+};
 
 function parseArgs(argv) {
 	let lockfile = './package-lock.json';
@@ -137,6 +150,9 @@ async function main() {
 	const cutoffMs = Date.now() - MIN_AGE_DAYS * 24 * 60 * 60 * 1000;
 	const violations = [];
 	const unverifiable = [];
+	const expired = Object.entries(SECURITY_EXEMPTIONS).filter(
+		([, exemption]) => Date.parse(exemption.expires) < Date.now()
+	);
 
 	await runPool(names, CONCURRENCY, async (name) => {
 		const url = `${REGISTRY}/${name}`;
@@ -161,7 +177,7 @@ async function main() {
 				continue;
 			}
 			const publishedMs = Date.parse(published);
-			if (publishedMs > cutoffMs) {
+			if (publishedMs > cutoffMs && !SECURITY_EXEMPTIONS[`${name}@${version}`]) {
 				const ageDays = (Date.now() - publishedMs) / (24 * 60 * 60 * 1000);
 				violations.push({ name, version, published, ageDays });
 			}
@@ -192,7 +208,14 @@ async function main() {
 		);
 	}
 
-	if (unverifiable.length > 0 || violations.length > 0) {
+	if (expired.length > 0) {
+		console.error(`\n${expired.length} security exemption(s) are past their expiry; delete them:`);
+		for (const [key, exemption] of expired) {
+			console.error(`  - ${key}: expired ${exemption.expires} (${exemption.reason})`);
+		}
+	}
+
+	if (unverifiable.length > 0 || violations.length > 0 || expired.length > 0) {
 		console.error(
 			'\nFAIL: treating unverifiable packages as a failure (not a pass), and/or found age violations.'
 		);
@@ -200,7 +223,9 @@ async function main() {
 		return;
 	}
 
-	console.log(`\nOK: all ${entries.length} package entries are at least ${MIN_AGE_DAYS} days old.`);
+	console.log(
+		`\nOK: all ${entries.length} package entries are at least ${MIN_AGE_DAYS} days old or carry a security exemption.`
+	);
 }
 
 main().catch((err) => {

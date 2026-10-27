@@ -16,6 +16,7 @@ name: Runtime Security
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [dev, test, main]
   schedule:
     - cron: '0 3 * * *'
@@ -33,6 +34,7 @@ permissions:
 
 jobs:
   changes:
+    if: github.event.pull_request.draft != true
     name: Decide whether runtime paths changed
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -109,7 +111,7 @@ jobs:
     # requiring `gate` would be satisfied by whatever reports under that name --
     # so a dead runtime workflow would leave the static gate alone to satisfy the
     # rule, and a dead gate reads exactly like a passing one.
-    if: always()
+    if: ${{ always() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

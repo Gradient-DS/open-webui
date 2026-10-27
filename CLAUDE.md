@@ -31,6 +31,26 @@ npm run format:backend         # Black formatting
 
 Best hot-reload: backend (`open-webui dev`, port 8080) and frontend (`npm run dev`, port 5173, proxies to backend) in separate terminals. Full stack via `docker compose up -d`.
 
+### Local secrets
+
+Running Open WebUI inside a soev stack (`soev-docs/architecture/local-development.md`, profile `owui-src`) is the
+preferred way and already takes its secrets from 1Password. For the standalone commands above, secrets come from
+1Password too ([rule](https://github.com/Gradient-DS/soev-docs/blob/main/local-secrets.md)): `secrets.env` holds
+`op://` references only (item `soev-dev-stack`, vault `soev-development`) and `.env` holds non-secret settings only.
+Start the backend through the wrapper, which runs `op run` for that one process:
+
+```bash
+scripts/op-run open-webui dev                       # backend
+scripts/op-run docker compose -f docker-compose.yaml -f docker-compose.secrets.yaml up -d
+```
+
+`npm run dev` needs no secrets. `op run` sets real environment variables, and `env.py` loads `.env` without
+override, so they win over `.env`. Give `DATABASE_TYPE/USER/HOST/PORT/NAME` in `.env` instead of a `DATABASE_URL`
+with a password; `env.py` builds the URL with `DATABASE_PASSWORD`. A new secret gets a field in the item's `owui`
+section and a line in `secrets.env` (and `docker-compose.secrets.yaml`). Agents use the read-only service-account
+token from the keychain (`soev-dev-op-token`), which the wrapper picks up; without it `op` asks the desktop app.
+Never write a value to a file, and never `op read`/`op inject` to disk.
+
 ### Database migrations (Alembic)
 
 Migrations live in `backend/open_webui/migrations/versions/`. **Gotcha (hit more than once): every Alembic `revision` id must be globally unique across that directory.** When creating a migration by copying an existing one, change BOTH the filename AND the `revision = '...'` line to a fresh id, then `grep -rn "<newid>" backend/open_webui/migrations/versions/` and confirm exactly one match before committing.
