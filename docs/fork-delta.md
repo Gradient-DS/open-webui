@@ -469,3 +469,13 @@ missing note (agent path). Upstream files touched: `InputMenu.svelte` (menu
 item and tab), `FileItem.svelte` (chip icon and label), `Chat.svelte` (the two
 attachment type lists). "Chat over deze vergadering" uses the existing new-chat
 draft hand-off (`sessionStorage['chat-input']`, restored by `Chat.svelte`).
+
+## Local secrets from 1Password
+
+Standalone local development (`open-webui dev`, the repo's docker compose) takes
+its secrets from `op://` references in the tracked `secrets.env`, resolved by
+`op run` through `scripts/op-run`; `.env` holds non-secret settings only. Rule:
+soev-docs `local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
+that passes those variables into the container. `.env.example` gains a header
+comment only. No runtime code changes: `env.py` already loads `.env` without
+override, so `op run`'s variables win.

@@ -4,6 +4,7 @@
 	import markedExtension from '$lib/utils/marked/extension';
 	import markedKatexExtension from '$lib/utils/marked/katex-extension';
 	import { disableSingleTilde } from '$lib/utils/marked/strikethrough-extension';
+	import { linkSpaceExtension } from '$lib/utils/marked/link-space-extension';
 	import { mentionExtension } from '$lib/utils/marked/mention-extension';
 	import colonFenceExtension from '$lib/utils/marked/colon-fence-extension';
 	import footnoteExtension from '$lib/utils/marked/footnote-extension';
@@ -19,6 +20,7 @@
 	marked.use(footnoteExtension(options));
 	marked.use(colonFenceExtension(options));
 	marked.use(disableSingleTilde);
+	marked.use(linkSpaceExtension);
 	marked.use({
 		extensions: [
 			mentionExtension({ triggerChar: '@' }),
