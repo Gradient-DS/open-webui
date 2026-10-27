@@ -30,10 +30,6 @@ const SECURITY_EXEMPTIONS = {
 		reason: 'GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c',
 		expires: '2026-10-30'
 	},
-	'dompurify@3.4.17': {
-		reason: 'GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f',
-		expires: '2026-10-27'
-	},
 	'markdown-it@14.3.3': {
 		reason: 'GHSA-gfr2-rv44-r23c, GHSA-vfgh-jcmw-g37q',
 		expires: '2026-10-31'
