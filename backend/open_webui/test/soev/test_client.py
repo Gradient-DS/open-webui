@@ -12,6 +12,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.task_turns import TaskTurnRequest
 
 
 @pytest_asyncio.fixture
@@ -307,11 +308,10 @@ async def test_every_page_carries_the_login_token(recorded_http, caplog):
         'send',
         'post_bytes',
         'stream',
-        'stream_task',
         'chat_stream',
         'chat_post',
         'chat_delete',
-        'complete_task',
+        'submit_task',
     ],
 )
 async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeypatch):
@@ -322,11 +322,9 @@ async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeyp
 
     monkeypatch.setattr('open_webui.soev.client.user_token', AsyncMock(return_value=None))
     with pytest.raises(SoevApiError) as caught:
-        if method in {'stream', 'stream_task', 'chat_stream'}:
+        if method in {'stream', 'chat_stream'}:
             if method == 'stream':
                 stream = client.stream('/v1/original', as_user='owui:user:alice')
-            elif method == 'stream_task':
-                stream = client.stream_task({}, as_user='owui:user:alice')
             else:
                 stream = client.chat_stream('/v1/chat/threads', {}, as_user='owui:user:alice')
             await anext(stream)
@@ -334,8 +332,9 @@ async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeyp
             await client.chat_post('/v1/chat/threads', {}, as_user='owui:user:alice')
         elif method == 'chat_delete':
             await client.chat_delete('/v1/chat/threads/fictional', as_user='owui:user:alice')
-        elif method == 'complete_task':
-            await client.complete_task({}, as_user='owui:user:alice')
+        elif method == 'submit_task':
+            turn = TaskTurnRequest(task='emoji', input={'text': 'Fictional text'}, idempotency_key='fictional-task')
+            await client.submit_task(turn, as_user='owui:user:alice')
         elif method == 'pages':
             _ = [item async for item in client.pages('/v1/collections', as_user='owui:user:alice')]
         elif method == 'send':

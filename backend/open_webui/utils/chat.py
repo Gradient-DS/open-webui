@@ -43,6 +43,8 @@ async def generate_chat_completion(
     bypass_filter: bool = False,
     bypass_system_prompt: bool = False,
 ):
+    if model_catalog.is_v2():
+        raise HTTPException(status_code=400)
     log.debug('generate_chat_completion: %s', form_data)
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
@@ -140,8 +142,6 @@ async def generate_chat_completion(
                 ),
                 'selected_model_id': selected_model_id,
             }
-    if model_catalog.is_v2():
-        return await model_catalog.task_completion(form_data, user)
     if model.get('pipe'):
         return await generate_function_chat_completion(request, form_data, user=user, models=models)
     if model.get('owned_by') == 'ollama':

@@ -1,6 +1,5 @@
-"""v2 mode takes models, the default and task completions from soev-api; Ollama remains available outside v2."""
+"""Take models and the default from soev-api in v2 mode; keep Ollama outside v2."""
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,10 +8,8 @@ from open_webui import env
 from open_webui.models.models import ModelModel
 from open_webui.soev import model_catalog
 from open_webui.test.soev.fake_api import FakeSoevApi
-from open_webui.utils import chat as chat_utils
 from open_webui.utils import models as models_utils
 from open_webui.utils.access_control import has_base_model_access
-from starlette.responses import StreamingResponse
 
 GLM = {
     'id': 'glm-5-3',
@@ -306,79 +303,3 @@ async def test_v2_default_comes_from_the_catalog_and_ignores_ui_default_models(v
 @pytest.mark.asyncio
 async def test_stock_default_is_ui_default_models(stock) -> None:
     assert await model_catalog.default_models('zai-org/GLM-5.3') == 'zai-org/GLM-5.3'
-
-
-def task_request(model: dict) -> SimpleNamespace:
-    return app_request(MODELS={model['id']: model})
-
-
-TASK_FORM = {
-    'model': 'glm-5-3',
-    'messages': [
-        {'role': 'system', 'content': 'Be brief'},
-        {
-            'role': 'user',
-            'content': [
-                {'type': 'text', 'text': 'Title this'},
-                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,AA', 'detail': 'auto'}},
-            ],
-        },
-    ],
-    'stream': False,
-    'max_completion_tokens': 50,
-    'temperature': 0.1,
-    'metadata': {'task': 'title_generation', 'chat_id': 'chat'},
-    'chat_id': 'chat',
-}
-
-
-@pytest.mark.asyncio
-async def test_v2_task_goes_to_the_task_route_as_the_acting_user(v2: FakeSoevApi) -> None:
-    [model] = [m for m in await model_catalog.base_models() if m['id'] == 'glm-5-3']
-    admin = SimpleNamespace(id='alice', role='admin')
-    result = await chat_utils.generate_chat_completion(task_request(model), json.loads(json.dumps(TASK_FORM)), admin)
-    assert result['choices'][0]['message']['content'] == 'Task answer 1'
-    assert result['model'] == 'task-model'
-    [(subject, body)] = v2.task_bodies
-    assert subject == 'owui:user:alice'
-    assert body == {
-        'messages': [
-            {'role': 'system', 'content': 'Be brief'},
-            {
-                'role': 'user',
-                'content': [
-                    {'type': 'text', 'text': 'Title this'},
-                    {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,AA'}},
-                ],
-            },
-        ],
-        'stream': False,
-        'temperature': 0.1,
-        'max_tokens': 50,
-    }
-    task = next(request for request in v2.requests if request.url.path == '/v1/completions/task')
-    assert 'X-Soev-User-Token' in task.headers and 'Idempotency-Key' not in task.headers
-
-
-@pytest.mark.asyncio
-async def test_v2_streamed_task_streams_through(v2: FakeSoevApi) -> None:
-    [model] = [m for m in await model_catalog.base_models() if m['id'] == 'glm-5-3']
-    form = {**json.loads(json.dumps(TASK_FORM)), 'stream': True}
-    response = await chat_utils.generate_chat_completion(
-        task_request(model), form, SimpleNamespace(id='alice', role='admin')
-    )
-    assert isinstance(response, StreamingResponse)
-    raw = b''.join([chunk async for chunk in response.body_iterator]).decode()
-    assert 'Task answer 1' in raw and raw.endswith('data: [DONE]\n\n')
-    assert v2.task_bodies[0][1]['stream'] is True
-
-
-@pytest.mark.asyncio
-async def test_v2_task_refusal_is_an_http_error(v2: FakeSoevApi) -> None:
-    [model] = [m for m in await model_catalog.base_models() if m['id'] == 'glm-5-3']
-    v2.capabilities['soev_test_cred-runtime_test-secret'] = {'mint'}
-    with pytest.raises(Exception) as raised:
-        await chat_utils.generate_chat_completion(
-            task_request(model), json.loads(json.dumps(TASK_FORM)), SimpleNamespace(id='alice', role='admin')
-        )
-    assert getattr(raised.value, 'status_code', None) == 403

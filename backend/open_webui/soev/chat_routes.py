@@ -246,8 +246,6 @@ class DarkChatRoute(APIRoute):
             return 'config' not in name
         if self.domain == 'notes':
             return name in {'get_note_chat_by_id', 'get_note_chats_by_id', 'create_note_chat_by_id'}
-        if self.domain == 'tasks':
-            return name in {'generate_title', 'generate_chat_tags'}
         return True
 
     def get_route_handler(self):
@@ -301,7 +299,3 @@ class ExportRoute(DarkChatRoute):
 
 class NoteChatRoute(DarkChatRoute):
     domain = 'notes'
-
-
-class TaskRoute(DarkChatRoute):
-    domain = 'tasks'

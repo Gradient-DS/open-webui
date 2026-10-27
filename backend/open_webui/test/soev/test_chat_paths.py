@@ -252,8 +252,6 @@ async def dark_api(monkeypatch):
         ('GET', '/notes/fictional-note/chat'),
         ('GET', '/notes/fictional-note/chats'),
         ('POST', '/notes/fictional-note/chat'),
-        ('POST', '/tasks/title/completions'),
-        ('POST', '/tasks/tags/completions'),
         ('GET', '/evaluations/feedbacks/all/export'),
         ('DELETE', '/evaluations/feedbacks'),
     ],

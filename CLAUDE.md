@@ -69,10 +69,10 @@ To develop this fork against the soev platform, run it from your checkout (comma
 
 ## Models under the v2 runtime
 
-With `AGENT_API_ENABLED` and `SOEV_API_URL` set, `soev/model_catalog.py` makes soev-api
-the only source of models (`GET /v1/models`), the default (served as `default_models`) and task completions
-(`POST /v1/completions/task`, called from `generate_chat_completion`). Connections, `ui.default_models` and the task
-model settings are not used. Details: `docs/agent-api-deployment.md`. Every model goes by its provider/model id:
+With `AGENT_API_ENABLED` and `SOEV_API_URL` set, `soev/model_catalog.py` reads models
+(`GET /v1/models`) and the default (served as `default_models`) only from soev-api.
+Task routes send typed `soev.task/1` turns through `soev/task_turns.py` to `POST /v1/completions/task`.
+Connections, `ui.default_models` and the task model settings are not used. Details: `docs/agent-api-deployment.md`. Every model goes by its provider/model id:
 the catalog's label is not used, and an admin's or a migrated v1 base-model row never renames a catalog model
 (`apply_catalog`); assistants keep their own names.
 

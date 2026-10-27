@@ -107,6 +107,8 @@ class TaskCompletionBody(BaseModel):
     responses: list[str] | None = None
     type: str | None = None
     chat_id: str | None = None
+    message_id: str | None = None
+    language: str | None = None
 
 
 class CompletionBody(BaseModel):

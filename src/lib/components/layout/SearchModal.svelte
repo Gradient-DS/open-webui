@@ -238,12 +238,15 @@
 
 		editingChatTitle = '';
 
-		const generatedTitle = await generateTitle(localStorage.token, model, msgList).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		const generatedTitle = await generateTitle(
+			localStorage.token,
+			model,
+			msgList,
+			editingChatId
+		).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		if (generatedTitle) {
 			editingChatTitle = generatedTitle;
