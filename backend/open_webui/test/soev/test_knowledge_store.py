@@ -1101,9 +1101,9 @@ async def test_referenced_file_ids_count_knowledge_bases_the_acting_user_cannot_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('acting_user', [None, 'alice'])
-async def test_references_use_the_source_lookup_route(env, acting_user):
-    """One lookup per source resolves each collection once under the same acting identity."""
+@pytest.mark.parametrize('acting_user,as_service', [(None, False), ('alice', False), ('alice', True)])
+async def test_references_use_the_source_lookup_route(env, acting_user, as_service):
+    """Every source's pages resolve each collection once under the same person or service authority."""
     await file(env, 'first')
     await file(env, 'second')
     await seed(env, 'other')
@@ -1114,16 +1114,18 @@ async def test_references_use_the_source_lookup_route(env, acting_user):
     token = acting._requester_ref.set(f'owui:user:{acting_user}' if acting_user else None)
     env.api.requests.clear()
     try:
-        pairs = await env.store._references({'first', 'second', 'missing'})
+        pairs = await env.store._references({'first', 'second', 'missing'}, as_service=as_service)
     finally:
         acting._requester_ref.reset(token)
     expected = {('kb', 'first'), ('kb', 'second'), ('other', 'first')}
-    if acting_user is None:
+    if acting_user is None or as_service:
         expected.add(('private', 'first'))
     assert {(collection['key'], document['source_id']) for collection, document in pairs} == expected
     lookups = [request for request in env.api.requests if request.url.path == '/v1/documents']
     assert [str(request.url).split('/v1/')[1] for request in lookups] == [
         'documents?source_id=first',
+        'documents?source_id=first&cursor=1',
+        *(['documents?source_id=first&cursor=2'] if acting_user is None or as_service else []),
         'documents?source_id=missing',
         'documents?source_id=second',
     ]
@@ -1132,9 +1134,10 @@ async def test_references_use_the_source_lookup_route(env, acting_user):
     assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
     assert not any(request.url.path == '/v1/collections' for request in env.api.requests)
     for request in env.api.requests:
-        if acting_user:
+        if acting_user and not as_service:
             assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         else:
+            assert 'X-Soev-User-Token' not in request.headers
             assert 'X-Soev-' + 'Subject' not in request.headers
 
 
@@ -1376,7 +1379,11 @@ async def test_reference_collections_overlap_and_preserve_order_and_errors(env, 
     assert len(started) == 2
     assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
     assert sum(request.url.path == '/v1/collections/other' for request in env.api.requests) == 1
-    assert len(env.api.requests) == (3 if failure in (403, 503) else 4)
+    lookups = [request for request in env.api.requests if request.url.path == '/v1/documents']
+    sources = ('first',) if failure in (403, 503) else ('first', 'second')
+    assert [dict(request.url.params) for request in lookups] == [
+        params for source in sources for params in ({'source_id': source}, {'source_id': source, 'cursor': '1'})
+    ]
 
 
 @pytest.mark.asyncio

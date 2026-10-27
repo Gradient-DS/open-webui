@@ -275,6 +275,24 @@ async def test_pages_walks_every_cursor(recorded_http):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'initial,cursors',
+    [(None, ['next', 'next']), (None, ['next', 'last', 'next']), ('start', ['start'])],
+)
+async def test_pages_refuses_repeated_cursors(recorded_http, initial, cursors):
+    requests, responses = recorded_http
+    responses.extend(httpx.Response(200, json={'data': [], 'next_cursor': cursor}) for cursor in cursors)
+    params = {'cursor': initial} if initial is not None else None
+    client = SoevClient('https://soev.invalid', 'test-api-key')
+
+    with pytest.raises(SoevApiError, match='Repeated pagination cursor') as caught:
+        [item async for item in client.pages('/v1/documents', params=params)]
+
+    assert caught.value.status == 502
+    assert len(requests) == len(cursors)
+
+
+@pytest.mark.asyncio
 async def test_every_page_carries_the_login_token(recorded_http, caplog):
     """Each cursor request keeps the same person without a subject assertion."""
     requests, responses = recorded_http

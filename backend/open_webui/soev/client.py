@@ -472,13 +472,17 @@ class SoevClient:
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items with fresh admission for every cursor request."""
         query = dict(params or {})
+        seen = {query['cursor']} if query.get('cursor') is not None else set()
         while True:
             page = await self.get(path, as_user=as_user, params=query)
             for item in page['data']:
                 yield item
             cursor = page.get('next_cursor')
-            if not cursor:
+            if cursor is None:
                 return
+            if cursor in seen:
+                raise SoevApiError(502, 'upstream_error', 'Repeated pagination cursor')
+            seen.add(cursor)
             query['cursor'] = cursor
 
     async def send(

@@ -72,8 +72,10 @@ async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | No
         return None
     client = client if client is not None else identity.build_client()
     ref = f'owui:user:{user_id}'
-    response = await client.get('/v1/documents', params={'source_id': file.id}, as_user=ref)
-    keys = [document['collection_key'] for document in response['data']]
+    keys = [
+        document['collection_key']
+        async for document in client.pages('/v1/documents', params={'source_id': file.id}, as_user=ref)
+    ]
     keys.sort(key=lambda key: key != attachments_collection_key(user_id))
     if not keys:
         return None
