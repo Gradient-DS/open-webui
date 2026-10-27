@@ -22,6 +22,11 @@ import sidebarSource from '$lib/components/layout/ThreadSidebar.svelte?raw';
 import stateSource from '$lib/components/common/ThreadState.svelte?raw';
 import shareSource from '$lib/components/chat/ThreadShareModal.svelte?raw';
 import sharedSource from '$lib/components/chat/SharedThread.svelte?raw';
+import mainSidebarSource from '$lib/components/layout/Sidebar.svelte?raw';
+import folderSource from '$lib/components/layout/Sidebar/RecursiveFolder.svelte?raw';
+import sharedFolderSource from '$lib/components/layout/Sidebar/SharedFolderItem.svelte?raw';
+import searchSource from '$lib/components/layout/SearchModal.svelte?raw';
+import archivedSource from '$lib/components/chat/Settings/ArchivedChats.svelte?raw';
 import { sharingAPI, shareStateText } from './threadSharing';
 
 it('provides English keys and Dutch translations for every thread UI label', () => {
@@ -56,6 +61,7 @@ const page = (
 });
 const fork = (id = 'fictional-fork', at = 2): IndexItem => ({
 	thread_id: id,
+	owned: true,
 	title: 'Fictional fork',
 	updated_at: '2026-10-25T10:00:00Z',
 	parent_thread: 'fictional-thread',
@@ -326,6 +332,68 @@ const sidebarItem = (id: string, pinned = false): SidebarItem => ({
 });
 
 describe('platform sidebar', () => {
+	it('passes readonly state to every chat row in the sidebar and folders', () => {
+		const mainRows = [...mainSidebarSource.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
+		expect(mainRows).toHaveLength(2);
+		for (const [row] of mainRows) {
+			expect(row).toContain('readonly={chat.readonly ?? false}');
+		}
+		for (const source of [folderSource, sharedFolderSource]) {
+			const rows = [...source.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
+			expect(rows).toHaveLength(1);
+			expect(rows[0][0]).toContain('readonly={chat.readonly ??');
+		}
+	});
+
+	it('hides search menus and Shift actions for readonly rows', () => {
+		const actions = searchSource.match(
+			/\{#if !chat\.readonly && editingChatId !== chat\.id\}([\s\S]*?)\n\t{8}\{\/if\}/
+		)?.[1];
+		expect(actions).toBeDefined();
+		expect(actions).toContain('{#if shiftKey}');
+		expect(actions).toContain('archiveChatHandler(chat.id)');
+		expect(actions).toContain('deleteChatHandler(chat.id)');
+		expect(actions).toContain('<ChatMenu');
+		expect(searchSource.match(/<ChatMenu\s/g)).toHaveLength(1);
+	});
+
+	it('routes readonly archived rows to shared threads under v2', () => {
+		expect(archivedSource).toMatch(
+			/\{@const chatUrl =\s*\$config\?\.features\?\.enable_v2_threads && chat\.readonly\s*\? `\/s\/\$\{chat\.id\}`\s*: `\/c\/\$\{chat\.id\}`\}/
+		);
+		expect(archivedSource).toContain('href={chatUrl}');
+		expect(archivedSource).toContain('goto(chatUrl)');
+		expect(archivedSource).not.toContain('goto(`/c/${chat.id}`)');
+	});
+
+	it('hides archived owner actions while keeping reader unarchive on its organization', () => {
+		const actions = archivedSource.match(/\{#if !chat\.readonly &&[\s\S]*?\{\/if\}/)?.[0];
+		expect(actions).toBeDefined();
+		expect(actions).toContain("$user?.role === 'admin'");
+		expect(actions).toContain('$user?.permissions?.chat?.delete');
+		expect(actions).toContain('selectedChatId = chat.id;');
+		expect(actions).toContain("aria-label={$i18n.t('Delete Chat')}");
+		expect(archivedSource.match(/aria-label=\{\$i18n\.t\('Delete Chat'\)\}/g)).toHaveLength(1);
+		expect(actions).not.toContain('unarchiveHandler');
+		expect(archivedSource).toContain('unarchiveHandler(chat.id, chat.organization?.id ?? chat.id)');
+		expect(archivedSource).toContain('archiveChatById(localStorage.token, organizationId)');
+		const exportAction = archivedSource.match(
+			/\{#if !\$config\?\.features\?\.enable_v2_threads\}[\s\S]*?\{\/if\}/
+		)?.[0];
+		expect(exportAction).toContain('on:click={exportChatsHandler}');
+	});
+
+	it('preserves platform ownership independently of local records', async () => {
+		const backend = api();
+		const shared = { ...sidebarItem('fictional-shared', true), owned: false };
+		const owned = { ...sidebarItem('fictional-owned'), organization: null };
+		vi.mocked(backend.index).mockResolvedValueOnce({ items: [shared, owned], next_cursor: null });
+		const controller = new ThreadSidebar(backend);
+		await controller.search();
+		expect(controller.snapshot.items).toEqual([shared, owned]);
+		expect(filterSidebar(controller.snapshot.items, { pinned: true })).toEqual([shared]);
+	});
+
 	it('keeps platform order and local filters after search and opaque paging', async () => {
 		const backend = api();
 		vi.mocked(backend.index)

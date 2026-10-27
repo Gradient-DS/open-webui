@@ -96,20 +96,29 @@ class ChatPaths:
         ]
         items.sort(key=lambda item: self._sort_key(item, sort_by), reverse=sort_dir == 'desc')
         selected = items if page is None else items[(page - 1) * 60 : page * 60]
-        return self.folder_rows(selected) if folder_id is not None else selected
+        return self.ui_rows(selected)
 
     @staticmethod
-    def folder_rows(items: list[dict]) -> list[dict]:
-        return [
-            {
+    def ui_rows(items: list[dict]) -> list[dict]:
+        rows = []
+        for item in items:
+            org = item['organization'] or {}
+            readonly = not item['owned'] or item.get('readonly', False)
+            row = {
                 **item,
-                'id': item['thread_id'] if item['readonly'] else item['organization']['id'],
-                'updated_at': int(dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()),
-                'last_read_at': item['organization']['last_read_at'],
+                'id': item['thread_id'] if readonly else org.get('id', item['thread_id']),
+                'last_read_at': org.get('last_read_at'),
+                'readonly': readonly,
+                'pinned': org.get('pinned', False),
+                'folder_id': org.get('folder_id'),
+                'archived': org.get('archived', False),
                 'active': False,
             }
-            for item in items
-        ]
+            for field in ('updated_at', 'created_at'):
+                if isinstance(row.get(field), str):
+                    row[field] = int(dt.datetime.fromisoformat(row[field].replace('Z', '+00:00')).timestamp())
+            rows.append(row)
+        return rows
 
     async def in_folder(self, user_id: str, items: list[dict], folder_id: str) -> list[dict]:
         members = await self.organizations.folder_records(folder_id)
@@ -199,7 +208,12 @@ class ChatPaths:
         for item in items:
             org = item['organization'] or {}
             updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
-            if item.get('readonly') or org.get('archived') or updated <= (org.get('last_read_at') or 0):
+            if (
+                not item['owned']
+                or item.get('readonly', False)
+                or org.get('archived')
+                or updated <= (org.get('last_read_at') or 0)
+            ):
                 continue
             folder, seen = org.get('folder_id'), set()
             while folder and folder not in seen:

@@ -45,6 +45,7 @@ class ProjectionPage(WireModel):
 
 class IndexItem(WireModel):
     thread_id: str
+    owned: bool
     title: str | None
     updated_at: str
     parent_thread: str | None

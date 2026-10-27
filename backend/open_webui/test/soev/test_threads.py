@@ -29,9 +29,10 @@ def page(*positions: int, before: str | None = None) -> dict:
     }
 
 
-def index_item(identifier='fictional-thread', parent=None, at=None) -> dict:
+def index_item(identifier='fictional-thread', parent=None, at=None, *, owned=True) -> dict:
     return {
         'thread_id': identifier,
+        'owned': owned,
         'title': 'Fictional title',
         'updated_at': '2026-10-25T10:00:00Z',
         'parent_thread': parent,
@@ -119,6 +120,20 @@ async def test_index_search_forks_and_fork_creation(thread_http):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('owned', [None, 'true', 1])
+async def test_index_requires_boolean_ownership(thread_http, owned):
+    _, responses, client = thread_http
+    item = index_item()
+    if owned is None:
+        del item['owned']
+    else:
+        item['owned'] = owned
+    responses.append(httpx.Response(200, json={'items': [item], 'next_cursor': None}))
+    with pytest.raises(ThreadError, match='reconnect'):
+        await client.index()
+
+
+@pytest.mark.asyncio
 async def test_projection_uses_only_requester_login_token(thread_http):
     requests, responses, client = thread_http
     responses.extend([httpx.Response(200, json=page(1)) for _ in range(2)])
@@ -178,7 +193,7 @@ async def test_transport_invalid_payload_and_unsolicited_304_fail_closed(thread_
 
 
 def test_join_only_platform_authorized_items_preserves_order():
-    platform = IndexPage(items=[index_item('fictional-visible')], next_cursor='opaque-next')
+    platform = IndexPage(items=[index_item('fictional-visible', owned=False)], next_cursor='opaque-next')
     joined = join_index(
         platform,
         [
@@ -189,6 +204,7 @@ def test_join_only_platform_authorized_items_preserves_order():
         ],
     )
     assert len(joined['items']) == 1
+    assert joined['items'][0]['owned'] is False
     assert joined['items'][0]['organization']['pinned'] is True
     assert joined['items'][0]['organization']['folder_id'] == 'fictional-folder'
     assert joined['next_cursor'] == 'opaque-next'

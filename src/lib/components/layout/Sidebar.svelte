@@ -1733,6 +1733,7 @@
 													updatedAt={chat.updated_at}
 													lastReadAt={chat.last_read_at}
 													active={chat.active ?? false}
+													readonly={chat.readonly ?? false}
 													{shiftKey}
 													selected={selectedChatId === chat.id}
 													on:select={() => {
@@ -1798,6 +1799,7 @@
 											updatedAt={chat.updated_at}
 											lastReadAt={chat.last_read_at}
 											active={chat.active ?? false}
+											readonly={chat.readonly ?? false}
 											{shiftKey}
 											selected={selectedChatId === chat.id}
 											on:select={() => {

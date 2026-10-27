@@ -958,7 +958,7 @@
 							active={chat.active ?? false}
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
-							readonly={chat.user_id !== $user?.id}
+							readonly={chat.readonly ?? chat.user_id !== $user?.id}
 							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {

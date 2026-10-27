@@ -3,6 +3,8 @@ import { getChatList, getPinnedChatList } from '$lib/apis/chats';
 
 type ChatListItem = {
 	id: string;
+	readonly?: boolean;
+	owned?: boolean;
 	[key: string]: unknown;
 };
 
