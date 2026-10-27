@@ -10,8 +10,9 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.responses import StreamingResponse
 
-from open_webui.soev import identity
+from open_webui.soev import identity, threads
 from open_webui.soev.client import SoevApiError
+from open_webui.utils.chat_id import is_temporary_chat_id
 
 TaskKind = Literal['title', 'tags', 'follow_ups', 'queries', 'autocomplete', 'emoji', 'moa']
 TaskText = Annotated[str, Field(strict=True, min_length=1, max_length=16384)]
@@ -134,14 +135,16 @@ def task_request(request: Request, task: TaskKind, form: dict) -> TaskTurnReques
     if language is None:
         language = request.headers.get('Accept-Language', '').split(',')[0].split(';')[0].strip() or None
     source = form.get('chat_id')
-    if isinstance(source, str) and source.startswith(('local:', 'temp:')):
+    if isinstance(source, str) and is_temporary_chat_id(source):
         source = None
     messages = form.get('messages') or []
     message_id = form.get('message_id') or next((item['id'] for item in reversed(messages) if item.get('id')), None)
     # A thread reference alone cannot distinguish later turns from retries.
     anchor = message_id
     if anchor is None and INPUTS[task] is TaskInput:
-        anchor = messages or uuid4().hex
+        if not messages:
+            raise HTTPException(status_code=422)
+        anchor = messages
     replay = json.dumps([source, task, anchor, values, language], sort_keys=True, ensure_ascii=False)
     try:
         return TaskTurnRequest(
@@ -160,7 +163,14 @@ def _last_text(messages: list[dict]) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return '\n'.join(part.get('text', '') for part in content if part.get('type') == 'text')
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get('type') == 'text':
+                text = part.get('text')
+                if not isinstance(text, str):
+                    raise HTTPException(status_code=422)
+                parts.append(text)
+        return '\n'.join(parts)
     return ''
 
 
@@ -181,8 +191,34 @@ def completion_response(result: TaskTurnResult) -> dict:
     }
 
 
+async def _source_thread(request: Request, user: Any, chat_id: str) -> str:
+    if threads.enabled():
+        from open_webui.soev.chat_routes import paths
+
+        return (await paths(request).record(user.id, chat_id)).thread_id
+
+    from open_webui.models.chats import Chats
+
+    chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+    if chat is not None:
+        messages = await Chats.get_messages_map_by_chat_id(chat_id) or {}
+        current = chat.current_message_id or Chats.get_current_message_id(chat.chat)
+        seen = set()
+        while current and current not in seen:
+            seen.add(current)
+            message = messages.get(current) or {}
+            bookmark = (message.get('meta') or {}).get('agent_v2') or {}
+            if bookmark.get('thread_id'):
+                return bookmark['thread_id']
+            current = message.get('parentId')
+    raise SoevApiError(404, 'not_found', 'Source thread unavailable')
+
+
 async def complete_task(request: Request, task: TaskKind, form: dict, user: Any) -> dict | StreamingResponse:
-    turn = task_request(request, task, form)
+    source = form.get('chat_id')
+    if isinstance(source, str) and source and not is_temporary_chat_id(source):
+        source = await _source_thread(request, user, source)
+    turn = task_request(request, task, {**form, 'chat_id': source})
     client = identity.build_client(timeout=120.0)
     raw = await client.submit_task(turn, as_user=identity.external_ref(user))
     try:

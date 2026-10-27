@@ -10,10 +10,11 @@ import pytest_asyncio
 from fastapi import FastAPI, HTTPException, Request
 from httpx import AsyncClient
 from open_webui.routers import tasks
-from open_webui.soev import model_catalog
+from open_webui.soev import model_catalog, threads
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
 from open_webui.soev.task_turns import TaskTurnRequest, TaskTurnResult, task_request
+from open_webui.soev.threads import Organization
 from open_webui.utils.auth import get_verified_user
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
@@ -41,6 +42,12 @@ FORM = {
 @pytest_asyncio.fixture
 async def task_api(chat_http, monkeypatch):
     monkeypatch.setattr(model_catalog, 'is_v2', lambda: True)
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    records = {}
+
+    async def owned(user_id):
+        return records.get(user_id, [])
+
     chat_http.task_threads = {
         'owui:user:fern': {'fictional-thread', 'fictional-shared'},
         'owui:user:lark': {'fictional-shared'},
@@ -65,11 +72,12 @@ async def task_api(chat_http, monkeypatch):
 
     app = FastAPI()
     app.state.MODELS = {}
+    app.state.thread_organizations = SimpleNamespace(list=owned)
     app.include_router(tasks.router, prefix='/tasks')
     app.dependency_overrides[get_verified_user] = user
     app.add_exception_handler(SoevApiError, problem)
     async with AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test.invalid') as browser:
-        yield SimpleNamespace(browser=browser, platform=chat_http)
+        yield SimpleNamespace(browser=browser, platform=chat_http, records=records)
 
 
 @pytest.mark.asyncio
@@ -254,10 +262,9 @@ def test_message_and_snapshot_keys_are_stable():
     assert without_ids.idempotency_key == task_request(request, 'title', {**form, 'messages': messages}).idempotency_key
     assert without_ids.idempotency_key != original.idempotency_key
     reference = {'chat_id': FORM['chat_id']}
-    assert (
-        task_request(request, 'title', reference).idempotency_key
-        != task_request(request, 'title', reference).idempotency_key
-    )
+    with pytest.raises(HTTPException) as error:
+        task_request(request, 'title', reference)
+    assert error.value.status_code == 422
 
 
 def test_old_message_contract_is_deleted():
@@ -334,4 +341,145 @@ async def test_service_cannot_submit_a_person_task(task_api):
     client = SoevClient('https://soev.invalid', 'fictional-key').as_service()
     with pytest.raises(ValueError):
         await client.submit_task(turn, as_user='owui:user:fern')
+    assert task_api.platform.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', [route for route, _, _ in KINDS])
+async def test_tasks_resolve_the_callers_active_thread(task_api, route):
+    task_api.records['fern'] = [
+        Organization(id='fictional-chat', thread_id='fictional-thread', branch_thread_ids=['fictional-old'])
+    ]
+    task_api.records['lark'] = [Organization(id='fictional-chat', thread_id='fictional-shared')]
+    for actor, source in [('fern', 'fictional-thread'), ('lark', 'fictional-shared')]:
+        response = await task_api.browser.post(
+            f'/tasks/{route}/completions',
+            json={**FORM, 'chat_id': 'fictional-chat', 'source_thread': 'fictional-old'},
+            headers={'X-Fictional-User': actor},
+        )
+        assert response.status_code == 200, response.text
+        assert task_api.platform.task_bodies[-1][1]['source_thread'] == source
+        assert task_api.platform.requests[-1].headers['X-Soev-User-Token'] == f'fictional-login:owui:user:{actor}'
+
+
+@pytest.mark.asyncio
+async def test_tasks_follow_a_fork_without_reusing_the_previous_result(task_api):
+    task_api.records['fern'] = [Organization(id='fictional-chat', thread_id='fictional-thread')]
+    form = {**FORM, 'chat_id': 'fictional-chat'}
+    first = await task_api.browser.post('/tasks/title/completions', json=form)
+    task_api.records['fern'][0] = Organization(id='fictional-chat', thread_id='fictional-shared')
+    second = await task_api.browser.post('/tasks/title/completions', json=form)
+    assert first.status_code == second.status_code == 200
+    assert first.json()['choices'] != second.json()['choices']
+    assert len(task_api.platform.task_results) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', ['auto', 'emoji', 'queries', 'moa'])
+@pytest.mark.parametrize('prefix', ['temporary:', 'local:'])
+async def test_text_tasks_accept_temporary_chat_ids(task_api, route, prefix):
+    response = await task_api.browser.post(
+        f'/tasks/{route}/completions', json={**FORM, 'chat_id': prefix + 'fictional'}
+    )
+    assert response.status_code == 200, response.text
+    assert 'source_thread' not in task_api.platform.task_bodies[0][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', ['title', 'tags', 'follow_up'])
+async def test_reference_only_tasks_require_a_stable_invocation(task_api, route):
+    response = await task_api.browser.post(f'/tasks/{route}/completions', json={'chat_id': FORM['chat_id']})
+    assert response.status_code == 422
+    assert task_api.platform.requests == []
+    form = {'chat_id': FORM['chat_id'], 'message_id': 'fictional-invocation'}
+    for _ in range(2):
+        result = await task_api.browser.post(f'/tasks/{route}/completions', json=form)
+        assert result.status_code == 200, result.text
+    assert len(task_api.platform.task_results) == 1
+    assert task_api.platform.task_bodies[0][1] == task_api.platform.task_bodies[1][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text', [None, 7, [], {}])
+async def test_invalid_query_text_blocks_are_refused(task_api, text):
+    form = {**FORM, 'prompt': None, 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': text}]}]}
+    response = await task_api.browser.post('/tasks/queries/completions', json=form)
+    assert response.status_code == 422
+    assert task_api.platform.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('actor', ['lark', 'fictional-other-tenant'])
+async def test_task_mapping_never_borrows_another_callers_thread(task_api, actor):
+    task_api.records['fern'] = [Organization(id='fictional-chat', thread_id='fictional-thread')]
+    responses = [
+        await task_api.browser.post(
+            '/tasks/title/completions', json={**FORM, 'chat_id': source}, headers={'X-Fictional-User': actor}
+        )
+        for source in ['fictional-chat', 'fictional-missing']
+    ]
+    assert responses[0].status_code == responses[1].status_code == 404
+    assert responses[0].content == responses[1].content
+    assert responses[0].headers == responses[1].headers
+    assert task_api.platform.task_bodies == []
+
+
+@pytest.mark.asyncio
+async def test_mapped_thread_access_is_checked_by_platform(task_api):
+    task_api.records['lark'] = [Organization(id='fictional-chat', thread_id='fictional-thread')]
+    response = await task_api.browser.post(
+        '/tasks/title/completions', json={**FORM, 'chat_id': 'fictional-chat'}, headers={'X-Fictional-User': 'lark'}
+    )
+    assert response.status_code == 404
+    assert task_api.platform.task_results == {}
+    assert task_api.platform.requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:lark'
+
+
+@pytest.mark.asyncio
+async def test_tasks_use_only_the_saved_active_bookmark(task_api, monkeypatch):
+    from open_webui.models.chats import Chats
+
+    monkeypatch.setattr(threads, 'enabled', lambda: False)
+    saved = SimpleNamespace(
+        current_message_id='fictional-pending',
+        chat={
+            'history': {
+                'currentId': 'fictional-pending',
+                'messages': {
+                    'fictional-pending': {'parentId': 'fictional-active'},
+                    'fictional-active': {'meta': {'agent_v2': {'thread_id': 'fictional-thread', 'position': 2}}},
+                    'fictional-inactive': {'meta': {'agent_v2': {'thread_id': 'fictional-old', 'position': 7}}},
+                },
+            }
+        },
+    )
+    lookup = AsyncMock(return_value=saved)
+    monkeypatch.setattr(Chats, 'get_chat_by_id_and_user_id', lookup)
+    messages = saved.chat['history'].pop('messages')
+    monkeypatch.setattr(Chats, 'get_messages_map_by_chat_id', AsyncMock(return_value=messages))
+    response = await task_api.browser.post(
+        '/tasks/title/completions',
+        json={
+            **FORM,
+            'chat_id': 'fictional-chat',
+            'messages': [{'id': 'fictional-inactive', 'meta': {'agent_v2': {}}}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    lookup.assert_awaited_once_with('fictional-chat', 'fern')
+    assert task_api.platform.task_bodies[0][1]['source_thread'] == 'fictional-thread'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved', [None, SimpleNamespace(chat={}, current_message_id=None)])
+async def test_tasks_without_a_saved_bookmark_do_not_submit(task_api, monkeypatch, saved):
+    from open_webui.models.chats import Chats
+
+    monkeypatch.setattr(threads, 'enabled', lambda: False)
+    lookup = AsyncMock(return_value=saved)
+    monkeypatch.setattr(Chats, 'get_chat_by_id_and_user_id', lookup)
+    monkeypatch.setattr(Chats, 'get_messages_map_by_chat_id', AsyncMock(return_value={}))
+    response = await task_api.browser.post('/tasks/title/completions', json={**FORM, 'chat_id': 'fictional-chat'})
+    assert response.status_code == 404
+    lookup.assert_awaited_once_with('fictional-chat', 'fern')
     assert task_api.platform.requests == []
