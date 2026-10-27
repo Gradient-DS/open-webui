@@ -652,6 +652,10 @@
 					{/if}
 
 					{#each chatList as chat, idx (chat.id)}
+						{@const chatUrl =
+							$config?.features?.enable_v2_threads && chat.readonly
+								? `/s/${chat.id}`
+								: `/c/${chat.id}`}
 						{#if idx === 0 || (idx > 0 && chat.time_range !== chatList[idx - 1].time_range)}
 							<div
 								class="w-full text-xs text-gray-500 dark:text-gray-500 font-normal {idx === 0
@@ -738,10 +742,10 @@
 							{:else}
 								<a
 									class="flex-1 min-w-0"
-									href="/c/{chat.id}"
+									href={chatUrl}
 									draggable="false"
 									on:click={async () => {
-										await goto(`/c/${chat.id}`);
+										await goto(chatUrl);
 										show = false;
 										onClose();
 									}}

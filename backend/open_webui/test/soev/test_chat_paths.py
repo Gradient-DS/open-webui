@@ -292,6 +292,127 @@ async def test_projection_forks_clone_tags_and_usage(dark_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path',
+    ['search?text=Fictional%20message&page=1', 'list', '', 'folder/fictional-folder', 'folder/fictional-folder/list'],
+)
+async def test_listing_rows_have_ui_ids_dates_and_caller_state(dark_api, path):
+    folder_id = 'fictional-folder' if path.startswith('folder/') else None
+    dark_api.records.records[0] = dark_api.records.records[0].model_copy(
+        update={'folder_id': folder_id, 'last_read_at': 1792922399}
+    )
+    dark_api.records.folders = {'fictional-folder': {'fictional-shared': 'fictional-lark'}}
+    dark_api.visible.append(index_item('fictional-shared'))
+    response = await dark_api.browser.get('/api/v1/chats/' + path)
+    assert response.status_code == 200, response.text
+    rows = {row['id']: row for row in response.json()}
+    assert set(rows) == {'fictional-chat', 'fictional-shared'}
+    for chat_id, row in rows.items():
+        assert row['title'] == 'Fictional title'
+        assert type(row['updated_at']) is int
+        assert row['updated_at'] == 1792922400
+        if 'created_at' in row:
+            assert type(row['created_at']) is int
+        assert row['readonly'] is (chat_id == 'fictional-shared')
+        assert row['last_read_at'] == (1792922399 if chat_id == 'fictional-chat' else None)
+        assert row['pinned'] is False
+        assert row['archived'] is False
+        assert row['folder_id'] == folder_id
+        assert row['active'] is False
+    assert all(call.url.path == '/v1/threads' for call in dark_api.calls)
+    assert dict(dark_api.calls[-1].url.params) == {
+        'q': 'Fictional message' if path.startswith('search') else '',
+        'limit': '200',
+        'cursor': '',
+    }
+    dark_api.legacy.assert_not_awaited()
+
+
+def test_ui_rows_convert_available_creation_dates_without_inventing_them():
+    rows = ChatPaths.ui_rows(
+        [
+            {**index_item(), 'organization': None, 'created_at': '2026-10-25T11:59:59.900+02:00'},
+            {**index_item('fictional-shared'), 'organization': None},
+        ]
+    )
+    assert rows[0]['created_at'] == 1792922399
+    assert type(rows[0]['created_at']) is int
+    assert 'created_at' not in rows[1]
+
+
+@pytest.mark.asyncio
+async def test_tag_results_have_ui_ids_and_dates(dark_api):
+    response = await dark_api.browser.post('/api/v1/chats/tags', json={'name': 'Fictional tag'})
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['id'] == 'fictional-chat'
+    assert row['updated_at'] == 1792922400
+    assert row['readonly'] is False
+    assert row['folder_id'] == 'fictional-folder'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path,expected',
+    [
+        ('list', {'fictional-plain', 'fictional-shared'}),
+        ('?include_pinned=true&include_folders=true', {'fictional-plain', 'fictional-chat', 'fictional-shared'}),
+        ('search?text=Fictional', {'fictional-plain', 'fictional-chat', 'fictional-shared'}),
+        ('search?text=Fictional&include_pinned=false', {'fictional-plain', 'fictional-shared'}),
+        ('pinned', {'fictional-chat'}),
+        ('archived', {'fictional-archive'}),
+        ('archived/count', 1),
+    ],
+)
+async def test_listing_filters_preserve_caller_state(dark_api, path, expected):
+    dark_api.records.records[0].pinned = True
+    dark_api.records.records.extend(
+        [
+            Organization(id='fictional-plain', thread_id='fictional-plain-thread'),
+            Organization(id='fictional-archive', thread_id='fictional-archive-thread', archived=True, pinned=True),
+        ]
+    )
+    dark_api.visible.extend(
+        index_item(thread_id)
+        for thread_id in ['fictional-plain-thread', 'fictional-archive-thread', 'fictional-shared']
+    )
+    response = await dark_api.browser.get('/api/v1/chats/' + path)
+    assert response.status_code == 200, response.text
+    if path == 'archived/count':
+        assert response.json() == expected
+        return
+    rows = response.json()
+    assert {row['id'] for row in rows} == expected
+    for row in rows:
+        org = row['organization'] or {}
+        assert row['pinned'] == org.get('pinned', False)
+        assert row['archived'] == org.get('archived', False)
+        assert row['folder_id'] == org.get('folder_id')
+        assert row['readonly'] is (not org)
+        assert type(row['updated_at']) is int
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path', ['search?text=Fictional&page=', 'list?page=', '?page='])
+async def test_listing_pages_keep_distinct_chat_ids(dark_api, path):
+    dark_api.records.records = [
+        Organization(id=f'fictional-chat-{i:02}', thread_id=f'fictional-thread-{i:02}') for i in range(61)
+    ]
+    dark_api.visible[:] = [index_item(record.thread_id) for record in dark_api.records.records]
+    pages = []
+    for number in [1, 2, 3]:
+        response = await dark_api.browser.get('/api/v1/chats/' + path + str(number))
+        assert response.status_code == 200, response.text
+        pages.append([row['id'] for row in response.json()])
+    assert pages == [
+        [f'fictional-chat-{i:02}' for i in range(60, 0, -1)],
+        ['fictional-chat-00'],
+        [],
+    ]
+    assert all(call.url.params['limit'] == '200' and call.url.params['cursor'] == '' for call in dark_api.calls)
+
+
+@pytest.mark.asyncio
 async def test_invisible_thread_changes_no_order_count_page_or_folder_unread(dark_api):
     service = ChatPaths(dark_api.client, dark_api.records)
     before = await service.listing('fictional-fern', folder_id='fictional-folder', page=1)

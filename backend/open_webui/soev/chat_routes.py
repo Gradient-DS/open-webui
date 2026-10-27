@@ -180,7 +180,7 @@ async def tag_listing(service, request, user, route):
         names.update(name for name in tags if isinstance(name, str))
         if tag in tags:
             found.append(item)
-    return found if route == '/tags' else sorted(names)
+    return service.ui_rows(found) if route == '/tags' else sorted(names)
 
 
 async def organize(service, request, user, identifier, route):
