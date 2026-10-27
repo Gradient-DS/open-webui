@@ -56,6 +56,7 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
     saved = {
         'live_mail.enable': enabled,
         'live_documents.enable': enabled,
+        'data_sources.enable': enabled,
         'onedrive.enable': True,
         'onedrive.enable_business': enabled,
         'onedrive.enable_personal': enabled,
@@ -65,7 +66,13 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
         platform_capabilities.clear()
     request = Request({'type': 'http', 'path': '/api/config', 'headers': [(b'authorization', b'Bearer test')]})
     result = await main.get_app_config(request)
-    for flag in ['enable_live_mail', 'enable_live_documents', 'feature_meetings', 'enable_onedrive_business']:
+    for flag in [
+        'enable_live_mail',
+        'enable_live_documents',
+        'enable_data_sources',
+        'feature_meetings',
+        'enable_onedrive_business',
+    ]:
         assert bool(result['features'][flag]) is (present and enabled)
     assert bool(result['features']['enable_onedrive_integration']) is present
     assert result['features']['feature_agent_api_enabled'] is True

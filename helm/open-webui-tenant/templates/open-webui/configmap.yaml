@@ -236,6 +236,9 @@ data:
   # Agent trace download (admins)
   ENABLE_AGENT_TRACE_DOWNLOAD: {{ .Values.openWebui.config.enableAgentTraceDownload | default "false" | quote }}
 
+  # Data sources (ds: collections in the "+" menu)
+  ENABLE_DATA_SOURCES: {{ .Values.openWebui.config.enableDataSources | default "false" | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}

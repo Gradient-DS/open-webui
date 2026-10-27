@@ -209,6 +209,7 @@ from open_webui.routers import (
     chats,
     configs,
     cloud_sync,
+    data_sources,
     data_warnings,
     evaluations,
     export,
@@ -1131,6 +1132,8 @@ app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
+# [Gradient] Data sources for the composer, gated in-handler on enable_data_sources.
+app.include_router(data_sources.router, prefix='/api/v1/data-sources', tags=['data-sources'])
 
 # [Gradient] Product feedback reporting API.
 # Mounted unconditionally — gated in-handler on the feedback_report.enable
@@ -2690,6 +2693,7 @@ async def get_app_config(request: Request):
         'onedrive.enable',
         'live_documents.enable',
         'live_mail.enable',
+        'data_sources.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
@@ -2899,6 +2903,9 @@ async def get_app_config(request: Request):
                     'enable_live_documents': AGENT_API_ENABLED
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
+                    'enable_data_sources': AGENT_API_ENABLED
+                    and config.get('data_sources.enable')
+                    and await capabilities.has(capabilities.DATA_SOURCES),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]

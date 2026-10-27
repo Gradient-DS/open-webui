@@ -3153,6 +3153,7 @@ DEFAULT_CONFIG = {
     'google_drive.api_key': GOOGLE_DRIVE_API_KEY,
     'live_mail.enable': os.getenv('ENABLE_LIVE_MAIL', 'False').lower() == 'true',
     'live_documents.enable': os.getenv('ENABLE_LIVE_DOCUMENTS', 'False').lower() == 'true',
+    'data_sources.enable': os.getenv('ENABLE_DATA_SOURCES', 'False').lower() == 'true',
     'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
     'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
     'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,

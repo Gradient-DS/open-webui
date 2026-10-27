@@ -46,6 +46,7 @@ def platform_capabilities(monkeypatch):
         capabilities.MEETINGS,
         capabilities.GROUPS_PUSH,
         capabilities.IMAGES,
+        capabilities.DATA_SOURCES,
     }
 
     async def refresh():

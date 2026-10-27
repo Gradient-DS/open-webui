@@ -130,8 +130,10 @@ class SoevKnowledgeTable:
                 return None
             raise
 
-    async def _collections(self, *, user_id=None, as_service=False):
+    async def _collections(self, *, user_id=None, as_service=False, data_sources=False):
+        """The knowledge bases, or with `data_sources` only the data sources, which never list as knowledge."""
         from open_webui.soev import ingest
+        from open_webui.soev.data_sources import is_data_source
 
         rows, queued, running = await asyncio.gather(
             self._pages('/v1/collections', user_id=user_id, as_service=as_service),
@@ -146,7 +148,13 @@ class SoevKnowledgeTable:
             and not ingest.is_attachments_collection(row['key'])
             and not ingest.is_assistant_collection(row['key'])
             and not ingest.is_folder_collection(row['key'])
+            and is_data_source(row['key']) is data_sources
         ]
+
+    async def data_sources(self, user_id):
+        """The data sources the user can read, by name."""
+        rows = await self._collections(user_id=user_id, data_sources=True)
+        return sorted(rows, key=lambda row: (_sort_value(row['name']), row['key']))
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
@@ -459,8 +467,20 @@ class SoevKnowledgeTable:
         if not members:
             return None
         collection, document = members[0]
+        row = _catalog_file_row(document, user_id)
+        row['meta']['soev_collection_key'] = collection['key']
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
-        return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
+        return row, self._client.stream(path, as_user=await self._as_user(user_id))
+
+    async def catalog_rendition(self, collection_key, source_id, *, user_id):
+        """The document's retained markdown read as the user, or None when unreadable or never parsed."""
+        path = self._path(collection_key) + '/documents/' + quote(source_id, safe='') + '/content'
+        try:
+            return await self._client.get_text(path, as_user=await self._as_user(user_id))
+        except SoevApiError as error:
+            if error.status == 404 or (error.status == 409 and error.code == 'rendition_missing'):
+                return None
+            raise
 
     async def _references(self, ids, *, user_id=None, as_service=False):
         result = []

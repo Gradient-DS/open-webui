@@ -41,14 +41,15 @@ def classify_file(item: Optional[dict]) -> Optional[str]:
     return None
 
 
-def request_mixes_data_sources(files, messages, web_search_requested) -> bool:
+def request_mixes_data_sources(files, messages, web_search_requested, data_sources=()) -> bool:
     """True when a request combines open-internet with internal documents.
 
     Considers the current turn's ``files``, every prior message's ``files``
-    (conversation lock), and whether web search is requested this turn.
+    (conversation lock), whether web search is requested this turn, and the
+    turn's switched-on data sources, which are knowledge bases to the agent.
     """
     open_internet = bool(web_search_requested)
-    internal = False
+    internal = bool(data_sources)
 
     all_files = list(files or [])
     for message in messages or []:

@@ -23,7 +23,13 @@ export function mergeCitationDocuments(
 		: documents;
 }
 
-export async function probeFileAvailable(fileId: string): Promise<boolean> {
+export interface FileProbe {
+	available: boolean;
+	/** What the content route serves, without parameters; unknown while the original is prepared. */
+	contentType?: string;
+}
+
+export async function probeFile(fileId: string): Promise<FileProbe> {
 	try {
 		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
 		const response = await fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, {
@@ -31,17 +37,23 @@ export async function probeFileAvailable(fileId: string): Promise<boolean> {
 			headers: token ? { authorization: `Bearer ${token}` } : {}
 		});
 		// [Gradient] 409: the original is still being prepared; the viewer waits for it.
-		return response.ok || response.status === 409;
+		if (!response.ok) return { available: response.status === 409 };
+		const contentType = response.headers?.get('content-type')?.split(';')[0].trim().toLowerCase();
+		return contentType ? { available: true, contentType } : { available: true };
 	} catch {
-		return false;
+		return { available: false };
 	}
+}
+
+export async function probeFileAvailable(fileId: string): Promise<boolean> {
+	return (await probeFile(fileId)).available;
 }
 
 // [Gradient] Every check re-probes (no cached failure) and only the latest check reports, so a late
 // result for a replaced citation never decides the preview of the one now shown.
 export function createPreviewProbe(
-	onResult: (available: boolean) => void,
-	probe: (fileId: string) => Promise<boolean> = probeFileAvailable
+	onResult: (available: boolean, contentType?: string) => void,
+	probe: (fileId: string) => Promise<boolean | FileProbe> = probeFile
 ) {
 	let version = 0;
 	return {
@@ -49,8 +61,10 @@ export function createPreviewProbe(
 			const current = ++version;
 			onResult(true);
 			if (!fileId) return;
-			const available = await probe(fileId);
-			if (current === version) onResult(available);
+			const result = await probe(fileId);
+			const { available, contentType } =
+				typeof result === 'boolean' ? { available: result, contentType: undefined } : result;
+			if (current === version) onResult(available, contentType);
 		},
 		cancel() {
 			version++;

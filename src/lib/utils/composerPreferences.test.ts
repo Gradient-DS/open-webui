@@ -12,7 +12,8 @@ const chosen = composerPreferences({
 	documentWriterEnabled: true,
 	selectedToolIds: ['tool'],
 	selectedSkillIds: ['skill'],
-	selectedFilterIds: ['filter']
+	selectedFilterIds: ['filter'],
+	selectedDataSourceIds: ['ds:publications']
 });
 
 describe('composer preferences', () => {
@@ -77,6 +78,13 @@ describe('composer preferences', () => {
 		expect(restored.liveMailState).toBe('off');
 		expect(restored).not.toHaveProperty('webSearchRequired');
 		expect(composerFeatures(restored)).not.toHaveProperty('web_search_required');
+	});
+	it('keeps only data source ids in a saved data source choice', () => {
+		const restored = composerFromFeatures({
+			data_sources: ['ds:publications', 'kb-private', 'ds:', 3, 'ds:publications']
+		});
+		expect(restored.selectedDataSourceIds).toEqual(['ds:publications']);
+		expect(composerFromFeatures({}).selectedDataSourceIds).toEqual([]);
 	});
 	it('partial preferences inherit missing choices and do not share selection arrays', () => {
 		const restored = composerPreferences({ webSearchEnabled: false }, chosen);

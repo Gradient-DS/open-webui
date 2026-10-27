@@ -361,6 +361,10 @@ openWebui:
     # assistant's instructions; "false" hides the item and 404s the route.
     enableAgentTraceDownload: "false"
 
+    # Data sources: tenant-wide platform collections (keys starting with `ds:`) a user
+    # switches on per chat from the "+" menu. Also needs soev-api `data_sources`.
+    enableDataSources: "false"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"

@@ -39,8 +39,12 @@
 	let expandedDocs: Set<number> = new Set();
 	let selectedTab: 'preview' | 'content' = 'preview';
 	let previewAvailable = true;
+	let previewType: string | undefined;
 	let panelElement: HTMLElement;
-	const availability = createPreviewProbe((available) => (previewAvailable = available));
+	const availability = createPreviewProbe((available, contentType) => {
+		previewAvailable = available;
+		previewType = contentType;
+	});
 
 	// [Gradient] The list comes from the live branch; payloads identify only the target answer.
 	$: groups = sourceGroups(history);
@@ -166,7 +170,11 @@
 			document: text || $i18n.t('No content')
 		}));
 	}
-	$: ({ fileId, isPreviewable } = citationFileInfo(citation, mergedDocuments));
+	$: ({ fileId, isPreviewable, textOnly } = citationFileInfo(
+		citation,
+		mergedDocuments,
+		previewType
+	));
 	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
 	// [Gradient] Every opened payload re-probes, even for the same file: a transient failure never sticks.
 	$: checkAvailability(panel, fileId);
@@ -204,7 +212,14 @@
 					aria-label={$i18n.t('Back to sources')}
 					on:click={backToSources}><ChevronLeft className="size-4" /></button
 				>
-				<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl} size="sm">
+				<CitationHeader
+					{citation}
+					{mergedDocuments}
+					{previewAvailable}
+					{externalUrl}
+					{textOnly}
+					size="sm"
+				>
 					<div slot="actions" class="flex items-center gap-1 shrink-0 whitespace-nowrap">
 						{#if isPreviewable && previewAvailable}
 							<div
@@ -268,6 +283,7 @@
 						{showPercentage}
 						{showRelevance}
 						{previewAvailable}
+						{previewType}
 						preview={isPreviewable && previewAvailable && selectedTab === 'preview'}
 					/>
 				{/key}

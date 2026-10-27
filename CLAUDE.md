@@ -229,6 +229,22 @@ which continues with the next connection or lands on `/auth`. User settings key 
 records every tried connection (never tried again) and the one in flight (consumed on return, 300 s), so
 popups keep their postMessage page. A failure leaves the manual reconnect; the login never fails on it.
 
+### Data sources
+
+A data source is a tenant-wide platform collection whose key starts with `ds:` (`soev/data_sources.py`). It never
+lists as knowledge (`knowledge_store._collections`); `GET /api/v1/data-sources` lists the ones the caller can read,
+404 unless `features.enable_data_sources` (`ENABLE_DATA_SOURCES`, config `data_sources.enable`, default false, chart
+`openWebui.config.enableDataSources`, plus `AGENT_API_ENABLED` and the soev-api `data_sources` capability). The + menu's
+Data sources submenu switches each on or off per chat; each source and the submenu are pinnable. Switched-on ids
+persist and travel as `features.data_sources`; `agent_v2._knowledge` appends the readable ones to `input.knowledge`
+after the chat's, assistant's and folder's, dropping non-`ds:` ids and everything while the gate is closed. They are
+never chat `files`, so no chip and no notice. A citation's `/files/{source_id}/content` serves a catalog document's
+original as the user (`soev/catalog_content.py`); without one (404 or 409 `original_missing`), its retained markdown
+as inline `text/plain`, so text fragments still land; 404 when neither is readable. The sources panel reads the
+served type from its HEAD probe (`probeFile`): a PDF gets Voorbeeld | Inhoud even when named by its title, text-only
+gets Inhoud alone with a plain title, and the icon beside the title opens `source_url`. The Inhoud label in the text
+view is never a link, for any citation kind: the title or the icon beside it is the one way out of the panel.
+
 ### Live mail
 
 `ENABLE_LIVE_MAIL=true` enables the server gate (`live_mail.enable`, default false),
