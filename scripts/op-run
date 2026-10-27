@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# [Gradient] Run a command with secrets.env resolved by 1Password, e.g.
+#   scripts/op-run open-webui dev
+# A service-account token in the macOS keychain (soev-dev-op-token) is used for
+# this process only; without it, op asks the desktop app.
+set -euo pipefail
+dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+(($#)) || { echo "usage: scripts/op-run <command> [args...]" >&2; exit 2; }
+if token=$(security find-generic-password -s soev-dev-op-token -w 2>/dev/null); then export OP_SERVICE_ACCOUNT_TOKEN="$token"; fi
+exec op run --env-file "$dir/secrets.env" -- "$@"
