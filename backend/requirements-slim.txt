@@ -68,7 +68,7 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 ftfy==6.3.1
 chardet==7.4.3
 pypdf==6.21.2 # security: CVE-2026-115572/115580/115585 (crafted-PDF runtime blow-ups) fixed in 6.21.2; CVE-2026-113786 (crafted PDF reaches arbitrary image parsers) and CVE-2026-113789..113791 (memory/CPU blow-up via crafted PDFs) fixed in 6.21.0-6.21.1; CVE-2026-113792..113795 and earlier fixes (CVE-2026-102993..103000, CVE-2026-84309/84310/84311 and prior) stay fixed
-fpdf2==2.8.7
+fpdf2==2.8.8 # security: CVE-2026-114609 / CVE-2026-114610 (SVG <use> expansion, implicit image dereference) fixed in 2.8.8
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
 python-pptx==1.0.2
@@ -112,7 +112,7 @@ googleapis-common-protos==1.75.0
 google-cloud-storage==3.9.0
 
 ## Databases
-pymongo==4.18.2 # security: GHSA-v4x9-3549-crwv / GHSA-vp6j-j7w5-5xjj / GHSA-qx36-8mw2-4r3x fixed in 4.18.2
+pymongo==4.18.3 # security: GHSA-v4x9-3549-crwv / GHSA-vp6j-j7w5-5xjj / GHSA-qx36-8mw2-4r3x fixed in 4.18.2; CVE-2026-106435 (BSON regex decoder) fixed in 4.18.3
 psycopg2-binary==2.9.12
 pgvector==0.4.2
 
@@ -163,7 +163,7 @@ opentelemetry-instrumentation-aiohttp-client==0.66b1
 opentelemetry-instrumentation-system-metrics==0.66b1
 
 # security: explicit pins for transitive deps flagged by pip-audit/Trivy
-msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
+msgpack==1.2.3 # security: GHSA-6v7p-g79w-8964 (OOB read/crash); CVE-2026-114613 (C extension leaks a decoded map value) fixed in 1.2.3
 setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
 oauthlib==4.0.0 # security: GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv fixed in 4.0.0
 certifi==2026.10.19 # security: GHSA-6q48-6c7w-9gw2 (eMudhra/emSign CA key compromise, MITM on outbound TLS) fixed in 2026.10.18; 2026.10.19 is the recommended release
