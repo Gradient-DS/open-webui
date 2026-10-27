@@ -18,6 +18,7 @@ export type ProjectionPage = {
 
 export type IndexItem = {
 	thread_id: string;
+	owned: boolean;
 	title: string | null;
 	updated_at: string;
 	parent_thread: string | null;

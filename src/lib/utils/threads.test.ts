@@ -22,6 +22,10 @@ import sidebarSource from '$lib/components/layout/ThreadSidebar.svelte?raw';
 import stateSource from '$lib/components/common/ThreadState.svelte?raw';
 import shareSource from '$lib/components/chat/ThreadShareModal.svelte?raw';
 import sharedSource from '$lib/components/chat/SharedThread.svelte?raw';
+import mainSidebarSource from '$lib/components/layout/Sidebar.svelte?raw';
+import folderSource from '$lib/components/layout/Sidebar/RecursiveFolder.svelte?raw';
+import sharedFolderSource from '$lib/components/layout/Sidebar/SharedFolderItem.svelte?raw';
+import searchSource from '$lib/components/layout/SearchModal.svelte?raw';
 import { sharingAPI, shareStateText } from './threadSharing';
 
 it('provides English keys and Dutch translations for every thread UI label', () => {
@@ -56,6 +60,7 @@ const page = (
 });
 const fork = (id = 'fictional-fork', at = 2): IndexItem => ({
 	thread_id: id,
+	owned: true,
 	title: 'Fictional fork',
 	updated_at: '2026-10-25T10:00:00Z',
 	parent_thread: 'fictional-thread',
@@ -326,6 +331,42 @@ const sidebarItem = (id: string, pinned = false): SidebarItem => ({
 });
 
 describe('platform sidebar', () => {
+	it('passes readonly state to every chat row in the sidebar and folders', () => {
+		const mainRows = [...mainSidebarSource.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
+		expect(mainRows).toHaveLength(2);
+		for (const [row] of mainRows) {
+			expect(row).toContain('readonly={chat.readonly ?? false}');
+		}
+		for (const source of [folderSource, sharedFolderSource]) {
+			const rows = [...source.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
+			expect(rows).toHaveLength(1);
+			expect(rows[0][0]).toContain('readonly={chat.readonly ??');
+		}
+	});
+
+	it('hides search menus and Shift actions for readonly rows', () => {
+		const actions = searchSource.match(
+			/\{#if !chat\.readonly && editingChatId !== chat\.id\}([\s\S]*?)\n\t{8}\{\/if\}/
+		)?.[1];
+		expect(actions).toBeDefined();
+		expect(actions).toContain('{#if shiftKey}');
+		expect(actions).toContain('archiveChatHandler(chat.id)');
+		expect(actions).toContain('deleteChatHandler(chat.id)');
+		expect(actions).toContain('<ChatMenu');
+		expect(searchSource.match(/<ChatMenu\s/g)).toHaveLength(1);
+	});
+
+	it('preserves platform ownership independently of local records', async () => {
+		const backend = api();
+		const shared = { ...sidebarItem('fictional-shared', true), owned: false };
+		const owned = { ...sidebarItem('fictional-owned'), organization: null };
+		vi.mocked(backend.index).mockResolvedValueOnce({ items: [shared, owned], next_cursor: null });
+		const controller = new ThreadSidebar(backend);
+		await controller.search();
+		expect(controller.snapshot.items).toEqual([shared, owned]);
+		expect(filterSidebar(controller.snapshot.items, { pinned: true })).toEqual([shared]);
+	});
+
 	it('keeps platform order and local filters after search and opaque paging', async () => {
 		const backend = api();
 		vi.mocked(backend.index)

@@ -787,7 +787,7 @@
 									)}
 								</div>
 
-								{#if editingChatId !== chat.id}
+								{#if !chat.readonly && editingChatId !== chat.id}
 									{#if shiftKey}
 										<div class="flex items-center space-x-1.5">
 											<Tooltip content={$i18n.t('Archive')} className="flex items-center">

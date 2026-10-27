@@ -103,10 +103,10 @@ class ChatPaths:
         rows = []
         for item in items:
             org = item['organization'] or {}
-            readonly = item.get('readonly', not org)
+            readonly = item.get('readonly', not item['owned'])
             row = {
                 **item,
-                'id': item['thread_id'] if readonly else org['id'],
+                'id': item['thread_id'] if readonly else org.get('id', item['thread_id']),
                 'last_read_at': org.get('last_read_at'),
                 'readonly': readonly,
                 'pinned': org.get('pinned', False),
@@ -208,7 +208,11 @@ class ChatPaths:
         for item in items:
             org = item['organization'] or {}
             updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
-            if item.get('readonly') or org.get('archived') or updated <= (org.get('last_read_at') or 0):
+            if (
+                item.get('readonly', not item['owned'])
+                or org.get('archived')
+                or updated <= (org.get('last_read_at') or 0)
+            ):
                 continue
             folder, seen = org.get('folder_id'), set()
             while folder and folder not in seen:

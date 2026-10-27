@@ -302,7 +302,7 @@ async def test_listing_rows_have_ui_ids_dates_and_caller_state(dark_api, path):
         update={'folder_id': folder_id, 'last_read_at': 1792922399}
     )
     dark_api.records.folders = {'fictional-folder': {'fictional-shared': 'fictional-lark'}}
-    dark_api.visible.append(index_item('fictional-shared'))
+    dark_api.visible.append(index_item('fictional-shared', owned=False))
     response = await dark_api.browser.get('/api/v1/chats/' + path)
     assert response.status_code == 200, response.text
     rows = {row['id']: row for row in response.json()}
@@ -328,11 +328,58 @@ async def test_listing_rows_have_ui_ids_dates_and_caller_state(dark_api, path):
     dark_api.legacy.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path', ['search?text=Fictional', '?include_pinned=true', 'list?include_pinned=true', 'pinned']
+)
+async def test_pinned_shared_chat_keeps_thread_id_and_readonly(dark_api, path):
+    dark_api.visible[0]['owned'] = False
+    dark_api.records.records[0].folder_id = None
+    response = await dark_api.browser.post('/api/v1/chats/fictional-chat/pin')
+    assert response.status_code == 200, response.text
+    response = await dark_api.browser.get('/api/v1/chats/' + path)
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['id'] == 'fictional-thread'
+    assert row['organization']['id'] == 'fictional-chat'
+    assert row['pinned'] is True
+    assert row['readonly'] is True
+
+
+@pytest.mark.asyncio
+async def test_owned_chat_without_record_is_writable(dark_api):
+    dark_api.records.records.clear()
+    response = await dark_api.browser.get('/api/v1/chats/list')
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['id'] == 'fictional-thread'
+    assert row['organization'] is None
+    assert row['readonly'] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('owned', [False, True])
+@pytest.mark.parametrize('member', ['fictional-fern', 'fictional-reader'])
+async def test_folder_rows_keep_member_readonly_override(dark_api, owned, member):
+    dark_api.visible[0]['owned'] = owned
+    dark_api.records.folders = {'fictional-folder': {'fictional-thread': member}}
+    response = await dark_api.browser.get('/api/v1/chats/folder/fictional-folder/list')
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    readonly = member != 'fictional-fern'
+    assert row['readonly'] is readonly
+    assert row['id'] == ('fictional-thread' if readonly else 'fictional-chat')
+    service = ChatPaths(dark_api.client, dark_api.records)
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {
+        'fictional-folder': 0 if readonly else 1
+    }
+
+
 def test_ui_rows_convert_available_creation_dates_without_inventing_them():
     rows = ChatPaths.ui_rows(
         [
             {**index_item(), 'organization': None, 'created_at': '2026-10-25T11:59:59.900+02:00'},
-            {**index_item('fictional-shared'), 'organization': None},
+            {**index_item('fictional-shared', owned=False), 'organization': None},
         ]
     )
     assert rows[0]['created_at'] == 1792922399
@@ -373,7 +420,7 @@ async def test_listing_filters_preserve_caller_state(dark_api, path, expected):
         ]
     )
     dark_api.visible.extend(
-        index_item(thread_id)
+        index_item(thread_id, owned=thread_id != 'fictional-shared')
         for thread_id in ['fictional-plain-thread', 'fictional-archive-thread', 'fictional-shared']
     )
     response = await dark_api.browser.get('/api/v1/chats/' + path)
@@ -388,7 +435,7 @@ async def test_listing_filters_preserve_caller_state(dark_api, path, expected):
         assert row['pinned'] == org.get('pinned', False)
         assert row['archived'] == org.get('archived', False)
         assert row['folder_id'] == org.get('folder_id')
-        assert row['readonly'] is (not org)
+        assert row['readonly'] is (not row['owned'])
         assert type(row['updated_at']) is int
 
 
@@ -884,6 +931,7 @@ async def test_retired_share_owner_only_and_fallback_share_refused(dark_api):
 @pytest.mark.asyncio
 async def test_shared_folder_joins_only_authorized_threads_before_counting_and_sorting(dark_api):
     service = ChatPaths(dark_api.client, dark_api.records)
+    dark_api.visible[0]['owned'] = False
     dark_api.records.records = []  # The reader owns no row for either chat.
     dark_api.records.folders = {'fictional-folder': {'fictional-thread': 'fictional-owner'}}
     before = await service.listing('fictional-fern', folder_id='fictional-folder')
@@ -997,7 +1045,7 @@ async def test_readonly_folder_rows_do_not_stay_unread_after_reading(dark_api):
             'fictional-shared': 'fictional-owner',
         }
     }
-    dark_api.visible.append(index_item('fictional-shared'))
+    dark_api.visible.append(index_item('fictional-shared', owned=False))
     assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 1}
     await service.organize('fictional-fern', 'fictional-chat', {'last_read_at': 2_000_000_000})
     assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
