@@ -333,11 +333,12 @@ const sidebarItem = (id: string, pinned = false): SidebarItem => ({
 
 describe('platform sidebar', () => {
 	it('passes readonly state to every chat row in the sidebar and folders', () => {
-		const mainRows = [...mainSidebarSource.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
-		expect(mainRows).toHaveLength(2);
-		for (const [row] of mainRows) {
-			expect(row).toContain('readonly={chat.readonly ?? false}');
-		}
+		const mainRows = [...mainSidebarSource.matchAll(/<ChatItem\s[\s\S]*?\/>/g)].map(([row]) => row);
+		expect(mainRows).toHaveLength(3);
+		expect(
+			mainRows.filter((row) => row.includes('readonly={chat.readonly ?? false}'))
+		).toHaveLength(2);
+		expect(mainRows.filter((row) => row.includes('readonly={true}'))).toHaveLength(1);
 		for (const source of [folderSource, sharedFolderSource]) {
 			const rows = [...source.matchAll(/<ChatItem\s[\s\S]*?\/>/g)];
 			expect(rows).toHaveLength(1);

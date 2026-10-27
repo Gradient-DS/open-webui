@@ -40,6 +40,7 @@
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import GarbageBin from '../icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
+	import { isSharedChat } from '$lib/utils/sharedChats';
 	dayjs.extend(calendar);
 	dayjs.extend(localizedFormat);
 
@@ -774,6 +775,13 @@
 							<div
 								class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-3 pl-6 shrink-0"
 							>
+								{#if isSharedChat(chat)}
+									<div
+										class="text-xs text-gray-500 dark:text-gray-400 rounded-md border border-gray-200 dark:border-gray-700 px-1.5"
+									>
+										{$i18n.t('Shared')}
+									</div>
+								{/if}
 								<div class="text-gray-500 dark:text-gray-400 text-xs">
 									{$i18n.t(
 										dayjs(chat?.updated_at * 1000).calendar(null, {

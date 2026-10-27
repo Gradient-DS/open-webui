@@ -97,6 +97,7 @@
 	import CheckIcon from '../icons/Check.svelte';
 	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
 	import MobileSwipePanel from '../common/MobileSwipePanel.svelte';
+	import { splitChatsByOwnership } from '$lib/utils/sharedChats';
 
 	const BREAKPOINT = 768;
 
@@ -117,6 +118,8 @@
 
 	// Pagination variables
 	let chatListLoading = false;
+	$: chatLists = splitChatsByOwnership($chats, $pinnedChats);
+
 	let chatListReady = false;
 	let allChatsLoaded = false;
 
@@ -126,6 +129,7 @@
 	let showPinnedNotes = false;
 	let showFolders = false;
 	let showSharedFolders = false;
+	let showSharedChats = false;
 	let showChatsMenu = false;
 
 	let folders = {};
@@ -1557,6 +1561,38 @@
 						</SidebarSection>
 					{/if}
 
+					{#if chatLists.shared.length > 0}
+						<SidebarSection
+							id="sidebar-shared-chats"
+							bind:open={showSharedChats}
+							name={$i18n.t('Shared with me')}
+							dragAndDrop={false}
+						>
+							<div class="flex flex-col">
+								{#each chatLists.shared as chat (`shared-chat-${chat.id}`)}
+									<ChatItem
+										className=""
+										id={chat.id}
+										title={chat.title}
+										createdAt={chat.created_at}
+										updatedAt={chat.updated_at}
+										lastReadAt={chat.last_read_at}
+										active={chat.active ?? false}
+										readonly={true}
+										{shiftKey}
+										selected={selectedChatId === chat.id}
+										on:select={() => {
+											selectedChatId = chat.id;
+										}}
+										on:unselect={() => {
+											selectedChatId = null;
+										}}
+									/>
+								{/each}
+							</div>
+						</SidebarSection>
+					{/if}
+
 					<SidebarSection
 						id="sidebar-chats"
 						collapsible={false}
@@ -1661,7 +1697,7 @@
 							</Dropdown>
 						</svelte:fragment>
 
-						{#if $pinnedChats.length > 0}
+						{#if chatLists.pinned.length > 0}
 							<div class="mb-1">
 								<div class="flex flex-col space-y-1 rounded-xl">
 									<Folder
@@ -1724,7 +1760,7 @@
 										<div
 											class="ml-3 pl-1 mt-[0.0625rem] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-700 dark:text-gray-300"
 										>
-											{#each $pinnedChats as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
+											{#each chatLists.pinned as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
 												<ChatItem
 													className=""
 													id={chat.id}
@@ -1760,9 +1796,9 @@
 
 						<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
 							<div class="pt-1.5">
-								{#if $chats}
-									{#each $chats as chat, idx (`chat-${chat?.id ?? idx}`)}
-										{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
+								{#if chatLists.own}
+									{#each chatLists.own as chat, idx (`chat-${chat?.id ?? idx}`)}
+										{#if idx === 0 || (idx > 0 && chat.time_range !== chatLists.own[idx - 1].time_range)}
 											<div
 												class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
 												0
