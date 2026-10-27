@@ -11,6 +11,7 @@ on:
   # and the first scan happened on the test → main release PR — where a
   # pre-existing dependency advisory shows up looking like a release blocker.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, dev, test]
   # Daily: catches advisories published against code and images that have not
   # changed, which a push whose scans are reused (see `reuse`) does not.
@@ -55,7 +56,7 @@ jobs:
   source:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
-    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
     uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
@@ -73,7 +74,7 @@ jobs:
   # docker-build-soev.yaml's `scan-image`, on the digest it published; the
   # daily run scans the published digests (`published-<branch>`).
   image:
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
@@ -168,7 +169,7 @@ jobs:
     needs: reuse
     # Same reuse rule as `source`: a package only gets older, so a tree that
     # passed keeps passing.
-    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -184,9 +185,9 @@ jobs:
   # Named so a required check cannot be satisfied by runtime-security.yml's
   # `runtime-gate` or any other workflow's generic `gate`.
   gate:
-    name: security-gate
+    name: gate
     needs: [reuse, source, image, published-dev, published-test, published-main]
-    if: always()
+    if: ${{ always() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -236,6 +237,7 @@ jobs:
       && needs.image.result == 'success'
       && needs.lockfile-age.result == 'success'
       && needs.gate.result == 'success'
+      && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

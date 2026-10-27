@@ -2,12 +2,15 @@ name: Branch promotion guard
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
       - test
 
 jobs:
   check-source-branch:
+    name: promotion-guard
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
