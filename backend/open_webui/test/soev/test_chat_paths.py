@@ -360,19 +360,34 @@ async def test_owned_chat_without_record_is_writable(dark_api):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('owned', [False, True])
 @pytest.mark.parametrize('member', ['fictional-fern', 'fictional-reader'])
-async def test_folder_rows_keep_member_readonly_override(dark_api, owned, member):
+async def test_folder_rows_combine_ownership_and_member_restrictions(dark_api, owned, member):
     dark_api.visible[0]['owned'] = owned
     dark_api.records.folders = {'fictional-folder': {'fictional-thread': member}}
     response = await dark_api.browser.get('/api/v1/chats/folder/fictional-folder/list')
     assert response.status_code == 200, response.text
     row = response.json()[0]
-    readonly = member != 'fictional-fern'
+    readonly = not owned or member != 'fictional-fern'
     assert row['readonly'] is readonly
     assert row['id'] == ('fictional-thread' if readonly else 'fictional-chat')
     service = ChatPaths(dark_api.client, dark_api.records)
     assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {
         'fictional-folder': 0 if readonly else 1
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('suffix', ['', '/list'])
+async def test_shared_thread_in_readers_own_folder_stays_readonly_and_not_unread(dark_api, suffix):
+    dark_api.visible[0]['owned'] = False
+    response = await dark_api.browser.get('/api/v1/chats/folder/fictional-folder' + suffix)
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['readonly'] is True
+    assert row['id'] == 'fictional-thread'
+    assert row['organization']['id'] == 'fictional-chat'
+    assert row['folder_id'] == 'fictional-folder'
+    service = ChatPaths(dark_api.client, dark_api.records)
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
 
 
 def test_ui_rows_convert_available_creation_dates_without_inventing_them():
@@ -501,6 +516,32 @@ async def test_organization_changes_reauthorize_and_store_no_content(dark_api):
     response = await dark_api.browser.post('/api/v1/chats/fictional-chat/pin')
     assert response.status_code == 404
     assert len(dark_api.records.writes) == writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bulk', [False, True])
+async def test_shared_thread_unarchive_only_updates_readers_organization(dark_api, bulk):
+    dark_api.visible[0]['owned'] = False
+    dark_api.records.records[0].archived = True
+    response = await dark_api.browser.get('/api/v1/chats/archived')
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['id'] == 'fictional-thread'
+    assert row['readonly'] is True
+    dark_api.calls.clear()
+    if not bulk:
+        dark_api.state.update(reader=True, shares=[{'at': 2}])
+    path = 'unarchive/all' if bulk else row['organization']['id'] + '/archive'
+    response = await dark_api.browser.post('/api/v1/chats/' + path)
+    assert response.status_code == 200, response.text
+    assert len(dark_api.records.records) == 1
+    record = dark_api.records.records[0]
+    assert record.id == 'fictional-chat'
+    assert record.archived is False
+    assert all(call.method == 'GET' for call in dark_api.calls)
+    assert [call.url.path for call in dark_api.calls] == (
+        ['/v1/threads', '/v1/threads/fictional-thread'] if bulk else ['/v1/threads/fictional-thread']
+    )
 
 
 @pytest.mark.asyncio

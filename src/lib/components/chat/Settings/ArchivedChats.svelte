@@ -19,7 +19,7 @@
 		getArchivedChatList,
 		unarchiveAllChats
 	} from '$lib/apis/chats';
-	import { chatId, showSettings, user } from '$lib/stores';
+	import { chatId, config, showSettings, user } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 	import { formatNumber } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -117,8 +117,8 @@
 		saveAs(blob, `${$i18n.t('archived-chat-export')}-${Date.now()}.json`);
 	};
 
-	const unarchiveHandler = async (id: string) => {
-		await archiveChatById(localStorage.token, id).catch((error) => {
+	const unarchiveHandler = async (id: string, organizationId: string = id) => {
+		await archiveChatById(localStorage.token, organizationId).catch((error) => {
 			toast.error(`${error}`);
 		});
 
@@ -249,15 +249,17 @@
 						<div class="min-w-0 flex-1 truncate text-left">{$i18n.t('Unarchive All')}</div>
 					</button>
 
-					<button
-						class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-lg bg-transparent px-2 text-xs hover:text-gray-900 disabled:cursor-default disabled:opacity-30 dark:hover:text-gray-100"
-						disabled={loading || chatCount === 0}
-						type="button"
-						on:click={exportChatsHandler}
-					>
-						<Download className="size-3.5 shrink-0" strokeWidth="1.5" />
-						<div class="min-w-0 flex-1 truncate text-left">{$i18n.t('Export')}</div>
-					</button>
+					{#if !$config?.features?.enable_v2_threads}
+						<button
+							class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-lg bg-transparent px-2 text-xs hover:text-gray-900 disabled:cursor-default disabled:opacity-30 dark:hover:text-gray-100"
+							disabled={loading || chatCount === 0}
+							type="button"
+							on:click={exportChatsHandler}
+						>
+							<Download className="size-3.5 shrink-0" strokeWidth="1.5" />
+							<div class="min-w-0 flex-1 truncate text-left">{$i18n.t('Export')}</div>
+						</button>
+					{/if}
 				</DropdownMenu>
 			</div>
 		</Dropdown>
@@ -308,15 +310,19 @@
 
 			<div>
 				{#each chatList as chat (chat.id)}
+					{@const chatUrl =
+						$config?.features?.enable_v2_threads && chat.readonly
+							? `/s/${chat.id}`
+							: `/c/${chat.id}`}
 					<div class="flex w-full justify-between gap-2 px-1 py-1 text-xs">
 						<a
 							class="mr-auto min-w-0 max-w-xl flex-1 self-center truncate text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-white"
-							href={`/c/${chat.id}`}
+							href={chatUrl}
 							title={chat?.title}
 							on:click={(event) => {
 								event.preventDefault();
 								showSettings.set(false);
-								goto(`/c/${chat.id}`);
+								goto(chatUrl);
 							}}
 						>
 							{chat?.title}
@@ -342,13 +348,13 @@
 									type="button"
 									aria-label={$i18n.t('Unarchive Chat')}
 									on:click={() => {
-										unarchiveHandler(chat.id);
+										unarchiveHandler(chat.id, chat.organization?.id ?? chat.id);
 									}}
 								>
 									<UndoAction className="size-3.5" strokeWidth="1.5" />
 								</button>
 							</Tooltip>
-							{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+							{#if !chat.readonly && ($user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true))}
 								<Tooltip content={$i18n.t('Delete Chat')}>
 									<button
 										class="rounded-lg p-1 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"
