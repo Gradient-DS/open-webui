@@ -18,7 +18,7 @@ dependencies = [
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
     "PyJWT[crypto]==2.15.0",
-    "authlib==1.7.2",
+    "authlib==1.9.1", # security: CVE-2026-114618 (RFC 7523 JWT bearer grant accepts any audience) fixed in 1.9.0
     "joserfc==1.7.4",
 
     "requests==2.34.2",
@@ -239,6 +239,12 @@ accelerate = false
 # exemption is required here. Remove it once 70.0 ages past the 14-day window on
 # 2026-09-22.
 weasyprint = false
+# Security-fix exemption (2026-10-27): authlib 1.9.1 (published 2026-10-14) is
+# the first release line fixing CVE-2026-114618 (RFC 7523 JWT bearer grant
+# accepts an assertion for any audience) — see the pin comment in
+# [project.dependencies]. Remove this exemption once 1.9.1 ages past the 14-day
+# window on 2026-10-28.
+authlib = false
 # Security-fix exemption (2026-10-21): pillow 13.0.0 (published 2026-10-16) is
 # the only release fixing CVE-2026-112403 (critical heap overflow in the JPEG
 # decoder) and eight more crafted-image CVEs; Pillow decodes user-supplied images

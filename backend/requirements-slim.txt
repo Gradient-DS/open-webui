@@ -14,7 +14,7 @@ cryptography==50.0.0 # security: CVE-2026-69248/69249 (X.509 wildcard name-const
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.15.0 # security: CVE-2026-101917, CVE-2026-101918, CVE-2026-102265..102274 fixed by 2.15.0
-authlib==1.7.2
+authlib==1.9.1 # security: CVE-2026-114618 (RFC 7523 JWT bearer grant accepts any audience) fixed in 1.9.0
 joserfc==1.7.4
 orjson==3.11.9
 
