@@ -70,3 +70,19 @@ it('maps network loss and an unsolicited 304 to reconnect', async () => {
 	await expect(client.projection('fictional-thread')).rejects.toEqual(new ThreadError('reconnect'));
 	await expect(client.projection('fictional-thread')).rejects.toEqual(new ThreadError('reconnect'));
 });
+
+it('uses limit for projection reads and keeps current public metadata', async () => {
+	const page = {
+		thread_id: 'fictional-thread',
+		title: 'Fictional Cedar',
+		tags: ['fictional_grove'],
+		messages: []
+	};
+	const fetcher = vi.fn(async () => new Response(JSON.stringify(page)));
+	vi.stubGlobal('fetch', fetcher);
+	expect((await threadAPI('fictional-token', 1).projection('fictional-thread')).page).toEqual(page);
+	const [url] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+	const query = new URL(url, 'https://fictional.invalid').searchParams;
+	expect(query.get('limit')).toBe('1');
+	expect(query.has('window')).toBe(false);
+});

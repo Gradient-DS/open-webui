@@ -351,3 +351,178 @@ async def test_authorize_relay_uses_login_token_only_and_is_private(thread_http,
         for response in (authorized, tokenless, invalid, disabled):
             assert response.headers['cache-control'] == 'private, no-store'
             assert response.headers['vary'] == 'Authorization, Cookie'
+
+
+@pytest.mark.asyncio
+async def test_metadata_uses_if_match_and_reloads_normalized_title(thread_http):
+    requests, responses, client = thread_http
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            httpx.Response(204, headers={'ETag': '"fictional-second"'}),
+            httpx.Response(200, json={**page(1), 'title': 'Fictional Cedar'}),
+        ]
+    )
+    saved = await client.update_metadata('fictional-thread', lambda page: {'title': '  Fictional Cedar  '})
+    assert saved.title == 'Fictional Cedar'
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+    assert requests[0].url.params['limit'] == '1'
+    assert 'window' not in requests[0].url.params
+    assert requests[1].headers['If-Match'] == '"fictional-first"'
+    assert 'If-None-Match' not in requests[1].headers
+    assert json.loads(requests[1].content) == {'title': '  Fictional Cedar  '}
+    assert all(request.headers['X-Soev-User-Token'] == 'fictional-login-token' for request in requests)
+    assert all(request.headers['Authorization'] == 'Bearer fictional-product-key' for request in requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('action', ['add', 'remove', 'replace'])
+async def test_metadata_conflict_remerges_latest_preferences_and_passes_tags_unchanged(thread_http, action):
+    from open_webui.soev.chat_paths import ChatPaths
+
+    requests, responses, client = thread_http
+    initial = {
+        **page(1),
+        'tags': ['fictional_old'],
+        'preferences': {'theme': 'fictional-first', 'tags': ['fictional_old']},
+    }
+    latest = {
+        **initial,
+        'tags': ['fictional_old', 'fictional_concurrent'],
+        'preferences': {
+            'theme': 'fictional-second',
+            'private': {'fictional': True},
+            'tags': ['fictional_old', 'fictional_concurrent'],
+        },
+    }
+    raw = [' Fictional Grove ', 'FICTIONAL_GROVE', 'FICTIÓN'] if action != 'remove' else ['fictional_old']
+    expected = raw if action == 'replace' else [*latest['tags'], *raw] if action == 'add' else ['fictional_concurrent']
+    canonical = (
+        ['fictional_grove', 'fictión']
+        if action == 'replace'
+        else (['fictional_old', 'fictional_concurrent', 'fictional_grove', 'fictión'] if action == 'add' else expected)
+    )
+    final = {**latest, 'tags': canonical, 'preferences': {**latest['preferences'], 'tags': canonical}}
+    responses.extend(
+        [
+            httpx.Response(200, json=initial, headers={'ETag': '"fictional-first"'}),
+            httpx.Response(412),
+            httpx.Response(200, json=latest, headers={'ETag': '"fictional-latest"'}),
+            httpx.Response(204),
+            httpx.Response(200, json=final),
+        ]
+    )
+    organizations = AsyncMock()
+    organizations.list.return_value = [Organization(id='fictional-chat', thread_id='fictional-thread')]
+    saved = await ChatPaths(client, organizations).metadata(
+        'fictional-fern', 'fictional-chat', {'tags': raw}, tag_action=action
+    )
+    assert saved.tags == canonical
+    assert json.loads(requests[3].content) == {'preferences': {**latest['preferences'], 'tags': expected}}
+    assert requests[3].headers['If-Match'] == '"fictional-latest"'
+    assert requests[3].url.path == '/v1/threads/fictional-thread'
+    organizations.put.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_metadata_non_owner_is_not_retried(thread_http):
+    requests, responses, client = thread_http
+    shared = page(1)
+    del shared['preferences']
+    responses.extend([httpx.Response(200, json=shared, headers={'ETag': '"fictional-shared"'}), httpx.Response(404)])
+    with pytest.raises(ThreadError) as error:
+        await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional forged'})
+    assert error.value.status == 404
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_metadata_conflicts_are_bounded(thread_http):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}))
+    for index in range(3):
+        responses.extend(
+            [httpx.Response(412), httpx.Response(200, json=page(1), headers={'ETag': f'"fictional-{index}"'})]
+        )
+    with pytest.raises(ThreadError) as error:
+        await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional retry'})
+    assert error.value.status == 412
+    assert sum(request.method == 'PATCH' for request in requests) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [httpx.ReadTimeout('fictional response lost'), httpx.Response(503)])
+@pytest.mark.parametrize('committed', [True, False])
+async def test_metadata_reconciles_ambiguous_response_without_another_write(thread_http, failure, committed):
+    requests, responses, client = thread_http
+    final = {**page(1), 'title': 'Fictional Cedar'} if committed else page(1)
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            failure,
+            httpx.Response(200, json=final),
+        ]
+    )
+    if committed:
+        assert (
+            await client.update_metadata('fictional-thread', lambda page: {'title': '  Fictional Cedar  '})
+        ).title == 'Fictional Cedar'
+    else:
+        with pytest.raises(ThreadError):
+            await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+
+
+@pytest.mark.asyncio
+async def test_metadata_missing_validator_refuses_without_patch(thread_http):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(200, json=page(1)))
+    with pytest.raises(ThreadError):
+        await client.update_metadata('fictional-thread', lambda page: {'title': None})
+    assert [request.method for request in requests] == ['GET']
+
+
+@pytest.mark.asyncio
+async def test_metadata_response_loss_reconciles_normalized_tags_and_full_preferences(thread_http):
+    _, responses, client = thread_http
+    preferences = {'fictional_private': {'choice': True}, 'tags': ['fictional_grove', 'fictión']}
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            httpx.ReadError('fictional response lost'),
+            httpx.Response(200, json={**page(1), 'tags': preferences['tags'], 'preferences': preferences}),
+        ]
+    )
+    saved = await client.update_metadata(
+        'fictional-thread',
+        lambda page: {
+            'preferences': {
+                'fictional_private': {'choice': True},
+                'tags': [' Fictional Grove ', 'FICTIONAL_GROVE', 'FICTIÓN'],
+            }
+        },
+    )
+    assert saved.preferences == preferences
+
+
+@pytest.mark.asyncio
+async def test_metadata_can_clear_title_and_tags(thread_http):
+    requests, responses, client = thread_http
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            httpx.Response(204),
+            httpx.Response(
+                200, json={**page(1), 'title': None, 'tags': [], 'preferences': {'fallback': True, 'tags': []}}
+            ),
+        ]
+    )
+    from open_webui.soev.chat_paths import ChatPaths
+
+    organizations = AsyncMock()
+    organizations.list.return_value = []
+    saved = await ChatPaths(client, organizations).metadata(
+        'fictional-fern', 'fictional-thread', {'title': None, 'tags': []}
+    )
+    assert saved.title is None and saved.tags == []
+    assert json.loads(requests[1].content) == {'title': None, 'preferences': {'fallback': True, 'tags': []}}

@@ -38406,13 +38406,13 @@
           },
           {
             "in": "query",
-            "name": "window",
+            "name": "limit",
             "required": false,
             "schema": {
               "default": 20,
               "maximum": 200,
               "minimum": 1,
-              "title": "Window",
+              "title": "Limit",
               "type": "integer"
             }
           },

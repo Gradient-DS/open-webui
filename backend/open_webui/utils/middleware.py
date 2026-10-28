@@ -6515,6 +6515,10 @@ async def streaming_chat_response_handler(response, ctx):
 
 
 async def process_chat_response(response, ctx):
+    if soev_threads.enabled():
+        from open_webui.soev.thread_metadata import finish_response
+
+        response = await finish_response(response, ctx)
     # Non-streaming response
     if not isinstance(response, StreamingResponse):
         return await non_streaming_chat_response_handler(response, ctx)

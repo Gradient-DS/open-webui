@@ -19,7 +19,7 @@ class Problem(Exception):
 
 
 class FakeSoevApi:
-    def __init__(self, *, page_size=200):
+    def __init__(self, *, page_size=50):
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
         self.credentials = {'soev_test_cred-runtime_test-secret': 'owui:service:webui'}
@@ -342,16 +342,17 @@ class FakeSoevApi:
 
     def _lookup_documents(self, request, credential, subject):
         source_id = request.url.params.get('source_id')
-        if not source_id:
+        if not source_id or not source_id.strip():
             raise Problem(400, 'malformed_request')
         rows = [
             row
             for key, collection in sorted(self.collections.items())
-            if self._readable(collection, subject or self.credentials[credential])
+            if collection.get('kind', 'kb') == 'kb'
+            and self._readable(collection, subject or self.credentials[credential])
             for row in self._document_rows(key, credential, subject)
             if row['source_id'] == source_id
         ]
-        return httpx.Response(200, json={'data': rows, 'next_cursor': None})
+        return self._page(rows, request)
 
     def _identity(self, method, parts, body):
         if len(parts) == 5 and parts[1:3] == ['directory', 'groups'] and parts[-1] == 'members' and method == 'PUT':

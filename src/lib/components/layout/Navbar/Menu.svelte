@@ -543,7 +543,7 @@
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
 				<div class="flex max-h-28 overflow-y-auto px-2 py-1">
-					<Tags chatId={chat.id} />
+					<Tags chatId={chat.id} disabled={readOnly || chat?.owned === false} />
 				</div>
 			{/if}
 		</DropdownMenu>
