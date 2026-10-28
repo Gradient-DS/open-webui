@@ -146,21 +146,19 @@ async def test_failed_post_turn_patch_emits_no_metadata_event(dark_api, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_task_routes_reuse_owner_task_completion_without_model_override(dark_api, monkeypatch):
+async def test_post_turn_metadata_runs_as_task_turn_on_the_chat(dark_api, monkeypatch):
     async def setting(key, *args, **kwargs):
-        return True if key.endswith('.enable') else ''
+        return key.endswith('.enable')
 
     monkeypatch.setattr(thread_metadata.Config, 'get', setting)
     task = AsyncMock(return_value={'choices': [{'message': {'content': '{"title":"Fictional Cedar"}'}}]})
-    monkeypatch.setattr(thread_metadata.model_catalog, 'task_completion', task)
+    monkeypatch.setattr(thread_metadata.task_turns, 'complete_task', task)
+    request = Request({'type': 'http', 'app': dark_api.app})
+    user = SimpleNamespace(id='fictional-fern')
+    messages = [{'role': 'user', 'content': 'Fictional prompt'}]
     for kind in ['title', 'tags']:
-        response = await dark_api.browser.post(
-            '/api/v1/tasks/' + kind + '/completions',
-            json={'model': 'fictional-ignored', 'messages': [{'role': 'user', 'content': 'Fictional prompt'}]},
-        )
-        assert response.status_code == 200, response.text
-        assert 'model' not in task.await_args.args[0]
-        assert task.await_args.args[0]['stream'] is False
+        await thread_metadata.generate(request, kind, 'fictional-chat', messages, user)
+        assert task.await_args.args == (request, kind, {'chat_id': 'fictional-chat', 'messages': messages}, user)
     assert not dark_api.records.writes
 
 

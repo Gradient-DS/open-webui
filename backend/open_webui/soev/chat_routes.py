@@ -254,13 +254,6 @@ async def evaluation(request: Request, user, route: str):
     refused()
 
 
-async def task(request: Request, user, route: str):
-    from open_webui.soev.thread_metadata import generate
-
-    kind = 'title' if route == '/title/completions' else 'tags'
-    return await generate(kind, await body(request), user)
-
-
 class DarkChatRoute(APIRoute):
     domain = 'chats'
 
@@ -279,7 +272,7 @@ class DarkChatRoute(APIRoute):
         from open_webui.utils.auth import get_verified_user
 
         async def replacement(request: Request, user=Depends(get_verified_user)):
-            handler = {'chats': chat, 'evaluations': evaluation, 'tasks': task}.get(self.domain)
+            handler = {'chats': chat, 'evaluations': evaluation}.get(self.domain)
             if handler is None:
                 refused()
             result = await handler(request, user, self.path.split('/' + self.domain, 1)[-1])

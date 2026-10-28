@@ -6,9 +6,9 @@ import logging
 from starlette.responses import StreamingResponse
 
 from open_webui.models.config import Config
-from open_webui.soev import model_catalog
+from open_webui.soev import task_turns
 from open_webui.soev.chat_routes import paths
-from open_webui.soev.threads import ProjectionPage, ThreadError
+from open_webui.soev.threads import ProjectionPage
 
 log = logging.getLogger(__name__)
 
@@ -29,23 +29,11 @@ async def emit_metadata(user_id: str, chat_id: str, page: ProjectionPage, change
             )
 
 
-async def generate(kind: str, form: dict, user) -> dict:
-    from open_webui.config import DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE, DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE
-    from open_webui.utils.task import tags_generation_template, title_generation_template
-
-    messages = form.get('messages')
-    if not isinstance(messages, list) or any(not isinstance(message, dict) for message in messages):
-        raise ThreadError(422, 'invalid_request')
+async def generate(request, kind: str, chat_id: str, messages: list[dict], user) -> dict:
+    """Run the title or tags task as a soev.task/1 turn on the chat's thread."""
     if not await Config.get(f'task.{kind}.enable'):
         return {}
-    template = await Config.get(f'task.{kind}.prompt_template')
-    if kind == 'title':
-        content = await title_generation_template(template or DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE, messages, user)
-    else:
-        content = await tags_generation_template(template or DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE, messages, user)
-    return await model_catalog.task_completion(
-        {'messages': [{'role': 'user', 'content': content}], 'stream': False}, user
-    )
+    return await task_turns.complete_task(request, kind, {'chat_id': chat_id, 'messages': messages}, user)
 
 
 def generated_value(response: dict, field: str):
@@ -74,17 +62,17 @@ async def complete(ctx: dict) -> None:
         if not tasks.get(f'{field}_generation'):
             continue
         try:
-            await complete_field(service, user, chat_id, field, messages)
+            await complete_field(ctx['request'], service, user, chat_id, field, messages)
         except Exception as error:
             log.warning('Thread metadata task failed: field=%s status=%s', field, getattr(error, 'status', None))
 
 
-async def complete_field(service, user, chat_id: str, field: str, messages: list[dict]) -> None:
+async def complete_field(request, service, user, chat_id: str, field: str, messages: list[dict]) -> None:
     if field == 'title':
         page = (await service.projection(user.id, chat_id, window=1)).page
         if page.title:
             return
-    value = generated_value(await generate(field, {'messages': messages}, user), field)
+    value = generated_value(await generate(request, field, chat_id, messages, user), field)
     if field == 'title' and not value:
         value = next((message.get('content') for message in messages if message.get('role') == 'user'), '')
         value = value[:200] if isinstance(value, str) else ''
