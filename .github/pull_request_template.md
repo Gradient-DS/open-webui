@@ -2,7 +2,8 @@
 
 <!-- Fixes GRA-123 when this PR completes the ticket, Part of GRA-123 when more PRs follow.
      Several tickets: Fixes GRA-123, GRA-124. IDs only, never ticket titles. Required: the
-     linear-link check fails without one. No ticket on purpose? Label the PR no-ticket. -->
+     linear-link check fails without one. No ticket on purpose? Label the PR no-ticket.
+     Outside contributor? Delete this section; PRs from forks need no ticket. -->
 Fixes GRA-
 
 ## What & why
