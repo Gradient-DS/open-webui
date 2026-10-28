@@ -1,0 +1,15 @@
+name: Linear link
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions: {}
+
+jobs:
+  linear-link:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: Gradient-DS/security-ci/actions/linear-link@bab08cc788b10f2f638ade727fa891a7530af58d # linear-link v1
