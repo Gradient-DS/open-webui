@@ -189,6 +189,29 @@ exceptions:
     approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
+  # nltk 3.10.4 fixes the finding below but was published 2026-10-21, inside
+  # the 14-day package minimum age. Upgrade and delete this entry once it ages
+  # out on 2026-11-04.
+  - id: GHSA-j456-xh4h-cpf2
+    package: nltk
+    scanner: trivy
+    reason: >-
+      High, no CVE id. WekaClassifier hands a caller-controlled model path to
+      the weka JVM without nltk's pathsec containment check. The only fixed
+      release, 3.10.4, is younger than the 14-day minimum package age, so
+      3.10.3 stays pinned until then. Reported by the image scan only.
+    replacement_considered: >-
+      nltk is pulled in by unstructured for tokenisation and POS tagging;
+      replacing unstructured would change how every existing document is
+      parsed and chunked. Waiting out the age window is the smaller step.
+    usage_analysis: >-
+      Unreachable. The backend never imports nltk, and unstructured only calls
+      sent_tokenize, word_tokenize and pos_tag. Nothing imports
+      nltk.classify.weka, the image ships no weka JVM, and no code path lets
+      user input choose a model path.
+    approved_by: "@LexLubbers, 2026-10-28"
+    recheck: 2026-11-05
+
   - id: CVE-2026-69112
     package: accelerate
     scanner: pip-audit
