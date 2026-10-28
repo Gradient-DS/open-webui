@@ -78,14 +78,48 @@ def fake_api(request, calls, state, visible, feedback):
         )
         return httpx.Response(204)
     if path in {'/v1/threads/fictional-thread', '/v1/threads/fictional-child'}:
-        if request.headers.get('If-None-Match'):
-            return httpx.Response(304)
-        return httpx.Response(
-            200,
-            json={**page(1, 2), 'thread_id': path.rsplit('/', 1)[1], 'preferences': {'tags': ['Fictional tag']}},
-            headers={'ETag': 'fictional-etag'},
-        )
+        return fake_thread_read(request, state, visible, path)
     return httpx.Response(501)
+
+
+def fake_thread_read(request, state, visible, path):
+    if state.get('metadata'):
+        return fake_metadata(request, state, visible)
+    if request.headers.get('If-None-Match'):
+        return httpx.Response(304)
+    return httpx.Response(
+        200,
+        json={
+            **page(1, 2),
+            'thread_id': path.rsplit('/', 1)[1],
+            'tags': ['Fictional tag'],
+            'preferences': {'tags': ['Fictional tag']},
+        },
+        headers={'ETag': 'fictional-etag'},
+    )
+
+
+def fake_metadata(request, state, visible):
+    import unicodedata
+
+    current = state.setdefault('projection', {**page(1, 2), 'tags': [], 'preferences': {'fictional_private': True}})
+    if request.method == 'PATCH':
+        if not state.get('owner', True):
+            return httpx.Response(404)
+        assert request.headers['If-Match'] == '"fictional-current"'
+        assert 'If-None-Match' not in request.headers
+        changes = json.loads(request.content)
+        if 'title' in changes:
+            current['title'] = unicodedata.normalize('NFC', changes['title']).strip() if changes['title'] else None
+        if 'preferences' in changes:
+            current['preferences'] = changes['preferences']
+            current['tags'] = list(
+                dict.fromkeys('_'.join(tag.casefold().split()) for tag in changes['preferences']['tags'])
+            )
+            current['preferences']['tags'] = current['tags']
+        visible[0].update({key: current[key] for key in ('title', 'tags')})
+        return httpx.Response(204)
+    return httpx.Response(200, json=current, headers={'ETag': '"fictional-current"'})
 
 
 def fake_reader(request, state):
@@ -177,7 +211,7 @@ async def dark_api(monkeypatch):
     from open_webui.routers import chats, evaluations, export, notes, tasks
     from open_webui.soev import client as transport
 
-    calls, visible, feedback = [], [index_item()], []
+    calls, visible, feedback = [], [{**index_item(), 'tags': ['Fictional tag']}], []
     state = {'allowed': True, 'admin': False, 'status': 200}
     records = FictionalOrganizations()
     api = FastAPI()
@@ -237,23 +271,18 @@ async def dark_api(monkeypatch):
     'method,path',
     [
         ('POST', '/chats/import'),
-        ('POST', '/chats/fictional-chat'),
         ('POST', '/chats/fictional-chat/messages/fictional-message'),
         ('DELETE', '/chats/fictional-chat/messages/fictional-message'),
         ('POST', '/chats/fictional-chat/messages/fictional-message/event'),
         ('POST', '/chats/fictional-chat/compact'),
         ('GET', '/chats/all'),
         ('GET', '/chats/all/archived'),
-        ('POST', '/chats/fictional-chat/tags'),
-        ('DELETE', '/chats/fictional-chat/tags'),
         ('POST', '/export/data'),
         ('GET', '/export/data/status'),
         ('DELETE', '/export/data'),
         ('GET', '/notes/fictional-note/chat'),
         ('GET', '/notes/fictional-note/chats'),
         ('POST', '/notes/fictional-note/chat'),
-        ('POST', '/tasks/title/completions'),
-        ('POST', '/tasks/tags/completions'),
         ('GET', '/evaluations/feedbacks/all/export'),
         ('DELETE', '/evaluations/feedbacks'),
     ],

@@ -56,7 +56,7 @@ async def chat(request: Request, user, route: str):
     # Refusals run without opening the local organisation repository.
     if route in {'/import', '/all', '/all/archived'} or '/messages/' in route:
         refused()
-    if method == 'POST' and (route in {'/{id}', '/{id}/compact'} or '/messages/' in route):
+    if method == 'POST' and (route == '/{id}/compact' or '/messages/' in route):
         refused()
     if '/share' in route or '/shared' in route or route == '/{id}/clone/shared':
         from open_webui.soev.thread_sharing import dispatch
@@ -64,6 +64,8 @@ async def chat(request: Request, user, route: str):
         return await dispatch(paths(request), request, user, route)
     service = paths(request)
     identifier = request.path_params.get('id')
+    if route == '/{id}/tags' and method != 'GET' or route == '/{id}' and method == 'POST':
+        return await metadata_write(service, request, user, identifier, route)
     if method == 'DELETE':
         if route == '/':
             await service.delete_all(user.id)
@@ -109,7 +111,7 @@ async def chat_read(service, request, user, identifier, route):
         result = await service.projection(
             user.id,
             identifier,
-            window=integer(request, 'window', 20),
+            window=integer(request, 'limit', 20),
             before=request.query_params.get('before', ''),
             etag=request.headers.get('If-None-Match'),
         )
@@ -121,8 +123,7 @@ async def chat_read(service, request, user, identifier, route):
         )
     if route == '/{id}/tags':
         projection = await service.projection(user.id, identifier, window=1)
-        prefs = projection.page.preferences
-        return prefs.get('tags', []) if isinstance(prefs, dict) else []
+        return projection.page.tags
     if route in {'/all/tags', '/tags'}:
         return await tag_listing(service, request, user, route)
     if route == '/{id}/pinned':
@@ -174,13 +175,29 @@ async def tag_listing(service, request, user, route):
     tag = (await body(request)).get('name') if route == '/tags' else None
     found, names = [], set()
     for item in await service.authorized(user.id):
-        projection = await service.client.projection(item['thread_id'], window=1)
-        prefs = projection.page.preferences
-        tags = prefs.get('tags', []) if isinstance(prefs, dict) else []
+        tags = item['tags']
         names.update(name for name in tags if isinstance(name, str))
         if tag in tags:
             found.append(item)
     return service.ui_rows(found) if route == '/tags' else sorted(names)
+
+
+async def metadata_write(service, request, user, identifier, route):
+    require_header_mutation(request)
+    form = await body(request)
+    if route == '/{id}' and set(form) == {'chat'} and isinstance(form['chat'], dict):
+        form = form['chat']
+    action = 'replace'
+    if route == '/{id}/tags':
+        if set(form) != {'name'} or not isinstance(form['name'], str):
+            raise ThreadError(422, 'invalid_request')
+        form = {'tags': [form['name']]}
+        action = 'remove' if request.method == 'DELETE' else 'add'
+    page = await service.metadata(user.id, identifier, form, tag_action=action)
+    from open_webui.soev.thread_metadata import emit_metadata
+
+    await emit_metadata(user.id, identifier, page, form)
+    return page.tags if route == '/{id}/tags' else page.model_dump()
 
 
 async def organize(service, request, user, identifier, route):
@@ -237,6 +254,13 @@ async def evaluation(request: Request, user, route: str):
     refused()
 
 
+async def task(request: Request, user, route: str):
+    from open_webui.soev.thread_metadata import generate
+
+    kind = 'title' if route == '/title/completions' else 'tags'
+    return await generate(kind, await body(request), user)
+
+
 class DarkChatRoute(APIRoute):
     domain = 'chats'
 
@@ -257,12 +281,10 @@ class DarkChatRoute(APIRoute):
         from open_webui.utils.auth import get_verified_user
 
         async def replacement(request: Request, user=Depends(get_verified_user)):
-            if self.domain == 'chats':
-                result = await chat(request, user, self.path.split('/chats', 1)[-1])
-            elif self.domain == 'evaluations':
-                result = await evaluation(request, user, self.path.split('/evaluations', 1)[-1])
-            else:
+            handler = {'chats': chat, 'evaluations': evaluation, 'tasks': task}.get(self.domain)
+            if handler is None:
                 refused()
+            result = await handler(request, user, self.path.split('/' + self.domain, 1)[-1])
             return result if isinstance(result, Response) else JSONResponse(result)
 
         replacement_handler = APIRoute(

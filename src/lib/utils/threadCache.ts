@@ -72,6 +72,7 @@ export class IndexedThreadStorage implements ThreadCacheStorage {
 				thread_id: thread,
 				generation: window.generation,
 				title: null,
+				tags: [],
 				preferences: { fallback: window.fallback === true },
 				messages,
 				next_cursor: window.cursor

@@ -1,7 +1,9 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
+import { stateText, type ThreadState } from '$lib/apis/threads';
 
 const getErrorDetail = (err: any) => {
+	if (err?.state && err.state in stateText) return stateText[err.state as ThreadState];
 	if (Array.isArray(err?.detail)) {
 		return err.detail.map((e: { msg?: string }) => e.msg || JSON.stringify(e)).join(', ');
 	}
@@ -1374,7 +1376,9 @@ export const getTagsById = async (token: string, id: string) => {
 			return res.json();
 		})
 		.then((json) => {
-			return json;
+			return json.map((tag: string | { name: string }) =>
+				typeof tag === 'string' ? { name: tag } : tag
+			);
 		})
 		.catch((err) => {
 			error = getErrorDetail(err);
@@ -1412,7 +1416,7 @@ export const addTagById = async (token: string, id: string, tagName: string) => 
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 			console.error(err);
 			return null;
 		});

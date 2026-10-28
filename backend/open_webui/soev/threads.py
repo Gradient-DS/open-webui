@@ -1,6 +1,8 @@
 """Prepared UI thread client. No content is retained between requests."""
 
 import re
+import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TypeVar
 
@@ -38,6 +40,7 @@ class ProjectionPage(WireModel):
     thread_id: str
     generation: str
     title: str | None
+    tags: list[str] = Field(default_factory=list)
     preferences: JsonValue = None
     messages: list[MessageView]
     next_cursor: str | None
@@ -47,6 +50,7 @@ class IndexItem(WireModel):
     thread_id: str
     owned: bool
     title: str | None
+    tags: list[str] = Field(default_factory=list)
     updated_at: str
     parent_thread: str | None
     parent_position: int | None
@@ -179,6 +183,24 @@ def _page_size(value: int) -> int:
     return value
 
 
+def _metadata_matches(page: ProjectionPage, body: dict) -> bool:
+    if 'title' in body:
+        title = body['title']
+        if page.title != (unicodedata.normalize('NFC', title).strip() or None if title is not None else None):
+            return False
+    if 'preferences' in body:
+        preferences = {**body['preferences']}
+        if 'tags' in preferences:
+            preferences['tags'] = list(
+                dict.fromkeys(
+                    '_'.join(unicodedata.normalize('NFC', tag.casefold()).split()) for tag in preferences['tags']
+                )
+            )
+        if page.preferences != preferences:
+            return False
+    return True
+
+
 class ThreadClient:
     def __init__(self, base_url: str, product_key: str, *, timeout: float = 30.0) -> None:
         self.base_url = base_url.rstrip('/')
@@ -193,6 +215,7 @@ class ThreadClient:
         params: dict | None = None,
         body: dict | None = None,
         etag: str | None = None,
+        if_match: str | None = None,
     ) -> httpx.Response:
         # Resolve the actual requester on every call, without an owner override.
         token = await acting.user_token(acting.requester_ref())
@@ -205,6 +228,8 @@ class ThreadClient:
         }
         if etag is not None:
             headers['If-None-Match'] = etag
+        if if_match is not None:
+            headers['If-Match'] = if_match
         try:
             response = await _shared_client().request(
                 method,
@@ -222,6 +247,8 @@ class ThreadClient:
         if response.status_code in {200, 201, 204}:
             return response
         status = response.status_code
+        if status == 412:
+            raise ThreadError(412, 'reconnect')
         if status in {401, 403, 404, 422}:
             mapped = {401: 'sign_in', 403: 'unavailable', 404: 'unavailable', 422: 'invalid_request'}
             raise ThreadError(404 if status == 403 else status, mapped[status])
@@ -245,7 +272,7 @@ class ThreadClient:
         response = await self._request(
             'GET',
             f'/v1/threads/{_identifier(thread_id)}',
-            params={'window': _page_size(window), 'before': before},
+            params={'limit': _page_size(window), 'before': before},
             etag=etag,
         )
         if response.status_code == 304:
@@ -254,6 +281,32 @@ class ThreadClient:
         if page.thread_id != thread_id:
             raise ThreadError(502, 'reconnect')
         return ProjectionResult(page, response.headers.get('ETag'))
+
+    async def update_metadata(self, thread_id: str, change: Callable[[ProjectionPage], dict]) -> ProjectionPage:
+        current = await self.projection(thread_id, window=1)
+        for attempt in range(3):
+            if not current.etag or current.page is None:
+                raise ThreadError(502, 'reconnect')
+            body = change(current.page)
+            try:
+                response = await self._request(
+                    'PATCH', f'/v1/threads/{_identifier(thread_id)}', body=body, if_match=current.etag
+                )
+                if response.status_code != 204:
+                    raise ThreadError(502, 'reconnect')
+            except ThreadError as error:
+                if error.status not in {412, 502, 503}:
+                    raise
+                current = await self.projection(thread_id, window=1)
+                if error.status == 412 and attempt < 2:
+                    continue
+                # Delivery can commit before its response is lost. Compare only
+                # the requested public fields, using the service's normalization.
+                if error.status != 412 and _metadata_matches(current.page, body):
+                    return current.page
+                raise
+            return (await self.projection(thread_id, window=1)).page
+        raise ThreadError(503, 'reconnect')
 
     async def index(self, *, q: str = '', limit: int = 50, cursor: str = '') -> IndexPage:
         return self._parse(

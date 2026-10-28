@@ -55,6 +55,7 @@ const page = (
 	thread_id: thread,
 	generation: 'fictional-generation',
 	title: 'Fictional title',
+	tags: [],
 	preferences: {},
 	messages: positions.map((p) => message(p)),
 	next_cursor: cursor
@@ -63,6 +64,7 @@ const fork = (id = 'fictional-fork', at = 2): IndexItem => ({
 	thread_id: id,
 	owned: true,
 	title: 'Fictional fork',
+	tags: [],
 	updated_at: '2026-10-25T10:00:00Z',
 	parent_thread: 'fictional-thread',
 	parent_position: at
@@ -522,4 +524,14 @@ it('wires retry to a fresh cache and loads shared older messages on click', () =
 		/const reopen = \(\) => \{\s*cache.dispose\(\);[\s\S]*?cache = browserThreadCache/
 	);
 	expect(sharedSource).toMatch(/onclick=\{\(\) => \{\s*older = true;\s*void refresh\(\);/);
+});
+
+it('filters by the public index tags independently of ownership and title search', () => {
+	const owned = { ...sidebarItem('fictional-owned'), tags: ['fictional_grove'] };
+	const shared = { ...sidebarItem('fictional-shared'), owned: false, tags: ['fictional_grove'] };
+	const other = { ...sidebarItem('fictional-other'), tags: ['fictional_other'] };
+	expect(filterSidebar([owned, shared, other], { tag: 'fictional_grove' })).toEqual([
+		owned,
+		shared
+	]);
 });

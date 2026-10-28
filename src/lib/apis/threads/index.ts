@@ -11,6 +11,7 @@ export type ProjectionPage = {
 	thread_id: string;
 	generation: string;
 	title: string | null;
+	tags: string[];
 	preferences: unknown;
 	messages: MessageView[];
 	next_cursor: string | null;
@@ -20,6 +21,7 @@ export type IndexItem = {
 	thread_id: string;
 	owned: boolean;
 	title: string | null;
+	tags: string[];
 	updated_at: string;
 	parent_thread: string | null;
 	parent_position: number | null;
@@ -85,7 +87,7 @@ export interface ThreadAPI {
 }
 
 // The login token stays on the server. This boundary takes only the OWUI session credential.
-export const threadAPI = (token: string, window = 20): ThreadAPI => {
+export const threadAPI = (token: string, limit = 20): ThreadAPI => {
 	const request = async (path: string, init: RequestInit = {}) => {
 		let response: Response;
 		try {
@@ -120,7 +122,7 @@ export const threadAPI = (token: string, window = 20): ThreadAPI => {
 			return (await request(':authorize', { method: 'POST', body: JSON.stringify(body) })).json();
 		},
 		async projection(threadId, before = '', etag) {
-			const query = new URLSearchParams({ window: String(window), before });
+			const query = new URLSearchParams({ limit: String(limit), before });
 			const response = await request(`/${encodeURIComponent(threadId)}?${query}`, {
 				headers: etag ? { 'If-None-Match': etag } : {}
 			});

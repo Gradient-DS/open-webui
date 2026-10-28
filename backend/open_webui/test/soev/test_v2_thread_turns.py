@@ -17,8 +17,13 @@ organization_store = test_thread_organizations.organization_store
 
 
 @pytest.mark.asyncio
-async def test_full_v2_turn_streams_without_local_content(chat_http, organization_store, monkeypatch):
+@pytest.mark.parametrize('metadata_tasks', [False, True])
+async def test_full_v2_turn_streams_without_local_content(chat_http, organization_store, monkeypatch, metadata_tasks):
+    from open_webui.soev import thread_metadata
     from open_webui.utils import agent_v2
+
+    complete = AsyncMock()
+    monkeypatch.setattr(thread_metadata, 'complete', complete)
 
     repository, session, statements = organization_store
     model = {'id': 'fictional-model', 'owned_by': 'openai', 'info': {'meta': {}}}
@@ -71,6 +76,8 @@ async def test_full_v2_turn_streams_without_local_content(chat_http, organizatio
             'chat_id': chat_id,
             'session_id': 'fictional-session',
         }
+        if metadata_tasks:
+            form['background_tasks'] = {'title_generation': True, 'tags_generation': True}
         response = await main.chat_completion(request, form, user)
         assert isinstance(response, StreamingResponse), response
         assert response.headers['cache-control'] == 'private, no-store'
@@ -87,5 +94,8 @@ async def test_full_v2_turn_streams_without_local_content(chat_http, organizatio
     mutations = [r for r in chat_http.chat.requests if r.method == 'POST']
     assert [r.url.path for r in mutations] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     assert [json.loads(r.content)['input']['text'] for r in mutations] == ['Fictional turn 0', 'Fictional turn 1']
+    assert complete.await_count == (2 if metadata_tasks else 0)
+    if metadata_tasks:
+        assert complete.await_args.args[0]['tasks'] == {'title_generation': True, 'tags_generation': True}
     assert not content_calls
     assert not any('chat_message' in sql or 'summary' in sql for sql in statements)
