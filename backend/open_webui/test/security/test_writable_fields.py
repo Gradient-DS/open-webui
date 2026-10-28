@@ -45,8 +45,12 @@ def test_derived_counts(surface):
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
         194,
-        2135,
-    ), f'Expected 194 routes / 2135 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        2151,
+    ), f'Expected 194 routes / 2151 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    # TaskTurnRequest validates language; message_id only feeds the retry hash.
+    # image_prompt refuses platform mode before consuming either field.
+    for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
+        assert {'language', 'message_id'} <= set(fields[f'POST /api/v1/tasks/{task}/completions'])
     # Membership edits remain in the attack surface even though the handler refuses them.
     assert 'user_ids[]' in fields['POST /api/v1/groups/id/{id}/update']
     assert 'POST /api/v1/threads/{thread_id}/context:import' not in fields

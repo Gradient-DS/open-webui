@@ -440,6 +440,7 @@
   "soev/agent_threads.py:user_thread_ids:ChatMessages",
   "soev/retention.py:poll_deletions:ChatMessage",
   "soev/retention.py:poll_deletions:Chats",
+  "soev/task_turns.py:_source_thread:Chats",
   "tasks.py::REDIS_RESPONSE_STREAMS_KEY",
   "tasks.py::response_streams",
   "tasks.py:cleanup_task:response_streams",
