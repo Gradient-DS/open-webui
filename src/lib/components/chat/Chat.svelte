@@ -1472,6 +1472,21 @@
 			if (type === 'chat:list') {
 				return;
 			}
+			if (type === 'chat:title') {
+				const title = event.data.data;
+				chatTitle.set(title);
+				if (embedded && $chatId) {
+					await onEmbeddedChatTitle?.($chatId, title);
+				}
+				await refreshChatList(localStorage.token);
+				return;
+			}
+			if (type === 'chat:tags') {
+				chat = await getChatById(localStorage.token, $chatId);
+				tags = await getTagsById(localStorage.token, $chatId);
+				allTags.set(await getAllTags(localStorage.token));
+				return;
+			}
 			let message = history.messages[event.message_id];
 
 			if (message) {
@@ -1586,15 +1601,6 @@
 				} else if (type === 'chat:message:favorite') {
 					// Update message favorite status
 					message.favorite = data.favorite;
-				} else if (type === 'chat:title') {
-					chatTitle.set(data);
-					if (embedded && $chatId) {
-						await onEmbeddedChatTitle?.($chatId, data);
-					}
-					await refreshChatList(localStorage.token);
-				} else if (type === 'chat:tags') {
-					chat = await getChatById(localStorage.token, $chatId);
-					allTags.set(await getAllTags(localStorage.token));
 				} else if (type === 'present_ui') {
 					// [Gradient] Generative-UI directive from the agent service.
 					// Payload: { name: '<component>', props: {...} }. The

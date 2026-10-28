@@ -92,14 +92,14 @@ def create_thread_router(
     @router.get('/{thread_id}')
     async def projection(
         thread_id: str,
-        window: int = Query(20, ge=1, le=200),
+        limit: int = Query(20, ge=1, le=200),
         before: str = '',
         if_none_match: str | None = Header(None),
         user=Depends(require_enabled),
     ):
         result = await threads.build_client().projection(
             thread_id,
-            window=window,
+            window=limit,
             before=before,
             etag=if_none_match,
         )

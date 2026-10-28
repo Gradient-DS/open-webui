@@ -15,6 +15,8 @@
 </script>
 
 <script lang="ts">
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { toast } from 'svelte-sonner';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
@@ -57,10 +59,11 @@
 	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
 	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
+	import { buildThreadHistory } from '$lib/utils/threads';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	const dispatch = createEventDispatcher();
 
@@ -205,15 +208,20 @@
 	let chatTitle = title;
 
 	const editChatTitle = async (id, title) => {
+		if (readonly) return;
 		if (title === '') {
 			toast.error($i18n.t('Title cannot be an empty string.'));
 		} else {
-			await updateChatById(localStorage.token, id, {
+			const saved = await updateChatById(localStorage.token, id, {
 				title: title
+			}).catch((error) => {
+				toast.error($i18n.t(`${error}`));
+				return null;
 			});
+			if (!saved) return;
 
 			if (id === $chatId) {
-				_chatTitle.set(title);
+				_chatTitle.set(saved.title ?? title);
 			}
 
 			await refreshChatList(localStorage.token, { refreshPinned: true });
@@ -415,6 +423,7 @@
 	};
 
 	const renameHandler = async () => {
+		if (readonly) return;
 		chatTitle = title;
 		confirmEdit = true;
 		openPreview = false;
@@ -431,10 +440,20 @@
 	};
 
 	const generateTitleHandler = async () => {
+		if (readonly) return;
 		generating = true;
-		chat = await getChatById(localStorage.token, id);
+		chat = await getChatById(localStorage.token, id).catch((error) => {
+			toast.error($i18n.t(`${error}`));
+			return null;
+		});
+		if (!chat) {
+			generating = false;
+			return;
+		}
 
-		const chatContent = chat.chat;
+		const chatContent = $config?.features?.enable_v2_threads
+			? { history: buildThreadHistory(chat, []) }
+			: chat.chat;
 
 		// Build the active branch message list from the history tree.
 		// Fallback to the legacy flat messages array for older chats

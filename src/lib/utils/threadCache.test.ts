@@ -70,6 +70,7 @@ const page = (): ProjectionPage => ({
 	thread_id: 'fictional-thread',
 	generation: 'fictional-generation',
 	title: null,
+	tags: [],
 	preferences: null,
 	next_cursor: null,
 	messages: [

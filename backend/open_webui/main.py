@@ -1453,10 +1453,9 @@ async def chat_completion(
             metadata['chat_id'] = str(uuid4())
         if soev_threads.enabled():
             metadata['new_thread'] = is_new_chat or not chat_id
-            tasks = None
 
         initial_title_generation = None
-        if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
+        if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks and not soev_threads.enabled():
             initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
 
         if metadata.get('chat_id') and user and not soev_threads.enabled():
@@ -1967,7 +1966,7 @@ async def chat_completion(
 
     if soev_threads.enabled():
         metadata['message_id'] = message_ids[0]['message_id']
-        response = await process_chat(request, form_data, user, metadata, model)
+        response = await process_chat(request, form_data, user, metadata, model, tasks)
         if not isinstance(response, Response):
             response = JSONResponse(response)
         response.headers.update(NO_STORE)

@@ -30,7 +30,6 @@ class FeedbackForm(BaseModel):
 
 # These operations have no suitable platform contract yet.
 CONTRACT_GAPS = {
-    'metadata': 'thread.update through the UI gateway',
     'export': 'authorized export creation, status and download',
     'import': 'fresh-id owner-only OWUI/full-scope user import',
     'temporary': 'temporary creation with platform TTL policy',
@@ -163,6 +162,32 @@ class ChatPaths:
     async def projection(self, user_id: str, chat_id: str, **kwargs):
         record = await self.record(user_id, chat_id)
         return await self.client.projection(record.thread_id, **kwargs)
+
+    async def metadata(self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'):
+        if not changes or set(changes) - {'title', 'tags'}:
+            raise ThreadError(422, 'invalid_request')
+        if 'title' in changes and changes['title'] is not None and not isinstance(changes['title'], str):
+            raise ThreadError(422, 'invalid_request')
+        if 'tags' in changes and (
+            not isinstance(changes['tags'], list) or any(not isinstance(tag, str) for tag in changes['tags'])
+        ):
+            raise ThreadError(422, 'invalid_request')
+        record = await self.record(user_id, chat_id)
+
+        def change(page):
+            result = {'title': changes['title']} if 'title' in changes else {}
+            if 'tags' in changes:
+                if not isinstance(page.preferences, dict):
+                    raise ThreadError(404, 'unavailable')
+                tags = changes['tags']
+                if tag_action == 'add':
+                    tags = [*page.tags, *tags]
+                elif tag_action == 'remove':
+                    tags = [tag for tag in page.tags if tag not in tags]
+                result['preferences'] = {**page.preferences, 'tags': tags}
+            return result
+
+        return await self.client.update_metadata(record.thread_id, change)
 
     async def fork(self, user_id: str, chat_id: str, at: int, *, clone: bool = False) -> Organization:
         record = await self.record(user_id, chat_id)

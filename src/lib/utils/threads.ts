@@ -364,13 +364,19 @@ export class ThreadWindow {
 	}
 }
 
-export type SidebarFilter = { folderId?: string | null; pinned?: boolean; archived?: boolean };
+export type SidebarFilter = {
+	folderId?: string | null;
+	pinned?: boolean;
+	archived?: boolean;
+	tag?: string;
+};
 export const filterSidebar = (items: SidebarItem[], filter: SidebarFilter): SidebarItem[] =>
 	items.filter(
-		({ organization: record }) =>
+		({ organization: record, tags }) =>
 			(filter.folderId === undefined || (record?.folder_id ?? null) === filter.folderId) &&
 			(filter.pinned === undefined || (record?.pinned ?? false) === filter.pinned) &&
-			(filter.archived === undefined || (record?.archived ?? false) === filter.archived)
+			(filter.archived === undefined || (record?.archived ?? false) === filter.archived) &&
+			(filter.tag === undefined || tags.includes(filter.tag))
 	);
 
 export type SidebarSnapshot = {
