@@ -12,4 +12,4 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: Gradient-DS/security-ci/actions/linear-link@bab08cc788b10f2f638ade727fa891a7530af58d # linear-link v1
+      - uses: Gradient-DS/security-ci/actions/linear-link@43c1a8f82ee335662937c7cf13c224a36c147d7a # linear-link v1
