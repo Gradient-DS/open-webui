@@ -305,3 +305,311 @@ exceptions:
       only.
     approved_by: "@LexLubbers (pending, review on PR #523)"
     recheck: 2026-11-07
+
+  - id: CVE-2026-119284
+    package: joserfc
+    scanner: pip-audit
+    reason: >-
+      Compact JWS parsing splits the token before checking its size limits, so
+      an oversized token costs about one extra copy of its payload in memory.
+      Fixed in 1.7.6 (published 2026-10-18), which is inside the 14-day minimum
+      package age until 2026-11-01. 1.7.5 is pinned and fixes CVE-2026-119283.
+    replacement_considered: >-
+      Bump to 1.7.6 once it passes the 14-day age rule on 2026-11-01.
+    usage_analysis: >-
+      Not reachable by an attacker: joserfc only verifies the ID token that
+      authlib receives from the configured identity provider's token endpoint,
+      server to server over TLS. Back-channel logout tokens are parsed with
+      PyJWT, not joserfc, and no request path hands client input to joserfc.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-01
+
+  - id: GHSA-3f7j-7jwc-fxfj
+    package: systeminformation
+    scanner: npm
+    reason: >-
+      High. Windows command injection in services() through Unicode quotation
+      marks. Fixed in 5.33.16 (published 2026-10-19), which is inside the
+      14-day minimum package age until 2026-11-02.
+    replacement_considered: >-
+      Bump the package.json override from 5.33.15 to 5.33.16 on 2026-11-02.
+    usage_analysis: >-
+      Unreachable: the code path runs only on Windows and we build and ship
+      Linux only. systeminformation is a transitive build/dev dependency and
+      services() is never called with user input.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-02
+
+  - id: CVE-2026-112908
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      StrictSoftFileLock applies the caller's mode to claim files and
+      directories in a way another local user can exploit. Fixed in 4.2.1.
+    replacement_considered: &filelock_cap >-
+      filelock 4.x is blocked by unstructured's filelock<4 constraint; move
+      when unstructured lifts the cap or we drop it.
+    usage_analysis: &filelock_local >-
+      Unreachable: needs a second local user or process that can create files
+      in the lock directory. Our containers run one non-root user, and lock
+      paths live in app-owned cache directories, not in /tmp or shared paths.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112909
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      UnixFileLock truncates, and with an explicit mode chmods, whatever
+      regular file it finds at the lock path. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112910
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      On Windows filelock ignores the mode argument, so the lock file inherits
+      the directory's ACL. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: Windows only; we ship Linux images only.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112911
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      Strict soft locks and soft read/write locks adopt an existing state
+      directory that another local user may have planted. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112912
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      raise_on_not_writable_file() judges a planted symlink at the lock path by
+      itself instead of its target. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112915
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      ReadWriteLock runs a PRAGMA on every acquire that loads the schema of
+      whatever database sits at the lock path. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: nothing in Open WebUI uses ReadWriteLock, and the attack
+      needs another local user to place a database at the lock path.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112935
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      The stale-lock break of soft locks identifies the marker by two values
+      another local process can forge. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112936
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      ReadWriteLock resolves the lock path and opens it with sqlite3 without
+      refusing a planted symlink. Fixed in 4.0.9.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: nothing in Open WebUI uses ReadWriteLock, and the attack
+      needs another local user who can create names in the lock directory.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112938
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      StrictSoftFileLock checks its coordination directory with one lstat and
+      then follows the name, leaving a symlink race. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112939
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      Soft locks decide from the marker file's own record whether its owner is
+      gone, without checking who wrote it. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-119284
+    package: joserfc
+    scanner: pip-audit
+    reason: >-
+      Compact JWS parsing splits the token before checking its size limits, so
+      an oversized token costs about one extra copy of its payload in memory.
+      Fixed in 1.7.6 (published 2026-10-18), which is inside the 14-day minimum
+      package age until 2026-11-01. 1.7.5 is pinned and fixes CVE-2026-119283.
+    replacement_considered: >-
+      Bump to 1.7.6 once it passes the 14-day age rule on 2026-11-01.
+    usage_analysis: >-
+      Not reachable by an attacker: joserfc only verifies the ID token that
+      authlib receives from the configured identity provider's token endpoint,
+      server to server over TLS. Back-channel logout tokens are parsed with
+      PyJWT, not joserfc, and no request path hands client input to joserfc.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-01
+
+  - id: GHSA-3f7j-7jwc-fxfj
+    package: systeminformation
+    scanner: npm
+    reason: >-
+      High. Windows command injection in services() through Unicode quotation
+      marks. Fixed in 5.33.16 (published 2026-10-19), which is inside the
+      14-day minimum package age until 2026-11-02.
+    replacement_considered: >-
+      Bump the package.json override from 5.33.15 to 5.33.16 on 2026-11-02.
+    usage_analysis: >-
+      Unreachable: the code path runs only on Windows and we build and ship
+      Linux only. systeminformation is a transitive build/dev dependency and
+      services() is never called with user input.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-02
+
+  - id: CVE-2026-112908
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      StrictSoftFileLock applies the caller's mode to claim files and
+      directories in a way another local user can exploit. Fixed in 4.2.1.
+    replacement_considered: &filelock_cap >-
+      filelock 4.x is blocked by unstructured's filelock<4 constraint; move
+      when unstructured lifts the cap or we drop it.
+    usage_analysis: &filelock_local >-
+      Unreachable: needs a second local user or process that can create files
+      in the lock directory. Our containers run one non-root user, and lock
+      paths live in app-owned cache directories, not in /tmp or shared paths.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112909
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      UnixFileLock truncates, and with an explicit mode chmods, whatever
+      regular file it finds at the lock path. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112910
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      On Windows filelock ignores the mode argument, so the lock file inherits
+      the directory's ACL. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: Windows only; we ship Linux images only.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112911
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      Strict soft locks and soft read/write locks adopt an existing state
+      directory that another local user may have planted. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112912
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      raise_on_not_writable_file() judges a planted symlink at the lock path by
+      itself instead of its target. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112915
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      ReadWriteLock runs a PRAGMA on every acquire that loads the schema of
+      whatever database sits at the lock path. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: nothing in Open WebUI uses ReadWriteLock, and the attack
+      needs another local user to place a database at the lock path.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112935
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      The stale-lock break of soft locks identifies the marker by two values
+      another local process can forge. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112936
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      ReadWriteLock resolves the lock path and opens it with sqlite3 without
+      refusing a planted symlink. Fixed in 4.0.9.
+    replacement_considered: *filelock_cap
+    usage_analysis: >-
+      Unreachable: nothing in Open WebUI uses ReadWriteLock, and the attack
+      needs another local user who can create names in the lock directory.
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112938
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      StrictSoftFileLock checks its coordination directory with one lstat and
+      then follows the name, leaving a symlink race. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112939
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      Soft locks decide from the marker file's own record whether its owner is
+      gone, without checking who wrote it. Fixed in 4.2.1.
+    replacement_considered: *filelock_cap
+    usage_analysis: *filelock_local
+    approved_by: "@LexLubbers, 2026-10-30"
+    recheck: 2026-11-07
