@@ -1,5 +1,6 @@
 """Carry the authenticated OWUI user's external ref and OIDC access token through the request."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from functools import wraps
@@ -33,8 +34,40 @@ async def user_token(as_user: str | None) -> str | None:
     return await resolver()
 
 
+def oidc_token_resolver(request: Request, user, auth_token) -> Callable[[], Awaitable[str | None]]:
+    """Fetch (and refresh) the user's `oidc` session token on first use, once per request.
+
+    Concurrent soev calls in one request share the single lookup instead of seeing it unfinished.
+    """
+    cached: dict[str, str | None] = {}
+    lock = asyncio.Lock()
+
+    async def fetch() -> str | None:
+        from open_webui.models.oauth_sessions import OAuthSessions
+
+        # Match upstream's credential precedence, including x-api-key middleware.
+        credential = auth_token.credentials if auth_token is not None else request.cookies.get('token')
+        if credential is None and getattr(request.state, 'token', None):
+            credential = request.state.token.credentials
+        session_id = request.cookies.get('oauth_session_id')
+        if not session_id or (credential or '').startswith('sk-'):
+            return None
+        session = await OAuthSessions.get_session_by_id_and_user_id(session_id, user.id)
+        if session is None or session.provider != 'oidc':
+            return None
+        oauth_token = await request.app.state.oauth_manager.get_oauth_token(user.id, session_id)
+        return oauth_token.get('access_token') if oauth_token else None
+
+    async def resolve() -> str | None:
+        async with lock:
+            if 'token' not in cached:
+                cached['token'] = await fetch()
+            return cached['token']
+
+    return resolve
+
+
 def install(app: FastAPI) -> None:
-    from open_webui.models.oauth_sessions import OAuthSessions
     from open_webui.soev import identity
     from open_webui.utils.auth import bearer_security, get_current_user
 
@@ -52,7 +85,7 @@ def install(app: FastAPI) -> None:
     ):
         ref = identity.external_ref(user)
         requester = _requester_ref.set(ref)
-        resolver = _token_resolver.set(_oidc_token_resolver(request, user, auth_token))
+        resolver = _token_resolver.set(oidc_token_resolver(request, user, auth_token))
         try:
             with request_cache():
                 if identity.config.SOEV_API_URL and user.person_id is None:
@@ -72,29 +105,5 @@ def install(app: FastAPI) -> None:
         finally:
             _token_resolver.reset(resolver)
             _requester_ref.reset(requester)
-
-    def _oidc_token_resolver(request: Request, user, auth_token):
-        """Fetch (and refresh) the user's `oidc` session token on first use, once per request."""
-        cached: dict[str, str | None] = {}
-
-        async def resolve() -> str | None:
-            if 'token' in cached:
-                return cached['token']
-            cached['token'] = None
-            # Match upstream's credential precedence, including x-api-key middleware.
-            credential = auth_token.credentials if auth_token is not None else request.cookies.get('token')
-            if credential is None and getattr(request.state, 'token', None):
-                credential = request.state.token.credentials
-            session_id = request.cookies.get('oauth_session_id')
-            if not session_id or (credential or '').startswith('sk-'):
-                return None
-            session = await OAuthSessions.get_session_by_id_and_user_id(session_id, user.id)
-            if session is None or session.provider != 'oidc':
-                return None
-            oauth_token = await request.app.state.oauth_manager.get_oauth_token(user.id, session_id)
-            cached['token'] = oauth_token.get('access_token') if oauth_token else None
-            return cached['token']
-
-        return resolve
 
     app.dependency_overrides[get_current_user] = with_acting_user
