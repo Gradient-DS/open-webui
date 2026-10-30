@@ -38,6 +38,8 @@ class FakeSoevApi:
         self.models: list[dict] = []
         self.task_bodies: list[tuple[str | None, dict]] = []
         self.task_model = 'task-model'
+        self.task_threads = {}
+        self.task_results = {}
 
     def handle(self, request):
         self.requests.append(request)
@@ -262,40 +264,38 @@ class FakeSoevApi:
         raise Problem(404, 'route_not_found')
 
     def _task(self, request, body, credential, subject):
-        """The task route: `read` plus a subject; it picks the model and refuses unknown fields."""
+        from open_webui.soev.task_turns import TaskTurnRequest
+        from pydantic import ValidationError
+
         self._require(credential, 'read')
         if subject is None:
             raise Problem(401, 'credential_invalid')
-        allowed = {'messages', 'stream', 'temperature', 'max_tokens', 'top_p', 'response_format', 'stop'}
-        if not isinstance(body, dict) or set(body) - allowed or not body.get('messages'):
-            raise Problem(422, 'invalid_field')
-        for message in body['messages']:
-            if set(message) - {'role', 'content', 'tool_call_id', 'tool_calls'}:
-                raise Problem(422, 'invalid_field')
+        try:
+            turn = TaskTurnRequest.model_validate(body)
+        except ValidationError:
+            raise Problem(422, 'invalid_field') from None
+        if turn.source_thread and turn.source_thread not in self.task_threads.get(subject, set()):
+            raise Problem(404, 'not_found')
         self.task_bodies.append((subject, copy.deepcopy(body)))
-        answer = f'Task answer {len(self.task_bodies)}'
-        if not body.get('stream'):
-            return httpx.Response(
-                200,
-                json={
-                    'id': 'chatcmpl-task',
-                    'object': 'chat.completion',
-                    'model': self.task_model,
-                    'choices': [
-                        {'index': 0, 'message': {'role': 'assistant', 'content': answer}, 'finish_reason': 'stop'}
-                    ],
-                },
-            )
-        chunks = [{'role': 'assistant', 'content': ''}, {'content': answer}]
-        content = ''.join(
-            'data: '
-            + json.dumps({'object': 'chat.completion.chunk', 'model': self.task_model, 'choices': [{'delta': delta}]})
-            + '\n\n'
-            for delta in chunks
-        )
-        return httpx.Response(
-            200, content=(content + 'data: [DONE]\n\n').encode(), headers={'Content-Type': 'text/event-stream'}
-        )
+        key = (subject, turn.idempotency_key)
+        if key in self.task_results:
+            previous, result = self.task_results[key]
+            if previous != body:
+                raise Problem(409, 'conflict')
+            return httpx.Response(200, json=result)
+        answer = f'Fictional answer {len(self.task_results) + 1}'
+        outputs = {
+            'title': {'title': answer},
+            'tags': {'tags': [answer]},
+            'follow_ups': {'follow_ups': [answer]},
+            'queries': {'queries': [answer]},
+            'autocomplete': {'completion': answer},
+            'emoji': {'emoji': '🪶'},
+            'moa': {'response': answer},
+        }
+        result = {'contract': 'soev.task/1', 'task': turn.task, 'output': outputs[turn.task], 'model': self.task_model}
+        self.task_results[key] = (copy.deepcopy(body), result)
+        return httpx.Response(200, json=result)
 
     def _collections(self, request, body, credential, subject):
         if request.method == 'POST':

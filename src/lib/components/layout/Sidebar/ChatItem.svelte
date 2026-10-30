@@ -504,7 +504,7 @@
 
 		chatTitle = '';
 
-		const generatedTitle = await generateTitle(localStorage.token, model, messages).catch(
+		const generatedTitle = await generateTitle(localStorage.token, model, messages, id).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;

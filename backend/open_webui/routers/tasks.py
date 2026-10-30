@@ -1,10 +1,7 @@
 import logging
-import re
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse, RedirectResponse
-from open_webui.soev.chat_routes import TaskRoute
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from open_webui.config import (
     DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE,
@@ -14,11 +11,11 @@ from open_webui.config import (
     DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE,
-    DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
 )
-from open_webui.services.model_request_bodies import task_completion_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.models.config import Config
+from open_webui.services.model_request_bodies import task_completion_body
+from open_webui.soev import model_catalog, task_turns
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.payload import apply_params_to_form_data
@@ -37,7 +34,7 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(route_class=TaskRoute)
+router = APIRouter()
 
 TASK_CONFIG_KEYS = {
     'TASK_MODEL': 'task.model.default',
@@ -112,8 +109,8 @@ async def get_task_config(request: Request, user=Depends(get_verified_user)):
 
 
 class TaskConfigForm(BaseModel):
-    TASK_MODEL: Optional[str]
-    TASK_MODEL_EXTERNAL: Optional[str]
+    TASK_MODEL: str | None
+    TASK_MODEL_EXTERNAL: str | None
     TASK_MODEL_PARAMS: dict | None = None
     ENABLE_TITLE_GENERATION: bool
     TITLE_GENERATION_PROMPT_TEMPLATE: str
@@ -130,7 +127,7 @@ class TaskConfigForm(BaseModel):
     QUERY_GENERATION_PROMPT_TEMPLATE: str
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: str
     ENABLE_VOICE_MODE_PROMPT: bool
-    VOICE_MODE_PROMPT_TEMPLATE: Optional[str]
+    VOICE_MODE_PROMPT_TEMPLATE: str | None
 
 
 @router.post('/config/update')
@@ -148,6 +145,9 @@ async def generate_title(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Title generation is disabled'},
         )
+
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'title', form_data, user)
 
     models = request.app.state.MODELS
 
@@ -194,7 +194,7 @@ async def generate_title(
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)
-    except Exception as e:
+    except Exception:
         log.error('Exception occurred', exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -211,6 +211,9 @@ async def generate_follow_ups(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Follow-up generation is disabled'},
         )
+
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'follow_ups', form_data, user)
 
     models = request.app.state.MODELS
 
@@ -249,7 +252,7 @@ async def generate_follow_ups(
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)
-    except Exception as e:
+    except Exception:
         log.error('Exception occurred', exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -266,6 +269,9 @@ async def generate_chat_tags(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Tags generation is disabled'},
         )
+
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'tags', form_data, user)
 
     models = request.app.state.MODELS
 
@@ -316,6 +322,9 @@ async def generate_chat_tags(
 async def generate_image_prompt(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
+    if model_catalog.is_v2():
+        raise HTTPException(status_code=404)
+
     models = request.app.state.MODELS
 
     model_id = form_data.get('model')
@@ -353,7 +362,7 @@ async def generate_image_prompt(
 
     try:
         return await generate_chat_completion(request, form_data=payload, user=user)
-    except Exception as e:
+    except Exception:
         log.error('Exception occurred', exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -378,6 +387,9 @@ async def generate_queries(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.FEATURE_DISABLED('Query generation'),
             )
+
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'queries', form_data, user)
 
     if getattr(request.state, 'cached_queries', None):
         log.info('Reusing cached queries: %s', request.state.cached_queries)
@@ -453,6 +465,9 @@ async def generate_autocompletion(
                 detail=ERROR_MESSAGES.INPUT_TOO_LONG(autocomplete_input_max_length),
             )
 
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'autocomplete', form_data, user)
+
     models = request.app.state.MODELS
 
     model_id = form_data.get('model')
@@ -502,6 +517,9 @@ async def generate_autocompletion(
 async def generate_emoji(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'emoji', form_data, user)
+
     models = request.app.state.MODELS
 
     model_id = form_data.get('model')
@@ -546,6 +564,9 @@ async def generate_emoji(
 async def generate_moa_response(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
 ):
+    if model_catalog.is_v2():
+        return await task_turns.complete_task(request, 'moa', form_data, user)
+
     models = request.app.state.MODELS
 
     model_id = form_data.get('model')

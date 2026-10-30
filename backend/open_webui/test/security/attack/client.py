@@ -45,7 +45,7 @@ _PROHIBITED = 'You do not have permission to access this resource. Please contac
 _BAD_CREDENTIALS = 'The email or password provided is incorrect. Please check for typos and try logging in again.'
 _NOT_ENTERED_MARKERS = (
     RefusalMarker(
-        (403,), 'Custom functions are disabled under v2', 'soev/model_catalog.py', 'require_custom_functions', 32
+        (403,), 'Custom functions are disabled under v2', 'soev/model_catalog.py', 'require_custom_functions', 28
     ),
     RefusalMarker((401,), 'Not authenticated', 'utils/auth.py', 'get_current_user', 370),
     RefusalMarker((401,), 'Invalid token', 'utils/auth.py', 'get_current_user', 398),

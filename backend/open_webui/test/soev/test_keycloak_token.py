@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from open_webui.soev import acting
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.task_turns import TaskTurnRequest
 
 
 async def _send_file(api, ref, operation):
@@ -94,7 +95,15 @@ async def token_app(identity_config, monkeypatch):
                 200, headers={'X-Soev-Thread-Id': 'fictional-thread'}, text='event: status\ndata: {"state":"idle"}\n\n'
             )
         if request.url.path == '/v1/completions/task':
-            return httpx.Response(200, text='data: {"text":"hello"}\n\n')
+            return httpx.Response(
+                200,
+                json={
+                    'contract': 'soev.task/1',
+                    'task': 'emoji',
+                    'output': {'emoji': '🪶'},
+                    'model': 'fictional-model',
+                },
+            )
         if request.url.path == '/v1/original':
             return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
         if request.url.path == '/v1/downloads/fictional-code':
@@ -121,7 +130,8 @@ async def token_app(identity_config, monkeypatch):
             if operation in {'bytes', 'upload'}:
                 await _send_file(api, ref, operation)
             elif operation == 'task':
-                return StreamingResponse(api.stream_task({}, as_user=ref))
+                turn = TaskTurnRequest(task='emoji', input={'text': 'Fictional text'}, idempotency_key='fictional-task')
+                return await api.submit_task(turn, as_user=ref)
             elif operation == 'chat':
                 assert [event.event async for event in api.chat_stream('/v1/chat', {}, as_user=ref)] == [
                     'connection',
@@ -177,8 +187,11 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
         assert 'X-Soev-' + 'Subject' not in request.headers
     if operation == 'bytes':
         assert request.content == b'fictional-image'
-    if operation in {'chat', 'task'}:
+    if operation == 'chat':
         assert request.headers['Accept'] == 'text/event-stream'
+    if operation == 'task':
+        assert request.headers['Content-Type'] == 'application/json'
+        assert request.headers.get('Accept') != 'text/event-stream'
     if operation == 'original':
         assert response.content == b'fictional-original'
         assert ctx.requests[1].headers['X-Soev-User-Token'] == 'fictional-access-token'
