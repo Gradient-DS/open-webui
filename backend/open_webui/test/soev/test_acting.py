@@ -126,3 +126,37 @@ def test_disabled_integration_does_not_require_credentials(identity_config, monk
     for setting in ('SOEV_API_URL', 'SOEV_API_KEY'):
         monkeypatch.setattr(identity.config, setting, '')
     install(FastAPI())
+
+
+@pytest.mark.asyncio
+async def test_concurrent_calls_share_one_token_lookup(identity_config, monkeypatch):
+    """Parallel soev calls in one request all receive the token, never an unfinished lookup."""
+    from types import SimpleNamespace
+
+    acting = importlib.import_module('open_webui.soev.acting')
+    sessions = importlib.import_module('open_webui.models.oauth_sessions')
+    started = asyncio.Event()
+
+    async def slow_token(user_id, session_id):
+        started.set()
+        await asyncio.sleep(0.01)
+        return {'access_token': 'fictional-access-token'}
+
+    monkeypatch.setattr(
+        sessions.OAuthSessions,
+        'get_session_by_id_and_user_id',
+        AsyncMock(return_value=SimpleNamespace(provider='oidc')),
+    )
+    manager = SimpleNamespace(get_oauth_token=AsyncMock(side_effect=slow_token))
+    request = SimpleNamespace(
+        cookies={'oauth_session_id': 'fictional-session'},
+        state=SimpleNamespace(),
+        app=SimpleNamespace(state=SimpleNamespace(oauth_manager=manager)),
+    )
+    resolve = acting.oidc_token_resolver(
+        request, SimpleNamespace(id='alice'), SimpleNamespace(credentials='fictional-jwt')
+    )
+    tokens = await asyncio.gather(resolve(), resolve(), resolve())
+    assert started.is_set()
+    assert tokens == ['fictional-access-token'] * 3
+    manager.get_oauth_token.assert_awaited_once()
