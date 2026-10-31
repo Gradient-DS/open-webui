@@ -196,11 +196,11 @@ async def metadata_write(service, request, user, identifier, route):
             raise ThreadError(422, 'invalid_request')
         form = {'tags': [form['name']]}
         action = 'remove' if request.method == 'DELETE' else 'add'
-    page = await service.metadata(user.id, identifier, form, tag_action=action)
+    metadata = await service.metadata(user.id, identifier, form, tag_action=action)
     from open_webui.soev.thread_metadata import emit_metadata
 
-    await emit_metadata(user.id, identifier, page, form)
-    return page.tags if route == '/{id}/tags' else page.model_dump()
+    await emit_metadata(user.id, identifier, metadata, form)
+    return metadata.tags if route == '/{id}/tags' else metadata.model_dump()
 
 
 async def organize(service, request, user, identifier, route):

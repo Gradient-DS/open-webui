@@ -114,26 +114,17 @@ def fake_thread_read(request, state, visible, path):
 
 
 def fake_metadata(request, state, visible):
-    import unicodedata
+    from open_webui.test.soev.fake_chat import FakeChatApi
 
     current = state.setdefault('projection', {**page(1, 2), 'tags': [], 'preferences': {'fictional_private': True}})
     if request.method == 'PATCH':
         if not state.get('owner', True):
             return httpx.Response(404)
-        assert request.headers['If-Match'] == '"fictional-current"'
         assert 'If-None-Match' not in request.headers
-        changes = json.loads(request.content)
-        if 'title' in changes:
-            current['title'] = unicodedata.normalize('NFC', changes['title']).strip() if changes['title'] else None
-        if 'preferences' in changes:
-            current['preferences'] = changes['preferences']
-            current['tags'] = list(
-                dict.fromkeys('_'.join(tag.casefold().split()) for tag in changes['preferences']['tags'])
-            )
-            current['preferences']['tags'] = current['tags']
+    response = FakeChatApi.metadata(request, current)
+    if request.method == 'PATCH' and response.status_code == 200:
         visible[0].update({key: current[key] for key in ('title', 'tags')})
-        return httpx.Response(204)
-    return httpx.Response(200, json=current, headers={'ETag': '"fictional-current"'})
+    return response
 
 
 def fake_reader(request, state):

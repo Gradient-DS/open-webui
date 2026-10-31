@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from open_webui.soev import acting, threads
-from open_webui.soev.threads import IndexPage, Organization, ThreadClient, ThreadError, join_index
+from open_webui.soev.threads import (
+    IndexPage,
+    Organization,
+    ThreadClient,
+    ThreadError,
+    ThreadMetadataResponse,
+    join_index,
+)
 
 
 def message(position: int) -> dict:
@@ -27,6 +34,11 @@ def page(*positions: int, before: str | None = None) -> dict:
         'messages': [message(p) for p in positions],
         'next_cursor': before,
     }
+
+
+def metadata(**changes) -> dict:
+    current = {**page(), 'tags': [], **changes}
+    return {key: current[key] for key in ('thread_id', 'title', 'preferences', 'tags')}
 
 
 def index_item(identifier='fictional-thread', parent=None, at=None, *, owned=True) -> dict:
@@ -437,18 +449,19 @@ async def test_authorize_relay_uses_login_token_only_and_is_private(thread_http,
 
 
 @pytest.mark.asyncio
-async def test_metadata_uses_if_match_and_reloads_normalized_title(thread_http):
+async def test_metadata_uses_if_match_and_returns_saved_metadata_without_projection_read(thread_http):
     requests, responses, client = thread_http
+    committed = metadata(title='Fictional Cedar', tags=['saved'], preferences={'tags': ['saved'], 'private': True})
     responses.extend(
         [
             httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
-            httpx.Response(204, headers={'ETag': '"fictional-second"'}),
-            httpx.Response(200, json={**page(1), 'title': 'Fictional Cedar'}),
+            httpx.Response(200, json=committed, headers={'ETag': '"fictional-second"'}),
         ]
     )
     saved = await client.update_metadata('fictional-thread', lambda page: {'title': '  Fictional Cedar  '})
-    assert saved.title == 'Fictional Cedar'
-    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+    assert isinstance(saved, ThreadMetadataResponse)
+    assert saved.model_dump() == committed
+    assert [request.method for request in requests] == ['GET', 'PATCH']
     assert requests[0].url.params['limit'] == '1'
     assert 'window' not in requests[0].url.params
     assert requests[1].headers['If-Match'] == '"fictional-first"'
@@ -491,8 +504,7 @@ async def test_metadata_conflict_remerges_latest_preferences_and_passes_tags_unc
             httpx.Response(200, json=initial, headers={'ETag': '"fictional-first"'}),
             httpx.Response(412),
             httpx.Response(200, json=latest, headers={'ETag': '"fictional-latest"'}),
-            httpx.Response(204),
-            httpx.Response(200, json=final),
+            httpx.Response(200, json=metadata(**final), headers={'ETag': '"fictional-saved"'}),
         ]
     )
     organizations = AsyncMock()
@@ -501,6 +513,8 @@ async def test_metadata_conflict_remerges_latest_preferences_and_passes_tags_unc
         'fictional-fern', 'fictional-chat', {'tags': raw}, tag_action=action
     )
     assert saved.tags == canonical
+    assert saved.preferences == final['preferences']
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET', 'PATCH']
     assert json.loads(requests[3].content) == {'preferences': {**latest['preferences'], 'tags': expected}}
     assert requests[3].headers['If-Match'] == '"fictional-latest"'
     assert requests[3].url.path == '/v1/threads/fictional-thread'
@@ -534,7 +548,10 @@ async def test_metadata_conflicts_are_bounded(thread_http):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', [httpx.ReadTimeout('fictional response lost'), httpx.Response(503)])
+@pytest.mark.parametrize(
+    'failure',
+    [httpx.ReadTimeout('fictional response lost'), httpx.Response(503), httpx.Response(200, content='incomplete')],
+)
 @pytest.mark.parametrize('committed', [True, False])
 async def test_metadata_reconciles_ambiguous_response_without_another_write(thread_http, failure, committed):
     requests, responses, client = thread_http
@@ -547,9 +564,9 @@ async def test_metadata_reconciles_ambiguous_response_without_another_write(thre
         ]
     )
     if committed:
-        assert (
-            await client.update_metadata('fictional-thread', lambda page: {'title': '  Fictional Cedar  '})
-        ).title == 'Fictional Cedar'
+        saved = await client.update_metadata('fictional-thread', lambda page: {'title': '  Fictional Cedar  '})
+        assert isinstance(saved, ThreadMetadataResponse)
+        assert saved.model_dump() == metadata(**final)
     else:
         with pytest.raises(ThreadError):
             await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
@@ -566,26 +583,52 @@ async def test_metadata_missing_validator_refuses_without_patch(thread_http):
 
 
 @pytest.mark.asyncio
-async def test_metadata_response_loss_reconciles_normalized_tags_and_full_preferences(thread_http):
-    _, responses, client = thread_http
+async def test_metadata_reconciliation_refuses_metadata_without_owner_preferences(thread_http):
+    requests, responses, client = thread_http
+    shared = {**page(1), 'title': 'Fictional Cedar', 'preferences': None}
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            httpx.Response(503),
+            httpx.Response(200, json=shared),
+        ]
+    )
+    with pytest.raises(ThreadError) as error:
+        await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
+    assert error.value.status == 503
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('private_matches', [True, False])
+async def test_metadata_response_loss_reconciles_normalized_tags_and_full_preferences(thread_http, private_matches):
+    requests, responses, client = thread_http
     preferences = {'fictional_private': {'choice': True}, 'tags': ['fictional_grove', 'fictión']}
+    actual_preferences = {**preferences, 'fictional_private': {'choice': private_matches}}
     responses.extend(
         [
             httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
             httpx.ReadError('fictional response lost'),
-            httpx.Response(200, json={**page(1), 'tags': preferences['tags'], 'preferences': preferences}),
+            httpx.Response(200, json={**page(1), 'tags': preferences['tags'], 'preferences': actual_preferences}),
         ]
     )
-    saved = await client.update_metadata(
-        'fictional-thread',
-        lambda page: {
+
+    def change(page):
+        return {
             'preferences': {
                 'fictional_private': {'choice': True},
                 'tags': [' Fictional Grove ', 'FICTIONAL_GROVE', 'FICTIÓN'],
             }
-        },
-    )
-    assert saved.preferences == preferences
+        }
+
+    if private_matches:
+        saved = await client.update_metadata('fictional-thread', change)
+        assert isinstance(saved, ThreadMetadataResponse)
+        assert saved.preferences == preferences
+    else:
+        with pytest.raises(ThreadError):
+            await client.update_metadata('fictional-thread', change)
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
 
 
 @pytest.mark.asyncio
@@ -594,9 +637,10 @@ async def test_metadata_can_clear_title_and_tags(thread_http):
     responses.extend(
         [
             httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
-            httpx.Response(204),
             httpx.Response(
-                200, json={**page(1), 'title': None, 'tags': [], 'preferences': {'fallback': True, 'tags': []}}
+                200,
+                json=metadata(title=None, tags=[], preferences={'fallback': True, 'tags': []}),
+                headers={'ETag': '"fictional-cleared"'},
             ),
         ]
     )
@@ -608,4 +652,32 @@ async def test_metadata_can_clear_title_and_tags(thread_http):
         'fictional-fern', 'fictional-thread', {'title': None, 'tags': []}
     )
     assert saved.title is None and saved.tags == []
+    assert [request.method for request in requests] == ['GET', 'PATCH']
     assert json.loads(requests[1].content) == {'title': None, 'preferences': {'fallback': True, 'tags': []}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'failure',
+    [
+        httpx.Response(204),
+        httpx.Response(201, json=metadata()),
+        httpx.Response(200, content='not json'),
+        httpx.Response(200, json={'thread_id': 'fictional-thread', 'title': 'Fictional Cedar'}),
+        httpx.Response(200, json=metadata(thread_id='fictional-other', title='Fictional Cedar')),
+        httpx.Response(200, json=metadata(preferences=None)),
+    ],
+)
+async def test_metadata_refuses_old_status_and_invalid_response_without_repeating_write(thread_http, failure):
+    requests, responses, client = thread_http
+    responses.extend(
+        [
+            httpx.Response(200, json=page(1), headers={'ETag': '"fictional-first"'}),
+            failure,
+            httpx.Response(200, json=page(1)),
+        ]
+    )
+    with pytest.raises(ThreadError) as error:
+        await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
+    assert error.value.status == 502
+    assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']

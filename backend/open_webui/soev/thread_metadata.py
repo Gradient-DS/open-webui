@@ -8,12 +8,12 @@ from starlette.responses import StreamingResponse
 from open_webui.models.config import Config
 from open_webui.soev import task_turns
 from open_webui.soev.chat_routes import paths
-from open_webui.soev.threads import ProjectionPage
+from open_webui.soev.threads import ThreadMetadataResponse
 
 log = logging.getLogger(__name__)
 
 
-async def emit_metadata(user_id: str, chat_id: str, page: ProjectionPage, changes: dict) -> None:
+async def emit_metadata(user_id: str, chat_id: str, metadata: ThreadMetadataResponse, changes: dict) -> None:
     from open_webui.socket.main import sio
 
     for field in ('title', 'tags'):
@@ -23,7 +23,7 @@ async def emit_metadata(user_id: str, chat_id: str, page: ProjectionPage, change
                 {
                     'chat_id': chat_id,
                     'message_id': None,
-                    'data': {'type': f'chat:{field}', 'data': getattr(page, field)},
+                    'data': {'type': f'chat:{field}', 'data': getattr(metadata, field)},
                 },
                 room=f'user:{user_id}',
             )
@@ -79,8 +79,8 @@ async def complete_field(request, service, user, chat_id: str, field: str, messa
     if value is None or (field == 'title' and not value):
         return
     changes = {field: value}
-    page = await service.metadata(user.id, chat_id, changes)
-    await emit_metadata(user.id, chat_id, page, changes)
+    metadata = await service.metadata(user.id, chat_id, changes)
+    await emit_metadata(user.id, chat_id, metadata, changes)
 
 
 async def finish_response(response, ctx: dict):

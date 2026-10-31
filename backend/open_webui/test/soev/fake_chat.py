@@ -2,7 +2,9 @@
 
 import asyncio
 import copy
+import hashlib
 import json
+import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -76,6 +78,34 @@ class FakeChatApi:
             json={'status': status, 'code': code, 'detail': detail or code},
             headers={'Content-Type': 'application/problem+json'},
         )
+
+    @staticmethod
+    def metadata(request: httpx.Request, current: dict) -> httpx.Response:
+        def headers():
+            digest = hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest()
+            return {'ETag': f'"{digest}"'}
+
+        if request.method == 'PATCH':
+            if request.headers.get('If-Match') != headers()['ETag']:
+                return FakeChatApi.problem(412, 'precondition_failed')
+            changes = json.loads(request.content)
+            if 'title' in changes:
+                title = changes['title']
+                current['title'] = unicodedata.normalize('NFC', title).strip() or None if title is not None else None
+            if 'preferences' in changes:
+                preferences = changes['preferences']
+                if 'tags' in preferences:
+                    preferences['tags'] = list(
+                        dict.fromkeys(
+                            '_'.join(unicodedata.normalize('NFC', tag.casefold()).split())
+                            for tag in preferences['tags']
+                        )
+                    )
+                current['preferences'] = preferences
+                current['tags'] = preferences.get('tags', [])
+            saved = {key: current[key] for key in ('thread_id', 'title', 'preferences', 'tags')}
+            return httpx.Response(200, json=saved, headers=headers())
+        return httpx.Response(200, json=current, headers=headers())
 
     def _new(self, owner: tuple[str, str | None], events: list[dict]) -> dict[str, Any]:
         thread_id = f'thr-{len(self.threads) + 1}'

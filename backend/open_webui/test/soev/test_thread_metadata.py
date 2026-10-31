@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import Request
 from open_webui.soev import thread_metadata
-from open_webui.soev.threads import IndexPage
+from open_webui.soev.threads import IndexPage, ThreadMetadataResponse
 from open_webui.test.soev.test_chat_paths import dark_api as dark_api
 from open_webui.test.soev.test_threads import index_item
 from starlette.responses import StreamingResponse
@@ -21,7 +21,12 @@ async def test_manual_title_and_tags_persist_before_canonical_events(dark_api, m
     base = '/api/v1/chats/fictional-chat'
     renamed = await dark_api.browser.post(base, json={'chat': {'title': '  Fictional Cedar  '}})
     assert renamed.status_code == 200, renamed.text
-    assert renamed.json()['title'] == 'Fictional Cedar'
+    assert renamed.json() == {
+        'thread_id': 'fictional-thread',
+        'title': 'Fictional Cedar',
+        'preferences': {'fictional_private': True},
+        'tags': [],
+    }
     added = await dark_api.browser.post(base + '/tags', json={'name': 'Fictional Grove'})
     assert added.json() == ['fictional_grove']
     assert dark_api.state['projection']['preferences'] == {'fictional_private': True, 'tags': ['fictional_grove']}
@@ -29,6 +34,8 @@ async def test_manual_title_and_tags_persist_before_canonical_events(dark_api, m
     removed = await dark_api.browser.request('DELETE', base + '/tags', json={'name': 'fictional_grove'})
     assert removed.json() == []
     assert events.await_count == 3
+    assert all(isinstance(call.args[2], ThreadMetadataResponse) for call in events.await_args_list)
+    assert [call.method for call in dark_api.calls] == ['GET', 'PATCH'] * 3
     assert not dark_api.records.writes
     listed = await dark_api.browser.get('/api/v1/chats/?include_folders=true')
     assert listed.json()[0]['title'] == 'Fictional Cedar'
@@ -123,7 +130,31 @@ async def test_post_turn_title_tags_use_persistence_and_canonical_events(dark_ap
     assert dark_api.state['projection']['tags'] == ['fictional_grove']
     assert events.await_args_list[0].args[2].title == expected
     assert events.await_args_list[1].args[2].tags == ['fictional_grove']
+    assert [call.method for call in dark_api.calls] == ['GET', 'GET', 'PATCH', 'GET', 'PATCH']
     assert not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_manual_metadata_emits_saved_fields_from_patch_response(dark_api, monkeypatch):
+    from open_webui.socket.main import sio
+
+    dark_api.state['metadata'] = True
+    events = AsyncMock()
+    monkeypatch.setattr(sio, 'emit', events)
+    response = await dark_api.browser.post(
+        '/api/v1/chats/fictional-chat', json={'title': '  Fictional Cedar  ', 'tags': ['Fictional Grove']}
+    )
+    assert response.status_code == 200, response.text
+    assert [call.method for call in dark_api.calls] == ['GET', 'PATCH']
+    assert events.await_count == 2
+    for call, field, value in zip(
+        events.await_args_list, ['title', 'tags'], ['Fictional Cedar', ['fictional_grove']], strict=True
+    ):
+        assert call.args == (
+            'events',
+            {'chat_id': 'fictional-chat', 'message_id': None, 'data': {'type': f'chat:{field}', 'data': value}},
+        )
+        assert call.kwargs == {'room': 'user:fictional-fern'}
 
 
 @pytest.mark.asyncio

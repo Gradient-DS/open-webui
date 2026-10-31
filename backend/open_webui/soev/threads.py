@@ -46,6 +46,13 @@ class ProjectionPage(WireModel):
     next_cursor: str | None
 
 
+class ThreadMetadataResponse(WireModel):
+    thread_id: str
+    title: str | None
+    preferences: dict[str, JsonValue]
+    tags: list[str]
+
+
 class IndexItem(WireModel):
     thread_id: str
     owned: bool
@@ -282,7 +289,7 @@ class ThreadClient:
             raise ThreadError(502, 'reconnect')
         return ProjectionResult(page, response.headers.get('ETag'))
 
-    async def update_metadata(self, thread_id: str, change: Callable[[ProjectionPage], dict]) -> ProjectionPage:
+    async def update_metadata(self, thread_id: str, change: Callable[[ProjectionPage], dict]) -> ThreadMetadataResponse:
         current = await self.projection(thread_id, window=1)
         for attempt in range(3):
             if not current.etag or current.page is None:
@@ -292,7 +299,10 @@ class ThreadClient:
                 response = await self._request(
                     'PATCH', f'/v1/threads/{_identifier(thread_id)}', body=body, if_match=current.etag
                 )
-                if response.status_code != 204:
+                if response.status_code != 200:
+                    raise ThreadError(502, 'reconnect')
+                saved = self._parse(response, ThreadMetadataResponse)
+                if saved.thread_id != thread_id:
                     raise ThreadError(502, 'reconnect')
             except ThreadError as error:
                 if error.status not in {412, 502, 503}:
@@ -302,10 +312,16 @@ class ThreadClient:
                     continue
                 # Delivery can commit before its response is lost. Compare only
                 # the requested public fields, using the service's normalization.
-                if error.status != 412 and _metadata_matches(current.page, body):
-                    return current.page
+                if (
+                    error.status != 412
+                    and isinstance(current.page.preferences, dict)
+                    and _metadata_matches(current.page, body)
+                ):
+                    return ThreadMetadataResponse.model_validate(
+                        current.page.model_dump(include={'thread_id', 'title', 'preferences', 'tags'})
+                    )
                 raise
-            return (await self.projection(thread_id, window=1)).page
+            return saved
         raise ThreadError(503, 'reconnect')
 
     async def index(self, *, q: str = '', limit: int = 50, cursor: str = '') -> IndexPage:

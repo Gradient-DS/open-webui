@@ -226,7 +226,9 @@ class ChatPaths:
                 logging.getLogger(__name__).warning('Thread presentation sources unavailable')
         return await present_projection(page, events)
 
-    async def metadata(self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'):
+    async def metadata(
+        self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'
+    ) -> threads.ThreadMetadataResponse:
         if not changes or set(changes) - {'title', 'tags', 'features'}:
             raise ThreadError(422, 'invalid_request')
         if 'title' in changes and changes['title'] is not None and not isinstance(changes['title'], str):
