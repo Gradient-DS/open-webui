@@ -781,3 +781,98 @@ def test_sync_all_runs_the_kbs_schedules_in_one_call(api, key):
     assert api.requests[0].url.raw_path.decode() == f'/v1/collections/{quote(key, safe="")}/sync'
     assert api.requests[0].headers['Idempotency-Key']
     assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('operation', ['list', 'add', 'duplicate', 'remove'])
+def test_shared_mailbox_proxies_use_the_users_identity(api, operation):
+    mailbox = {'address': 'gedeeld@example.test', 'added_at': '2026-10-31T12:00:00Z'}
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    upstream = '/v1/connections/c/mailboxes'
+    if operation == 'list':
+        body = {'enabled': True, 'consented': False, 'mailboxes': [mailbox]}
+        api.responses.append(response(body))
+        result = api.browser.get(path)
+        assert result.json() == body
+    elif operation == 'remove':
+        api.responses.append(httpx.Response(204))
+        result = api.browser.delete(path + '/gedeeld%40example.test')
+        assert result.status_code == 204
+        assert not result.content
+        upstream += '/gedeeld@example.test'
+    else:
+        api.responses.append(response(mailbox, 201 if operation == 'add' else 200))
+        result = api.browser.post(path, json={'address': mailbox['address']})
+        assert result.json() == mailbox
+        assert json.loads(api.requests[0].content) == {'address': mailbox['address']}
+    assert result.is_success
+    assert api.requests[0].url.path == upstream
+    assert api.refs == ['owui:user:alice']
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST', 'DELETE'])
+@pytest.mark.parametrize(
+    'status,code,constraint',
+    [
+        (403, 'policy_forbids', None),
+        (403, 'mailbox_access_denied', None),
+        (409, 'reconsent_required', None),
+        (409, 'mailbox_limit', None),
+        (409, 'connection_required', None),
+        (422, 'invalid_field', 'address:email'),
+        (422, 'invalid_field', 'address:own_mailbox'),
+    ],
+)
+def test_shared_mailbox_refusals_keep_their_code(api, method, status, code, constraint):
+    problem = {'code': code, 'detail': 'Refused', **({'constraint': constraint} if constraint else {})}
+    api.responses.append(httpx.Response(status, json=problem, headers={'Content-Type': 'application/problem+json'}))
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    if method == 'DELETE':
+        path += '/gedeeld%40example.test'
+    result = api.browser.request(
+        method, path, **({'json': {'address': 'gedeeld@example.test'}} if method == 'POST' else {})
+    )
+    assert result.status_code == status
+    assert result.json()['detail'] == problem
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST', 'DELETE'])
+def test_shared_mailboxes_require_live_mail_and_a_verified_user(api, platform_capabilities, method):
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    if method == 'DELETE':
+        path += '/gedeeld%40example.test'
+    kwargs = {'json': {'address': 'gedeeld@example.test'}} if method == 'POST' else {}
+    platform_capabilities.discard('live_mail')
+    assert api.browser.request(method, path, **kwargs).status_code == 503
+
+    def reject():
+        raise HTTPException(401)
+
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = reject
+    assert api.browser.request(method, path, **kwargs).status_code == 401
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_outlook_silent_reauthorization_uses_the_signed_in_email(api):
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = lambda: SimpleNamespace(
+        id='alice', role='user', email='gebruiker@example.test'
+    )
+    api.responses.extend(
+        [
+            response({'id': 'c', 'source_kind': 'outlook_mail', 'lifecycle': 'enabled'}),
+            response({'authorize_url': 'https://provider.invalid/silent'}),
+        ]
+    )
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/authorize', json={'silent': True})
+    assert result.status_code == 200
+    assert json.loads(api.requests[1].content) == {'silent': True, 'owner_email': 'gebruiker@example.test'}
+    assert_assertions(api.requests)
+
+
+def test_silent_interaction_keeps_the_popup_for_interactive_consent(api):
+    page = api.browser.get('/api/v1/cloud-sync/connect/done?connection=c&result=interaction_required')
+    assert page.status_code == 200
+    assert 'window.close();' not in page.text
+    assert '"result": "interaction_required"' in page.text

@@ -49,6 +49,19 @@ class CloudSync:
             idempotency_key=f'live:{family}:{connection_id}',
         )
 
+    async def mailboxes(self, connection_id: str) -> dict:
+        return await self._get(f'/v1/connections/{quote(connection_id, safe="")}/mailboxes')
+
+    async def add_mailbox(self, connection_id: str, address: str) -> dict:
+        return await self._send(
+            'POST', f'/v1/connections/{quote(connection_id, safe="")}/mailboxes', {'address': address}
+        )
+
+    async def remove_mailbox(self, connection_id: str, address: str) -> None:
+        await self._send(
+            'DELETE', f'/v1/connections/{quote(connection_id, safe="")}/mailboxes/{quote(address, safe="")}'
+        )
+
     async def connection_usage(self, connection_id: str) -> dict:
         await self.connection(connection_id)
         knowledge_ids: set[str] = set()
