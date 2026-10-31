@@ -30,7 +30,16 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents, threads
+from open_webui.soev import (
+    acting,
+    agent_threads,
+    assistant_files,
+    identity,
+    ingest,
+    live_documents,
+    model_catalog,
+    threads,
+)
 from open_webui.soev.chat_paths import Organizations
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
@@ -1325,7 +1334,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     properties = {
         'title': whole.get('title') or whole.get('filename'),
         'source_id': whole.get('source_id'),
-        'source_url': whole.get('source_url') or whole.get('web_url'),
+        'source_url': whole.get('source_url') or whole.get('web_url') or whole.get('url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
         'granularity': _GRANULARITY.get(element.get('type')),
@@ -1927,6 +1936,10 @@ class AgentTurn:
         answered = (payload.get('answered_model') if isinstance(payload, dict) else None) or event.data.get(
             'answered_model'
         )
+        if not answered and event.event == 'model_output':
+            answered = payload.get('model')
+        if isinstance(answered, str):
+            answered = model_catalog.catalog_id(answered)
         if isinstance(answered, str) and answered and answered != self.answered_model:
             self.answered_model = answered
             await self.emit('chat:completion', {'answered_model': answered})
@@ -2075,7 +2088,7 @@ class AgentTurn:
         self.model = body.get('model')
         self.documents = body.get('input', {}).get('documents', 'off')
         try:
-            self.emitter = await get_event_emitter(self.metadata)
+            self.emitter = await get_event_emitter(self.metadata, update_db=not threads.enabled())
             await self.notify()
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}

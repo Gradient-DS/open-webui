@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import websearch from './fixtures/projection-websearch.json';
+import { buildFullSourceList } from './citations';
 import {
 	ThreadError,
 	stateText,
@@ -91,6 +93,83 @@ const deferred = <T>() => {
 };
 
 describe('projection history', () => {
+	it('folds the live web-search projection into one assistant per turn with reasoning, tools and citations', () => {
+		const history = buildThreadHistory(websearch, []);
+		const messages = Object.values(history.messages);
+		expect(messages.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
+		const [first, , last] = messages;
+		expect(first.content).toContain('<details type="reasoning"');
+		expect(first.content).toContain('I should search the web for this.');
+		expect(first.content).toContain('<details type="tool_calls"');
+		expect(first.content).toContain('Python 3.14.0 is uitgebracht');
+		expect(first.content).toContain('Python [1][2].');
+		expect(first.statusHistory).toEqual(
+			expect.arrayContaining([expect.objectContaining({ action: 'web_search', done: true })])
+		);
+		expect(first.sources).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					n: 1,
+					source: expect.objectContaining({
+						url: 'https://www.python.org/downloads/release/python-3140/'
+					})
+				})
+			])
+		);
+		expect(buildFullSourceList(first.sources as unknown[])).toHaveLength(5);
+		expect(last.content).toContain('Template strings');
+		expect(last.content).toContain('[15]');
+		expect(last.position).toBe(23);
+		expect(last.version).toBe(websearch.messages.at(-1)!.version);
+		expect(first.id).toBe(`${websearch.thread_id}:${websearch.generation}:3`);
+	});
+
+	it('keeps a turn id as tool steps arrive and forks at their original platform positions', () => {
+		const projected = { ...websearch, messages: websearch.messages.slice(0, 1) };
+		const initial = Object.values(buildThreadHistory(projected, []).messages)[0];
+		const history = buildThreadHistory(websearch, [
+			{ ...fork('child', 4), parent_thread: websearch.thread_id }
+		]);
+		const finished = Object.values(history.messages)[0];
+		expect(finished.id).toBe(initial.id);
+		expect(finished.position).toBe(5);
+		expect(finished.positions).toEqual([3, 4, 5]);
+		expect(history.versions[5]).toContainEqual({ threadId: 'child', at: 4 });
+	});
+
+	it('inserts markers at code point offsets and ignores unknown optional fields', () => {
+		const projected = page([2]);
+		projected.messages[0].content = {
+			role: 'assistant',
+			text: '😀 Hi',
+			future: true,
+			markers: [
+				null,
+				{ at: 1, text: ' [7]', cited: [{ written: 7, source: 'https://example.com' }] }
+			],
+			tool_calls: [null, { future: true }]
+		};
+		const [answer] = Object.values(buildThreadHistory(projected, []).messages);
+		expect(answer.content).toBe('😀 [7] Hi');
+		expect(buildFullSourceList(answer.sources as unknown[])).toHaveLength(1);
+		expect(answer).not.toHaveProperty('future');
+	});
+
+	it('keeps texts in order, ignores unknown keys and preserves enriched sources', () => {
+		const projected = page([2, 4, 6]);
+		projected.messages.forEach((m, i) => {
+			m.content = { role: 'assistant', text: ['First', '', 'Last'][i], future: { anything: true } };
+		});
+		(projected.messages[2].content as Record<string, unknown>).sources = [
+			{ n: 7, source: { id: 'url', name: 'Title', url: 'url' }, document: ['Snippet'] }
+		];
+		const [answer] = Object.values(buildThreadHistory(projected, []).messages);
+		expect(answer.content).toBe('First\n\nLast');
+		expect(answer.sources).toEqual(
+			(projected.messages[2].content as Record<string, unknown>).sources
+		);
+	});
+
 	it('builds a linked active branch with immutable versions and no orphan parents at a page boundary', () => {
 		const history = buildThreadHistory(page([5, 6]), []);
 		const [first, last] = Object.values(history.messages);

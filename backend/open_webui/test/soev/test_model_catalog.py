@@ -303,3 +303,17 @@ async def test_v2_default_comes_from_the_catalog_and_ignores_ui_default_models(v
 @pytest.mark.asyncio
 async def test_stock_default_is_ui_default_models(stock) -> None:
     assert await model_catalog.default_models('zai-org/GLM-5.3') == 'zai-org/GLM-5.3'
+
+
+def test_recorded_endpoints_resolve_to_catalog_ids_without_guessing(monkeypatch):
+    monkeypatch.setitem(
+        model_catalog.CATALOG_CACHE,
+        'entries',
+        [
+            {'id': 'zai-org/glm-5.3', 'endpoint_id': 'nebul--glm-5-3-flash'},
+        ],
+    )
+    assert model_catalog.catalog_id('nebul--glm-5-3-flash') == 'zai-org/glm-5.3'
+    assert model_catalog.catalog_id('zai-org/glm-5.3') == 'zai-org/glm-5.3'
+    assert model_catalog.catalog_id('unknown-endpoint') == 'unknown-endpoint'
+    assert model_catalog.catalog_id('old-endpoint', {'old-endpoint': 'zai-org/glm-5.3'}) == 'zai-org/glm-5.3'

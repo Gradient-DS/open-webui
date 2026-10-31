@@ -116,10 +116,11 @@ async def chat_read(service, request, user, identifier, route):
             etag=request.headers.get('If-None-Match'),
         )
         headers = {'ETag': result.etag} if result.etag else {}
+        page = None if result.not_modified else await service.presentation(user.id, result.page)
         return (
             Response(status_code=304, headers=headers)
             if result.not_modified
-            else JSONResponse(result.page.model_dump(), headers=headers)
+            else JSONResponse(page.model_dump(), headers=headers)
         )
     if route == '/{id}/tags':
         projection = await service.projection(user.id, identifier, window=1)

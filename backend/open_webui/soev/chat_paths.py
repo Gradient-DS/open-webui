@@ -1,8 +1,10 @@
 """Dark chat handlers over the platform contract and local organisation records."""
 
 import datetime as dt
+import logging
 import time
 from typing import Protocol
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -162,6 +164,24 @@ class ChatPaths:
     async def projection(self, user_id: str, chat_id: str, **kwargs):
         record = await self.record(user_id, chat_id)
         return await self.client.projection(record.thread_id, **kwargs)
+
+    async def presentation(self, user_id: str, page: threads.ProjectionPage) -> threads.ProjectionPage:
+        from open_webui.soev import acting, identity
+        from open_webui.soev.chat_presentation import present_projection
+        from open_webui.soev.client import SoevApiError
+
+        if not any(isinstance(m.content, dict) and m.content.get('role') == 'assistant' for m in page.messages):
+            return page
+        events = []
+        try:
+            thread = await identity.build_client().get(
+                f'/v1/chat/threads/{quote(page.thread_id, safe="")}',
+                as_user=acting.requester_ref() or f'owui:user:{user_id}',
+            )
+            events = thread['events']
+        except SoevApiError:
+            logging.getLogger(__name__).warning('Thread presentation sources unavailable')
+        return await present_projection(page, events)
 
     async def metadata(self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'):
         if not changes or set(changes) - {'title', 'tags'}:

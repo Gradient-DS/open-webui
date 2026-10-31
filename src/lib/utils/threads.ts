@@ -18,6 +18,7 @@ export type HistoryMessage = {
 	done: boolean;
 	timestamp: number;
 	position: number;
+	positions: number[];
 	version: string | null;
 	[key: string]: unknown;
 };
@@ -33,72 +34,165 @@ const emptyHistory = (): ThreadHistory => ({ messages: {}, currentId: null, vers
 const messageId = (page: ProjectionPage, position: number) =>
 	`${page.thread_id}:${page.generation}:${position}`;
 
-// 7a leaves content as JsonValue. Accept text and OWUI presentation fields;
-// reject other shapes instead of displaying raw runtime state as JSON.
+const record = (value: unknown): Record<string, unknown> | null =>
+	value !== null && typeof value === 'object' && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+
+const escapeHtml = (text: string) =>
+	text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const presentation = (content: unknown): Record<string, unknown> => {
 	if (typeof content === 'string') return { role: 'assistant', content };
-	if (!content || typeof content !== 'object' || Array.isArray(content)) {
-		throw new ThreadError('reconnect');
-	}
-	const value = content as Record<string, unknown>;
-	if (!['content', 'text', 'output'].some((key) => key in value))
-		throw new ThreadError('reconnect');
+	const value = record(content);
+	if (!value) throw new ThreadError('reconnect');
 	const text = value.content ?? value.text ?? '';
-	if (
-		typeof text !== 'string' ||
-		(value.role !== undefined && !['user', 'assistant'].includes(String(value.role)))
-	) {
-		throw new ThreadError('reconnect');
+	if (typeof text !== 'string') throw new ThreadError('reconnect');
+	return { ...value, role: value.role ?? 'assistant', content: text };
+};
+
+const toolDescriptions: Record<string, string> = {
+	web_search: 'Searching the web…',
+	fetch: 'Fetching web pages...'
+};
+
+const assistantContent = (fields: Record<string, unknown>) => {
+	const parts: string[] = [];
+	if (typeof fields.reasoning === 'string' && fields.reasoning.trim()) {
+		const reasoning = fields.reasoning
+			.trim()
+			.split('\n')
+			.map((line) => (line.startsWith('>') ? line : `> ${line}`))
+			.join('\n');
+		parts.push(
+			`<details type="reasoning" done="true" duration="0">\n<summary>Thought for 0 seconds</summary>\n${escapeHtml(reasoning)}\n</details>`
+		);
 	}
-	const result: Record<string, unknown> = { role: value.role ?? 'assistant', content: text };
-	for (const key of [
-		'output',
-		'sources',
-		'files',
-		'statusHistory',
-		'reasoning',
-		'model',
-		'timestamp',
-		'notices'
-	]) {
-		if (value[key] !== undefined) result[key] = value[key];
+	const text = Array.from(fields.content as string);
+	let at = 0;
+	let marked = '';
+	const sources: unknown[] = Array.isArray(fields.sources) ? [...fields.sources] : [];
+	const markers = (Array.isArray(fields.markers) ? fields.markers : [])
+		.map(record)
+		.filter((marker): marker is Record<string, unknown> => marker !== null);
+	for (const marker of markers.sort((a, b) => Number(a.at) - Number(b.at))) {
+		if (
+			!Number.isInteger(marker.at) ||
+			Number(marker.at) < at ||
+			Number(marker.at) > text.length ||
+			typeof marker.text !== 'string'
+		)
+			continue;
+		marked += text.slice(at, Number(marker.at)).join('') + marker.text;
+		at = Number(marker.at);
+		for (const cited of Array.isArray(marker.cited) ? marker.cited : []) {
+			const citation = record(cited);
+			if (!citation || typeof citation.source !== 'string' || !Number.isInteger(citation.written))
+				continue;
+			if (!sources.some((source) => record(source)?.n === citation.written)) {
+				sources.push({
+					n: citation.written,
+					source: { id: citation.source, name: citation.source, url: citation.source },
+					document: [''],
+					metadata: [{ source: citation.source, name: citation.source }]
+				});
+			}
+		}
 	}
-	return result;
+	marked += text.slice(at).join('');
+	if (marked) parts.push(marked);
+	const statuses: unknown[] = Array.isArray(fields.statusHistory) ? [...fields.statusHistory] : [];
+	for (const entry of Array.isArray(fields.tool_calls) ? fields.tool_calls : []) {
+		const call = record(entry);
+		if (!call || typeof call.name !== 'string' || typeof call.id !== 'string') continue;
+		const status = statuses.map(record).find((status) => status?.call_id === call.id) ?? {
+			action: call.name,
+			call_id: call.id,
+			description: toolDescriptions[call.name] ?? 'Executing tool…',
+			done: true
+		};
+		if (!statuses.includes(status)) statuses.push(status);
+		parts.push(
+			`<details type="tool_calls" done="true" name="${escapeHtml(call.name)}">\n<summary>${escapeHtml(String(status.description ?? call.name))}</summary>\n</details>`
+		);
+	}
+	return { content: parts.join('\n\n'), sources, statusHistory: statuses };
 };
 
 export const buildThreadHistory = (page: ProjectionPage, forks: IndexItem[]): ThreadHistory => {
 	const history = emptyHistory();
+	const seen = new Set<number>();
+	const anchors = new Map<number, number>();
 	let previous: HistoryMessage | undefined;
 	for (const view of [...page.messages].sort((a, b) => a.position - b.position)) {
-		const id = messageId(page, view.position);
-		if (history.messages[id]) throw new ThreadError('reconnect');
+		if (!Number.isInteger(view.position) || view.position < 1 || seen.has(view.position))
+			throw new ThreadError('reconnect');
+		seen.add(view.position);
 		const fields = presentation(view.content);
+		if (!['user', 'assistant', 'tool'].includes(String(fields.role))) continue;
+		const role = fields.role === 'user' ? 'user' : 'assistant';
+		const shown =
+			fields.role === 'assistant'
+				? assistantContent(fields)
+				: {
+						content: fields.role === 'tool' ? '' : (fields.content as string),
+						sources: fields.sources,
+						statusHistory: fields.statusHistory
+					};
+		if (role === 'assistant' && previous?.role === 'assistant') {
+			previous.content = [previous.content, shown.content].filter(Boolean).join('\n\n');
+			for (const key of ['sources', 'statusHistory', 'files', 'output']) {
+				const added = key in shown ? shown[key as keyof typeof shown] : fields[key];
+				if (Array.isArray(added) && added.length)
+					previous[key] = [
+						...(Array.isArray(previous[key]) ? (previous[key] as unknown[]) : []),
+						...added
+					];
+			}
+			if (fields.model) previous.model = fields.model;
+			previous.done = previous.done && view.finished;
+			previous.position = view.position;
+			previous.version = view.version;
+			previous.positions.push(view.position);
+			continue;
+		}
+		const id = messageId(page, view.position);
 		const message: HistoryMessage = {
-			...fields,
 			id,
 			parentId: previous?.id ?? null,
 			childrenIds: [],
-			role: fields.role as HistoryMessage['role'],
-			content: fields.content as string,
+			role,
+			content: shown.content,
 			timestamp: typeof fields.timestamp === 'number' ? fields.timestamp : 0,
 			done: view.finished,
 			position: view.position,
+			positions: [view.position],
 			version: view.version
 		};
+		for (const key of ['output', 'files', 'reasoning', 'model', 'notices']) {
+			if (fields[key] !== undefined) message[key] = fields[key];
+		}
+		if (Array.isArray(shown.sources) && shown.sources.length) message.sources = shown.sources;
+		if (Array.isArray(shown.statusHistory) && shown.statusHistory.length)
+			message.statusHistory = shown.statusHistory;
 		if (previous) previous.childrenIds.push(id);
 		history.messages[id] = message;
 		previous = message;
 	}
+	for (const message of Object.values(history.messages)) {
+		for (const position of message.positions) anchors.set(position, message.position);
+	}
 	history.currentId = previous?.id ?? null;
-	// Fork index rows carry no message bodies. Arrows load their projection on demand.
+	// A folded bubble anchors every underlying fork position; each target keeps its original cursor.
 	for (const fork of forks) {
 		if (fork.parent_thread !== page.thread_id || fork.parent_position === null) continue;
 		const at = fork.parent_position;
-		const targets = history.versions[at] ?? [{ threadId: page.thread_id, at }];
+		const anchor = anchors.get(at) ?? at;
+		const targets = history.versions[anchor] ?? [{ threadId: page.thread_id, at }];
 		if (!targets.some((target) => target.threadId === fork.thread_id)) {
 			targets.push({ threadId: fork.thread_id, at });
 		}
-		history.versions[at] = targets;
+		history.versions[anchor] = targets;
 	}
 	return history;
 };
