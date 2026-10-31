@@ -26,13 +26,11 @@ const ALLOWLIST_PREFIXES = ['@gradient-ds/'];
 // date the version ages out. An entry past its expiry fails the run, so it is
 // deleted rather than left to exempt later versions by accident.
 const SECURITY_EXEMPTIONS = {
-	'undici@7.30.1': {
-		reason: 'GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c',
-		expires: '2026-10-30'
-	},
-	'markdown-it@14.3.3': {
-		reason: 'GHSA-gfr2-rv44-r23c, GHSA-vfgh-jcmw-g37q',
-		expires: '2026-10-31'
+	// Security-fix exemption (2026-10-31): 5.33.16 was published 2026-10-19.
+	// Remove this exemption once it ages past the 14-day window on 2026-11-02.
+	'systeminformation@5.33.16': {
+		reason: 'GHSA-3f7j-7jwc-fxfj, GHSA-4vjg-vx72-qq4g, GHSA-7648-jmwf-vw7j',
+		expires: '2026-11-02'
 	}
 };
 
