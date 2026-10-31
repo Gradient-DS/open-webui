@@ -15,25 +15,25 @@
 		userSignIn,
 		userSignUp,
 		updateUserTimezone,
-		verify2FA,
 		requestPasswordReset
 	} from '$lib/apis/auths';
 	import TwoFactorChallenge from '$lib/components/auth/TwoFactorChallenge.svelte';
 	import TwoFactorSetup from '$lib/components/chat/Settings/Account/TwoFactorSetup.svelte';
 
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
+	import type i18nType from '$lib/i18n';
 
-	import { generateInitialsImage, canvasPixelTest, getUserTimezone } from '$lib/utils';
+	import { generateInitialsImage, getUserTimezone } from '$lib/utils';
+	import { resolveAuthPageState, type AuthPageState } from '$lib/utils/authPage';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
-	import { redirect } from '@sveltejs/kit';
 
-	const i18n = getContext('i18n');
+	const i18n: typeof i18nType = getContext('i18n');
 
-	let loaded = false;
+	let authState: AuthPageState = 'loading';
 
 	let mode = $config?.features.enable_ldap ? 'ldap' : 'signin';
 
@@ -53,7 +53,6 @@
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
-			console.log(sessionUser);
 			toast.success($i18n.t(`You're now logged in.`));
 			if (sessionUser.token) {
 				localStorage.token = sessionUser.token;
@@ -72,7 +71,7 @@
 				redirectPath = $page.url.searchParams.get('redirect') || '/';
 			}
 
-			goto(redirectPath);
+			await goto(redirectPath);
 			localStorage.removeItem('redirectPath');
 		}
 	};
@@ -166,33 +165,6 @@
 		}
 	};
 
-	const oauthCallbackHandler = async () => {
-		// Get the value of the 'token' cookie
-		function getCookie(name) {
-			const match = document.cookie.match(
-				new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
-			);
-			return match ? decodeURIComponent(match[1]) : null;
-		}
-
-		const token = getCookie('token');
-		if (!token) {
-			return;
-		}
-
-		const sessionUser = await getSessionUser(token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (!sessionUser) {
-			return;
-		}
-
-		localStorage.token = token;
-		await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null);
-	};
-
 	let onboarding = false;
 
 	async function setLogoImage() {
@@ -221,16 +193,8 @@
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
 		const logout = $page.url.searchParams.get('state') === 'logout';
-		// $user is undefined before the session check and null after a signed-out
-		// 401 redirect — only a real session may leave the login page. Treating
-		// null as signed-in ping-pongs /auth <-> the (app) layout's own
-		// null-guard in an infinite SPA navigation loop (the "refresh storm").
-		if ($user && !logout) {
-			goto(redirectPath || '/');
-		} else {
-			if (redirectPath) {
-				localStorage.setItem('redirectPath', redirectPath);
-			}
+		if ((!$user || logout) && redirectPath) {
+			localStorage.setItem('redirectPath', redirectPath);
 		}
 
 		const error = $page.url.searchParams.get('error');
@@ -238,7 +202,24 @@
 			toast.error(error);
 		}
 
-		await oauthCallbackHandler();
+		const nextState = await resolveAuthPageState({
+			hasSession: Boolean($user),
+			logout,
+			cookie: document.cookie,
+			redirect: async () => {
+				await goto(redirectPath || '/');
+			},
+			getSessionUser,
+			setSessionUser: async (sessionUser, token) => {
+				localStorage.token = token;
+				await setSessionUser(sessionUser, localStorage.getItem('redirectPath') || null);
+			},
+			onError: (error) => toast.error(`${error}`)
+		});
+		if (nextState === 'redirecting') {
+			authState = nextState;
+			return;
+		}
 		form = $page.url.searchParams.get('form');
 
 		// Auto-redirect to SSO when OAUTH_AUTO_REDIRECT is enabled and the
@@ -262,7 +243,7 @@
 			}
 		}
 
-		loaded = true;
+		authState = 'form';
 		setLogoImage();
 
 		if (($config?.features?.auth_trusted_header ?? false) || $config?.features?.auth === false) {
@@ -293,9 +274,17 @@
 <div class="w-full h-screen max-h-[100dvh] text-white relative" id="auth-page">
 	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-black"></div>
 
-	<div class="w-full absolute top-0 left-0 right-0 h-8 drag-region" />
+	<div class="w-full absolute top-0 left-0 right-0 h-8 drag-region"></div>
 
-	{#if loaded}
+	{#if authState !== 'form'}
+		<div
+			class="relative flex h-full items-center justify-center text-gray-500 dark:text-gray-400"
+			role="status"
+			aria-label={$i18n.t('Loading...')}
+		>
+			<Spinner className="size-6" />
+		</div>
+	{:else}
 		<div
 			class="fixed bg-transparent min-h-screen w-full flex justify-center font-primary z-50 text-black dark:text-white"
 			id="auth-container"
@@ -752,6 +741,7 @@
 						{#if $config?.metadata?.login_footer}
 							<div class="max-w-3xl mx-auto">
 								<div class="mt-2 text-[0.7rem] text-gray-500 dark:text-gray-400 marked">
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- DOMPurify sanitizes the configured footer. -->
 									{@html DOMPurify.sanitize(marked($config?.metadata?.login_footer))}
 								</div>
 							</div>
