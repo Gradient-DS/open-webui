@@ -9,6 +9,7 @@
 	import { onMount, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
 	import { clearThreadDrafts } from '$lib/utils/threadCache';
+	import { sessionRedirecting } from '$lib/stores/session';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
@@ -261,6 +262,7 @@
 	};
 
 	const gotoAuth = async () => {
+		if ($sessionRedirecting) return;
 		const currentUrl = `${$page.url.pathname}${$page.url.search}`;
 		await goto(`/auth?redirect=${encodeURIComponent(currentUrl)}`);
 	};

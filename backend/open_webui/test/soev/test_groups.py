@@ -266,17 +266,18 @@ async def test_product_permissions_are_local_configuration_only(group_db, monkey
 
 
 @pytest.mark.asyncio
-async def test_startup_periodic_and_failure_retry(monkeypatch):
-    calls = AsyncMock(side_effect=[RuntimeError('offline'), None, asyncio.CancelledError])
+async def test_demand_refresh_retries_failures_and_reuses_fresh_snapshots(monkeypatch):
+    calls = AsyncMock(side_effect=[RuntimeError('offline'), None])
     monkeypatch.setattr(group_mirror, 'reconcile', calls)
-    monkeypatch.setattr(group_mirror, '_pull_due', AsyncMock(return_value=True))
+    due = AsyncMock(side_effect=[True, False, True])
+    monkeypatch.setattr(group_mirror, '_pull_due', due)
     monkeypatch.setattr(group_mirror.config, 'SOEV_API_URL', 'https://directory.invalid')
-    monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_RECONCILE_MINUTES', 1)
-    monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
-    monkeypatch.setattr(group_mirror.asyncio, 'sleep', AsyncMock())
-    await group_mirror._run(asyncio.Event())
-    assert calls.await_count == 3
-    calls.assert_awaited_with(scheduled=True)
+    await group_mirror.ensure_snapshot()
+    await group_mirror.ensure_snapshot()
+    assert calls.await_count == 1
+    await group_mirror.ensure_snapshot()
+    assert calls.await_count == 2
+    calls.assert_awaited_with(db=None, scheduled=True)
 
 
 @pytest.mark.asyncio
@@ -888,19 +889,13 @@ async def test_refresh_and_retry_cadence_respect_snapshot_bound(group_db, monkey
             raise RuntimeError('fictional unavailable directory')
         return {row()['id']: group_mirror.PlatformGroup.model_validate(row())}
 
-    async def pause(seconds):
-        now[0] += seconds
-        if now[0] > 108:
-            raise asyncio.CancelledError
-        if not failure:
-            assert await group_db.scalar(select(model.snapshot_is_fresh()))
-
     reconcile, observe = group_mirror.reconcile, group_mirror._pull_due
     monkeypatch.setattr(group_mirror, '_fetch_groups', fetch)
-    monkeypatch.setattr(group_mirror, 'reconcile', lambda **kwargs: reconcile(db=group_db, **kwargs))
-    monkeypatch.setattr(group_mirror, '_pull_due', lambda: observe(db=group_db))
-    monkeypatch.setattr(group_mirror.asyncio, 'sleep', pause)
-    await group_mirror._run(asyncio.Event())
+    monkeypatch.setattr(group_mirror, 'reconcile', lambda db=None, **kwargs: reconcile(db=group_db, **kwargs))
+    monkeypatch.setattr(group_mirror, '_pull_due', lambda **kwargs: observe(db=group_db))
+    while now[0] <= 108:
+        await group_mirror.ensure_snapshot()
+        now[0] += 0.1
     assert len(attempted_at) >= 4
     assert all(5 / 3 <= after - before < 5 / 3 + 0.11 for before, after in zip(attempted_at, attempted_at[1:]))
     if failure:

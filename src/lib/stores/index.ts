@@ -488,6 +488,7 @@ type PromptSuggestion = {
 };
 
 export type SessionUser = {
+	expires_at?: number | null;
 	permissions: any;
 	id: string;
 	email: string;

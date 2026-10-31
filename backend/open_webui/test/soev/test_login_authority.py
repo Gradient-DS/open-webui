@@ -50,15 +50,21 @@ async def test_main_routes_use_only_login_authority(
             response = await ctx.browser.get('/cloud/connections')
         else:
             response = await ctx.browser.post('/meetings', json={'input': {'text': 'Fictional meeting'}})
+    requests = []
+    for request in fake_api.requests:
+        if request.method == 'GET' and request.url.path == '/v1/groups':
+            assert 'X-Soev-User-Token' not in request.headers
+        else:
+            requests.append(request)
     if logged_in:
         assert response.status_code in {200, 201}, response.text
-        assert fake_api.requests
-        assert all(r.headers['X-Soev-User-Token'] == 'fictional-access-token' for r in fake_api.requests)
+        assert requests
+        assert all(r.headers['X-Soev-User-Token'] == 'fictional-access-token' for r in requests)
         assert all('X-Soev-' + 'Subject' not in r.headers for r in fake_api.requests)
     else:
         assert response.status_code == 401, response.text
         assert 'sign_in' in response.text
-        assert not fake_api.requests
+        assert not requests
 
 
 @pytest.mark.asyncio

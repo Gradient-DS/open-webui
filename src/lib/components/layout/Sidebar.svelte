@@ -42,9 +42,11 @@
 	} from '$lib/stores/chatList';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Readable<import('i18next').i18n>>('i18n');
 
-	$: canImportChats = $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true);
+	$: canImportChats =
+		!$config?.features?.enable_v2_threads &&
+		($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true));
 
 	import {
 		getAllTags,
@@ -285,7 +287,10 @@
 		await Promise.all([
 			(async () => {
 				console.log('Init tags');
-				const _tags = await getAllTags(localStorage.token);
+				const _tags = await getAllTags(localStorage.token).catch((error) => {
+					toast.error($i18n.t(`${error}`));
+					return [];
+				});
 				tags.set(_tags);
 			})(),
 			(async () => {
@@ -312,14 +317,21 @@
 	};
 
 	const refreshChatRows = async () => {
-		// [Gradient] Folders load alongside the chat list instead of after it.
-		const [result] = await Promise.all([
-			refreshChatList(localStorage.token, { refreshPinned: true }),
-			initFolders()
-		]);
-		if (result.accepted) {
-			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
-			allChatsLoaded = result.allLoaded;
+		try {
+			const [result] = await Promise.all([
+				refreshChatList(localStorage.token, { refreshPinned: true }),
+				initFolders()
+			]);
+			if (result.accepted) {
+				await Promise.all(
+					Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.())
+				);
+				allChatsLoaded = result.allLoaded;
+			}
+		} catch (error) {
+			allChatsLoaded = true;
+			toast.error($i18n.t(`${error}`));
+		} finally {
 			chatListReady = true;
 		}
 	};
@@ -331,10 +343,14 @@
 
 		chatListLoading = true;
 
-		const result = await loadNextChatListPage(localStorage.token);
-		allChatsLoaded = result.allLoaded;
-
-		chatListLoading = false;
+		try {
+			const result = await loadNextChatListPage(localStorage.token);
+			allChatsLoaded = result.allLoaded;
+		} catch (error) {
+			toast.error($i18n.t(`${error}`));
+		} finally {
+			chatListLoading = false;
+		}
 	};
 
 	const applyFolderUnreadCounts = (folderUnreadCounts: Record<string, number>) => {
@@ -1798,14 +1814,14 @@
 							<div class="pt-1.5">
 								{#if chatLists.own}
 									{#each chatLists.own as chat, idx (`chat-${chat?.id ?? idx}`)}
-										{#if idx === 0 || (idx > 0 && chat.time_range !== chatLists.own[idx - 1].time_range)}
+										{#if idx === 0 || (idx > 0 && chat.time_range !== chatLists.own?.[idx - 1]?.time_range)}
 											<div
 												class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
 												0
 													? ''
 													: 'pt-4'} pb-1"
 											>
-												{$i18n.t(chat.time_range)}
+												{$i18n.t(String(chat.time_range))}
 												<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
 							{$i18n.t('Today')}
 							{$i18n.t('Yesterday')}
@@ -1871,7 +1887,7 @@
 											</div>
 										</Loader>
 									{/if}
-								{:else}
+								{:else if !chatListReady}
 									<div
 										class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
 									>

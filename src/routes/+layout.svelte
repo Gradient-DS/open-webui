@@ -35,7 +35,19 @@
 		pyodideWorker,
 		desktopEvent
 	} from '$lib/stores';
-	import { refreshChatList } from '$lib/stores/chatList';
+	import { refreshChatList, resetChatListState } from '$lib/stores/chatList';
+	import {
+		completeSessionSignOut,
+		createSessionBoundary,
+		sessionLoginPath
+	} from '$lib/apis/session';
+	import {
+		connectionRetryCount,
+		installSessionRecovery,
+		retryConnection,
+		sessionRedirecting,
+		waitForConnectionRetry
+	} from '$lib/stores/session';
 	import { observeThreadAccount } from '$lib/utils/threadCache';
 
 	$: if (
@@ -108,8 +120,11 @@
 	const bc = new BroadcastChannel('active-tab-channel');
 
 	let loaded = false;
-	let tokenTimer = null;
-	let isAuthRedirectInProgress = false;
+	/** @type {ReturnType<typeof setInterval> | undefined} */
+	let tokenTimer;
+	/** @type {ReturnType<typeof createSessionBoundary>} */
+	let sessionBoundary;
+	let restoreSessionBoundary = () => {};
 
 	let showRefresh = false;
 
@@ -685,86 +700,10 @@
 		}
 	};
 
-	const TOKEN_EXPIRY_BUFFER = 60; // seconds
-	const resolveFetchUrl = (input) => {
-		if (input instanceof Request) {
-			return new URL(input.url, window.location.origin);
-		}
+	const clearExpiredSession = () => sessionBoundary?.expire();
 
-		return new URL(input, window.location.origin);
-	};
-
-	const resolveFetchHeaders = (input, init) => {
-		if (init?.headers) {
-			return new Headers(init.headers);
-		}
-
-		if (input instanceof Request) {
-			return input.headers;
-		}
-
-		return new Headers();
-	};
-
-	const isAuthenticatedBackendFetch = (input, init) => {
-		try {
-			const requestUrl = resolveFetchUrl(input);
-			const backendOrigin = new URL(WEBUI_BASE_URL || '/', window.location.origin).origin;
-
-			return (
-				requestUrl.origin === backendOrigin && resolveFetchHeaders(input, init).has('authorization')
-			);
-		} catch {
-			return false;
-		}
-	};
-
-	const clearExpiredSession = () => {
-		if (isAuthRedirectInProgress) {
-			return;
-		}
-
-		isAuthRedirectInProgress = true;
-		if (tokenTimer) {
-			clearInterval(tokenTimer);
-			tokenTimer = null;
-		}
-		user.set(null);
-		localStorage.removeItem('token');
-		// Clear the OAuth token cookie so /auth doesn't auto-login and redirect-loop
-		document.cookie = 'token=; Max-Age=0; path=/';
-		userSignOut().catch((error) => {
-			console.error('Error signing out expired session:', error);
-		});
-		toast.error($i18n.t('Session expired. Please sign in again.'));
-		isAuthRedirectInProgress = false;
-	};
-
-	const isCurrentSessionUnauthorized = async (originalFetch) => {
-		return originalFetch(`${WEBUI_API_BASE_URL}/auths/`, {
-			method: 'GET',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${localStorage.token}`
-			},
-			credentials: 'include'
-		})
-			.then((res) => res.status === 401)
-			.catch(() => false);
-	};
-
-	const checkTokenExpiry = async () => {
-		const exp = $user?.expires_at; // token expiry time in unix timestamp
-		const now = Math.floor(Date.now() / 1000); // current time in unix timestamp
-
-		if (!exp) {
-			// If no expiry time is set, do nothing
-			return;
-		}
-
-		if (now >= exp - TOKEN_EXPIRY_BUFFER) {
-			clearExpiredSession();
-		}
+	const checkTokenExpiry = () => {
+		if ($user?.expires_at && Date.now() >= $user.expires_at * 1000) clearExpiredSession();
 	};
 
 	const desktopEventHandler = async (event) => {
@@ -854,20 +793,34 @@
 	};
 
 	onMount(async () => {
-		const originalFetch = window.fetch.bind(window);
-		window.fetch = async (input, init) => {
-			const response = await originalFetch(input, init);
-
-			if (
-				response.status === 401 &&
-				localStorage.token &&
-				isAuthenticatedBackendFetch(input, init) &&
-				(await isCurrentSessionUnauthorized(originalFetch))
-			) {
-				clearExpiredSession();
+		const originalFetch = window.fetch;
+		sessionBoundary = createSessionBoundary({
+			fetch: originalFetch.bind(window),
+			origin: window.location.origin,
+			apiBase: WEBUI_API_BASE_URL,
+			token: () => localStorage.getItem('token'),
+			expiresAt: () => $user?.expires_at ?? undefined,
+			waitForRetry: waitForConnectionRetry,
+			reload: () => window.location.reload(),
+			onExpire: () => {
+				const login = sessionLoginPath(new URL(window.location.href));
+				sessionRedirecting.set(true);
+				clearInterval(tokenTimer);
+				tokenTimer = undefined;
+				localStorage.removeItem('token');
+				document.cookie = 'token=; Max-Age=0; path=/';
+				user.set(null);
+				resetChatListState();
+				$socket?.disconnect();
+				toast.dismiss();
+				void completeSessionSignOut(userSignOut, () => window.location.replace(login));
 			}
-
-			return response;
+		});
+		window.fetch = sessionBoundary.fetch;
+		const removeRecovery = installSessionRecovery(sessionBoundary.recover);
+		restoreSessionBoundary = () => {
+			removeRecovery();
+			if (window.fetch === sessionBoundary.fetch) window.fetch = originalFetch;
 		};
 
 		window.addEventListener('message', windowMessageEventHandler);
@@ -1153,6 +1106,8 @@
 	}
 
 	onDestroy(() => {
+		restoreSessionBoundary();
+		clearInterval(tokenTimer);
 		bc.close();
 	});
 </script>
@@ -1189,7 +1144,17 @@
 	</div>
 {/if}
 
-{#if loaded}
+{#if $connectionRetryCount && !$sessionRedirecting}
+	<div
+		role="status"
+		class="fixed bottom-4 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+	>
+		<span>{$i18n.t('Reconnect to view this chat')}</span>
+		<button class="font-medium underline" onclick={retryConnection}>{$i18n.t('Retry')}</button>
+	</div>
+{/if}
+
+{#if loaded && !$sessionRedirecting}
 	{#if $isApp}
 		<div class="flex flex-row h-screen">
 			<AppSidebar />

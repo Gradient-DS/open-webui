@@ -5,7 +5,8 @@
 	import { getChatById } from '$lib/apis/chats';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { user } from '$lib/stores';
+	import { user, config } from '$lib/stores';
+	import { buildThreadHistory } from '$lib/utils/threads';
 
 	const i18n: any = getContext('i18n');
 
@@ -62,7 +63,11 @@
 		const chat = await getChatById(localStorage.token, id).catch(() => null);
 		if (token !== loadToken) return;
 
-		if (chat?.chat?.history) {
+		if ($config?.features?.enable_v2_threads && chat) {
+			history = buildThreadHistory(chat, []);
+			previewReady = true;
+			scrollPreviewToBottom();
+		} else if (chat?.chat?.history) {
 			selectedModels = Array.isArray(chat.chat.models)
 				? chat.chat.models
 				: [chat.chat.models ?? ''];

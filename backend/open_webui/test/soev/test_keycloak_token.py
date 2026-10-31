@@ -176,7 +176,13 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
     with caplog.at_level(logging.DEBUG):
         response = await ctx.browser.get(f'/call/{operation}')
     assert response.status_code == 200
-    request = ctx.requests[0]
+    requests = []
+    for request in ctx.requests:
+        if request.method == 'GET' and request.url.path == '/v1/groups':
+            assert 'X-Soev-User-Token' not in request.headers
+        else:
+            requests.append(request)
+    request = requests[0]
     if operation == 'product':
         # A product-level call acts as OWUI itself: never with a person's token.
         assert 'X-Soev-User-Token' not in request.headers
@@ -194,9 +200,9 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
         assert request.headers.get('Accept') != 'text/event-stream'
     if operation == 'original':
         assert response.content == b'fictional-original'
-        assert ctx.requests[1].headers['X-Soev-User-Token'] == 'fictional-access-token'
-        assert ctx.requests[1].headers['Authorization'] == 'Bearer fictional-product-key'
-        assert 'X-Soev-' + 'Subject' not in ctx.requests[1].headers
+        assert requests[1].headers['X-Soev-User-Token'] == 'fictional-access-token'
+        assert requests[1].headers['Authorization'] == 'Bearer fictional-product-key'
+        assert 'X-Soev-' + 'Subject' not in requests[1].headers
     assert 'fictional-access-token' not in caplog.text
     assert 'fictional-refresh-token' not in caplog.text
     ctx.refresh.assert_not_awaited()
