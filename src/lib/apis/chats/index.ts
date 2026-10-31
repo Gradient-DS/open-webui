@@ -1,8 +1,12 @@
+import { get } from 'svelte/store';
+import { config } from '$lib/stores';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
 import { stateText, type ThreadState } from '$lib/apis/threads';
 
-const getErrorDetail = (err: any) => {
+export const v2ThreadsEnabled = () => Boolean(get(config)?.features?.enable_v2_threads);
+
+export const getErrorDetail = (err: any) => {
 	if (err?.state && err.state in stateText) return stateText[err.state as ThreadState];
 	if (Array.isArray(err?.detail)) {
 		return err.detail.map((e: { msg?: string }) => e.msg || JSON.stringify(e)).join(', ');
@@ -76,6 +80,14 @@ export const createNewChat = async (
 	meta: object | null = null
 ) => {
 	let error = null;
+	if (
+		v2ThreadsEnabled() &&
+		(!('agent' in chat) ||
+			!('input' in chat) ||
+			Object.keys(chat).some((key) => !['agent', 'input', 'model'].includes(key)))
+	) {
+		throw stateText.invalid_request;
+	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/new`, {
 		method: 'POST',
@@ -84,12 +96,16 @@ export const createNewChat = async (
 			'Content-Type': 'application/json',
 			authorization: `Bearer ${token}`
 		},
-		body: JSON.stringify({
-			chat: chat,
-			...(variables !== null ? { variables } : {}),
-			...(meta ? { meta } : {}),
-			folder_id: folderId ?? null
-		})
+		body: JSON.stringify(
+			v2ThreadsEnabled()
+				? chat
+				: {
+						chat: chat,
+						...(variables !== null ? { variables } : {}),
+						...(meta ? { meta } : {}),
+						folder_id: folderId ?? null
+					}
+		)
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -127,7 +143,7 @@ export const unarchiveAllChats = async (token: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;
@@ -159,7 +175,7 @@ export const unshareAllChats = async (token: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;
@@ -173,6 +189,7 @@ export const unshareAllChats = async (token: string) => {
 };
 
 export const importChats = async (token: string, chats: object[]) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/import`, {
@@ -382,6 +399,7 @@ export const getSharedChatList = async (token: string = '', page: number = 1, fi
 };
 
 export const getAllChats = async (token: string) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/all`, {
 		method: 'GET',
 		headers: {
@@ -540,6 +558,7 @@ export const getChatListByFolderId = async (token: string, folderId: string, pag
 };
 
 export const getAllArchivedChats = async (token: string) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/all/archived`, {
@@ -598,7 +617,9 @@ export const getAllTags = async (token: string) => {
 		throw error;
 	}
 
-	return res;
+	return res.map((tag: string | { name: string }) =>
+		typeof tag === 'string' ? { name: tag } : tag
+	);
 };
 
 export const getPinnedChatList = async (token: string = '') => {
@@ -672,17 +693,20 @@ export const getChatListByTagName = async (token: string = '', tagName: string) 
 	}));
 };
 
-export const getChatById = async (token: string, id: string) => {
+export const getChatById = async (token: string, id: string, before = '') => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before })}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
 		}
-	})
+	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
@@ -691,7 +715,7 @@ export const getChatById = async (token: string, id: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;
@@ -758,7 +782,7 @@ export const getChatPinnedStatusById = async (token: string, id: string) => {
 			error = err;
 
 			if ('detail' in err) {
-				error = err.detail;
+				error = getErrorDetail(err);
 			} else {
 				error = err;
 			}
@@ -796,7 +820,7 @@ export const toggleChatPinnedStatusById = async (token: string, id: string) => {
 			error = err;
 
 			if ('detail' in err) {
-				error = err.detail;
+				error = getErrorDetail(err);
 			} else {
 				error = err;
 			}
@@ -893,7 +917,7 @@ export const cloneChatById = async (token: string, id: string, title?: string) =
 			error = err;
 
 			if ('detail' in err) {
-				error = err.detail;
+				error = getErrorDetail(err);
 			} else {
 				error = err;
 			}
@@ -909,7 +933,16 @@ export const cloneChatById = async (token: string, id: string, title?: string) =
 	return res;
 };
 
-export const forkChatById = async (token: string, id: string, messageId?: string | null) => {
+export const forkChatById = async (
+	token: string,
+	id: string,
+	messageId?: string | number | null
+) => {
+	if (
+		v2ThreadsEnabled() &&
+		(typeof messageId !== 'number' || !Number.isInteger(messageId) || messageId <= 0)
+	)
+		throw stateText.invalid_request;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/fork`, {
@@ -920,7 +953,7 @@ export const forkChatById = async (token: string, id: string, messageId?: string
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify({
-			message_id: messageId ?? null
+			...(v2ThreadsEnabled() ? { at: messageId } : { message_id: messageId ?? null })
 		})
 	})
 		.then(async (res) => {
@@ -934,7 +967,7 @@ export const forkChatById = async (token: string, id: string, messageId?: string
 			error = err;
 
 			if ('detail' in err) {
-				error = err.detail;
+				error = getErrorDetail(err);
 			} else {
 				error = err;
 			}
@@ -972,7 +1005,7 @@ export const cloneSharedChatById = async (token: string, id: string) => {
 			error = err;
 
 			if ('detail' in err) {
-				error = err.detail;
+				error = getErrorDetail(err);
 			} else {
 				error = err;
 			}
@@ -989,6 +1022,7 @@ export const cloneSharedChatById = async (token: string, id: string) => {
 };
 
 export const shareChatById = async (token: string, id: string) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
@@ -1031,7 +1065,7 @@ export const updateChatFolderIdById = async (token: string, id: string, folderId
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify({
-			folder_id: folderId
+			folder_id: folderId ?? null
 		})
 	})
 		.then(async (res) => {
@@ -1120,6 +1154,7 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 };
 
 export const updateChatAccessGrants = async (token: string, id: string, accessGrants: object[]) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access/update`, {
@@ -1193,6 +1228,9 @@ export const updateChatById = async (
 	variables: object | null = null
 ) => {
 	let error = null;
+	if (v2ThreadsEnabled() && Object.keys(chat).some((key) => !['title', 'tags'].includes(key))) {
+		throw stateText.invalid_request;
+	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}`, {
 		method: 'POST',
@@ -1201,10 +1239,14 @@ export const updateChatById = async (
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
 		},
-		body: JSON.stringify({
-			chat: chat,
-			...(variables !== null ? { variables } : {})
-		})
+		body: JSON.stringify(
+			v2ThreadsEnabled()
+				? chat
+				: {
+						chat: chat,
+						...(variables !== null ? { variables } : {})
+					}
+		)
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -1228,6 +1270,7 @@ export const updateChatById = async (
 };
 
 export const compactChatById = async (token: string, id: string, model?: string | null) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/compact`, {
@@ -1261,6 +1304,7 @@ export const compactChatById = async (token: string, id: string, model?: string 
 };
 
 export const deleteChatMessageById = async (token: string, id: string, messageId: string) => {
+	if (v2ThreadsEnabled()) throw stateText.unavailable;
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/messages/${messageId}`, {
@@ -1347,7 +1391,7 @@ export const deleteChatById = async (token: string, id: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;
@@ -1482,7 +1526,7 @@ export const deleteAllChats = async (token: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;
@@ -1514,7 +1558,7 @@ export const archiveAllChats = async (token: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = getErrorDetail(err);
 
 			console.error(err);
 			return null;

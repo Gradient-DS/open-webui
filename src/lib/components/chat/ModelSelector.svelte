@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { models, pinnedModels, settings, user } from '$lib/stores';
+	import { models, pinnedModels, settings, user, config } from '$lib/stores';
 	// [Gradient] The picker contains LLMs only and disables compare for assistant chats.
 	import { activeAssistantId, llmSelection } from '$lib/stores/assistant';
 	import { isLLM } from '$lib/utils/assistants';
@@ -21,6 +21,10 @@
 	export let align: 'start' | 'end' = 'start';
 
 	let compareModels = selectedModels.length > 1;
+	$: if ($config?.features?.enable_v2_threads && selectedModels.length > 1) {
+		selectedModels = selectedModels.slice(0, 1);
+		compareModels = false;
+	}
 	let selector;
 
 	export const open = () => selector?.open();
@@ -89,7 +93,8 @@
 					{align}
 					{showSetDefault}
 					onSetDefault={saveDefaultModel}
-					multipleEnabled={!$activeAssistantId &&
+					multipleEnabled={!$config?.features?.enable_v2_threads &&
+						!$activeAssistantId &&
 						($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))}
 					{disabled}
 					bind:compareEnabled={compareModels}

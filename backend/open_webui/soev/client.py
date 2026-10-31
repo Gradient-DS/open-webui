@@ -295,13 +295,14 @@ class SoevClient:
         as_user: str,
         thread_id: str | None = None,
         after: int = 0,
+        follow: bool = False,
     ) -> AsyncIterator[ChatEvent]:
         """Reconnect capped streams through events, never by replaying the POST."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
         if not as_user:
             raise ValueError('Chat requires an acting user')
-        method = 'POST'
+        method = 'GET' if follow else 'POST'
         try:
             while True:
                 headers = await self._headers(as_user)

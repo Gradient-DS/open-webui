@@ -454,6 +454,9 @@ async def get_current_user(
                 asyncio.create_task(Users.update_last_active_by_id(user.id))
 
             # Scope-backed, so outer middleware (audit) can reuse the resolved user
+            from open_webui.soev.group_mirror import ensure_snapshot
+
+            await ensure_snapshot()
             request.state.user = user
             return user
         else:
@@ -485,6 +488,10 @@ async def get_current_user_by_api_key(request, api_key: str):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.INVALID_TOKEN,
         )
+
+    from open_webui.soev.group_mirror import ensure_snapshot
+
+    await ensure_snapshot()
 
     config_values = await Config.get_many(
         'auth.enable_api_keys',

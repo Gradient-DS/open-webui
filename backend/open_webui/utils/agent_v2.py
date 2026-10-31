@@ -1538,6 +1538,9 @@ class AgentTurn:
                     raise threads.ThreadError(404, 'unavailable')
                 return
             self.thread_id = record.thread_id
+            if self.metadata.get('follow_thread'):
+                self.position = 0
+                return
             thread = await self.client.get(self.path(), as_user=self.as_user)
             self.position = thread['status']['position']
             await self._seed_sources(thread['events'], self.position)
@@ -1868,6 +1871,19 @@ class AgentTurn:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
+        if self.metadata.get('follow_thread'):
+            stream = self.client.chat_stream(
+                self.path('events'),
+                None,
+                as_user=self.as_user,
+                thread_id=self.thread_id,
+                after=0,
+                follow=True,
+            )
+            async with aclosing(stream):
+                async for event in stream:
+                    yield event
+            return
         path = self.path('inputs') if self.thread_id else _ROOT
         if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
             body = {**body, 'temporary': True}
@@ -2114,7 +2130,12 @@ async def call_agent_v2(
     turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:
-        chunks = await _sent(turn, text, metadata, agent=agent, model=model)
+        if metadata.get('follow_thread'):
+            chunks = turn.run({'input': {'text': text}, 'model': model}, agent)
+        else:
+            chunks = await _sent(turn, text, metadata, agent=agent, model=model)
+        if isinstance(chunks, dict):
+            return chunks
     except Exception as error:
         chunks = _refused(turn.failed(error))
     early = await _opened(chunks)
@@ -2164,7 +2185,7 @@ async def _opened(chunks: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]]
 
 async def _sent(
     turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncIterator[dict[str, Any]] | dict:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
     entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
     if len(entries) > TEXTS:
@@ -2235,6 +2256,8 @@ async def _sent(
             body['input'][key] = value
     if isinstance(model, str) and model:
         body['model'] = model
+    if metadata.get('prepare_thread'):
+        return {**body, 'agent': agent}
     return turn.run(body, agent)
 
 

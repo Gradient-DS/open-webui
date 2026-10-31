@@ -180,7 +180,7 @@
 	};
 
 	const updateChat = async () => {
-		if (!$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && !$temporaryChatEnabled) {
 			history = history;
 			await tick();
 			const res = await updateChatById(localStorage.token, chatId, {
