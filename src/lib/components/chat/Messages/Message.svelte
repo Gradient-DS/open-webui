@@ -5,7 +5,7 @@
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
-	import { settings } from '$lib/stores';
+	import { settings, config } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 
 	import MultiResponseMessages from './MultiResponseMessages.svelte';
@@ -79,7 +79,7 @@
 				{editMessage}
 				{deleteMessage}
 				{allowDelete}
-				{readOnly}
+				readOnly={readOnly || Boolean($config?.features?.enable_v2_threads)}
 				{compactPreview}
 				{editCodeBlock}
 				{topPadding}

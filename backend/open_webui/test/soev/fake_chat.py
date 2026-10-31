@@ -174,7 +174,7 @@ class FakeChatApi:
     ) -> httpx.Response:
         headers = self._headers(thread) if opening else {}
         if request.headers.get('Accept') != 'text/event-stream':
-            return httpx.Response(200, json=self._view(thread), headers=headers)
+            return httpx.Response(201 if opening else 200, json=self._view(thread), headers=headers)
         content = b''.join(sse(kind, event) for kind, event in recorded)
         if self.close_after is not None:
             content = b''.join(sse(kind, event) for kind, event in recorded[: self.close_after]) + b': stream max\n\n'

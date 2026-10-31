@@ -300,21 +300,22 @@ async def _replace_snapshot(session: AsyncSession, groups: dict[str, PlatformGro
     await session.execute(delete(Group).where(Group.id.not_in(groups)))
 
 
+async def ensure_snapshot(*, db: AsyncSession | None = None) -> None:
+    if not config.SOEV_API_URL:
+        return
+    try:
+        if await _pull_due(db=db):
+            await reconcile(db=db, scheduled=True)
+    except Exception:
+        # Expired evidence still grants nothing; an unavailable directory must
+        # not prevent a person from using their own resources.
+        log.warning('soev-api group reconciliation unavailable')
+
+
 async def _run(stop: asyncio.Event) -> None:
     if not config.SOEV_API_URL:
         return
-    poll_interval = min(0.1, _interval() / 10)
-    try:
-        while not stop.is_set():
-            try:
-                if await _pull_due():
-                    await reconcile(scheduled=True)
-            except Exception:
-                # Only a complete pull renews evidence.
-                log.warning('soev-api group reconciliation unavailable')
-            await asyncio.sleep(poll_interval)
-    except asyncio.CancelledError:
-        return
+    await stop.wait()
 
 
 def start_reconciler(app: FastAPI) -> None:

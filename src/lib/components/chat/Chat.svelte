@@ -125,6 +125,9 @@
 		updateChatFolderIdById
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/chat';
+	import { generateThreadCompletion } from '$lib/apis/threadCompletion';
+	import { buildThreadHistory, mergeProjection } from '$lib/utils/threads';
+	import type { ProjectionPage } from '$lib/apis/threads';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
 		getAndUpdateUserLocation,
@@ -323,7 +326,9 @@
 			return next;
 		}, 0);
 
-	$: contextCompactionEnabled = Boolean($config?.features?.enable_context_compaction);
+	$: contextCompactionEnabled = Boolean(
+		$config?.features?.enable_context_compaction && !$config?.features?.enable_v2_threads
+	);
 
 	const getContextThreshold = () => {
 		const chatThreshold = Number(params?.compact_token_threshold);
@@ -529,14 +534,24 @@
 
 	let generating = false;
 	let dragged = false;
-	let generationController = null;
+	let generationController: AbortController | null = null;
+	let threadRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => {
+		generationController?.abort();
+		clearTimeout(threadRefreshTimer);
+	});
 	let contextCompactionToastId = null;
 
-	let chat = null;
+	let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
+	let threadPage: ProjectionPage | null = null;
 	let tags = [];
 
 	// Read-only when viewing someone else's chat (e.g. via shared folder access)
-	$: readOnly = chat != null && chat.user_id !== $user?.id;
+	$: readOnly =
+		chat != null &&
+		($config?.features?.enable_v2_threads ? chat.readonly === true : chat.user_id !== $user?.id);
+	$: if ($config?.features?.enable_v2_threads && $temporaryChatEnabled)
+		temporaryChatEnabled.set(false);
 
 	let chatOwner = null;
 
@@ -559,7 +574,9 @@
 
 	let chatTasks = [];
 
-	let history = {
+	// Legacy message extensions remain dynamic alongside projected messages.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let history: { messages: Record<string, any>; currentId: string | null } = {
 		messages: {},
 		currentId: null
 	};
@@ -603,7 +620,13 @@
 			});
 		}
 
-		if (chatChanged && $chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
+		if (
+			!$config?.features?.enable_v2_threads &&
+			chatChanged &&
+			$chatId &&
+			!$temporaryChatEnabled &&
+			!isTemporaryChatId($chatId)
+		) {
 			const res = await updateChatById(localStorage.token, $chatId, { params }).catch((err) => {
 				console.error('[tool permissions chat]', err);
 				return null;
@@ -863,7 +886,12 @@
 	const saveChatVariables = async (values) => {
 		chatVariables = { ...chatVariables, ...values };
 
-		if ($chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
+		if (
+			!$config?.features?.enable_v2_threads &&
+			$chatId &&
+			!$temporaryChatEnabled &&
+			!isTemporaryChatId($chatId)
+		) {
 			const res = await updateChatById(localStorage.token, $chatId, {}, chatVariables).catch(
 				(err) => {
 					console.error('[chat variables save]', err);
@@ -1040,6 +1068,7 @@
 		loading = true;
 		loadedChatIdProp = '';
 		chat = null;
+		threadPage = null;
 		tags = [];
 		taskIds = null;
 		chatTasks = [];
@@ -2359,6 +2388,7 @@
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
+		threadPage = null;
 		acceptedDataWarnings = new Set();
 		resetWebSearchConfirmation();
 
@@ -2381,7 +2411,10 @@
 			}
 		}
 
-		if ($user?.role !== 'admin' && !$user?.permissions?.chat?.temporary) {
+		if (
+			$config?.features?.enable_v2_threads ||
+			($user?.role !== 'admin' && !$user?.permissions?.chat?.temporary)
+		) {
 			await temporaryChatEnabled.set(false);
 		}
 
@@ -2487,7 +2520,7 @@
 		documentContents.set([]);
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
-			window.history.replaceState(history.state, '', `/`);
+			window.history.replaceState(window.history.state, '', `/`);
 		}
 
 		autoScroll = true;
@@ -2614,6 +2647,29 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
+	const refreshThreadProjection = (id: string) => {
+		clearTimeout(threadRefreshTimer);
+		threadRefreshTimer = setTimeout(async () => {
+			if ($chatId !== id || !$config?.features?.enable_v2_threads) return;
+			if (generationController || document.visibilityState === 'hidden') {
+				refreshThreadProjection(id);
+				return;
+			}
+			try {
+				const page: ProjectionPage = await getChatById(localStorage.token, id);
+				if ($chatId !== id || generationController) return;
+				threadPage = page;
+				history = buildThreadHistory(page, []);
+				chatTitle.set(page.title ?? $i18n.t('New Chat'));
+				tags = page.tags.map((name) => ({ name }));
+				const last = history.currentId ? history.messages[history.currentId] : null;
+				if (!last || last.role !== 'assistant' || !last.done) refreshThreadProjection(id);
+			} catch (error) {
+				toast.error($i18n.t(`${error}`));
+			}
+		}, 1000);
+	};
+
 	const loadChat = async () => {
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
@@ -2633,6 +2689,21 @@
 		if (!loadedChat) {
 			if (!embedded) await goto('/');
 			return 'not_found';
+		}
+		if ($config?.features?.enable_v2_threads) {
+			threadPage = loadedChat;
+			const projected = buildThreadHistory(threadPage!, []);
+			history = projected;
+			chat = { id: targetId, title: threadPage!.title };
+			tags = threadPage!.tags.map((name) => ({ name }));
+			chatTitle.set(threadPage!.title ?? $i18n.t('New Chat'));
+			const model = Object.values(projected.messages)
+				.reverse()
+				.find((m) => m.model)?.model;
+			selectedModels = normalizeSelectedModels(
+				typeof model === 'string' ? [model] : selectedModels
+			);
+			return 'loaded';
 		}
 		chat = loadedChat;
 
@@ -2791,6 +2862,24 @@
 		return 'not_found';
 	};
 
+	let loadingOlderThread = false;
+	const loadOlderThread = async () => {
+		const current = threadPage;
+		const id = $chatId;
+		if (!current?.next_cursor || loadingOlderThread) return;
+		loadingOlderThread = true;
+		try {
+			const older = await getChatById(localStorage.token, id, current.next_cursor);
+			if ($chatId !== id || threadPage !== current) return;
+			threadPage = mergeProjection(current, older);
+			history = buildThreadHistory(threadPage!, []);
+		} catch (error) {
+			toast.error($i18n.t(`${error}`));
+		} finally {
+			loadingOlderThread = false;
+		}
+	};
+
 	const scrollToBottom = async (behavior = 'auto') => {
 		await tick();
 		if (messagesContainerElement) {
@@ -2940,7 +3029,10 @@
 			done?: boolean;
 		} | null;
 		const settled =
-			isAgentRouted() && answer?.role === 'assistant' && answer.done !== true
+			!$config?.features?.enable_v2_threads &&
+			isAgentRouted() &&
+			answer?.role === 'assistant' &&
+			answer.done !== true
 				? expectSettled(answer.id, INTERRUPT_SETTLE_MS)
 				: null;
 		interrupting = true;
@@ -3024,7 +3116,7 @@
 		}
 
 		if ($chatId == _chatId) {
-			if (!$temporaryChatEnabled) {
+			if (!$config?.features?.enable_v2_threads && !$temporaryChatEnabled) {
 				chat = await updateChatById(localStorage.token, _chatId, {
 					models: selectedModels,
 					messages: messages,
@@ -3516,15 +3608,20 @@
 		const toastId = toast.loading($i18n.t('Forking chat...'));
 
 		try {
-			const result = await forkChatById(
-				localStorage.token,
-				$chatId,
-				messageId ?? history.currentId
-			);
+			let target: string | number | null = messageId ?? history.currentId;
+			if ($config?.features?.enable_v2_threads) {
+				target = history.messages[target!]?.position;
+				if (typeof target !== 'number') {
+					const page: ProjectionPage = await getChatById(localStorage.token, $chatId);
+					target = Math.max(0, ...page.messages.filter((m) => m.finished).map((m) => m.position));
+				}
+			}
+			const result = await forkChatById(localStorage.token, $chatId, target);
 
 			if (result?.id) {
 				if (!embedded) {
-					await goto(`/c/${result.id}`);
+					if ($config?.features?.enable_v2_threads && result.id === $chatId) await loadChat();
+					else await goto(`/c/${result.id}`);
 					await refreshChatList(localStorage.token, { refreshPinned: true });
 				}
 				toast.success($i18n.t('Chat forked'), { id: toastId });
@@ -3554,6 +3651,7 @@
 	// reference `submitHandler` by name (9 of them across this file). Aliasing
 	// keeps both names live without rewriting every call site.
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
+		if ($config?.features?.enable_v2_threads) selectedModels = selectedModels.slice(0, 1);
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -3764,7 +3862,7 @@
 		// createNewChat and sets $chatId; sendMessage then forwards that
 		// chat_id so the backend appends to the existing row instead of
 		// creating a duplicate.
-		if (!$chatId && !embedded) {
+		if (!$config?.features?.enable_v2_threads && !$chatId && !embedded) {
 			await initChatHandler(history);
 		}
 
@@ -3804,6 +3902,7 @@
 				: selectedModels;
 		// [Gradient] Legacy regeneration and compare must obey split request dispatch.
 		selectedModelIds = llmSelection(selectedModelIds);
+		if ($config?.features?.enable_v2_threads) selectedModelIds = selectedModelIds.slice(0, 1);
 		if (!modelId && history.messages[parentId]) {
 			history.messages[parentId].models = [...selectedModelIds];
 		}
@@ -3856,7 +3955,7 @@
 		history = history;
 
 		// Empty embedded drafts create their backing chat only when the first message is sent.
-		if (!_chatId) {
+		if (!_chatId && !$config?.features?.enable_v2_threads) {
 			if (embedded && onCreateEmbeddedChat) {
 				const createdChat = await onCreateEmbeddedChat();
 				if (!createdChat?.id) {
@@ -4163,9 +4262,52 @@
 		// Only send terminal_id if the model has terminal capability enabled
 		const terminalEnabled = model.info?.meta?.capabilities?.terminal ?? true;
 		const useChatVariablesFallback =
-			!_chatId || $temporaryChatEnabled || isTemporaryChatId(_chatId);
+			$config?.features?.enable_v2_threads ||
+			!_chatId ||
+			$temporaryChatEnabled ||
+			isTemporaryChatId(_chatId);
 
-		const res = await generateOpenAIChatCompletion(
+		const v2 = $config?.features?.enable_v2_threads;
+		const controller = v2 ? new AbortController() : null;
+		if (controller) {
+			generationController = controller;
+			generating = true;
+		}
+		const complete = v2
+			? (token: string, body: Record<string, unknown>, url?: string) =>
+					generateThreadCompletion(
+						token,
+						body,
+						{
+							signal: controller!.signal,
+							created: async (id) => {
+								if ($chatId !== _chatId || !history.messages[responseMessageId]) {
+									controller!.abort();
+									return;
+								}
+								chatRequestQueues.update((q) => {
+									if (!q[_chatId]?.length) return q;
+									const { [_chatId]: pending, ...rest } = q;
+									return { ...rest, [id]: [...pending, ...(rest[id] ?? [])] };
+								});
+								_chatId = id;
+								chatId.set(id);
+								if (!embedded) window.history.replaceState(window.history.state, '', `/c/${id}`);
+								selectedFolder.set(null);
+							},
+							chunk: async (data) => {
+								if ($chatId === _chatId && history.messages[responseMessageId])
+									await chatCompletionEventHandler(
+										data,
+										history.messages[responseMessageId],
+										_chatId
+									);
+							}
+						},
+						url
+					)
+			: generateOpenAIChatCompletion;
+		const res = await complete(
 			localStorage.token,
 			{
 				stream: stream,
@@ -4238,6 +4380,10 @@
 			},
 			`${WEBUI_BASE_URL}/api`
 		).catch(async (error) => {
+			if (error?.name === 'AbortError') {
+				responseMessage.done = true;
+				return null;
+			}
 			console.error(error);
 
 			let errorMessage = error;
@@ -4264,7 +4410,13 @@
 			return null;
 		});
 
+		if (generationController === controller) {
+			generationController = null;
+			generating = false;
+		}
+
 		if (res) {
+			if (v2 && $chatId === _chatId) refreshThreadProjection(_chatId);
 			if (res.error) {
 				await handleOpenAIError(res.error, responseMessage);
 			} else {
@@ -4290,14 +4442,14 @@
 					});
 					await chatId.set(res.chat_id);
 					if (!$temporaryChatEnabled && !embedded) {
-						window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
+						window.history.replaceState(window.history.state, '', `/c/${res.chat_id}`);
 						await refreshChatList(localStorage.token);
 
 						// Persist chat-level params (system prompt, advanced
 						// params) that the backend doesn't receive in the
 						// chat completion request.  Files are now persisted
 						// by the backend at chat creation time.
-						if (Object.keys(params).length > 0) {
+						if (!$config?.features?.enable_v2_threads && Object.keys(params).length > 0) {
 							await updateChatById(localStorage.token, res.chat_id, {
 								params: params
 							});
@@ -4580,7 +4732,7 @@
 			await chatId.set(_chatId);
 
 			if (!embedded) {
-				window.history.replaceState(history.state, '', `/c/${_chatId}`);
+				window.history.replaceState(window.history.state, '', `/c/${_chatId}`);
 			}
 
 			await tick();
@@ -4613,7 +4765,8 @@
 			files: structuredClone(chatFiles),
 			features: composerFeatures(currentComposerPreferences())
 		};
-		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
+		if ($config?.features?.enable_v2_threads || $chatId !== _chatId || $temporaryChatEnabled)
+			return chatSaveQueue;
 		chatSaveQueue = chatSaveQueue
 			.then(async () => {
 				const saved = await updateChatById(localStorage.token, _chatId, payload);
@@ -4626,7 +4779,7 @@
 	};
 
 	const saveControls = async () => {
-		if (!$chatId || $temporaryChatEnabled) return;
+		if ($config?.features?.enable_v2_threads || !$chatId || $temporaryChatEnabled) return;
 		const loaded = chat?.chat ?? {};
 		if (equal(params, loaded.params ?? {}) && equal(chatFiles, loaded.files ?? [])) return;
 
@@ -5064,6 +5217,15 @@
 									}}
 								>
 									<div class=" h-full w-full flex flex-col">
+										{#if $config?.features?.enable_v2_threads && threadPage?.next_cursor}
+											<button
+												class="mx-auto mt-18 block text-sm"
+												disabled={loadingOlderThread}
+												on:click={loadOlderThread}
+											>
+												{$i18n.t('Load older messages')}
+											</button>
+										{/if}
 										<Messages
 											bind:this={messagesRef}
 											chatId={$chatId}
@@ -5087,7 +5249,8 @@
 											{chatActionHandler}
 											{addMessages}
 											{onToolCallResolved}
-											allowDelete={!(generating || taskIds?.length)}
+											allowDelete={!$config?.features?.enable_v2_threads &&
+												!(generating || taskIds?.length)}
 											forkHandler={handleForkChat}
 											topPadding={!embedded}
 											topSpacing={true}

@@ -18,7 +18,10 @@ organization_store = test_thread_organizations.organization_store
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('metadata_tasks', [False, True])
-async def test_full_v2_turn_streams_without_local_content(chat_http, organization_store, monkeypatch, metadata_tasks):
+@pytest.mark.parametrize('browser_create', [False, True])
+async def test_full_v2_turn_streams_without_local_content(
+    chat_http, organization_store, monkeypatch, metadata_tasks, browser_create
+):
     from open_webui.soev import thread_metadata
     from open_webui.utils import agent_v2
 
@@ -78,6 +81,41 @@ async def test_full_v2_turn_streams_without_local_content(chat_http, organizatio
         }
         if metadata_tasks:
             form['background_tasks'] = {'title_generation': True, 'tags_generation': True}
+        if index == 0 and browser_create:
+            from open_webui.soev.chat_paths import ChatPaths
+            from open_webui.soev.chat_routes import chat_write
+
+            prepared = await main.chat_completion(request, {**form, 'prepare_thread': True}, user)
+            assert prepared.status_code == 200, prepared.body
+            payload = json.loads(prepared.body)
+            assert set(payload) == {'agent', 'input', 'model'}
+            assert payload['agent'] == 'test'
+            assert payload['model'] == model['id']
+            assert payload['input']['text'] == 'Fictional turn 0'
+            assert not [r for r in chat_http.chat.requests if r.method == 'POST']
+            assert await repository.list(user.id) == []
+            complete.assert_not_awaited()
+
+            async def receive():
+                return {'type': 'http.request', 'body': json.dumps(payload).encode()}
+
+            creation_request = Request({'type': 'http', 'app': api, 'headers': []}, receive)
+            from open_webui.soev import acting
+
+            context = acting._requester_ref.set('owui:user:fictional-fern')
+            token_context = acting._token_resolver.set(
+                AsyncMock(return_value='fictional-login:owui:user:fictional-fern')
+            )
+            try:
+                created = await chat_write(
+                    ChatPaths(threads.build_client(), repository), creation_request, user, None, '/new'
+                )
+            finally:
+                acting._requester_ref.reset(context)
+                acting._token_resolver.reset(token_context)
+            chat_id = created['id']
+            assert len([r for r in chat_http.chat.requests if r.method == 'POST']) == 1
+            form = {**form, 'chat_id': chat_id, 'follow_thread': True}
         response = await main.chat_completion(request, form, user)
         assert isinstance(response, StreamingResponse), response
         assert response.headers['cache-control'] == 'private, no-store'
@@ -94,6 +132,10 @@ async def test_full_v2_turn_streams_without_local_content(chat_http, organizatio
     mutations = [r for r in chat_http.chat.requests if r.method == 'POST']
     assert [r.url.path for r in mutations] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     assert [json.loads(r.content)['input']['text'] for r in mutations] == ['Fictional turn 0', 'Fictional turn 1']
+    if browser_create:
+        tails = [r for r in chat_http.chat.requests if r.url.path.endswith('/events')]
+        assert tails and tails[0].method == 'GET'
+        assert tails[0].headers['Last-Event-ID'] == '0'
     assert complete.await_count == (2 if metadata_tasks else 0)
     if metadata_tasks:
         assert complete.await_args.args[0]['tasks'] == {'title_generation': True, 'tags_generation': True}

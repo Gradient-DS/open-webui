@@ -1453,6 +1453,15 @@ async def chat_completion(
             metadata['chat_id'] = str(uuid4())
         if soev_threads.enabled():
             metadata['new_thread'] = is_new_chat or not chat_id
+            for operation in ('prepare_thread', 'follow_thread'):
+                value = form_data.pop(operation, False)
+                if type(value) is not bool:
+                    raise HTTPException(422, detail='Invalid thread operation')
+                metadata[operation] = value
+            if metadata['prepare_thread'] and (chat_id or metadata['follow_thread']):
+                raise HTTPException(422, detail='Invalid thread operation')
+            if metadata['follow_thread'] and not chat_id:
+                raise HTTPException(422, detail='Invalid thread operation')
 
         initial_title_generation = None
         if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks and not soev_threads.enabled():
@@ -1799,6 +1808,8 @@ async def chat_completion(
             # [Gradient] The agent owns inference and tool execution for routed chats.
             if route_to_agent:
                 response = await call_agent_api(request, form_data, metadata)
+                if metadata.get('prepare_thread'):
+                    return response
             else:
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get('chat_id') and metadata.get('message_id'):
@@ -2482,7 +2493,8 @@ async def get_app_config(request: Request):
                     'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
                     'enable_notes': config.get('notes.enable'),
-                    'enable_context_compaction': config.get('chat.context_compaction.enable'),
+                    'enable_context_compaction': config.get('chat.context_compaction.enable')
+                    and not soev_threads.enabled(),
                     'enable_tool_permissions': config.get('chat.tool_permissions.enable'),
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
@@ -2545,7 +2557,7 @@ async def get_app_config(request: Request):
                     'feature_reference_chats': FEATURE_REFERENCE_CHATS,
                     'feature_simple_assistant_builder': FEATURE_SIMPLE_ASSISTANT_BUILDER,
                     'feature_input_menu': FEATURE_INPUT_MENU,
-                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT,
+                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT and not soev_threads.enabled(),
                     'feature_tool_servers': FEATURE_TOOL_SERVERS,
                     'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
                     'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
