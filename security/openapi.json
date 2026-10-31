@@ -700,6 +700,18 @@
         "title": "AudioConfigUpdateForm",
         "type": "object"
       },
+      "AuthorizationForm": {
+        "additionalProperties": false,
+        "properties": {
+          "silent": {
+            "default": false,
+            "title": "Silent",
+            "type": "boolean"
+          }
+        },
+        "title": "AuthorizationForm",
+        "type": "object"
+      },
       "AutomationData": {
         "properties": {
           "model_id": {
@@ -10578,6 +10590,20 @@
           "url"
         ],
         "title": "LoadUrlForm",
+        "type": "object"
+      },
+      "MailboxForm": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "MailboxForm",
         "type": "object"
       },
       "MeetingInput": {
@@ -30923,6 +30949,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AuthorizationForm"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -31063,6 +31106,153 @@
           }
         ],
         "summary": "Enable Live Family",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}/mailboxes": {
+      "get": {
+        "operationId": "list_mailboxes_api_v1_cloud_sync_connections__connection_id__mailboxes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mailboxes",
+        "tags": [
+          "cloud-sync"
+        ]
+      },
+      "post": {
+        "operationId": "add_mailbox_api_v1_cloud_sync_connections__connection_id__mailboxes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailboxForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Mailbox",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}": {
+      "delete": {
+        "operationId": "remove_mailbox_api_v1_cloud_sync_connections__connection_id__mailboxes__address__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "title": "Address",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Mailbox",
         "tags": [
           "cloud-sync"
         ]
