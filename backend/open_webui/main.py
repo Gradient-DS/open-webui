@@ -570,12 +570,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_data_retention_cleanup())
     asyncio.create_task(periodic_export_cleanup())
 
-    # Reconcile soev ingest jobs from File metadata, including after a restart.
-    # The poller stays idle when SOEV_API_URL is unset.
-    from open_webui.soev.jobs import start_job_poller
-
     await capabilities.refresh()
-    start_job_poller(app)
     from open_webui.soev.group_mirror import start_reconciler
 
     start_reconciler(app)
@@ -685,10 +680,7 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.group_mirror import stop_reconciler
 
     await stop_reconciler(app)
-    app.state.soev_job_poller.cancel()
-    await app.state.soev_job_poller
-
-    # [Gradient] Release the soev-api keep-alive pool after its poller stops.
+    # [Gradient] Release the soev-api keep-alive pool after its workers stop.
     from open_webui.soev.client import close_client
 
     await close_client()

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi import HTTPException
 from open_webui.soev.client import ChatEvent
-from open_webui.test.soev.test_jobs import env  # noqa: F401
+from open_webui.test.soev.test_jobs import env, owner_login  # noqa: F401
 
 
 def attachment():
@@ -76,9 +76,10 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     assert len(messages['files']) == 1
     next_turn = {'user_id': 'alice', 'files': messages['files']}
     assert await agent_v2._attachments(next_turn) == {'attachment_notes': ['still processing: Quarterly plan.pdf']}
-    client = SimpleNamespace(get=AsyncMock(return_value={'status': 'SUCCEEDED'}), send=AsyncMock())
+    client = SimpleNamespace(is_service=False, get=AsyncMock(return_value={'status': 'SUCCEEDED'}), send=AsyncMock())
     client.as_service = lambda: client
-    assert await env.jobs.poll_once(client, now=rows[0].meta['soev_job']['submitted_at']) == 1
+    with owner_login():
+        assert await env.jobs.poll_once(client, now=rows[0].meta['soev_job']['submitted_at']) == 1
     client.send.assert_not_awaited()
     row = await env.files.Files.get_file_by_id(rows[0].id)
     assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
@@ -352,7 +353,9 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
 
     event = {**attachment(), 'content_type': None}
     row = await live_documents.register_attachment('alice', event)
-    client = SimpleNamespace(get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}]))
+    client = SimpleNamespace(
+        is_service=False, get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}])
+    )
     client.as_service = lambda: client
     from open_webui.soev import acting
 

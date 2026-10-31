@@ -29,6 +29,7 @@ class FakeSoevApi:
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
+        self.job_subjects = {}
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
@@ -484,6 +485,7 @@ class FakeSoevApi:
             raise Problem(413, 'inline_budget_exceeded', 'inline:budget')
         response = self._job('ingest', body['collection_key'], credential)
         job = self.jobs[response.json()['job_id']]
+        self.job_subjects[job['job_id']] = subject
         job['documents'] = copy.deepcopy(documents)
         job['items'] = [
             {
@@ -540,6 +542,12 @@ class FakeSoevApi:
         if len(parts) == 2 and request.method == 'POST':
             return self._create_ingest(body, credential, subject)
         rows = [row for jid, row in self.jobs.items() if self.job_owners[jid] == credential]
+        if request.method == 'GET':
+            rows = [
+                row
+                for row in rows
+                if row['job_id'] not in self.job_subjects or self.job_subjects[row['job_id']] == subject
+            ]
         if len(parts) >= 3:
             rows = [row for row in rows if row['job_id'] == parts[2]]
             if not rows:

@@ -1,6 +1,5 @@
-"""Reconcile credential-scoped ingest jobs from durable File metadata."""
+"""Reconcile ingest jobs with their owner's current login token."""
 
-import asyncio
 import logging
 import re
 import time
@@ -17,6 +16,7 @@ log = logging.getLogger(__name__)
 # An item's code and reason as soev-api gives them: fixed snake_case codes. A
 # file's error is shown to its user, so anything else is dropped, never shown.
 _FIXED_CODE = re.compile(r'[a-z][a-z0-9_]{0,63}')
+_POLL_SECONDS = 5
 
 
 def _item_error(item: dict, status: str) -> str:
@@ -52,7 +52,6 @@ async def _finish(file: FileModel, job: dict, error: str | None = None) -> int:
 
 
 async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
-    client = client.as_service()
     try:
         await client.send(
             'POST',
@@ -100,8 +99,11 @@ async def _reference_ready(client: SoevClient, file: FileModel, job: dict) -> in
 async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
     job = file.meta['soev_job']
     try:
-        result = await client.as_service().get(
-            f'/v1/jobs/{quote(job["job_id"], safe="")}', params={'include_items': 'true'}
+        result = await client.get(
+            f'/v1/jobs/{quote(job["job_id"], safe="")}',
+            as_user=f'owui:user:{file.user_id}',
+            params={'include_items': 'true'},
+            cache=False,
         )
     except SoevApiError as error:
         if error.status == 404 and error.code == 'job_not_found':
@@ -117,12 +119,15 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
     if status == 'SUCCEEDED':
         if job.get('kind') == 'reference':
             return await _reference_ready(client, file, job)
-        # TODO(D-2g-4): Land the document server-side or defer lookup/move to the owner's next request.
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
-        document = await client.get(path)
+        document = await client.get(path, as_user=f'owui:user:{file.user_id}')
         if (document.get('path') or '') != (job['path'] or ''):
             await client.send(
-                'POST', path + '/move', {'to': job['path'] or ''}, idempotency_key=f'{_job_key(file, job)}:move'
+                'POST',
+                path + '/move',
+                {'to': job['path'] or ''},
+                as_user=f'owui:user:{file.user_id}',
+                idempotency_key=f'{_job_key(file, job)}:move',
             )
         return await _finish(file, job)
     if status in {'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED'}:
@@ -132,52 +137,28 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
 
 
 async def poll_once(client: SoevClient, *, now: int) -> int:
+    ref = acting.requester_ref()
+    if client.is_service or ref is None:
+        return 0
+    owner_id = ref.removeprefix('owui:user:')
     touched = 0
-    for file in await Files.get_files_with_soev_jobs():
+    for file in await Files.get_files_with_soev_jobs(user_id=owner_id):
         try:
-            touched += await _poll_file(client, file, now)
+            if not await acting.user_token(ref):
+                return touched
+            file = await Files.claim_soev_job_poll(
+                file.id, owner_id, now=now, interval=max(_POLL_SECONDS, config.SOEV_API_JOB_POLL_SECONDS)
+            )
+            if file is not None:
+                touched += await _poll_file(client, file, now)
         except Exception as error:
             code = error.code if isinstance(error, SoevApiError) else type(error).__name__
             log.warning('soev job poll failed for file %s (%s)', file.id, code)
     return touched
 
 
-async def complete_references(owner_id: str) -> int:
-    """Fill missing reference MIME metadata only during its owner's login request."""
+async def reconcile_owner_jobs(owner_id: str) -> int:
     if not config.SOEV_API_URL:
         return 0
     acting.require_owner(owner_id)
-    touched = 0
-    client = identity.build_client()
-    for file in await Files.get_files_with_soev_jobs(user_id=owner_id):
-        if file.meta['soev_job'].get('kind') != 'reference' or file.meta.get('content_type'):
-            continue
-        try:
-            touched += await _poll_file(client, file, int(time.time()))
-        except Exception as error:
-            code = error.code if isinstance(error, SoevApiError) else type(error).__name__
-            log.warning('soev reference completion failed for file %s (%s)', file.id, code)
-    return touched
-
-
-async def _tick() -> None:
-    if not config.SOEV_API_URL:
-        return
-    try:
-        await poll_once(identity.build_client().as_service(), now=int(time.time()))
-    except Exception as error:
-        code = error.code if isinstance(error, SoevApiError) else type(error).__name__
-        log.warning('soev job poll tick failed (%s)', code)
-
-
-async def _run() -> None:
-    try:
-        while True:
-            await _tick()
-            await asyncio.sleep(config.SOEV_API_JOB_POLL_SECONDS)
-    except asyncio.CancelledError:
-        return
-
-
-def start_job_poller(app) -> None:
-    app.state.soev_job_poller = asyncio.create_task(_run())
+    return await poll_once(identity.build_client(), now=int(time.time()))

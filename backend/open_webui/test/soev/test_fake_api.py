@@ -480,15 +480,17 @@ def test_job_routes_conceal_unknown_and_other_credentials_jobs(api, suffix, meth
 
 
 def test_get_job_with_items_lists_each_document(api):
-    """Items are opt-in and subjects do not impose collection access on job reads."""
+    """Ingest jobs require the commissioning person; items are opt-in."""
     fake, client = api
     seed(client)
     seed(client, 'other', 'owui:user:bob')
-    job = ingest(client, inline_document(title='Notes'), file_document()).json()
+    job = ingest(client, inline_document(title='Notes'), file_document(), user='owui:user:alice').json()
     path = f'/v1/jobs/{job["job_id"]}'
-    assert 'items' not in send(client, 'GET', path, user='owui:user:bob').json()
-    assert 'items' not in send(client, 'GET', path + '?include_items=false').json()
-    response = send(client, 'GET', path + '?include_items=true', user='owui:user:bob')
+    assert send(client, 'GET', path, user='owui:user:bob').status_code == 404
+    assert send(client, 'GET', path).status_code == 404
+    assert 'items' not in send(client, 'GET', path, user='owui:user:alice').json()
+    assert 'items' not in send(client, 'GET', path + '?include_items=false', user='owui:user:alice').json()
+    response = send(client, 'GET', path + '?include_items=true', user='owui:user:alice')
     assert response.status_code == 200
     assert response.json()['items'] == [
         {
@@ -501,8 +503,10 @@ def test_get_job_with_items_lists_each_document(api):
         }
         for source_id in ('inline', 'file')
     ]
-    listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=AWAITING_UPLOAD').json()['data']
-    assert listed == [send(client, 'GET', path).json()]
+    listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=AWAITING_UPLOAD', user='owui:user:alice').json()[
+        'data'
+    ]
+    assert listed == [send(client, 'GET', path, user='owui:user:alice').json()]
     assert fake.jobs[job['job_id']]['progress']['total'] == 2
 
 

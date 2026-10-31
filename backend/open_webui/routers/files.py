@@ -40,7 +40,7 @@ from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.live_documents import router as live_documents_router
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
-from open_webui.soev import assistant_files, ingest
+from open_webui.soev import assistant_files, ingest, jobs
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.soev.live_documents import stream_original
@@ -234,7 +234,7 @@ async def process_uploaded_file(
 
             # Emit the persisted status: native processing has already completed,
             # while a submitted soev-api job is still processing. Both UI listeners
-            # ignore processing, keeping the spinner until the soev-api poller
+            # ignore processing, keeping the spinner until owner reconciliation
             # emits the terminal event. Await directly on the running event loop.
             file_data = await Files.get_file_by_id(file_item.id)
             meta = (file_data.meta or {}) if file_data else {}
@@ -796,6 +796,8 @@ async def get_file_process_status(
 
             async def event_stream(file_id):
                 for _ in range(MAX_FILE_PROCESSING_DURATION):
+                    if file.user_id == user.id:
+                        await jobs.reconcile_owner_jobs(user.id)
                     file_item = await Files.get_file_by_id(file_id)
                     if file_item:
                         data = file_item.model_dump().get('data', {})

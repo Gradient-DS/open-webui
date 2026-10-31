@@ -385,9 +385,15 @@ class SoevClient:
             raise SoevApiError(502, 'upstream_error', 'Chat event window unavailable') from None
         return events
 
-    async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
+    async def get(
+        self, path: str, *, as_user: str | None = None, params: dict | None = None, cache: bool = True
+    ) -> dict:
         await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
+        if not cache:
+            return self._json_object(
+                await self._request('GET', path, as_user=as_user, params=params, admission_headers=headers)
+            )
         key = (
             self._base_url,
             self._api_key,

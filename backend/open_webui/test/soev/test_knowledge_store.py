@@ -1016,7 +1016,10 @@ async def test_add_file_with_a_directory_records_the_path_for_an_in_flight_job(e
     jobs = importlib.import_module('open_webui.soev.jobs')
     monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
     env.api.advance(job['job_id'], 'SUCCEEDED')
-    assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
     assert env.api.documents['kb', row.id]['path'] == 'a'
 
 
@@ -1061,7 +1064,10 @@ async def test_a_failed_file_stays_listed_as_error_until_removed(env, monkeypatc
     env.api.advance(
         job['job_id'], 'COMPLETED_WITH_ERRORS', item_code='unsupported_content_type', item_detail='Cannot parse'
     )
-    assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
     result = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None}, metadata_only=True)
     assert result.total == 1 and result.items[0].status == 'failed'
     assert result.items[0].error == 'unsupported_content_type'

@@ -124,7 +124,7 @@ File whose id is the element's `file_id`, with `attached_by: 'agent'`; the OneDr
 picker registers through the same function with `attached_by: 'user'`. One attach call's
 documents are merged into the message files and `chat:message:files` is emitted once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
-jobs use the existing durable job poller, skipping upload commit and path moves. File content
+jobs reconcile on their owner's authenticated requests, skipping upload commit and path moves. File content
 routes stream platform originals with the requesting user's login token. Every v2 turn ensures
 and sends the user's chat attachments collection; stored reference metadata is sent next turn.
 The platform binds that collection into its live ticket; a missing or changed target
@@ -324,8 +324,11 @@ refetches every file without a landed version) there and in the source's ⋯ men
 
 User platform calls require that person's own login token. `SoevClient.as_service()` explicitly
 selects product authority. No subject signing, identity links or owner override remains.
-The durable job poller runs as the service; missing reference MIME metadata is completed
-inside the owner's next authenticated request using their token. The removed offline migration
+Durable file jobs reconcile inside their owner's authenticated requests using their login token,
+including status streams and knowledge file lists. A database claim limits job reads to once per
+file per five seconds across workers. There is no service file-job poller: these jobs require the
+commissioning person's authority. Completion fills missing reference MIME metadata and emits
+`file:status` after persisting the terminal state. The removed offline migration
 CLI and chart Job are replaced by platform cutover tooling; see `docs/cutover-handoff.md`.
 Role demotion and offboarding remain subject to the console boundary in `soev/policy_jobs.py`.
 
