@@ -214,11 +214,12 @@ exceptions:
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
 
-  # filelock 4.2.1 fixes the three findings below, but every unstructured
-  # release up to 0.27.34 (2026-10-22) declares filelock<4.0.0, and the 3.x line
-  # has no backport. pip-audit resolves requirements.txt with pip, which cannot
-  # override that cap. Upgrade and delete all four entries once unstructured
-  # allows filelock 4.
+  # filelock 4.x fixes every filelock finding below, but every unstructured
+  # release up to 0.27.36 declares filelock<4.0.0, and the 3.x line has no
+  # backport. pip-audit resolves requirements.txt with pip, which cannot
+  # override that cap. Upgrade and delete all filelock entries once unstructured
+  # allows filelock 4. Every one of them needs a second local account on the
+  # host (CVSS AV:L, PR:L); the container runs a single unprivileged user.
   - id: GHSA-v4x8-3wr5-3wq8
     package: filelock
     scanner: pip-audit
@@ -281,4 +282,150 @@ exceptions:
       Unreachable: oplocks are a Windows mechanism, and we ship Linux images
       only.
     approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112909
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-69hj-f68j-2879. UnixFileLock truncates and chmods a file another user renames or hard-links onto the lock path.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112908
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-6627-m3xw-93mp. StrictSoftFileLock creates its claim directories without the lock mode, so another user with write access can end a live hold.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112911
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-9c4x-gm8v-wgc4. StrictSoftFileLock and SoftReadWriteLock adopt a protocol directory another user created first.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112912
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-9j6q-wvj5-jgjg. A symlink swapped in during SoftFileLock's writability check tells another user whether a path is writable.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112935
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-fq56-3cx3-fjxp. SoftFileLock's stale-lock break can remove a live lock on a reused inode number.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112938
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-m462-7rxw-wvpg. StrictSoftFileLock follows a symlink another user swaps in at the lock path.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112939
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-rfpc-qcw5-3pc4. SoftFileLock removes a live holder's marker when another user forges the PID in it.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: it needs another local account that can write in the lock
+      directory or plant files at the lock path. The container runs a single
+      unprivileged user, and the backend never imports filelock (it arrives
+      through huggingface-hub, torch, datasets and unstructured).
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112915
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-cwqr-hh33-gh44. ReadWriteLock stalls on a lock database another user crafted.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: nothing we ship uses ReadWriteLock (see CVE-2026-112940),
+      and it also needs a second local account, which the single-user
+      container does not have.
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112936
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-j8f7-rjxc-mr56. ReadWriteLock follows a symlink at the lock path into SQLite.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: nothing we ship uses ReadWriteLock (see CVE-2026-112940),
+      and it also needs a second local account, which the single-user
+      container does not have.
+    approved_by: "@LexLubbers (pending, review on PR #568)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112910
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-8mx5-7m5m-r77g. Windows only: WindowsFileLock ignores the lock mode,
+      so the lock file inherits the directory ACL.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: we ship Linux images only.
+    approved_by: "@LexLubbers (pending, review on PR #568)"
     recheck: 2026-11-07
