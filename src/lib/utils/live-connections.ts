@@ -230,57 +230,100 @@ export async function connectLiveSource(
 			? { ...(await authorizeConnection(token, connection.id)), connection_id: connection.id }
 			: await createConnection(token, provider);
 		const id = authorization.connection_id;
-		if (authorization.authorize_url) {
-			const authorizeUrl = authorization.authorize_url;
-			const trusted = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
-			await new Promise<void>((resolve, reject) => {
-				let closing = false;
-				const finish = (error?: Error) => {
-					clearInterval(timer);
-					window.removeEventListener('message', received);
-					if (error) reject(error);
-					else resolve();
-				};
-				const received = (event: MessageEvent) => {
-					const result = connectResult(event, trusted, popup, id);
-					if (result)
-						finish(result === 'pending' ? undefined : new Error('Provider connection failed'));
-				};
-				// [Gradient] A popup can close before its message arrives (or without one) while the
-				// exchange succeeded: ask the connection once before calling it cancelled.
-				const closed = async () => {
-					closing = true;
-					try {
-						const outcome = connectionOutcome(await getConnection(token, id), 0);
-						if (outcome.status === 'done') return finish();
-					} catch {
-						// Unreadable: treated as cancelled below.
-					}
-					finish(new Error('Provider connection cancelled'));
-				};
-				const started = Date.now();
-				const timer = setInterval(() => {
-					if (closing) return;
-					if (Date.now() - started > 120000) finish(new Error('Provider connection cancelled'));
-					else if (popup.closed) void closed();
-				}, 500);
-				window.addEventListener('message', received);
-				popup.location.href = authorizeUrl;
-			});
-		}
-		const started = Date.now();
-		while (Date.now() - started <= 120000) {
-			const outcome = connectionOutcome(await getConnection(token, id), Date.now() - started);
-			if (outcome.status === 'done') return (await enableLiveFamily(token, id, family)).id;
-			if (outcome.status !== 'waiting') throw new Error('Provider connection failed');
-			await new Promise((resolve) => setTimeout(resolve, 1000));
-		}
-		throw new Error('Provider connection failed');
+		if (
+			authorization.authorize_url &&
+			(await waitForConsent(token, id, popup, authorization.authorize_url)) !== 'pending'
+		)
+			throw new Error('Provider connection failed');
+		await waitForConnection(token, id);
+		return (await enableLiveFamily(token, id, family)).id;
 	} finally {
 		popup.close();
 		// Also after a cancel, error or timeout: a retry then finds the connection this attempt
 		// created instead of creating another one.
 		await prefetchLiveConnections(token, provider, family).catch(() => {});
+	}
+}
+
+// The callback keeps an interaction_required popup open so consent can continue in the same window.
+async function waitForConsent(
+	token: string,
+	id: string,
+	popup: Window,
+	authorizeUrl: string
+): Promise<'pending' | 'interaction_required'> {
+	const trusted = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
+	return new Promise((resolve, reject) => {
+		let closing = false;
+		const finish = (result: 'pending' | 'interaction_required' | Error) => {
+			clearInterval(timer);
+			window.removeEventListener('message', received);
+			if (result instanceof Error) reject(result);
+			else resolve(result);
+		};
+		const received = (event: MessageEvent) => {
+			const result = connectResult(event, trusted, popup, id);
+			if (result)
+				finish(
+					result === 'pending' || result === 'interaction_required'
+						? result
+						: new Error('Provider connection failed')
+				);
+		};
+		// A popup can close before its message arrives while the exchange succeeded.
+		const closed = async () => {
+			closing = true;
+			try {
+				if (connectionOutcome(await getConnection(token, id), 0).status === 'done')
+					return finish('pending');
+			} catch {
+				// Unreadable: treated as cancelled below.
+			}
+			finish(new Error('Provider connection cancelled'));
+		};
+		const started = Date.now();
+		const timer = setInterval(() => {
+			if (closing) return;
+			if (Date.now() - started > 120000) finish(new Error('Provider connection cancelled'));
+			else if (popup.closed) void closed();
+		}, 500);
+		window.addEventListener('message', received);
+		popup.location.href = authorizeUrl;
+	});
+}
+
+async function waitForConnection(token: string, id: string): Promise<void> {
+	const started = Date.now();
+	while (Date.now() - started <= 120000) {
+		const outcome = connectionOutcome(await getConnection(token, id), Date.now() - started);
+		if (outcome.status === 'done') return;
+		if (outcome.status !== 'waiting') throw new Error('Provider connection failed');
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	throw new Error('Provider connection failed');
+}
+
+export function openMailConsent(): Window | null {
+	return window.open('about:blank', 'soev-live-mail', centeredPopupFeatures(600, 720));
+}
+
+export async function reauthorizeMail(
+	token: string,
+	id: string,
+	popup = openMailConsent()
+): Promise<void> {
+	if (!popup) throw new Error('Allow popups to connect your account');
+	try {
+		const silent = await authorizeConnection(token, id, true);
+		if ((await waitForConsent(token, id, popup, silent.authorize_url)) === 'interaction_required') {
+			const interactive = await authorizeConnection(token, id);
+			if ((await waitForConsent(token, id, popup, interactive.authorize_url)) !== 'pending')
+				throw new Error('Provider connection failed');
+		}
+		await waitForConnection(token, id);
+	} finally {
+		popup.close();
+		await prefetchLiveConnections(token, 'outlook_mail', 'mail').catch(() => {});
 	}
 }
 
