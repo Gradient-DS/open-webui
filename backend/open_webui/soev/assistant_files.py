@@ -60,7 +60,7 @@ async def ensure_collection(model: ModelModel, client: SoevClient) -> str:
     try:
         await client.get(_path(key), as_user=owner)
     except SoevApiError as error:
-        if error.code != 'collection_not_found':
+        if error.status != 404:
             raise
         await client.send(
             'POST',

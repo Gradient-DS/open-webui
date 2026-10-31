@@ -132,7 +132,7 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
     try:
         collection = await client.get(f'/v1/collections/{quote(key, safe="")}', as_user=ref)
     except SoevApiError as error:
-        if error.code != 'collection_not_found':
+        if error.status != 404:
             raise
         await client.send(
             'POST',
