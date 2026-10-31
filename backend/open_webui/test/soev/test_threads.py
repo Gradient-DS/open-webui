@@ -64,6 +64,89 @@ def thread_http(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('options', [{}, {'title': 'Fictional title', 'temporary': True}])
+async def test_reserve_sends_only_creation_metadata_with_requester_token(thread_http, options):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(200, json={'thread_id': 'fictional-reserved'}))
+    assert await client.reserve('fictional-agent', **options) == 'fictional-reserved'
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == 'POST' and request.url.path == '/v1/chat/threads:reserve'
+    assert json.loads(request.content) == {'agent': 'fictional-agent', 'title': None, 'temporary': False, **options}
+    assert request.headers['Accept'] == 'application/json'
+    assert request.headers['Authorization'] == 'Bearer fictional-product-key'
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
+    assert 'X-Soev-' + 'Subject' not in request.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'payload',
+    [
+        {},
+        [],
+        {'thread_id': None},
+        {'thread_id': 1},
+        {'thread_id': ''},
+        {'thread_id': '..'},
+        {'thread_id': 'a/b'},
+        {'thread_id': 'x' * 129},
+    ],
+)
+async def test_reserve_refuses_malformed_thread_id_without_fallback(thread_http, payload):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(200, json=payload))
+    with pytest.raises(ThreadError, match='reconnect') as error:
+        await client.reserve('fictional-agent')
+    assert error.value.status == 502
+    assert [request.url.path for request in requests] == ['/v1/chat/threads:reserve']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'status,expected,state',
+    [
+        (201, 502, 'reconnect'),
+        (401, 401, 'sign_in'),
+        (403, 404, 'unavailable'),
+        (404, 404, 'unavailable'),
+        (422, 422, 'invalid_request'),
+        (503, 503, 'reconnect'),
+    ],
+)
+async def test_reserve_refuses_unexpected_status_without_fallback(thread_http, status, expected, state):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(status, json={'thread_id': 'fictional-reserved'}))
+    with pytest.raises(ThreadError, match=state) as error:
+        await client.reserve('fictional-agent')
+    assert error.value.status == expected
+    assert [request.url.path for request in requests] == ['/v1/chat/threads:reserve']
+
+
+@pytest.mark.asyncio
+async def test_reserve_refuses_sse_and_missing_login_token(thread_http):
+    requests, responses, client = thread_http
+    responses.append(
+        httpx.Response(
+            200,
+            content='event: status\ndata: {}\n\n',
+            headers={'Content-Type': 'text/event-stream', 'X-Soev-Thread-Id': 'fictional-reserved'},
+        )
+    )
+    with pytest.raises(ThreadError, match='reconnect') as error:
+        await client.reserve('fictional-agent')
+    assert error.value.status == 502
+    resolver = acting._token_resolver.set(AsyncMock(return_value=None))
+    try:
+        with pytest.raises(ThreadError, match='sign_in') as error:
+            await client.reserve('fictional-agent')
+        assert error.value.status == 401
+    finally:
+        acting._token_resolver.reset(resolver)
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
 async def test_windows_versions_and_conditional_reads(thread_http):
     requests, responses, client = thread_http
     responses.extend(

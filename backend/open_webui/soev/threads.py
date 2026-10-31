@@ -379,16 +379,16 @@ class ThreadClient:
             body={'audience': audience.model_dump()},
         )
 
-    async def create(self, *, agent: str, input: JsonValue, model: str | None = None) -> CreatedThread:
+    async def reserve(self, agent: str, title: str | None = None, temporary: bool = False) -> str:
         response = await self._request(
-            'POST', '/v1/chat/threads', body={'agent': agent, 'input': input, 'model': model}
+            'POST', '/v1/chat/threads:reserve', body={'agent': agent, 'title': title, 'temporary': temporary}
         )
-        if response.status_code != 201:
+        if response.status_code != 200:
             raise ThreadError(502, 'reconnect')
+        created = self._parse(response, CreatedThread)
         try:
-            payload = response.json()
-            return CreatedThread.model_validate({'thread_id': _identifier(payload['thread_id'])})
-        except (ValueError, KeyError, TypeError):
+            return _identifier(created.thread_id)
+        except ThreadError:
             raise ThreadError(502, 'reconnect') from None
 
     async def delete(self, thread_id: str) -> None:

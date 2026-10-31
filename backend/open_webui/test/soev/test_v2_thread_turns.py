@@ -115,6 +115,12 @@ async def test_full_v2_turn_streams_without_local_content(
                 acting._token_resolver.reset(token_context)
             chat_id = created['id']
             assert len([r for r in chat_http.chat.requests if r.method == 'POST']) == 1
+            reservation = chat_http.chat.requests[-1]
+            assert reservation.url.path == '/v1/chat/threads:reserve'
+            assert json.loads(reservation.content) == {'agent': 'test', 'title': None, 'temporary': False}
+            assert chat_http.chat.threads[chat_id]['events'] == []
+            assert chat_http.chat.threads[chat_id]['state'] == 'reserved'
+            complete.assert_not_awaited()
             form = {**form, 'chat_id': chat_id, 'follow_thread': True}
         response = await main.chat_completion(request, form, user)
         assert isinstance(response, StreamingResponse), response
@@ -130,12 +136,20 @@ async def test_full_v2_turn_streams_without_local_content(
         assert len(records) == 1
         chat_id = records[0].id
     mutations = [r for r in chat_http.chat.requests if r.method == 'POST']
-    assert [r.url.path for r in mutations] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
-    assert [json.loads(r.content)['input']['text'] for r in mutations] == ['Fictional turn 0', 'Fictional turn 1']
+    assert [r.url.path for r in mutations] == (['/v1/chat/threads:reserve'] if browser_create else []) + [
+        '/v1/chat/threads',
+        '/v1/chat/threads/thr-1/inputs',
+    ]
+    turns = mutations[1:] if browser_create else mutations
+    assert [json.loads(r.content)['input']['text'] for r in turns] == ['Fictional turn 0', 'Fictional turn 1']
+    opening = json.loads(turns[0].content)
+    assert opening['agent'] == 'test'
+    assert opening['model'] == model['id']
+    assert turns[0].headers['Accept'] == 'text/event-stream'
+    assert opening.get('thread_id') == (chat_id if browser_create else None)
     if browser_create:
-        tails = [r for r in chat_http.chat.requests if r.url.path.endswith('/events')]
-        assert tails and tails[0].method == 'GET'
-        assert tails[0].headers['Last-Event-ID'] == '0'
+        assert opening['input'] == payload['input']
+    assert not [r for r in chat_http.chat.requests if r.url.path.endswith('/events')]
     assert complete.await_count == (2 if metadata_tasks else 0)
     if metadata_tasks:
         assert complete.await_args.args[0]['tasks'] == {'title_generation': True, 'tags_generation': True}

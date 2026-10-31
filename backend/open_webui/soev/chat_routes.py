@@ -145,10 +145,10 @@ async def chat_write(service, request, user, identifier, route):
     if route == '/new':
         form = await body(request)
         if form.get('temporary'):
-            refused()  # The runtime OpenThread contract has no temporary/TTL field.
+            refused()
         if set(form) - {'agent', 'input', 'model'} or not isinstance(form.get('agent'), str) or 'input' not in form:
             raise ThreadError(422, 'invalid_request')
-        return (await service.create(user.id, **form)).model_dump()
+        return (await service.create(user.id, agent=form['agent'])).model_dump()
     if route == '/{id}/fork':
         form = await body(request)
         if set(form) != {'at'} or type(form['at']) is not int:

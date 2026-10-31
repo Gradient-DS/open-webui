@@ -4,7 +4,7 @@ import datetime as dt
 import time
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from open_webui.soev import threads
 from open_webui.soev.threads import Organization, ThreadError
@@ -248,9 +248,9 @@ class ChatPaths:
                 folder = parents.get(folder)
         return counts
 
-    async def create(self, user_id: str, *, agent: str, input: JsonValue, model: str | None = None) -> Organization:
-        created = await self.client.create(agent=agent, input=input, model=model)
-        record = Organization(id=created.thread_id, thread_id=created.thread_id)
+    async def create(self, user_id: str, *, agent: str) -> Organization:
+        thread_id = await self.client.reserve(agent)
+        record = Organization(id=thread_id, thread_id=thread_id)
         await self.organizations.put(user_id, record)
         return record
 

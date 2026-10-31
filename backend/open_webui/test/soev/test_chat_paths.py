@@ -162,11 +162,18 @@ def fake_runtime(request):
     import json
 
     path = request.url.path
+    if path == '/v1/chat/threads:reserve' and request.method == 'POST':
+        assert json.loads(request.content) == {'agent': 'fictional-agent', 'title': None, 'temporary': False}
+        return httpx.Response(200, json={'thread_id': 'fictional-created'})
     if path == '/v1/chat/threads' and request.method == 'POST':
         payload = json.loads(request.content)
         assert set(payload) == {'agent', 'input', 'model'}
         assert 'thread_id' not in payload
-        return httpx.Response(201, json={'thread_id': 'fictional-created', 'status': {}, 'events': []})
+        return httpx.Response(
+            201,
+            content='event: status\ndata: {"state": "finished", "position": 0, "pending": []}\n\n',
+            headers={'Content-Type': 'text/event-stream', 'X-Soev-Thread-Id': 'fictional-created'},
+        )
     if path.endswith('/inputs') and request.method == 'POST':
         return httpx.Response(200, json={'thread_id': 'fictional-thread', 'status': {}, 'events': []})
     if path.startswith('/v1/chat/threads/') and request.method == 'DELETE':
@@ -745,18 +752,20 @@ async def test_remaining_organizational_routes_use_the_platform_set(dark_api, me
 
 
 @pytest.mark.asyncio
-async def test_create_uses_runtime_first_input_then_organizational_row(dark_api):
+async def test_create_reserves_without_input_then_stores_organizational_row(dark_api):
     response = await dark_api.browser.post(
         '/api/v1/chats/new',
         json={
             'agent': 'fictional-agent',
             'input': {'text': 'Fictional first input'},
+            'model': 'fictional-model',
         },
     )
     assert response.status_code == 200, response.text
     assert response.json()['thread_id'] == 'fictional-created'
     assert dark_api.records.writes[-1].thread_id == 'fictional-created'
-    assert dark_api.calls[-1].url.path == '/v1/chat/threads'
+    assert [request.url.path for request in dark_api.calls] == ['/v1/chat/threads:reserve']
+    assert json.loads(dark_api.calls[0].content) == {'agent': 'fictional-agent', 'title': None, 'temporary': False}
     dark_api.state['status'] = 503
     writes = len(dark_api.records.writes)
     response = await dark_api.browser.post(

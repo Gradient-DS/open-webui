@@ -232,6 +232,8 @@ above and enforced by the no-gateway-key assertion.
 
 ## Prepared platform thread UI
 
+New chats reserve an id via `POST /v1/chat/threads:reserve` without running input; the followed first turn streams `POST /v1/chat/threads` with that `thread_id`, and later turns use `/inputs`.
+
 `ENABLE_V2_THREADS` is a server-only switch, false by default. The authenticated
 configuration exposes `features.enable_v2_threads` only when that switch,
 `AGENT_API_ENABLED`, and `SOEV_API_URL` are set. This preparation does not mount

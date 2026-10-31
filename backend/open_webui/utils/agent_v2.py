@@ -1872,19 +1872,10 @@ class AgentTurn:
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
         if self.metadata.get('follow_thread'):
-            stream = self.client.chat_stream(
-                self.path('events'),
-                None,
-                as_user=self.as_user,
-                thread_id=self.thread_id,
-                after=0,
-                follow=True,
-            )
-            async with aclosing(stream):
-                async for event in stream:
-                    yield event
-            return
-        path = self.path('inputs') if self.thread_id else _ROOT
+            path = _ROOT
+            body = {**body, 'thread_id': self.thread_id}
+        else:
+            path = self.path('inputs') if self.thread_id else _ROOT
         if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
             body = {**body, 'temporary': True}
         try:
@@ -2097,7 +2088,7 @@ class AgentTurn:
             # before any tool output numbers more; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
-            if not self.thread_id:
+            if not self.thread_id or self.metadata.get('follow_thread'):
                 body = {**body, 'agent': agent}
             events = self.events(body)
             async with aclosing(events):
@@ -2130,10 +2121,7 @@ async def call_agent_v2(
     turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:
-        if metadata.get('follow_thread'):
-            chunks = turn.run({'input': {'text': text}, 'model': model}, agent)
-        else:
-            chunks = await _sent(turn, text, metadata, agent=agent, model=model)
+        chunks = await _sent(turn, text, metadata, agent=agent, model=model)
         if isinstance(chunks, dict):
             return chunks
     except Exception as error:
