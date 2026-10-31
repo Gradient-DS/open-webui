@@ -76,7 +76,7 @@ msoffcrypto-tool==6.0.0
 unstructured==0.24.1 # security: CVE-2026-71428 (SSRF via the url= argument of partition()/partition_html()/partition_md()) fixed in 0.24.0; was 0.22.31
 python-magic==0.4.27 # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
 
-nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
+nltk==3.10.4 # security: GHSA-j456-xh4h-cpf2 fixed in 3.10.4; PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
 lxml==6.1.1
