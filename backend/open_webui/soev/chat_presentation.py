@@ -14,13 +14,16 @@ async def present_projection(page: ProjectionPage, events: list[dict]) -> Projec
     boundary = max((message.position for message in page.messages), default=0)
     events = [event for event in events if event.get('stream') == 'root' and event['position'] <= boundary]
     await turn._seed_sources(events, boundary)
-    aliases = {
-        payload['model']: payload['answered_model']
-        for event in events
-        if event['type'] == 'model_output'
-        and isinstance((payload := event.get('payload') or {}).get('model'), str)
-        and isinstance(payload.get('answered_model'), str)
-    }
+    requested, models = None, {}
+    for event in sorted(events, key=lambda event: event['position']):
+        payload = event.get('payload') or {}
+        if event['type'] == 'input':
+            requested = payload.get('model')
+        if event['type'] == 'model_output' and isinstance(payload.get('model'), str):
+            models[event['position']] = model_catalog.catalog_id(
+                payload.get('answered_model') or payload['model'],
+                requested=None if payload.get('answered_model') else requested,
+            )
     outputs = {
         event['payload']['call_id']: event['payload']
         for event in events
@@ -41,7 +44,7 @@ async def present_projection(page: ProjectionPage, events: list[dict]) -> Projec
             continue
         content = dict(content)
         if isinstance(content.get('model'), str):
-            content['model'] = model_catalog.catalog_id(content['model'], aliases)
+            content['model'] = models.get(message.position) or model_catalog.catalog_id(content['model'])
         if sources := _sources(content, turn):
             content['sources'] = sources
         if statuses := _statuses(content, turn, calls, outputs, message.finished):

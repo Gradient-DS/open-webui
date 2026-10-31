@@ -42,14 +42,14 @@ async def catalog() -> list[dict]:
     return entries
 
 
-def catalog_id(model: str, aliases: dict[str, str] | None = None) -> str:
+def catalog_id(model: str, aliases: dict[str, str] | None = None, *, requested: str | None = None) -> str:
     """Resolve recorded endpoints using the platform's answered_model annotations or catalog facts."""
     if aliases and model in aliases:
-        return aliases[model]
+        return catalog_id(aliases[model])
     for entry in CATALOG_CACHE['entries']:
         if model == entry['id'] or model == entry.get('endpoint_id'):
             return entry['id']
-    return model
+    return requested or model
 
 
 def _description(description: dict | None) -> str | None:

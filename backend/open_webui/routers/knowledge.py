@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from open_webui import config
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
     RAG_EMBEDDING_CONTENT_PREFIX,
@@ -102,6 +103,8 @@ async def embed_knowledge_base_metadata(
     description: str,
 ) -> bool:
     """Generate and store embedding for knowledge base."""
+    if config.SOEV_API_URL:
+        return False
     try:
         content = f'{name}\n\n{description}' if description else name
         embedding = await request.app.state.EMBEDDING_FUNCTION(content, prefix=RAG_EMBEDDING_CONTENT_PREFIX)

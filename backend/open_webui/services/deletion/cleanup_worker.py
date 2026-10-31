@@ -62,6 +62,11 @@ async def _process_pending_deletions():
 
 async def _process_pending_chat_deletions():
     """Process chats marked for deletion."""
+    from open_webui.soev import threads
+
+    if threads.enabled():
+        return
+
     from open_webui.models.chats import Chats
     from open_webui.models.tags import Tags
     from open_webui.services.deletion import DeletionService

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from fastapi import Request
@@ -107,23 +108,30 @@ async def revoke_all(service: ChatPaths, thread_id: str) -> None:
 async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
     records = await service.organizations.list(user_id)
     owned = {thread_id for record in records for thread_id in [record.thread_id, *record.branch_thread_ids]}
-    items, cursor, seen = [], '', set()
-    while True:
-        page = await service.client.index(limit=200, cursor=cursor)
-        for item in page.items:
-            if item.thread_id not in owned:
-                continue
+    if not owned:
+        return []
+    pending = set(owned)
+    slots = asyncio.Semaphore(10)
+
+    async def shared(item):
+        async with slots:
             try:
                 shares = await all_shares(service.client, item.thread_id)
             except ThreadError as error:
                 if error.state == 'unavailable':
-                    continue
+                    return None
                 raise
             if shares:
-                # A shared old branch needs its own stable id in this list so
-                # unsharing it cannot accidentally address the current branch.
-                items.append({**item.model_dump(), 'id': item.thread_id, 'share_id': item.thread_id})
-        if page.next_cursor is None:
+                return {**item.model_dump(), 'id': item.thread_id, 'share_id': item.thread_id}
+        return None
+
+    items, cursor, seen = [], '', set()
+    while True:
+        page = await service.client.index(limit=200, cursor=cursor)
+        batch = [item for item in page.items if item.thread_id in pending]
+        items.extend(item for item in await asyncio.gather(*(shared(item) for item in batch)) if item is not None)
+        pending.difference_update(item.thread_id for item in batch)
+        if not pending or page.next_cursor is None:
             return items
         if page.next_cursor in seen:
             raise ThreadError(502, 'reconnect')

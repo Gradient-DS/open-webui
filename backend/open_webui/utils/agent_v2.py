@@ -1937,7 +1937,8 @@ class AgentTurn:
             'answered_model'
         )
         if not answered and event.event == 'model_output':
-            answered = payload.get('model')
+            model = payload.get('model')
+            answered = model_catalog.catalog_id(model, requested=self.model) if isinstance(model, str) else None
         if isinstance(answered, str):
             answered = model_catalog.catalog_id(answered)
         if isinstance(answered, str) and answered and answered != self.answered_model:

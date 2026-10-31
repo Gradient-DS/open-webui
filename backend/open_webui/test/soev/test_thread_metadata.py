@@ -182,3 +182,30 @@ async def test_stream_runs_metadata_only_after_successful_drain(monkeypatch, fai
     done.assert_not_awaited()
     assert '[DONE]' in ''.join([chunk async for chunk in response.body_iterator])
     assert done.await_count == (0 if failure else 1)
+
+
+@pytest.mark.asyncio
+async def test_composer_features_persist_without_overwriting_other_preferences(dark_api):
+    from open_webui.test.soev.test_threads import page
+
+    dark_api.state.update(
+        metadata=True,
+        projection={
+            **page(1, 2),
+            'tags': ['saved'],
+            'preferences': {'tags': ['saved'], 'fallback': True},
+        },
+    )
+    features = {'web_search': False, 'document_writer': True, 'tool_ids': []}
+    response = await dark_api.browser.post('/api/v1/chats/fictional-chat', json={'features': features})
+    assert response.status_code == 200, response.text
+    assert response.json()['preferences'] == {'tags': ['saved'], 'fallback': True, 'features': features}
+    assert not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('features', [{'web_search': 'false'}, {'history': {}}, {'tool_ids': [1]}])
+async def test_composer_preferences_reject_content_and_malformed_values(dark_api, features):
+    response = await dark_api.browser.post('/api/v1/chats/fictional-chat', json={'features': features})
+    assert response.status_code == 422
+    assert not dark_api.calls

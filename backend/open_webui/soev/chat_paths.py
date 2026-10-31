@@ -3,7 +3,7 @@
 import datetime as dt
 import logging
 import time
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -28,6 +28,19 @@ class FeedbackForm(BaseModel):
     rating: int
     comment: str | None = Field(None, max_length=2000)
     comment_authored: bool = False
+
+
+class ComposerFeatures(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    web_search: bool | None = None
+    document_writer: bool | None = None
+    image_generation: bool | None = None
+    code_interpreter: bool | None = None
+    live_documents: Literal['off', 'auto', 'required'] | None = None
+    live_mail: Literal['off', 'auto', 'required'] | None = None
+    tool_ids: list[str] | None = None
+    skill_ids: list[str] | None = None
+    filter_ids: list[str] | None = None
 
 
 # These operations have no suitable platform contract yet.
@@ -55,17 +68,18 @@ class ChatPaths:
         return Organization(id=chat_id, thread_id=chat_id)
 
     async def authorized(self, user_id: str, *, q: str = '') -> list[dict]:
+        return [item async for page in self.authorized_pages(user_id, q=q) for item in page]
+
+    async def authorized_pages(self, user_id: str, *, q: str = ''):
         records = await self.organizations.list(user_id)
         active = {record.thread_id for record in records}
         inactive = {thread_id for record in records for thread_id in record.branch_thread_ids} - active
-        items, cursor, seen = [], '', set()
+        cursor, seen = '', set()
         while True:
             page = await self.client.index(q=q, limit=200, cursor=cursor)
-            items.extend(
-                item for item in threads.join_index(page, records)['items'] if item['thread_id'] not in inactive
-            )
+            yield [item for item in threads.join_index(page, records)['items'] if item['thread_id'] not in inactive]
             if page.next_cursor is None:
-                return items
+                return
             if page.next_cursor in seen:
                 raise ThreadError(502, 'reconnect')
             seen.add(page.next_cursor)
@@ -89,12 +103,18 @@ class ChatPaths:
             raise ThreadError(422, 'invalid_request')
         if page is not None and page < 1:
             raise ThreadError(422, 'invalid_request')
-        items = await self.authorized(user_id, q=q)
-        if folder_id is not None:
-            items = await self.in_folder(user_id, items, folder_id)
-        items = [
-            item for item in items if self._included(item, folder_id, archived, pinned, include_pinned, include_folders)
-        ]
+        items = []
+        async for batch in self.authorized_pages(user_id, q=q):
+            if folder_id is not None:
+                batch = await self.in_folder(user_id, batch, folder_id)
+            items.extend(
+                item
+                for item in batch
+                if self._included(item, folder_id, archived, pinned, include_pinned, include_folders)
+            )
+            # The platform index is newest first. Other sorts need the full set.
+            if page is not None and sort_by == 'updated_at' and sort_dir == 'desc' and len(items) >= page * 60:
+                break
         items.sort(key=lambda item: self._sort_key(item, sort_by), reverse=sort_dir == 'desc')
         selected = items if page is None else items[(page - 1) * 60 : page * 60]
         return self.ui_rows(selected)
@@ -184,7 +204,7 @@ class ChatPaths:
         return await present_projection(page, events)
 
     async def metadata(self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'):
-        if not changes or set(changes) - {'title', 'tags'}:
+        if not changes or set(changes) - {'title', 'tags', 'features'}:
             raise ThreadError(422, 'invalid_request')
         if 'title' in changes and changes['title'] is not None and not isinstance(changes['title'], str):
             raise ThreadError(422, 'invalid_request')
@@ -192,6 +212,8 @@ class ChatPaths:
             not isinstance(changes['tags'], list) or any(not isinstance(tag, str) for tag in changes['tags'])
         ):
             raise ThreadError(422, 'invalid_request')
+        if 'features' in changes:
+            ComposerFeatures.model_validate(changes['features'])
         record = await self.record(user_id, chat_id)
 
         def change(page):
@@ -205,6 +227,11 @@ class ChatPaths:
                 elif tag_action == 'remove':
                     tags = [tag for tag in page.tags if tag not in tags]
                 result['preferences'] = {**page.preferences, 'tags': tags}
+            if 'features' in changes:
+                result['preferences'] = {
+                    **(result.get('preferences', page.preferences) or {}),
+                    'features': changes['features'],
+                }
             return result
 
         return await self.client.update_metadata(record.thread_id, change)

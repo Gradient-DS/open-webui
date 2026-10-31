@@ -1177,3 +1177,83 @@ async def test_legacy_access_update_cannot_create_a_live_share(dark_api):
     )
     assert response.status_code == 409 and response.json() == {'state': 'unavailable'}
     assert not dark_api.calls and not dark_api.state.get('shares')
+
+
+@pytest.mark.asyncio
+async def test_first_sidebar_page_does_not_exhaust_platform_index(dark_api, monkeypatch):
+    from open_webui.soev.threads import IndexPage
+
+    items = [index_item(f'thread-{i:04}') for i in range(300, 0, -1)]
+    index = AsyncMock(
+        side_effect=[
+            IndexPage(items=items[:200], next_cursor='older'),
+            IndexPage(items=items[200:], next_cursor=None),
+        ]
+    )
+    monkeypatch.setattr(dark_api.client, 'index', index)
+    response = await dark_api.browser.get('/api/v1/chats/?page=1')
+    assert response.status_code == 200
+    assert [row['id'] for row in response.json()] == [item['thread_id'] for item in items[:60]]
+    assert index.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_listing_skips_index_when_no_owned_threads(dark_api, monkeypatch):
+    dark_api.records.records = []
+    index = AsyncMock(side_effect=AssertionError('No owned chats to inspect'))
+    monkeypatch.setattr(dark_api.client, 'index', index)
+    response = await dark_api.browser.get('/api/v1/chats/shared')
+    assert response.status_code == 200 and response.json() == []
+    index.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shared_listing_stops_after_all_owned_threads_are_found(dark_api, monkeypatch):
+    from open_webui.soev.threads import IndexPage
+
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'reader'}, 'at': 2}]
+    index = AsyncMock(return_value=IndexPage(items=[index_item()], next_cursor='irrelevant-older'))
+    monkeypatch.setattr(dark_api.client, 'index', index)
+    response = await dark_api.browser.get('/api/v1/chats/shared')
+    assert response.status_code == 200 and len(response.json()) == 1
+    assert index.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_filtered_sidebar_reads_further_only_until_page_is_full(dark_api, monkeypatch):
+    from open_webui.soev.threads import IndexPage
+
+    items = [index_item(f'thread-{i:04}') for i in range(300, 0, -1)]
+    dark_api.records.records = [
+        Organization(id=item['thread_id'], thread_id=item['thread_id'], archived=True) for item in items[:180]
+    ]
+    index = AsyncMock(
+        side_effect=[
+            IndexPage(items=items[:200], next_cursor='older'),
+            IndexPage(items=items[200:], next_cursor='even-older'),
+        ]
+    )
+    monkeypatch.setattr(dark_api.client, 'index', index)
+    response = await dark_api.browser.get('/api/v1/chats/?page=1')
+    assert response.status_code == 200
+    assert [row['id'] for row in response.json()] == [item['thread_id'] for item in items[180:240]]
+    assert index.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_title_sort_still_reads_older_platform_pages(dark_api, monkeypatch):
+    from open_webui.soev.threads import IndexPage
+
+    recent = [{**index_item(f'thread-{i:04}'), 'title': 'Z'} for i in range(200)]
+    oldest = {**index_item('oldest'), 'title': 'A'}
+    index = AsyncMock(
+        side_effect=[
+            IndexPage(items=recent, next_cursor='older'),
+            IndexPage(items=[oldest], next_cursor=None),
+        ]
+    )
+    monkeypatch.setattr(dark_api.client, 'index', index)
+    response = await dark_api.browser.get('/api/v1/chats/?page=1&sort_by=title&sort_dir=asc')
+    assert response.status_code == 200
+    assert response.json()[0]['id'] == 'oldest'
+    assert index.await_count == 2

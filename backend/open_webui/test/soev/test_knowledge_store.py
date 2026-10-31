@@ -1402,3 +1402,49 @@ async def test_a_synced_document_is_left_to_its_source(env):
     await env.store.reset_knowledge_by_id('kb', include_directories=False)
     deleted = [r.url.path for r in env.api.requests if r.method == 'DELETE']
     assert sorted(deleted) == ['/v1/collections/kb/documents/catalog', '/v1/collections/kb/documents/f1']
+
+
+@pytest.mark.asyncio
+async def test_platform_person_owner_is_resolved_on_create_and_add_read(env, monkeypatch):
+    from open_webui.models.users import User
+
+    person = 'platform:user:550e8400-e29b-41d4-a716-446655440000'
+    async with env.sessions() as db:
+        db.add(User(id='alice', name='Alice', email='alice@example.invalid', role='user', person_id=person))
+        await db.commit()
+    send = env.client.send
+
+    async def create(*args, **kwargs):
+        row = await send(*args, **kwargs)
+        env.api.collections[row['key']]['created_by'] = person
+        return {**row, 'created_by': person}
+
+    monkeypatch.setattr(env.client, 'send', create)
+    created = await env.store.insert_new_knowledge('alice', env.models.KnowledgeForm(name='New', description=''))
+    assert created.user_id == 'alice'
+    # The file-add response reloads the collection through this same read path.
+    env.api.collections['kb']['created_by'] = person
+    result = await env.store.get_knowledge_by_id('kb')
+    assert result.user_id == 'alice'
+    env.api.add_document('kb', 'f1')
+    added = await env.store.add_file_to_knowledge_by_id('kb', 'f1', 'alice')
+    assert added.user_id == 'alice'
+
+
+@pytest.mark.asyncio
+async def test_unknown_platform_owner_does_not_become_the_reader(env):
+    env.api.collections['kb']['created_by'] = 'platform:user:550e8400-e29b-41d4-a716-446655440099'
+    assert (await env.store.get_knowledge_by_id('kb')).user_id == ''
+
+
+@pytest.mark.asyncio
+async def test_create_returns_the_creator_even_before_person_binding(env, monkeypatch):
+    send = env.client.send
+
+    async def create(*args, **kwargs):
+        row = await send(*args, **kwargs)
+        return {**row, 'created_by': 'platform:user:550e8400-e29b-41d4-a716-446655440000'}
+
+    monkeypatch.setattr(env.client, 'send', create)
+    result = await env.store.insert_new_knowledge('alice', env.models.KnowledgeForm(name='New', description=''))
+    assert result.user_id == 'alice'

@@ -24,7 +24,7 @@ RESULT = {
     'title': 'Python 3.14 release',
     'text': 'Released 7 October 2025.',
 }
-ENDPOINT = 'nebul--glm-5-3-flash'
+ENDPOINT = 'nebul--glm-5-3'
 MODEL = 'zai-org/glm-5.3'
 
 
@@ -241,3 +241,38 @@ async def test_live_model_output_can_map_an_endpoint_from_catalog_facts(monkeypa
     turn.emitter = AsyncMock()
     await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': 'Hi', 'model': ENDPOINT}}))
     turn.emitter.assert_awaited_with({'type': 'chat:completion', 'data': {'answered_model': MODEL}})
+
+
+@pytest.mark.asyncio
+async def test_live_endpoint_falls_back_to_requested_catalog_model(monkeypatch):
+    from open_webui.soev import model_catalog
+    from open_webui.soev.client import ChatEvent
+
+    monkeypatch.setitem(model_catalog.CATALOG_CACHE, 'entries', [{'id': MODEL}])
+    turn = agent_v2.AgentTurn(None, {}, '')
+    turn.model = MODEL
+    turn.emitter = AsyncMock()
+    await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': 'Hi', 'model': ENDPOINT}}))
+    turn.emitter.assert_awaited_with({'type': 'chat:completion', 'data': {'answered_model': MODEL}})
+
+
+@pytest.mark.asyncio
+async def test_reload_uses_each_turns_requested_model_without_endpoint_catalog_fields(monkeypatch):
+    from open_webui.soev import model_catalog
+    from open_webui.soev.chat_presentation import present_projection
+    from open_webui.soev.threads import ProjectionPage
+    from open_webui.test.soev.test_threads import page
+
+    other = 'other/catalog-model'
+    monkeypatch.setitem(model_catalog.CATALOG_CACHE, 'entries', [{'id': MODEL}, {'id': other}])
+    projected = ProjectionPage.model_validate(page(3, 5))
+    for message in projected.messages:
+        message.content = {'role': 'assistant', 'model': ENDPOINT, 'text': 'Hi'}
+    raw = [
+        {'position': 1, 'type': 'input', 'stream': 'root', 'payload': {'model': MODEL}},
+        {'position': 3, 'type': 'model_output', 'stream': 'root', 'payload': {'model': ENDPOINT}},
+        {'position': 4, 'type': 'input', 'stream': 'root', 'payload': {'model': other}},
+        {'position': 5, 'type': 'model_output', 'stream': 'root', 'payload': {'model': ENDPOINT}},
+    ]
+    result = await present_projection(projected, raw)
+    assert [m.content['model'] for m in result.messages] == [MODEL, other]

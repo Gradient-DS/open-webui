@@ -27,7 +27,9 @@ def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
     return KnowledgeModel(
         id=collection['key'],
-        user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
+        user_id=creator.removeprefix('owui:user:')
+        if creator.startswith('owui:user:')
+        else collection.get('_owui_owner_id') or '',
         type=collection['source_kind'],
         name=collection['name'],
         description=collection['description'] or '',

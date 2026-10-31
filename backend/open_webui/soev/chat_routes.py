@@ -100,7 +100,9 @@ async def chat_read(service, request, user, identifier, route):
             folder_id=request.path_params.get('folder_id'),
             archived=route.startswith('/archived'),
             pinned=True if route == '/pinned' else None,
-            page=integer(request, 'page', 1) if 'page' in request.query_params and route != '/archived/count' else None,
+            page=integer(request, 'page', 1)
+            if route in {'/', '/list'} or ('page' in request.query_params and route != '/archived/count')
+            else None,
             include_pinned=boolean(request, 'include_pinned', route not in {'/', '/list'}),
             include_folders=boolean(request, 'include_folders', route not in {'/', '/list'}),
             sort_by=request.query_params.get('sort_by', 'updated_at'),

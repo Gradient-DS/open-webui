@@ -2695,6 +2695,14 @@
 			const projected = buildThreadHistory(threadPage!, []);
 			history = projected;
 			chat = { id: targetId, title: threadPage!.title };
+			const preferences = threadPage!.preferences as { features?: Record<string, unknown> } | null;
+			savedThreadFeatures = preferences?.features
+				? { id: targetId, features: preferences.features }
+				: null;
+			restoreComposerPreferences(
+				composerFromFeatures(preferences?.features, composerPreferences($settings.composerTools))
+			);
+			lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 			tags = threadPage!.tags.map((name) => ({ name }));
 			chatTitle.set(threadPage!.title ?? $i18n.t('New Chat'));
 			const model = Object.values(projected.messages)
@@ -2780,7 +2788,9 @@
 				delete params.note_id;
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
-				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
+				restoreComposerPreferences(
+					composerFromFeatures(chatContent?.features, composerPreferences($settings.composerTools))
+				);
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 
 				// Load tasks from chat-level DB field
@@ -4294,6 +4304,7 @@
 								chatId.set(id);
 								if (!embedded) window.history.replaceState(window.history.state, '', `/c/${id}`);
 								selectedFolder.set(null);
+								await saveChatHandler(id, history);
 							},
 							chunk: async (data) => {
 								if ($chatId === _chatId && history.messages[responseMessageId])
@@ -4756,7 +4767,23 @@
 	};
 
 	let chatSaveQueue = Promise.resolve();
+	let savedThreadFeatures: { id: string; features: Record<string, unknown> } | null = null;
 	const saveChatHandler = (_chatId, history) => {
+		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
+		if ($config?.features?.enable_v2_threads) {
+			const features = composerFeatures(currentComposerPreferences());
+			chatSaveQueue = chatSaveQueue
+				.then(async () => {
+					if (savedThreadFeatures?.id === _chatId && equal(savedThreadFeatures.features, features))
+						return;
+					await updateChatById(localStorage.token, _chatId, { features });
+					savedThreadFeatures = { id: _chatId, features };
+				})
+				.catch(() => {
+					toast.error($i18n.t('Failed to save settings'));
+				});
+			return chatSaveQueue;
+		}
 		const payload = {
 			models: selectedModels,
 			history: structuredClone(history),
@@ -4765,8 +4792,6 @@
 			files: structuredClone(chatFiles),
 			features: composerFeatures(currentComposerPreferences())
 		};
-		if ($config?.features?.enable_v2_threads || $chatId !== _chatId || $temporaryChatEnabled)
-			return chatSaveQueue;
 		chatSaveQueue = chatSaveQueue
 			.then(async () => {
 				const saved = await updateChatById(localStorage.token, _chatId, payload);

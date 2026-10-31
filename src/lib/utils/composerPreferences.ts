@@ -51,12 +51,16 @@ export function composerFeatures(preferences: ComposerPreferences): Record<strin
 	);
 }
 
-export function composerFromFeatures(features: Record<string, unknown> = {}): ComposerPreferences {
+export function composerFromFeatures(
+	features: Record<string, unknown> | null = {},
+	defaults: Partial<ComposerPreferences> = {}
+): ComposerPreferences {
 	return composerPreferences(
 		Object.fromEntries(
 			Object.entries(featureKeys)
-				.filter(([, feature]) => feature in features)
-				.map(([key, feature]) => [key, features[feature]])
-		)
+				.filter(([, feature]) => feature in (features ?? {}))
+				.map(([key, feature]) => [key, features![feature]])
+		),
+		defaults
 	);
 }
