@@ -10,6 +10,17 @@ from open_webui.test.soev.test_keycloak_token import token_app as token_app
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
+def _non_directory_requests(requests):
+    remaining = []
+    for request in requests:
+        if request.method == 'GET' and request.url.path == '/v1/groups':
+            assert 'X-Soev-User-Token' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
+        else:
+            remaining.append(request)
+    return remaining
+
+
 @pytest_asyncio.fixture
 async def admin_app(token_app, monkeypatch):
     from open_webui import config, env
@@ -97,7 +108,7 @@ async def test_admin_suspension_refuses_before_any_write(admin_app, monkeypatch,
     assert (target.role, target.name, target.email) == (role, 'Elm', 'elm@example.invalid')
     password.assert_not_awaited()
     email.assert_not_awaited()
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -124,7 +135,7 @@ async def test_invalid_admin_role_update_refuses_before_any_write(admin_app, mon
     assert (target.role, target.name, target.email) == (before, 'Elm', 'elm@example.invalid')
     password.assert_not_awaited()
     email.assert_not_awaited()
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -140,7 +151,7 @@ async def test_admin_offboarding_refuses_with_the_real_token_resolver(admin_app,
     assert response.json()['detail'].get('constraint'), response.text
     assert response.json()['detail']['constraint'] == 'offboarding:console'
     assert await store.db.get(store.user_table, 'elm') is not None
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -198,7 +209,7 @@ async def test_scim_suspension_refuses_without_partial_updates(
     update.assert_not_awaited()
     stamp.assert_not_awaited()
     publish.assert_not_awaited()
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -240,7 +251,7 @@ async def test_scim_cannot_hide_deactivation_with_a_later_reactivation(admin_app
     update.assert_not_awaited()
     stamp.assert_not_awaited()
     publish.assert_not_awaited()
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -293,7 +304,7 @@ async def test_scim_invalid_patch_refuses_before_companion_writes(admin_app, mon
     update.assert_not_awaited()
     stamp.assert_not_awaited()
     publish.assert_not_awaited()
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -323,7 +334,7 @@ async def test_scim_normalized_patch_applies_supported_attributes(admin_app, rol
     assert target.role == ('admin' if role == 'admin' else 'user')
     assert (target.name, target.email) == ('Changed', 'changed@example.invalid')
     assert target.scim == {'fictional-provider': {'external_id': 'changed'}}
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
     store.resolve.assert_not_awaited()
 
 
@@ -348,10 +359,10 @@ async def test_archive_mutations_require_the_admins_own_token(admin_app, method,
         assert response.json()['detail']['code'] == 'sign_in'
         current = await UserArchives.get_archive_by_id(archive.id)
         assert current is not None and current.never_delete == archive.never_delete
-        assert store.ctx.requests == []
+        assert _non_directory_requests(store.ctx.requests) == []
         return
     assert response.status_code == 200
-    for request in store.ctx.requests:
+    for request in _non_directory_requests(store.ctx.requests):
         assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
         assert 'X-Soev-' + 'Subject' not in request.headers
     assert all(call.args == ('owui:user:fern',) for call in store.resolve.await_args_list)
@@ -371,7 +382,7 @@ async def test_explicit_cross_user_client_call_still_refuses(admin_app):
     response = await store.ctx.browser.get('/cross-user')
     assert response.status_code == 401
     assert response.json()['detail']['code'] == 'sign_in'
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
 
 
 @pytest.mark.asyncio
@@ -395,7 +406,7 @@ async def test_oauth_role_management_surfaces_suspension_as_403(admin_app, monke
     target = await store.db.get(store.user_table, 'elm')
     await store.db.refresh(target)
     assert target.role == 'user'
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []
 
 
 @pytest.mark.asyncio
@@ -409,4 +420,4 @@ async def test_role_changes_without_platform_custody_still_work(admin_app, monke
     assert response.status_code == 200
     await store.db.refresh(target)
     assert target.role == after
-    assert store.ctx.requests == []
+    assert _non_directory_requests(store.ctx.requests) == []

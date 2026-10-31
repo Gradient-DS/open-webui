@@ -1812,8 +1812,8 @@
 
 						<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
 							<div class="pt-1.5">
-								{#if chatLists.own || chatListReady}
-									{#each chatLists.own ?? [] as chat, idx (`chat-${chat?.id ?? idx}`)}
+								{#if chatLists.own}
+									{#each chatLists.own as chat, idx (`chat-${chat?.id ?? idx}`)}
 										{#if idx === 0 || (idx > 0 && chat.time_range !== chatLists.own?.[idx - 1]?.time_range)}
 											<div
 												class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
@@ -1887,7 +1887,7 @@
 											</div>
 										</Loader>
 									{/if}
-								{:else}
+								{:else if !chatListReady}
 									<div
 										class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
 									>
