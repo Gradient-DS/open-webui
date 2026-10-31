@@ -199,7 +199,8 @@ export const searchUsers = async (
 	orderBy?: string,
 	direction?: string,
 	page = 1,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	platformPeople = false
 ) => {
 	let error = null;
 	let res = null;
@@ -207,6 +208,7 @@ export const searchUsers = async (
 	const searchParams = new URLSearchParams();
 
 	searchParams.set('page', `${page}`);
+	if (platformPeople) searchParams.set('platform_people', 'true');
 
 	if (query) {
 		searchParams.set('query', query);

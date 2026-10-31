@@ -11,13 +11,10 @@
 
 <script lang="ts">
 	import { LinkPreview } from 'bits-ui';
-	import { getContext, onDestroy } from 'svelte';
-
-	const i18n = getContext('i18n');
-	import UserStatus from './UserStatus.svelte';
+	import { onDestroy } from 'svelte';
 	import UserStatusLinkPreview from './UserStatusLinkPreview.svelte';
 
-	export let user = null;
+	export let user: { id: string } | null = null;
 
 	export let align = 'center';
 	export let side = 'right';
@@ -56,5 +53,5 @@
 		</button>
 	</LinkPreview.Trigger>
 
-	<UserStatusLinkPreview id={user?.id} {openPreview} {side} {align} {sideOffset} />
+	<UserStatusLinkPreview id={user?.id ?? null} {openPreview} {side} {align} {sideOffset} />
 </LinkPreview.Root>

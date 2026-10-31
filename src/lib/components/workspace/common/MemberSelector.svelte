@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { getContext, onMount, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n') as any;
+	const i18n = getContext<import('svelte/store').Readable<import('i18next').i18n>>('i18n');
 
 	import { user as _user } from '$lib/stores';
 	import { getUserInfoById, searchUsers } from '$lib/apis/users';
@@ -12,23 +12,33 @@
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ProfilePreview from '$lib/components/common/ProfilePreview.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import { getGroups } from '$lib/apis/groups';
+	import { personAudience, groupAudience } from '$lib/utils/threadSharing';
+
+	type DirectoryUser = {
+		id: string;
+		name: string;
+		email: string;
+		is_active?: boolean;
+		person_id?: string | null;
+	};
+	type DirectoryGroup = { id: string; name: string; member_count?: number };
 
 	export let includeGroups = true;
 	export let includeUsers = true;
 	export let pagination = false;
 	export let includeSessionUser = false;
+	export let platformPeople = false;
+	export let disabled = false;
 	export let accessGrants: { principal_type: string; principal_id: string }[] = [];
 
 	export let groupIds: string[] = [];
 	export let userIds: string[] = [];
 
-	let groups: any[] | null = null;
-	let filteredGroups: any[] = [];
+	let groups: DirectoryGroup[] | null = null;
+	let filteredGroups: DirectoryGroup[] = [];
 
 	const hasGrant = (principalType: string, principalId: string) =>
 		accessGrants.some(
@@ -38,19 +48,24 @@
 	$: filteredGroups = groups
 		? groups.filter(
 				(group) =>
-					group.name.toLowerCase().includes(query.toLowerCase()) && !hasGrant('group', group.id)
+					group.name.toLowerCase().includes(query.toLowerCase()) &&
+					!hasGrant('group', group.id) &&
+					(!platformPeople || groupAudience(group) !== null)
 			)
 		: [];
 
 	$: filteredUsers = (users ?? []).filter(
-		(user) => !hasGrant('user', user.id) && (includeSessionUser || user?.id !== $_user?.id)
+		(user) =>
+			!hasGrant('user', user.id) &&
+			(includeSessionUser || user?.id !== $_user?.id) &&
+			(!platformPeople || personAudience(user) !== null)
 	);
 
-	let selectedGroup: Record<string, any> = {};
-	let selectedUsers: Record<string, any> = {};
+	let selectedGroup: Record<string, DirectoryGroup> = {};
+	export let selectedUsers: Record<string, DirectoryUser> = {};
 
 	let page = 1;
-	let users: any[] | null = null;
+	let users: DirectoryUser[] | null = null;
 	let total: number | null = null;
 
 	let query = '';
@@ -58,16 +73,28 @@
 	let orderBy = 'name'; // default sort key
 	let direction = 'asc'; // default sort order
 
-	const getUserList = async () => {
-		try {
-			const res = await searchUsers(localStorage.token, query, orderBy, direction, page).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+	let searchController: AbortController | undefined;
 
-			if (res) {
+	const getUserList = async () => {
+		searchController?.abort();
+		const controller = new AbortController();
+		searchController = controller;
+		const searchQuery = query;
+		try {
+			const res = await searchUsers(
+				localStorage.token,
+				query,
+				orderBy,
+				direction,
+				page,
+				controller.signal,
+				platformPeople
+			).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+
+			if (res && !controller.signal.aborted && query === searchQuery) {
 				users = res.users;
 				total = res.total;
 			}
@@ -79,11 +106,13 @@
 	const handleSearchInput = () => {
 		clearTimeout(searchDebounceTimer);
 		searchDebounceTimer = setTimeout(() => {
-			getUserList();
+			if (page === 1) getUserList();
+			else page = 1;
 		}, 300);
 	};
 
 	onDestroy(() => {
+		searchController?.abort();
 		clearTimeout(searchDebounceTimer);
 	});
 
@@ -128,6 +157,7 @@
 						{#if selectedGroup[id]}
 							<button
 								type="button"
+								{disabled}
 								class="inline-flex items-center space-x-1 px-2 py-1 bg-gray-100/50 dark:bg-gray-850 rounded-lg text-xs"
 								on:click={() => {
 									groupIds = groupIds.filter((gid) => gid !== id);
@@ -160,6 +190,7 @@
 						{#if selectedUsers[id]}
 							<button
 								type="button"
+								{disabled}
 								class="inline-flex items-center space-x-1 px-2 py-1 bg-gray-100/50 dark:bg-gray-850 rounded-lg text-xs"
 								on:click={() => {
 									userIds = userIds.filter((uid) => uid !== id);
@@ -217,8 +248,9 @@
 							</div>
 
 							<div class="mb-3">
-								{#each filteredGroups as group, groupIdx (group.id)}
+								{#each filteredGroups as group (group.id)}
 									<button
+										{disabled}
 										class=" dark:border-gray-850 text-xs flex items-center justify-between w-full"
 										type="button"
 										on:click={() => {
@@ -261,6 +293,7 @@
 							<div>
 								{#each filteredUsers as user (user.id)}
 									<button
+										{disabled}
 										class=" dark:border-gray-850 text-xs flex items-center justify-between w-full"
 										type="button"
 										on:click={() => {
@@ -318,6 +351,9 @@
 			<div class="text-gray-500 text-xs text-center py-5 px-10">
 				{$i18n.t('No users were found.')}
 			</div>
+		{/if}
+		{#if pagination && includeUsers && total > 30}
+			<Pagination bind:page count={total} perPage={30} />
 		{/if}
 	{/if}
 </div>

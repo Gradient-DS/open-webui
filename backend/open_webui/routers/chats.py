@@ -2027,6 +2027,7 @@ async def update_shared_chat_access_by_id(
 
 
 @router.get('/shared/{id}/access', response_model=list)
+@router.get('/{id}/share', response_model=list)
 async def get_shared_chat_access_by_id(
     id: str,
     user=Depends(get_verified_user),

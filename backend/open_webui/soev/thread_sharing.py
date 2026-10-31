@@ -12,6 +12,8 @@ from open_webui.soev import acting
 from open_webui.soev.threads import Share, ThreadError
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from open_webui.models.users import UserModel
     from open_webui.soev.chat_paths import ChatPaths
     from open_webui.soev.threads import ProjectionResult, ThreadClient
@@ -44,6 +46,41 @@ async def all_shares(client: ThreadClient, thread_id: str) -> list[Share]:
             raise ThreadError(502, 'reconnect')
         seen.add(page.next_cursor)
         cursor = page.next_cursor
+
+
+async def named_shares(shares: list[Share], user: UserModel, db: AsyncSession | None = None) -> list[dict]:
+    from sqlalchemy import select
+
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.folders import Folders
+    from open_webui.models.groups import Groups
+    from open_webui.models.users import User
+    from open_webui.utils.access_control.folders import has_folder_access
+
+    names = {}
+    people = {share.audience.id for share in shares if share.audience.kind == 'person'}
+    groups = {share.audience.id for share in shares if share.audience.kind == 'group'}
+    folders = {share.audience.id for share in shares if share.audience.kind == 'folder'}
+    if not shares:
+        return []
+    async with get_async_db_context(db) as session:
+        if people:
+            rows = await session.execute(select(User.person_id, User.name).where(User.person_id.in_(people)))
+            names.update({('person', ref): name for ref, name in rows})
+        if groups:
+            visible = await Groups.get_groups(filter={} if user.role == 'admin' else {'member_id': user.id}, db=session)
+            names.update({('group', f'platform:group:{group.id}'): group.name for group in visible})
+        for id in folders:
+            folder = await Folders.get_folder_by_id(id, db=session)
+            if folder and await has_folder_access(user.id, folder, 'read', session):
+                names[('folder', id)] = folder.name
+    return [
+        {
+            **share.model_dump(),
+            **({'name': names[key]} if (key := (share.audience.kind, share.audience.id)) in names else {}),
+        }
+        for share in shares
+    ]
 
 
 async def resolve(service: ChatPaths, user_id: str, identifier: str) -> str:
@@ -149,6 +186,7 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
         ('GET', '/shared'),
         ('DELETE', '/share/all'),
         ('GET', '/shared/{id}/access'),
+        ('GET', '/{id}/share'),
         ('POST', '/{id}/share'),
         ('DELETE', '/{id}/share'),
     }:
@@ -208,7 +246,7 @@ async def manage(service: ChatPaths, request: Request, user: UserModel) -> dict 
     record = await service.record(user.id, request.path_params['id'])
     if request.method == 'GET':
         return {
-            'items': [share.model_dump() for share in await all_shares(service.client, record.thread_id)],
+            'items': await named_shares(await all_shares(service.client, record.thread_id), user),
             'next_cursor': None,
         }
     if request.method == 'DELETE':

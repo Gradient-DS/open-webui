@@ -239,7 +239,13 @@ async def dark_api(monkeypatch):
     monkeypatch.setattr(
         chats.Folders,
         'get_folder_by_id',
-        AsyncMock(return_value=SimpleNamespace(id='fictional-folder', user_id='fictional-fern')),
+        AsyncMock(
+            side_effect=lambda id, **_: (
+                SimpleNamespace(id=id, user_id='fictional-fern', name='Fictional folder')
+                if id == 'fictional-folder'
+                else None
+            )
+        ),
     )
     monkeypatch.setattr(chats, 'add_active_state_to_chat_list', AsyncMock(side_effect=lambda request, result: result))
     monkeypatch.setattr(threads, 'enabled', lambda: True)
@@ -877,6 +883,7 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     assert shared.status_code == 200 and shared.json() == {'share_id': 'fictional-thread'}
     listed = await dark_api.browser.get(base + '/shared/fictional-chat/access')
     assert listed.json() == {'items': [form], 'next_cursor': None}
+    assert (await dark_api.browser.get(base + '/fictional-chat/share')).json() == listed.json()
     own = await dark_api.browser.get(base + '/shared')
     assert own.json()[0]['share_id'] == 'fictional-thread'
     removed = await dark_api.browser.delete(base + '/fictional-chat/share')
@@ -884,6 +891,17 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     assert (await dark_api.browser.get(base + '/shared/fictional-chat/access')).json()['items'] == []
     assert not dark_api.records.writes
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login' for r in dark_api.calls)
+
+
+@pytest.mark.asyncio
+async def test_picker_unshares_only_the_selected_audience(dark_api):
+    person = {'kind': 'person', 'id': 'platform:user:70c51d1b-8310-4649-89bd-084764d104f6'}
+    group = {'kind': 'group', 'id': 'platform:group:13b95f20-57d8-48c6-9a13-042bcf78d021'}
+    dark_api.state['shares'] = [{'audience': person, 'at': 2}, {'audience': group, 'at': 2}]
+    response = await dark_api.browser.request('DELETE', '/api/v1/chats/fictional-chat/share', json={'audience': person})
+    assert response.status_code == 200
+    assert dark_api.state['shares'] == [{'audience': group, 'at': 2}]
+    assert json.loads(dark_api.calls[-1].content) == {'audience': person}
 
 
 @pytest.mark.asyncio
