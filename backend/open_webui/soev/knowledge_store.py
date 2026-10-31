@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.principal_refs import collection_access
 from open_webui.soev.request_cache import memoized
 
 
@@ -108,6 +109,8 @@ class SoevKnowledgeTable:
         return [row async for row in client.pages(path, as_user=ref, params=params)]
 
     async def _send(self, method, path, body=None, *, user_id=None, idempotency_key=None):
+        if body is not None and 'principals' in body and 'writers' in body:
+            body = await collection_access(body)
         if idempotency_key is None:
             operation = json.dumps([method, path, body], sort_keys=True, separators=(',', ':'))
             idempotency_key = hashlib.sha256(operation.encode()).hexdigest()
@@ -126,12 +129,19 @@ class SoevKnowledgeTable:
         from open_webui.models.users import User
         from open_webui.soev.principal_refs import is_canonical_person_ref
 
-        people = {row.get('created_by') for row in rows if is_canonical_person_ref(row.get('created_by'))}
+        people = {
+            ref
+            for row in rows
+            for ref in [row.get('created_by'), *row.get('principals', []), *row.get('writers', [])]
+            if is_canonical_person_ref(ref)
+        }
         if not people:
             return rows
         async with get_async_db_context() as db:
             owners = dict((await db.execute(select(User.person_id, User.id).where(User.person_id.in_(people)))).all())
-        return [{**row, '_owui_owner_id': owners.get(row.get('created_by'))} for row in rows]
+        return [
+            {**row, '_owui_owner_id': owners.get(row.get('created_by')), '_owui_person_ids': owners} for row in rows
+        ]
 
     @staticmethod
     def _path(key):
@@ -320,7 +330,7 @@ class SoevKnowledgeTable:
             if error.status == 404:
                 return []
             raise
-        return self.collection_grants(row)
+        return self.collection_grants((await self._with_owners([row]))[0])
 
     async def set_collection_access(self, id, access_grants, *, fields=None):
         current = await self._collection(id)

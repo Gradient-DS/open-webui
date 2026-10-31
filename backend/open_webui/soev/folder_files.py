@@ -17,6 +17,7 @@ from open_webui.models.folders import Folders
 from open_webui.models.users import Users
 from open_webui.soev import acting, identity, ingest, projection
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.principal_refs import collection_access, person_ref
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def file_ids(entries: list | None) -> list[str]:
     )
 
 
-def access(owner_id: str, principals: set[tuple[str, str]]) -> dict:
+async def access(owner_id: str, principals: set[tuple[str, str]]) -> dict:
     """The collection's access: the folder's audience reads, the owner reads and writes."""
     grants = [
         {'principal_type': principal_type, 'principal_id': principal_id, 'permission': 'read'}
@@ -42,7 +43,9 @@ def access(owner_id: str, principals: set[tuple[str, str]]) -> dict:
     ]
     visibility, readers, _ = projection.access_of(grants, service_principal=config.SOEV_API_SERVICE_PRINCIPAL)
     owner = f'owui:user:{owner_id}'
-    return {'visibility': visibility, 'principals': sorted(set(readers) | {owner}), 'writers': [owner]}
+    return await collection_access(
+        {'visibility': visibility, 'principals': sorted(set(readers) | {owner}), 'writers': [owner]}
+    )
 
 
 def _path(key: str) -> str:
@@ -60,7 +63,8 @@ async def _existing(key: str, client: SoevClient) -> dict | None:
 
 async def _delete(collection: dict, client: SoevClient) -> None:
     key = collection['key']
-    if collection['created_by'] != acting.requester_ref():
+    requester = acting.requester_ref()
+    if requester is None or collection['created_by'] != await person_ref(requester.removeprefix('owui:user:')):
         raise PermissionError('Folder collection requires its owner request')
     await client.send(
         'DELETE', _path(key), None, as_user=acting.requester_ref(), idempotency_key=f'folder-delete:{key}:{uuid4()}'
@@ -93,10 +97,10 @@ async def narrow(
         await _delete(collection, client)
         return
     owner = f'owui:user:{owner_id}'
-    wanted = access(owner_id, principals)
-    readers = sorted(set(collection['principals']) & (set(wanted['principals']) | {owner}))
+    wanted = await access(owner_id, principals)
+    readers = sorted(set(collection['principals']) & set(wanted['principals']))
     if readers != sorted(collection['principals']):
-        body = {'visibility': 'restricted', 'principals': readers, 'writers': [owner]}
+        body = {'visibility': 'restricted', 'principals': readers, 'writers': wanted['writers']}
         await client.send('PUT', _path(key) + '/access', body, as_user=owner, idempotency_key=f'{key}:access:{uuid4()}')
     documents = {
         document['source_id']
@@ -133,7 +137,7 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
             await _delete(collection, client)
         return False
     owner = f'owui:user:{folder.user_id}'
-    body = access(folder.user_id, principals)
+    body = await access(folder.user_id, principals)
     if await _existing(key, client) is None:
         await client.send(
             'POST',

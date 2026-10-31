@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from open_webui.soev import acting, folder_files, folder_sharing, ingest
-from open_webui.test.soev.fake_api import FakeSoevApi
+from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
 KEY = ingest.folder_collection_key('project')
 
@@ -32,7 +32,7 @@ def folder(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch):
         )
 
     async def user(user_id, db=None):
-        return SimpleNamespace(id=user_id, role='user')
+        return SimpleNamespace(id=user_id, role='user', person_id=person_ref(user_id))
 
     async def permitted(owner, resource_type, principals):
         return principals - {('user', '*')}
@@ -86,9 +86,9 @@ async def test_a_shared_folder_gets_a_collection_its_members_read_holding_the_ow
     folder.files = {'f-dana': upload('f-dana'), 'f-erik': upload('f-erik', owner='erik')}
     await folder_files.sync('project')
     collection = folder.api.collections[KEY]
-    assert collection['created_by'] == 'owui:user:dana'
-    assert {'owui:user:frank', 'platform:group:team', 'owui:user:dana'} <= set(collection['principals'])
-    assert collection['writers'] == ['owui:user:dana']
+    assert collection['created_by'] == person_ref('dana')
+    assert {person_ref('frank'), 'platform:group:team', person_ref('dana')} <= set(collection['principals'])
+    assert collection['writers'] == [person_ref('dana')]
     assert folder.submitted == [('f-dana', KEY, 'dana')]
 
 
@@ -133,8 +133,8 @@ async def test_narrowing_takes_away_readers_and_files_and_never_adds(folder):
 
     put = next(request for request in folder.api.requests if request.method == 'PUT')
     body = json.loads(put.content)
-    assert 'owui:user:frank' not in body['principals'] and 'owui:user:hugo' not in body['principals']
-    assert {'owui:user:gwen', 'owui:user:dana'} <= set(body['principals'])
+    assert person_ref('frank') not in body['principals'] and person_ref('hugo') not in body['principals']
+    assert {person_ref('gwen'), person_ref('dana')} <= set(body['principals'])
     assert ('DELETE', f'/v1/collections/{KEY}/documents/f-2') in writes(folder.api)
     assert ('DELETE', f'/v1/collections/{KEY}/documents/f-1') not in writes(folder.api)
 

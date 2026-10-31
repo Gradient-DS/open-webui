@@ -55,7 +55,7 @@ def attached(*documents):
 @pytest.mark.asyncio
 async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     """Replaying an event preserves one File and a completed job supplies next-turn identity."""
-    from open_webui.soev import live_documents
+    from open_webui.soev import ingest, live_documents
     from open_webui.utils import agent_v2
 
     messages = {'user_id': 'alice'}
@@ -83,6 +83,8 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     client.send.assert_not_awaited()
     row = await env.files.Files.get_file_by_id(rows[0].id)
     assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
+    key = await ingest.ensure_attachments_collection('alice', env.client)
+    env.api.add_document(key, row.id)
     assert await agent_v2._attachments(next_turn) == {
         'attachments': [
             {

@@ -435,6 +435,9 @@ async def _chat_attachment(
         # [Claude] Still in the v1 per-file collection: `migrate --uploads` did not ingest it.
         unavailable.append(Skipped('file', 'unmigrated', file_id, name))
         return
+    if await Knowledges.knowledge_document(key, file_id, user_id=user_id) is None:
+        unavailable.append(Skipped('file', 'denied', file_id, name))
+        return
     item = {'collection_key': key, 'file_id': file_id, 'name': name}
     if (file.meta or {}).get('source'):
         item['document_ref'] = file.meta['source']['ref']

@@ -6,7 +6,7 @@ import pytest
 from open_webui.models.access_grants import AccessGrantModel
 from open_webui.models.models import ModelMeta, ModelModel, ModelParams
 from open_webui.soev import acting, assistant_files, ingest
-from open_webui.test.soev.fake_api import FakeSoevApi
+from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
 KEY = ingest.assistant_collection_key('helper')
 
@@ -85,11 +85,30 @@ async def test_a_saved_assistant_gets_a_collection_its_users_read_and_its_files_
     saved.files = {'f1': file('f1'), 'f2': file('f2')}
     await assistant_files.sync('helper')
     collection = saved.api.collections[KEY]
-    assert collection['created_by'] == 'owui:user:bob'
-    assert {'platform:group:juristen', 'owui:user:carol', 'owui:user:bob'} <= set(collection['principals'])
-    assert collection['writers'] == ['owui:user:bob', 'owui:user:carol']
+    assert collection['created_by'] == person_ref('bob')
+    assert {'platform:group:juristen', person_ref('carol'), person_ref('bob')} <= set(collection['principals'])
+    assert collection['writers'] == sorted([person_ref('bob'), person_ref('carol')])
     assert ingest.is_assistant_collection(KEY) and not ingest.is_attachments_collection(KEY)
     assert saved.submitted == [('f1', KEY, 'bob'), ('f2', KEY, 'bob')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('unbound', ['bob', 'carol'])
+async def test_an_assistant_requires_person_bindings_for_its_owner_and_shared_users(saved, monkeypatch, unbound):
+    from open_webui.models.users import Users
+
+    get_user = Users.get_user_by_id
+
+    async def user(user_id, db=None):
+        return SimpleNamespace(person_id=None) if user_id == unbound else await get_user(user_id)
+
+    monkeypatch.setattr(Users, 'get_user_by_id', user)
+    saved.model = assistant('f1', grants=[grant('user', 'carol', 'write')])
+    saved.files = {'f1': file('f1')}
+    with pytest.raises(ValueError, match='no valid platform person binding'):
+        await assistant_files.sync('helper')
+    assert saved.api.requests == []
+    assert saved.submitted == []
 
 
 @pytest.mark.asyncio

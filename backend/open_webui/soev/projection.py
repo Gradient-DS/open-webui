@@ -100,6 +100,8 @@ def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantMo
         for ref in collection[field]:
             if ref in excluded:
                 continue
+            if user_id := collection.get('_owui_person_ids', {}).get(ref):
+                ref = f'owui:user:{user_id}'
             if ref == 'platform:pseudo:owui':
                 identities.add(('user', '*', permission))
                 continue

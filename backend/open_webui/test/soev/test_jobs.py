@@ -11,6 +11,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from open_webui.test.soev import test_ingest
+from open_webui.test.soev.fake_api import person_ref
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -51,8 +52,8 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
             'key': 'kb',
             'name': 'Research',
             'visibility': 'restricted',
-            'principals': [test_ingest.SERVICE, 'owui:user:alice'],
-            'writers': ['owui:user:alice'],
+            'principals': [test_ingest.SERVICE, person_ref('alice')],
+            'writers': [person_ref('alice')],
         },
         as_user='owui:user:alice',
         idempotency_key='collection:kb',

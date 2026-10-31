@@ -1,7 +1,6 @@
 """Exercise v2 routing and branching against the authenticated fake relay."""
 
 import asyncio
-import time
 import base64
 import copy
 import hashlib
@@ -9,6 +8,7 @@ import html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +23,7 @@ from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket import main as socket_main
 from open_webui.soev import agent_threads, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
-from open_webui.test.soev.fake_api import FakeSoevApi
+from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 from open_webui.utils import agent, agent_v2
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -398,12 +398,19 @@ async def test_a_turn_without_unavailable_items_shows_no_notice(chat: Chat) -> N
     assert 'notices' not in chat.messages['chat', 'a1']
 
 
-def stored_files(monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> None:
+def stored_files(chat: Chat, monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> None:
     """File records by id, owned by alice, each with its processing status."""
     records = {
         file_id: SimpleNamespace(id=file_id, user_id='alice', filename=f'{file_id}.pdf', meta={'status': status})
         for file_id, status in statuses.items()
     }
+    for record in records.values():
+        key = (record.meta or {}).get('collection_name') or ingest.attachments_collection_key(record.user_id)
+        if key.startswith('file-'):
+            continue
+        if key not in chat.api.collections:
+            seed_collection(chat.api, key, 'Chat attachments')
+        chat.api.add_document(key, record.id)
     monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
 
 
@@ -411,7 +418,7 @@ def stored_files(monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> Non
 async def test_attached_files_are_sent_with_their_collection_and_name(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    stored_files(monkeypatch, f1='completed', f2='completed', f3=None)
+    stored_files(chat, monkeypatch, f1='completed', f2='completed', f3=None)
     await chat.turn(
         'question',
         'a1',
@@ -431,6 +438,37 @@ async def test_attached_files_are_sent_with_their_collection_and_name(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('requester', [None, 'owui:user:alice'])
+@pytest.mark.parametrize('collection_exists', [False, True])
+async def test_unreadable_chat_attachments_are_skipped_with_a_notice_and_the_turn_continues(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, requester, collection_exists
+) -> None:
+    from contextvars import ContextVar
+
+    from open_webui.soev import acting
+
+    stored_files(chat, monkeypatch, f1='completed')
+    key = ingest.attachments_collection_key('alice')
+    if collection_exists:
+        chat.api.collections[key].update(
+            personal=True,
+            created_by=person_ref('alice'),
+            visibility='restricted',
+            principals=['owui:service:webui'],
+            writers=[],
+        )
+    else:
+        del chat.api.collections[key]
+    monkeypatch.setattr(acting, '_requester_ref', ContextVar('test-requester', default=requester))
+    chunks = await chat.turn('Please answer anyway', 'a1', files=[{'type': 'file', 'id': 'f1', 'name': 'Report.pdf'}])
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert 'attachments' not in sent
+    assert 'Report.pdf' in sent['text']
+    assert notices(chat) == [{'notices': ["File 'Report.pdf' is not accessible and was skipped."], 'removed': []}]
+
+
+@pytest.mark.asyncio
 async def test_the_file_record_names_the_collection_and_a_chat_entry_never_does(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -444,6 +482,13 @@ async def test_the_file_record_names_the_collection_and_a_chat_entry_never_does(
             meta={'status': 'completed', 'collection_name': ingest.attachments_collection_key('bob')},
         ),
     }
+    for record in records.values():
+        key = (record.meta or {}).get('collection_name') or ingest.attachments_collection_key(record.user_id)
+        if key.startswith('file-'):
+            continue
+        if key not in chat.api.collections:
+            seed_collection(chat.api, key, 'Chat attachments')
+        chat.api.add_document(key, record.id)
     monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
     await chat.turn(
         'question',
@@ -483,6 +528,13 @@ async def test_an_upload_the_v2_migration_left_in_its_v1_collection_is_left_out_
         ),
         'ok': SimpleNamespace(id='ok', user_id='alice', filename='goed.pdf', meta={'status': 'completed'}),
     }
+    for record in records.values():
+        key = (record.meta or {}).get('collection_name') or ingest.attachments_collection_key(record.user_id)
+        if key.startswith('file-'):
+            continue
+        if key not in chat.api.collections:
+            seed_collection(chat.api, key, 'Chat attachments')
+        chat.api.add_document(key, record.id)
     monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
     files = [{'type': 'file', 'id': 'old', 'name': 'oud.pdf'}, {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'}]
     chunks = await chat.turn('question', 'a1', files=files, user_language=language)
@@ -502,7 +554,7 @@ async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
     chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='factuur-0042.pdf', schedule_ids=['sch-1'])
     chat.api.add_document('kb-local', 'f-local', filename='contract.pdf')
     # The synced document has no OWUI File row; the local one keeps its upload's row, without a collection.
-    stored_files(monkeypatch, **{'f-local': 'completed'})
+    stored_files(chat, monkeypatch, **{'f-local': 'completed'})
     chunks = await chat.turn(
         'question',
         'a1',
@@ -527,7 +579,7 @@ async def test_a_knowledge_base_file_the_user_cannot_read_there_is_left_out_with
     chat.api.add_document('kb-a', 'elsewhere', filename='elders.pdf')
     chat.api.add_document('kb-a', 'ok', filename='goed.pdf')
     chat.api.add_document('kb-secret', 'hidden', filename='verborgen.pdf')
-    stored_files(monkeypatch, busy='processing')
+    stored_files(chat, monkeypatch, busy='processing')
     chunks = await chat.turn(
         'question',
         'a1',
@@ -565,7 +617,7 @@ async def test_a_knowledge_base_file_the_user_cannot_read_there_is_left_out_with
 
 @pytest.mark.asyncio
 async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
-    stored_files(monkeypatch, img='completed')
+    stored_files(chat, monkeypatch, img='completed')
     await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])
     assert 'attachments' not in chat.mutations()[-1][1]['input']
     assert 'images' not in chat.mutations()[-1][1]['input']
@@ -871,7 +923,7 @@ async def test_ten_notes_and_chats_are_allowed_together(chat: Chat, stored_texts
 async def test_attached_files_the_agent_cannot_read_are_left_out_with_a_notice(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str
 ) -> None:
-    stored_files(monkeypatch, ok='completed', busy='processing', broken='failed')
+    stored_files(chat, monkeypatch, ok='completed', busy='processing', broken='failed')
     files = [
         {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'},
         {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf'},
@@ -921,7 +973,7 @@ async def test_an_assistants_file_and_knowledge_base_both_reach_the_agent(
     seed_collection(chat.api, 'kb-a', 'Contracten')
     key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
     chat.api.add_document(key, 'af1', filename='handboek.txt')
-    stored_files(monkeypatch, af1='completed')
+    stored_files(chat, monkeypatch, af1='completed')
     chunks = await chat.turn(
         'question',
         'a1',
@@ -941,7 +993,7 @@ async def test_an_assistant_split_turn_reads_the_assistants_files_not_the_llms(
 ) -> None:
     key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
     chat.api.add_document(key, 'af1', filename='handboek.txt')
-    stored_files(monkeypatch, af1='completed')
+    stored_files(chat, monkeypatch, af1='completed')
     await chat.turn(
         'question',
         'a1',
@@ -962,7 +1014,7 @@ async def test_a_shared_assistants_file_is_read_by_a_group_member_and_skipped_fo
     """Bob owns the assistant and shares it with a group; alice reads its file through that group only."""
     key = seed_assistant_collection(chat.api, 'helper', 'owui:group:juristen')
     chat.api.add_document(key, 'af1', filename='handboek.txt')
-    stored_files(monkeypatch, af1='completed')
+    stored_files(chat, monkeypatch, af1='completed')
     knowledge = [{'id': 'af1', 'type': 'file', 'name': 'handboek.txt'}]
     chat.api.groups['owui:group:juristen'] = {'owui:user:alice'}
     await chat.turn('question', 'a1', model_id='helper', knowledge=knowledge)
@@ -987,7 +1039,7 @@ async def test_a_deleted_assistant_file_gives_a_notice_and_stays_on_the_assistan
     chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str, expected: str
 ) -> None:
     seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
-    stored_files(monkeypatch)
+    stored_files(chat, monkeypatch)
     chunks = await chat.turn(
         'question',
         'a1',
@@ -1015,7 +1067,7 @@ async def test_an_assistant_file_not_yet_in_its_collection_is_skipped_as_process
 
     monkeypatch.setattr(PendingSyncs, 'mark', mark)
     seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
-    stored_files(monkeypatch, new='completed')
+    stored_files(chat, monkeypatch, new='completed')
     await chat.turn('question', 'a1', model_id='helper', knowledge=[{'id': 'new', 'type': 'file', 'name': 'nieuw.txt'}])
     sent = chat.mutations()[-1][1]['input']
     assert 'attachments' not in sent
@@ -1030,7 +1082,7 @@ async def test_an_assistant_file_also_attached_in_the_chat_is_sent_once(
 ) -> None:
     key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
     chat.api.add_document(key, 'af1', filename='handboek.txt')
-    stored_files(monkeypatch, af1='completed')
+    stored_files(chat, monkeypatch, af1='completed')
     await chat.turn(
         'question',
         'a1',
@@ -1122,7 +1174,7 @@ async def test_a_folders_file_is_sent_from_its_collection_once(chat: Chat, monke
     seed_collection(chat.api, 'kb-a', 'Contracten')
     chat.api.add_document(key, 'f-folder', filename='beleid.pdf')
     chat.api.add_document('kb-a', 'f-kb', filename='contract.pdf')
-    stored_files(monkeypatch, **{'f-folder': 'completed', 'f-chat': 'completed', 'f-kb': 'completed'})
+    stored_files(chat, monkeypatch, **{'f-folder': 'completed', 'f-chat': 'completed', 'f-kb': 'completed'})
     chunks = await chat.turn(
         'question',
         'a1',
@@ -3264,7 +3316,7 @@ async def test_opening_an_attached_document_names_it_while_running_and_once_read
 ) -> None:
     if not declares:
         monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': {}})
-    stored_files(monkeypatch, f1='completed')
+    stored_files(declared, monkeypatch, f1='completed')
     attached = f'{ingest.attachments_collection_key("alice")}/f1'
     # The agent's own document of an attached file has only its filename; the open call names it by that id.
     opened = {'type': 'document', 'id': attached, 'filename': 'rapport.pdf'}

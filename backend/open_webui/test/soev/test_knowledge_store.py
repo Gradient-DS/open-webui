@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from open_webui.test.soev.fake_api import person_ref
+from sqlalchemy import event, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 SERVICE = 'owui:service:webui'
@@ -122,6 +123,23 @@ async def env(identity_config, fake_api, monkeypatch):
         sessions=sessions,
         engine=engine,
     )
+    async with sessions() as session:
+        session.add_all(
+            [
+                models.User(
+                    id=name,
+                    name=name.title(),
+                    email=f'{name}@example.invalid',
+                    role='user',
+                    person_id=person_ref(name),
+                    last_active_at=0,
+                    updated_at=0,
+                    created_at=0,
+                )
+                for name in ('alice', 'bob', 'carol')
+            ]
+        )
+        await session.commit()
     await seed(state)
     api.requests.clear()
     yield state
@@ -263,7 +281,7 @@ async def test_get_knowledge_by_id_reads_as_the_service_principal(env):
     model = await env.store.get_knowledge_by_id('kb', db=object())
     assert model.id == 'kb' and model.user_id == 'alice'
     assert model == env.projection.knowledge_of(
-        env.api._view(env.api.collections['kb'], None), service_principal=SERVICE
+        (await env.store._with_owners([env.api._view(env.api.collections['kb'], None)]))[0], service_principal=SERVICE
     )
     assert all('X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
     assert await env.store.get_knowledge_by_id('absent') is None
@@ -355,7 +373,7 @@ async def test_cloud_creation_has_only_the_owner_and_retains_its_type(env, monke
     result = await env.store.insert_new_knowledge('carol', form)
     row = env.api.collections[result.id]
     assert row['source_kind'] == provider
-    assert row['principals'] == row['writers'] == ['owui:user:carol']
+    assert row['principals'] == row['writers'] == [person_ref('carol')]
     monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:carol')
     assert (await env.store.get_knowledge_by_id(result.id)).type == provider
     creates = [r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections']
@@ -402,8 +420,8 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     result = await env.store.insert_new_knowledge('carol', form)
     assert result.user_id == 'carol'
     row = env.api.collections[result.id]
-    assert row['principals'] == [SERVICE, 'owui:user:carol', 'platform:group:staff']
-    assert row['writers'] == ['owui:user:carol', 'platform:group:staff']
+    assert row['principals'] == sorted([SERVICE, person_ref('carol'), 'platform:group:staff'])
+    assert row['writers'] == sorted([person_ref('carol'), 'platform:group:staff'])
     relevant = [request for request in env.api.requests if request.method == 'POST']
     assert len(relevant) == 1
     assert relevant[-1].url.path == '/v1/collections'
@@ -513,7 +531,7 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
     finally:
         acting._requester_ref.reset(token)
     assert result.name == 'Renamed'
-    assert env.api.collections['kb']['writers'] == ['owui:user:alice']
+    assert env.api.collections['kb']['writers'] == [person_ref('alice')]
     assert env.api.collections['kb']['visibility'] == 'restricted'
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'update_collection_access' and job['status'] == 'QUEUED'
@@ -521,7 +539,7 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
     env.api.advance(job['job_id'], 'SUCCEEDED')
     assert env.api.collections['kb']['visibility'] == 'restricted'
     assert 'platform:pseudo:owui' in env.api.collections['kb']['principals']
-    assert env.api.collections['kb']['writers'] == ['owui:user:alice', 'owui:user:bob']
+    assert env.api.collections['kb']['writers'] == sorted([person_ref('alice'), person_ref('bob')])
 
 
 @pytest.mark.asyncio
@@ -551,7 +569,7 @@ async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monke
 async def test_collection_variants_use_api_authority_and_owner_filters(env):
     """Collection lookup variants preserve write checks, local type, owned-only lists, and explicit-user precedence."""
     await seed(env, 'other', owner='bob')
-    env.api.collections['kb']['principals'].append('owui:user:bob')
+    env.api.collections['kb']['principals'].append(person_ref('bob'))
     assert await env.store.check_access_by_user_id('kb', 'bob', 'read') is True
     assert await env.store.check_access_by_user_id('kb', 'bob', 'write') is False
     assert await env.store.get_knowledge_by_id_and_user_id('kb', 'bob') is None
@@ -576,10 +594,11 @@ async def test_bulk_deletes_commission_each_owned_or_visible_collection(env):
 async def test_collection_lists_preserve_owner_display_and_timestamp_order(env):
     """Lists retain available owner details and sort RFC 3339 values by time rather than offset text."""
     async with env.sessions() as session:
-        session.add(
+        await session.merge(
             env.models.User(
                 id='alice',
                 name='Alice',
+                person_id=person_ref('alice'),
                 email='alice@example.invalid',
                 role='user',
                 last_active_at=0,
@@ -602,7 +621,7 @@ async def test_collection_lists_preserve_owner_display_and_timestamp_order(env):
 async def test_request_identity_cannot_fall_back_to_capability_only_writes(env):
     """An authenticated non-writer is refused, while a background write deliberately carries no subject."""
     acting = importlib.import_module('open_webui.soev.acting')
-    env.api.collections['kb']['principals'].append('owui:user:bob')
+    env.api.collections['kb']['principals'].append(person_ref('bob'))
     token = acting._requester_ref.set('owui:user:bob')
     try:
         with pytest.raises(Exception) as caught:
@@ -696,7 +715,7 @@ async def test_search_files_preserves_directory_filter_and_slim_rows(env, metada
 async def test_search_knowledge_files_spans_every_readable_collection(env, monkeypatch):
     """Cross-collection search reads only accessible documents as the user and keeps the first duplicate."""
     await seed(env, 'second', owner='bob')
-    env.api.collections['second']['principals'].append('owui:user:alice')
+    env.api.collections['second']['principals'].append(person_ref('alice'))
     await seed(env, 'private', owner='bob')
     await file(env, 'first')
     await file(env, 'shared', key='second')
@@ -930,7 +949,9 @@ async def test_add_file_is_a_no_op_for_a_landed_document(env):
     env.api.requests.clear()
     result = await env.store.add_file_to_knowledge_by_id('kb', 'f1', 'alice')
     assert result == env.projection.knowledge_link_of(
-        env.api.collections['kb'], env.api.documents['kb', 'f1'], service_principal=SERVICE
+        (await env.store._with_owners([env.api.collections['kb']]))[0],
+        env.api.documents['kb', 'f1'],
+        service_principal=SERVICE,
     )
     assert all(request.method == 'GET' for request in env.api.requests)
 
@@ -1288,7 +1309,7 @@ async def test_rollups_count_catalog_only_rows(env):
 @pytest.mark.asyncio
 async def test_file_counts_respect_mirrored_document_access(env):
     for index in range(12):
-        env.api.add_document('kb', f'cloud-{index}', principals=['owui:user:alice'])
+        env.api.add_document('kb', f'cloud-{index}', principals=[person_ref('alice')])
     assert await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice') == {'kb': 12}
     assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
     listing = await env.store.search_knowledge_bases('alice', {})
@@ -1430,7 +1451,7 @@ async def test_platform_person_owner_is_resolved_on_create_and_add_read(env, mon
 
     person = 'platform:user:550e8400-e29b-41d4-a716-446655440000'
     async with env.sessions() as db:
-        db.add(User(id='alice', name='Alice', email='alice@example.invalid', role='user', person_id=person))
+        await db.execute(update(User).where(User.id == 'alice').values(person_id=person))
         await db.commit()
     send = env.client.send
 
