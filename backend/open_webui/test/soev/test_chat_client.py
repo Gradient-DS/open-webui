@@ -18,6 +18,50 @@ async def _collect(stream: AsyncIterator[ChatEvent], *, timeout: float = 8) -> l
 
 
 @pytest.mark.asyncio
+async def test_presentation_events_read_only_the_shown_window(chat_http):
+    client = identity.build_client()
+    frames = await _collect(
+        client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'Hello'}}, as_user='owui:user:alice')
+    )
+    thread_id = frames[0].data['thread_id']
+    chat_http.chat.requests.clear()
+    events = await client.chat_events(thread_id, as_user='owui:user:alice', after=1, through=2)
+    assert [event['position'] for event in events] == [2]
+    (request,) = chat_http.chat.requests
+    assert request.url.path == f'/v1/chat/threads/{thread_id}/events'
+    assert request.headers['Last-Event-ID'] == '1'
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+    assert chat_http.chat.tails[-1].closed
+
+
+@pytest.mark.asyncio
+async def test_presentation_events_resume_capped_replay_without_reading_thread(chat_http, monkeypatch):
+    client = identity.build_client()
+    frames = await _collect(
+        client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'Hello'}}, as_user='owui:user:alice')
+    )
+    thread_id = frames[0].data['thread_id']
+    end = frames[-1].data['position']
+    original = chat_http.chat._operation
+
+    def capped(request, body, thread, operation):
+        if operation != 'events':
+            return original(request, body, thread, operation)
+        after = int(request.headers['Last-Event-ID'])
+        event = next(event for event in thread['events'] if event['position'] > after)
+        return httpx.Response(
+            200, content=f'data: {json.dumps(event)}\n\n', headers={'Content-Type': 'text/event-stream'}
+        )
+
+    monkeypatch.setattr(chat_http.chat, '_operation', capped)
+    chat_http.chat.requests.clear()
+    events = await client.chat_events(thread_id, as_user='owui:user:alice', after=0, through=end)
+    assert [event['position'] for event in events] == list(range(1, end + 1))
+    assert all(request.url.path.endswith('/events') for request in chat_http.chat.requests)
+    assert len(chat_http.chat.requests) == end
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('close_after', [2, 3])
 async def test_reconnected_tail_close_reads_terminality_without_a_status_frame(
     chat_http: FakeSoevApi, close_after: int

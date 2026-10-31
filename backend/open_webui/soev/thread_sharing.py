@@ -143,7 +143,7 @@ async def revoke_all(service: ChatPaths, thread_id: str) -> None:
 
 
 async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
-    records = await service.organizations.list(user_id)
+    records = await service.records(user_id)
     owned = {thread_id for record in records for thread_id in [record.thread_id, *record.branch_thread_ids]}
     if not owned:
         return []

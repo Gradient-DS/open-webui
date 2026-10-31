@@ -348,6 +348,43 @@ class SoevClient:
                         yield ChatEvent('status', status)
                         return
 
+    async def chat_events(self, thread_id: str, *, as_user: str, after: int, through: int) -> list[dict]:
+        path = f'/v1/chat/threads/{quote(thread_id, safe="")}/events'
+        await self._require_thread_request(path, as_user)
+        headers = await self._headers(as_user)
+        headers['Accept'] = 'text/event-stream'
+        events = []
+        try:
+            async with asyncio.timeout(self._timeout):
+                while after < through:
+                    headers['Last-Event-ID'] = str(after)
+                    previous = after
+                    async with _shared_client().stream(
+                        'GET',
+                        f'{self._base_url}{path}',
+                        headers=headers,
+                        timeout=self._timeout,
+                    ) as response:
+                        if not response.is_success:
+                            await response.aread()
+                            raise _response_error(response)
+                        async with aclosing(_chat_frames(response)) as frames:
+                            async for frame in frames:
+                                event = frame.data
+                                if event.get('stream') != 'root':
+                                    continue
+                                position = event['position']
+                                if after < position <= through:
+                                    events.append(event)
+                                after = max(after, position)
+                                if after >= through:
+                                    return events
+                    if after == previous:
+                        raise ValueError('Incomplete chat event window')
+        except (httpx.TransportError, TimeoutError, ValueError, KeyError, TypeError):
+            raise SoevApiError(502, 'upstream_error', 'Chat event window unavailable') from None
+        return events
+
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
         await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)

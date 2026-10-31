@@ -147,6 +147,20 @@ async def seed(env, key='kb', owner='alice', name='Research'):
 
 
 @pytest.mark.asyncio
+async def test_search_counts_and_permissions_share_request_lookups(env, monkeypatch):
+    from open_webui.soev.request_cache import request_cache
+
+    owners = AsyncMock(wraps=env.store._with_owners)
+    monkeypatch.setattr(env.store, '_with_owners', owners)
+    with request_cache():
+        await env.store.search_knowledge_bases('alice', {})
+        await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice')
+        await env.store.accessible_collection_ids('alice', ['kb'], 'write')
+    assert owners.await_count == 1
+    assert len(env.api.requests) == 3  # collections + queued/running jobs, one page each
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_', 'd_b3RoZXIKZGly'])
 async def test_invalid_or_foreign_directory_parent_is_a_client_error_without_a_write(env, identifier):
     from fastapi import HTTPException

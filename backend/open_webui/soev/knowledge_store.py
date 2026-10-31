@@ -147,6 +147,12 @@ class SoevKnowledgeTable:
             raise
 
     async def _collections(self, *, user_id=None, as_service=False):
+        return await memoized(
+            ('collections', self, self._user_ref(user_id), as_service),
+            lambda: self._load_collections(user_id=user_id, as_service=as_service),
+        )
+
+    async def _load_collections(self, *, user_id=None, as_service=False):
         from open_webui.soev import ingest
 
         rows, queued, running = await asyncio.gather(
@@ -461,9 +467,11 @@ class SoevKnowledgeTable:
             return result
         rows = [row for row in await self._pages('/v1/collections', user_id=user_id) if row['key'] in requested]
         files = await self._unlanded_files_by_collection(row['key'] for row in rows)
-        for row in rows:
+        pending = await asyncio.gather(
+            *(self._unlanded(row['key'], collection=row, user_id=user_id, files=files[row['key']]) for row in rows)
+        )
+        for row, unlanded in zip(rows, pending):
             key = row['key']
-            unlanded = await self._unlanded(key, collection=row, user_id=user_id, files=files[key])
             count = row['document_count'] + len(unlanded)
             if count:
                 result[key] = count

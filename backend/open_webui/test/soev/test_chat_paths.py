@@ -43,6 +43,20 @@ class FictionalOrganizations:
         self.records = [r for r in self.records if r.id != chat_id]
 
 
+@pytest.mark.asyncio
+async def test_request_organization_cache_is_reused_and_invalidated_after_write(dark_api, monkeypatch):
+    from open_webui.soev.request_cache import request_cache
+
+    listing = AsyncMock(wraps=dark_api.records.list)
+    monkeypatch.setattr(dark_api.records, 'list', listing)
+    service = ChatPaths(dark_api.client, dark_api.records)
+    with request_cache():
+        assert not (await service.record('fictional-fern', 'fictional-chat')).pinned
+        await service.organize('fictional-fern', 'fictional-chat', {'pinned': True})
+        assert (await service.record('fictional-fern', 'fictional-chat')).pinned
+    assert listing.await_count == 2
+
+
 def fake_api(request, calls, state, visible, feedback):
     import json
 
@@ -313,6 +327,7 @@ async def test_projection_forks_clone_tags_and_usage(dark_api):
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
     assert response.json()['messages'][1]['position'] == 2
     assert response.headers['etag'] == 'fictional-etag'
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads/fictional-thread']
     conditional = await dark_api.browser.get(
         '/api/v1/chats/fictional-chat', headers={'If-None-Match': 'fictional-etag'}
     )

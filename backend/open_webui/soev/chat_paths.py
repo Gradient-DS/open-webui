@@ -1,14 +1,15 @@
 """Dark chat handlers over the platform contract and local organisation records."""
 
+import asyncio
 import datetime as dt
 import logging
 import time
 from typing import Literal, Protocol
-from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from open_webui.soev import threads
+from open_webui.soev.request_cache import invalidate, memoized
 from open_webui.soev.threads import Organization, ThreadError
 
 
@@ -59,8 +60,13 @@ class ChatPaths:
     def __init__(self, client: threads.ThreadClient, organizations: Organizations) -> None:
         self.client, self.organizations = client, organizations
 
+    async def records(self, user_id: str) -> list[Organization]:
+        return await memoized(
+            ('thread-organizations', self.organizations, user_id), lambda: self.organizations.list(user_id)
+        )
+
     async def record(self, user_id: str, chat_id: str) -> Organization:
-        for record in await self.organizations.list(user_id):
+        for record in await self.records(user_id):
             if record.id == chat_id:
                 return record
         # A thread shared with the caller need not have a local organisational
@@ -71,12 +77,11 @@ class ChatPaths:
         return [item async for page in self.authorized_pages(user_id, q=q) for item in page]
 
     async def authorized_pages(self, user_id: str, *, q: str = ''):
-        records = await self.organizations.list(user_id)
+        records, page = await asyncio.gather(self.records(user_id), self.client.index(q=q, limit=200, cursor=''))
         active = {record.thread_id for record in records}
         inactive = {thread_id for record in records for thread_id in record.branch_thread_ids} - active
         cursor, seen = '', set()
         while True:
-            page = await self.client.index(q=q, limit=200, cursor=cursor)
             yield [item for item in threads.join_index(page, records)['items'] if item['thread_id'] not in inactive]
             if page.next_cursor is None:
                 return
@@ -84,6 +89,7 @@ class ChatPaths:
                 raise ThreadError(502, 'reconnect')
             seen.add(page.next_cursor)
             cursor = page.next_cursor
+            page = await self.client.index(q=q, limit=200, cursor=cursor)
 
     async def listing(
         self,
@@ -103,6 +109,10 @@ class ChatPaths:
             raise ThreadError(422, 'invalid_request')
         if page is not None and page < 1:
             raise ThreadError(422, 'invalid_request')
+        if pinned is True and not any(
+            record.pinned and record.archived == archived for record in await self.records(user_id)
+        ):
+            return []
         items = []
         async for batch in self.authorized_pages(user_id, q=q):
             if folder_id is not None:
@@ -142,7 +152,10 @@ class ChatPaths:
         return rows
 
     async def in_folder(self, user_id: str, items: list[dict], folder_id: str) -> list[dict]:
-        members = await self.organizations.folder_records(folder_id)
+        members = await memoized(
+            ('thread-folder-records', self.organizations, folder_id),
+            lambda: self.organizations.folder_records(folder_id),
+        )
         result = []
         for item in items:
             org = item['organization']
@@ -187,20 +200,30 @@ class ChatPaths:
 
     async def presentation(self, user_id: str, page: threads.ProjectionPage) -> threads.ProjectionPage:
         from open_webui.soev import acting, identity
-        from open_webui.soev.chat_presentation import present_projection
+        from open_webui.soev.chat_presentation import needs_events, needs_sources, present_projection
         from open_webui.soev.client import SoevApiError
 
-        if not any(isinstance(m.content, dict) and m.content.get('role') == 'assistant' for m in page.messages):
-            return page
         events = []
-        try:
-            thread = await identity.build_client().get(
-                f'/v1/chat/threads/{quote(page.thread_id, safe="")}',
-                as_user=acting.requester_ref() or f'owui:user:{user_id}',
-            )
-            events = thread['events']
-        except SoevApiError:
-            logging.getLogger(__name__).warning('Thread presentation sources unavailable')
+        if needs_events(page):
+            try:
+                client = identity.build_client()
+                requester = acting.requester_ref() or f'owui:user:{user_id}'
+                after = min(m.position for m in page.messages) - 1
+                events = await client.chat_events(
+                    page.thread_id,
+                    as_user=requester,
+                    after=after,
+                    through=max(m.position for m in page.messages),
+                )
+                enriched = await present_projection(page, events)
+                if not after or not needs_sources(enriched):
+                    return enriched
+                # A visible answer can cite a source read on an earlier page.
+                # Resolve that dependency only when the visible window needs it.
+                previous = await client.chat_events(page.thread_id, as_user=requester, after=0, through=after)
+                events = previous + events
+            except SoevApiError:
+                logging.getLogger(__name__).warning('Thread presentation sources unavailable')
         return await present_projection(page, events)
 
     async def metadata(self, user_id: str, chat_id: str, changes: dict, *, tag_action: str = 'replace'):
@@ -249,6 +272,7 @@ class ChatPaths:
                 }
             )
         await self.organizations.put(user_id, result)
+        invalidate()
         return result
 
     async def organize(self, user_id: str, chat_id: str, changes: dict) -> Organization:
@@ -269,13 +293,17 @@ class ChatPaths:
         except ValidationError:
             raise ThreadError(422, 'invalid_request') from None
         await self.organizations.put(user_id, result)
+        invalidate()
         return result
 
     async def folder_counts(self, user_id: str, parents: dict[str, str | None]) -> dict[str, int]:
         counts = dict.fromkeys(parents, 0)
+        if not parents:
+            return counts
         items = await self.authorized(user_id)
-        for folder_id in parents:
-            joined = {item['thread_id']: item for item in await self.in_folder(user_id, items, folder_id)}
+        memberships = await asyncio.gather(*(self.in_folder(user_id, items, folder_id) for folder_id in parents))
+        for members in memberships:
+            joined = {item['thread_id']: item for item in members}
             items = [joined.get(item['thread_id'], item) for item in items]
         for item in items:
             org = item['organization'] or {}
@@ -299,6 +327,7 @@ class ChatPaths:
         thread_id = await self.client.reserve(agent)
         record = Organization(id=thread_id, thread_id=thread_id)
         await self.organizations.put(user_id, record)
+        invalidate()
         return record
 
     async def delete(self, user_id: str, chat_id: str) -> None:
@@ -309,6 +338,7 @@ class ChatPaths:
         for thread_id in sorted(set(record.branch_thread_ids) | {record.thread_id}):
             await self.client.delete(thread_id)
         await self.organizations.remove(user_id, chat_id)
+        invalidate()
 
     async def delete_all(self, user_id: str) -> None:
         for record in await self.organizations.list(user_id):

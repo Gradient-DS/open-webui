@@ -9,6 +9,45 @@ def _objects(value) -> list[dict]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def needs_sources(page: ProjectionPage) -> bool:
+    for message in page.messages:
+        content = message.content
+        if not isinstance(content, dict) or content.get('role') != 'assistant':
+            continue
+        cited = {
+            citation['written']
+            for marker in _objects(content.get('markers'))
+            for citation in _objects(marker.get('cited'))
+            if isinstance(citation.get('source'), str) and isinstance(citation.get('written'), int)
+        }
+        supplied = {source['n'] for source in _objects(content.get('sources')) if isinstance(source.get('n'), int)}
+        if cited - supplied:
+            return True
+    return False
+
+
+def needs_events(page: ProjectionPage) -> bool:
+    if needs_sources(page):
+        return True
+    for message in page.messages:
+        content = message.content
+        if not isinstance(content, dict) or content.get('role') != 'assistant':
+            continue
+        calls = {
+            call['id']
+            for call in _objects(content.get('tool_calls'))
+            if isinstance(call.get('id'), str) and isinstance(call.get('name'), str)
+        }
+        statuses = {
+            status['call_id']
+            for status in _objects(content.get('statusHistory'))
+            if isinstance(status.get('call_id'), str) and status.get('done')
+        }
+        if calls - statuses:
+            return True
+    return False
+
+
 async def present_projection(page: ProjectionPage, events: list[dict]) -> ProjectionPage:
     turn = AgentTurn(None, {}, '')
     boundary = max((message.position for message in page.messages), default=0)

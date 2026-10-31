@@ -54,10 +54,17 @@ from open_webui.utils.access_control.folders import has_folder_access as _has_fo
 
 
 async def get_folder_unread_counts(
-    user_id: str, db: AsyncSession | None = None, request: Request | None = None
+    user_id: str,
+    db: AsyncSession | None = None,
+    request: Request | None = None,
+    *,
+    parent_by_id: dict[str, str | None] | None = None,
 ) -> dict[str, int]:
-    folders = await Folders.get_folders_by_user_id(user_id, db=db)
-    parent_by_id = {folder.id: folder.parent_id for folder in folders}
+    if parent_by_id is None:
+        folders = await Folders.get_folders_by_user_id(user_id, db=db)
+        parent_by_id = {folder.id: folder.parent_id for folder in folders}
+    if not parent_by_id:
+        return {}
     unread_counts = dict.fromkeys(parent_by_id.keys(), 0)
     if soev_threads.enabled():
         if request is None:
@@ -145,7 +152,7 @@ async def get_folders(
 
         folder_list.append(folder)
 
-    unread_counts = await get_folder_unread_counts(user.id, db=db, request=request)
+    unread_counts = await get_folder_unread_counts(user.id, db=db, request=request, parent_by_id=parent_by_id)
 
     return [
         FolderNameIdResponse(**folder.model_dump(), unread_count=unread_counts.get(folder.id, 0))

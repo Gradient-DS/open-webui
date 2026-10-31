@@ -8,7 +8,7 @@ import sys
 import urllib
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import partialmethod
 from types import SimpleNamespace
 from typing import Literal, Optional
@@ -203,6 +203,62 @@ async def get_oauth_runtime_config() -> SimpleNamespace:
 # Matches the value recommended by Authlib's compliance_fix documentation.
 DEFAULT_TOKEN_EXPIRY_SECONDS = 3600
 NON_EXPIRING_TOKEN_EXPIRES_AT = 253402300799  # 9999-12-31 23:59:59 UTC
+
+_refresh_flights: tuple[asyncio.AbstractEventLoop, dict[str, asyncio.Task]] | None = None
+
+
+def _token_needs_refresh(session) -> bool:
+    if session.expires_at is None:
+        return True
+    token = session.token
+    lifetime = token.get('expires_in')
+    if lifetime is None and token.get('issued_at') is not None:
+        lifetime = session.expires_at - token['issued_at']
+    margin = min(300, max(0, float(lifetime)) / 2) if lifetime is not None else 60
+    return session.expires_at - datetime.now().timestamp() <= margin
+
+
+async def _refresh_session(manager, session, *, force_refresh=False):
+    global _refresh_flights
+    loop = asyncio.get_running_loop()
+    if _refresh_flights is None or _refresh_flights[0] is not loop:
+        _refresh_flights = (loop, {})
+    flights = _refresh_flights[1]
+    if session.id not in flights:
+        task = asyncio.create_task(_coordinated_refresh(manager, session, force_refresh=force_refresh))
+        flights[session.id] = task
+
+        def completed(task):
+            flights.pop(session.id, None)
+            if not task.cancelled():
+                task.exception()
+
+        task.add_done_callback(completed)
+    # A disconnected request must not cancel a refresh other requests rely on.
+    return await asyncio.shield(flights[session.id])
+
+
+async def _coordinated_refresh(manager, observed, *, force_refresh):
+    async def refresh():
+        current = await OAuthSessions.get_session_by_id_and_user_id(observed.id, observed.user_id)
+        if current is None:
+            return None
+        # Another worker may have rotated the refresh credential while we waited.
+        if not _token_needs_refresh(current) and (current.token != observed.token or not force_refresh):
+            return current.token
+        async with asyncio.timeout(45):
+            token = await manager._refresh_token(current)
+        if token is None:
+            await OAuthSessions.delete_session_by_id(current.id)
+        return token
+
+    redis = getattr(getattr(getattr(manager, 'app', None), 'state', None), 'redis', None)
+    if redis is None:
+        return await refresh()
+    # The network operation is bounded below the lease. If Redis is unavailable,
+    # fail this request without racing an uncoordinated credential rotation.
+    async with redis.lock(f'oauth:refresh:{observed.id}', timeout=60, blocking_timeout=60, thread_local=False):
+        return await refresh()
 
 
 def _normalize_token_expiry(token: dict) -> dict:
@@ -1088,21 +1144,8 @@ class OAuthClientManager:
                 log.warning(f'No OAuth session found for user {user_id}, client_id {client_id}')
                 return None
 
-            if (
-                force_refresh
-                or session.expires_at is None
-                or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at)
-            ):
-                log.debug('Token refresh needed for user %s, client_id %s', user_id, session.provider)
-                refreshed_token = await self._refresh_token(session)
-                if refreshed_token:
-                    return refreshed_token
-                else:
-                    log.warning(
-                        f'Token refresh failed for user {user_id}, client_id {session.provider}, deleting session {session.id}'
-                    )
-                    await OAuthSessions.delete_session_by_id(session.id)
-                    return None
+            if force_refresh or _token_needs_refresh(session):
+                return await _refresh_session(self, session, force_refresh=force_refresh)
             return session.token
 
         except Exception as e:
@@ -1419,22 +1462,8 @@ class OAuthManager:
                 )
                 return None
 
-            if (
-                force_refresh
-                or session.expires_at is None
-                or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at)
-            ):
-                log.debug('Token refresh needed for user %s, provider %s', user_id, session.provider)
-                refreshed_token = await self._refresh_token(session)
-                if refreshed_token:
-                    return refreshed_token
-                else:
-                    log.warning(
-                        f'Token refresh failed for user {user_id}, provider {session.provider}, deleting session {session.id}'
-                    )
-                    await OAuthSessions.delete_session_by_id(session.id)
-
-                    return None
+            if force_refresh or _token_needs_refresh(session):
+                return await _refresh_session(self, session, force_refresh=force_refresh)
             return session.token
 
         except Exception as e:

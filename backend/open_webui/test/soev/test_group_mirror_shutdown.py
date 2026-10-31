@@ -58,6 +58,32 @@ async def test_idle_application_never_polls_directory(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_shutdown_cancels_a_pull_after_its_request_disconnected(monkeypatch):
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def pull(**kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(group_mirror.config, 'SOEV_API_URL', 'https://directory.invalid')
+    monkeypatch.setattr(group_mirror, '_pull_due', AsyncMock(return_value=True))
+    monkeypatch.setattr(group_mirror, 'reconcile', pull)
+    app = SimpleNamespace(state=SimpleNamespace())
+    group_mirror.start_reconciler(app)
+    request = asyncio.create_task(group_mirror.ensure_snapshot())
+    await entered.wait()
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    await group_mirror.stop_reconciler(app)
+    assert cancelled.is_set()
+    assert group_mirror._snapshot_flight[1].done()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('credential', ['jwt', 'sk-fictional'])
 async def test_verified_requests_refresh_directory_on_demand(monkeypatch, credential):
     from fastapi import BackgroundTasks, Request, Response

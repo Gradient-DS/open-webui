@@ -70,12 +70,15 @@ async def test_reload_enriches_projected_sources_and_models_with_one_events_read
 
     fixture = Path(__file__).parents[4] / 'src/lib/utils/fixtures/projection-websearch.json'
     page = ProjectionPage.model_validate(json.loads(fixture.read_text()))
+    page.messages = page.messages[:3]
     for message in page.messages:
         if message.content.get('model'):
             message.content['model'] = ENDPOINT
     projection = AsyncMock(return_value=threads.ProjectionResult(page, 'etag'))
     monkeypatch.setattr(dark_api.client, 'projection', projection)
-    runtime = SimpleNamespace(get=AsyncMock(return_value={'events': events(), 'status': {'position': 100}}))
+    # Keep only the fictional citation this test's event stream supplies.
+    page.messages[-1].content['markers'] = [{'at': 10, 'text': ' [1]', 'cited': [{'source': URL, 'written': 1}]}]
+    runtime = SimpleNamespace(chat_events=AsyncMock(return_value=events()))
     monkeypatch.setattr(identity, 'build_client', lambda: runtime)
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
     assert response.status_code == 200
@@ -88,9 +91,12 @@ async def test_reload_enriches_projected_sources_and_models_with_one_events_read
     assert source['metadata'][0]['granularity'] == 'snippet'
     assert answer['model'] == MODEL
     assert returned['messages'][0]['content']['statusHistory'][0]['action'] == 'web_search'
-    assert runtime.get.await_count == 1
-    assert runtime.get.call_args.args == (f'/v1/chat/threads/{page.thread_id}',)
-    assert runtime.get.call_args.kwargs['as_user'] == 'owui:user:fictional-fern'
+    runtime.chat_events.assert_awaited_once_with(
+        page.thread_id,
+        as_user='owui:user:fictional-fern',
+        after=2,
+        through=5,
+    )
     assert projection.await_count == 1
 
 
@@ -103,6 +109,50 @@ async def test_not_modified_page_needs_no_presentation_read(dark_api, monkeypatc
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat', headers={'If-None-Match': 'etag'})
     assert response.status_code == 304
     runtime.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plain_assistant_page_needs_no_events_read(dark_api, monkeypatch):
+    from open_webui.soev import identity
+    from open_webui.soev.threads import ProjectionPage
+    from open_webui.test.soev.test_threads import page
+
+    projected = ProjectionPage.model_validate(page(5))
+    projected.messages[0].content = {'role': 'assistant', 'text': 'Hello', 'model': MODEL}
+    monkeypatch.setattr(
+        dark_api.client, 'projection', AsyncMock(return_value=threads.ProjectionResult(projected, 'etag'))
+    )
+    runtime = SimpleNamespace(chat_events=AsyncMock())
+    monkeypatch.setattr(identity, 'build_client', lambda: runtime)
+    response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
+    assert response.status_code == 200
+    assert response.json()['messages'][0]['content']['model'] == MODEL
+    runtime.chat_events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_visible_citation_can_resolve_a_source_from_an_earlier_page(dark_api, monkeypatch):
+    from open_webui.soev import identity
+    from open_webui.soev.threads import ProjectionPage
+    from open_webui.test.soev.test_threads import page
+
+    projected = ProjectionPage.model_validate(page(5))
+    projected.messages[0].content = {
+        'role': 'assistant',
+        'text': 'October 7.',
+        'markers': [{'cited': [{'source': URL, 'written': 7}]}],
+    }
+    monkeypatch.setattr(
+        dark_api.client, 'projection', AsyncMock(return_value=threads.ProjectionResult(projected, 'etag'))
+    )
+    runtime = SimpleNamespace(chat_events=AsyncMock(side_effect=[events()[2:], events()[:2]]))
+    monkeypatch.setattr(identity, 'build_client', lambda: runtime)
+    response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
+    assert response.json()['messages'][0]['content']['sources'][0]['n'] == 7
+    assert [(call.kwargs['after'], call.kwargs['through']) for call in runtime.chat_events.await_args_list] == [
+        (4, 5),
+        (0, 4),
+    ]
 
 
 @pytest.mark.asyncio
