@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
+import { connectionRetryCount, retryConnection, waitForConnectionRetry } from '$lib/stores/session';
 import { threadAPI } from './threads';
 import { completeSessionSignOut, createSessionBoundary, sessionLoginPath } from './session';
 
@@ -14,7 +16,7 @@ const fixture = () => {
 		expiresAt: undefined as number | undefined
 	};
 	const fetch = vi.fn<typeof globalThis.fetch>();
-	const waitForRetry = vi.fn<(signal?: AbortSignal | null) => Promise<void>>().mockResolvedValue();
+	const waitForRetry = vi.fn<typeof waitForConnectionRetry>().mockResolvedValue();
 	const reload = vi.fn();
 	const onExpire = vi.fn(() => {
 		session.token = null;
@@ -37,9 +39,12 @@ const fixture = () => {
 	return { session, fetch, waitForRetry, reload, onExpire, boundary, request };
 };
 
+beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => {}));
 afterEach(() => {
+	retryConnection();
 	vi.unstubAllGlobals();
 	vi.useRealTimers();
+	vi.restoreAllMocks();
 });
 
 describe('session request boundary', () => {
@@ -191,7 +196,9 @@ describe('session request boundary', () => {
 	});
 
 	it('preserves Request headers and bodies across a read-only authorization retry', async () => {
+		vi.useFakeTimers();
 		const f = fixture();
+		f.waitForRetry.mockImplementation(waitForConnectionRetry);
 		f.fetch
 			.mockResolvedValueOnce(json(503))
 			.mockResolvedValueOnce(json(200))
@@ -201,7 +208,11 @@ describe('session request boundary', () => {
 			headers: { Authorization: 'Bearer session-token' },
 			body: '{"threads":[]}'
 		});
-		expect((await f.boundary.fetch(request)).status).toBe(200);
+		const pending = f.boundary.fetch(request);
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledOnce());
+		await vi.advanceTimersByTimeAsync(1000);
+		expect((await pending).status).toBe(200);
+		expect(get(connectionRetryCount)).toBe(0);
 		const original = f.fetch.mock.calls[0][0] as Request;
 		const retried = f.fetch.mock.calls[2][0] as Request;
 		expect(original.headers.get('authorization')).toBe('Bearer session-token');
@@ -267,6 +278,128 @@ describe('session request boundary', () => {
 		expect(f.onExpire).not.toHaveBeenCalled();
 		expect(f.waitForRetry).not.toHaveBeenCalled();
 	});
+});
+
+describe('automatic session retries', () => {
+	beforeEach(() => vi.useFakeTimers());
+
+	it.each(['network', 502, 503, 'reconnect', 401] as const)(
+		'recovers from %s without user action or ever showing the banner',
+		async (failure) => {
+			const f = fixture();
+			f.waitForRetry.mockImplementation(waitForConnectionRetry);
+			let reads = 0;
+			f.fetch.mockImplementation(async (input) => {
+				if (String(input).endsWith('/auths/')) return json(failure === 401 ? 503 : 200);
+				if (++reads > 1) return json(200);
+				if (failure === 'network') throw new TypeError('Offline');
+				return failure === 'reconnect'
+					? json(500, { detail: { state: 'reconnect' } })
+					: json(failure);
+			});
+			const counts: number[] = [];
+			const unsubscribe = connectionRetryCount.subscribe((count) => counts.push(count));
+			try {
+				const request = f.request('/chats/?private=value');
+				await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledOnce());
+				expect(reads).toBe(1);
+				await vi.advanceTimersByTimeAsync(1000);
+				expect((await request).status).toBe(200);
+				expect(reads).toBe(2);
+				expect(counts.every((count) => count === 0)).toBe(true);
+				expect(console.warn).toHaveBeenCalledExactlyOnceWith('Session read retry', {
+					method: 'GET',
+					path: '/api/v1/chats/',
+					status: failure === 'network' ? 'network error' : failure === 'reconnect' ? 500 : failure
+				});
+				expect(f.onExpire).not.toHaveBeenCalled();
+			} finally {
+				unsubscribe();
+			}
+		}
+	);
+
+	it('shows the banner on the second consecutive failure and clears it on recovery', async () => {
+		const f = fixture();
+		f.waitForRetry.mockImplementation(waitForConnectionRetry);
+		let recovered = false;
+		f.fetch.mockImplementation(async (input) =>
+			json(String(input).endsWith('/auths/') || recovered ? 200 : 503)
+		);
+		const request = f.request();
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledOnce());
+		expect(get(connectionRetryCount)).toBe(0);
+		await vi.advanceTimersByTimeAsync(1000);
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledTimes(2));
+		expect(get(connectionRetryCount)).toBe(1);
+		const firstStart = f.waitForRetry.mock.calls[0][2];
+		expect(f.waitForRetry.mock.calls[1]).toEqual([undefined, 2, firstStart]);
+		recovered = true;
+		await vi.advanceTimersByTimeAsync(2000);
+		expect((await request).status).toBe(200);
+		expect(get(connectionRetryCount)).toBe(0);
+		expect(f.reload).not.toHaveBeenCalled();
+	});
+
+	it('counts failures per request, so concurrent first failures do not show the banner', async () => {
+		const f = fixture();
+		f.waitForRetry.mockImplementation(waitForConnectionRetry);
+		const failed = new Set<string>();
+		f.fetch.mockImplementation(async (input) => {
+			const path = String(input);
+			if (path.endsWith('/auths/') || failed.has(path)) return json(200);
+			failed.add(path);
+			return json(503);
+		});
+		const requests = [f.request('/chats/one'), f.request('/chats/two')];
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledTimes(2));
+		expect(get(connectionRetryCount)).toBe(0);
+		retryConnection();
+		expect((await Promise.all(requests)).map((response) => response.status)).toEqual([200, 200]);
+		expect(f.waitForRetry.mock.calls.map((call) => call[1])).toEqual([1, 1]);
+	});
+
+	it('rejects an aborted wait, clears its banner and stops retrying', async () => {
+		const f = fixture();
+		f.waitForRetry.mockImplementation(waitForConnectionRetry);
+		f.fetch.mockImplementation(async (input) =>
+			json(String(input).endsWith('/auths/') ? 200 : 503)
+		);
+		const controller = new AbortController();
+		const request = f.request('/chats/', { signal: controller.signal });
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledOnce());
+		await vi.advanceTimersByTimeAsync(1000);
+		await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledTimes(2));
+		expect(get(connectionRetryCount)).toBe(1);
+		const reason = new DOMException('Cancelled', 'AbortError');
+		const rejection = expect(request).rejects.toBe(reason);
+		controller.abort(reason);
+		await rejection;
+		expect(get(connectionRetryCount)).toBe(0);
+		const sends = f.fetch.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(15000);
+		expect(f.fetch).toHaveBeenCalledTimes(sends);
+	});
+
+	it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+		'never replays a failed %s when the automatic wait ends',
+		async (method) => {
+			const f = fixture();
+			f.waitForRetry.mockImplementation(waitForConnectionRetry);
+			f.fetch.mockImplementation(async (input) =>
+				json(String(input).endsWith('/auths/') ? 200 : 503)
+			);
+			const completed = vi.fn();
+			void f.request('/chats/', { method, body: '{}' }).then(completed, completed);
+			await vi.waitFor(() => expect(f.waitForRetry).toHaveBeenCalledOnce());
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(f.reload).toHaveBeenCalledOnce();
+			expect(f.fetch).toHaveBeenCalledTimes(2);
+			expect(completed).not.toHaveBeenCalled();
+			expect(get(connectionRetryCount)).toBe(0);
+			expect(console.warn).not.toHaveBeenCalled();
+		}
+	);
 });
 
 describe('sign-out navigation', () => {

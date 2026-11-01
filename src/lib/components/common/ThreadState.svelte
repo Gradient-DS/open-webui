@@ -3,13 +3,12 @@
 	import type { Readable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
 	import type { ThreadState } from '$lib/apis/threads';
-	import { recoverSession, registerConnectionRetry, sessionRedirecting } from '$lib/stores/session';
+	import { recoverSession, sessionRedirecting } from '$lib/stores/session';
 
 	let { state, retry }: { state: ThreadState; retry: () => unknown } = $props();
 	const i18n = getContext<Readable<I18n>>('i18n');
 	$effect(() => {
 		void recoverSession(state);
-		if (state === 'reconnect') return registerConnectionRetry(() => retry());
 	});
 	const text = $derived({
 		reconnect: $i18n.t('Reconnect to view this chat'),
@@ -21,7 +20,7 @@
 	});
 </script>
 
-{#if state !== 'reconnect' && state !== 'sign_in' && !$sessionRedirecting}
+{#if state !== 'sign_in' && !$sessionRedirecting}
 	<p role="status">{text[state]}</p>
 	<button onclick={retry}>{$i18n.t('Retry')}</button>
 {/if}
