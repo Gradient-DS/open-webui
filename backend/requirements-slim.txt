@@ -15,7 +15,7 @@ bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.15.0 # security: CVE-2026-101917, CVE-2026-101918, CVE-2026-102265..102274 fixed by 2.15.0
 authlib==1.9.1 # security: CVE-2026-114618 (RFC 7523 JWT bearer grant accepts any audience) fixed in 1.9.0
-joserfc==1.7.4
+joserfc==1.7.6 # security: CVE-2026-119283/119284 fixed in 1.7.5/1.7.6
 orjson==3.11.9
 
 requests==2.34.2
@@ -67,7 +67,7 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 
 ftfy==6.3.1
 chardet==7.4.3
-pypdf==6.21.2 # security: CVE-2026-115572/115580/115585 (crafted-PDF runtime blow-ups) fixed in 6.21.2; CVE-2026-113786 (crafted PDF reaches arbitrary image parsers) and CVE-2026-113789..113791 (memory/CPU blow-up via crafted PDFs) fixed in 6.21.0-6.21.1; CVE-2026-113792..113795 and earlier fixes (CVE-2026-102993..103000, CVE-2026-84309/84310/84311 and prior) stay fixed
+pypdf==6.21.4 # security: CVE-2026-119203..119209 fixed in 6.21.3/6.21.4; prior crafted-PDF fixes stay fixed
 fpdf2==2.8.8 # security: CVE-2026-114609 / CVE-2026-114610 (SVG <use> expansion, implicit image dereference) fixed in 2.8.8
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
@@ -76,7 +76,7 @@ msoffcrypto-tool==6.0.0
 unstructured==0.24.1 # security: CVE-2026-71428 (SSRF via the url= argument of partition()/partition_html()/partition_md()) fixed in 0.24.0; was 0.22.31
 python-magic==0.4.27 # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
 
-nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
+nltk==3.10.4 # security: GHSA-j456-xh4h-cpf2 fixed in 3.10.4; PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
 lxml==6.1.1
