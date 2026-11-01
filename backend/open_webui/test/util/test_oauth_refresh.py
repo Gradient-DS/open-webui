@@ -2,10 +2,9 @@
 
 import asyncio
 import shutil
+import socket
 import subprocess
-import tempfile
 import time
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,24 +18,30 @@ def redis_url():
     binary = shutil.which('redis-server')
     if binary is None:
         pytest.skip('redis-server is required for distributed refresh tests')
-    directory = tempfile.TemporaryDirectory(prefix='owui-oauth-', dir='/tmp')
-    socket = Path(directory.name) / 'redis.sock'
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
     server = subprocess.Popen(
-        [binary, '--port', '0', '--unixsocket', str(socket), '--save', '', '--appendonly', 'no'],
+        [binary, '--bind', '127.0.0.1', '--port', str(port), '--save', '', '--appendonly', 'no'],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     try:
         for _ in range(100):
-            if socket.exists():
+            assert server.poll() is None, 'redis-server exited before accepting connections'
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=0.1):
+                    pass
+            except OSError:
+                time.sleep(0.01)
+            else:
                 break
-            time.sleep(0.01)
-        assert socket.exists()
-        yield f'unix://{socket}'
+        else:
+            pytest.fail('redis-server did not accept connections')
+        yield f'redis://127.0.0.1:{port}'
     finally:
         server.terminate()
         server.wait(timeout=5)
-        directory.cleanup()
 
 
 @pytest.fixture(params=[oauth.OAuthManager, oauth.OAuthClientManager])
