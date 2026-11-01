@@ -721,6 +721,17 @@ actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
+key = "cloud_mailbox_address"
+name = "address"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}"
+description = "A fictional shared mailbox address for the soev-api proxy; the sealed stack has no soev-api."
+seeded_by = "seed_cloud_mailbox_address"
+depends_on = ["cloud_connection"]
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
 key = "cloud_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"

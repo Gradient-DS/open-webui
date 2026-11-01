@@ -523,6 +523,10 @@ def seed_cloud_family(ctx, parameter):
     return 'live_documents'
 
 
+def seed_cloud_mailbox_address(ctx, parameter):
+    return 'gedeeld@example.test'
+
+
 def seed_cloud_connection(ctx, parameter):
     created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
@@ -598,6 +602,7 @@ _SEEDERS = {
         seed_cloud_connection,
         seed_cloud_authorize_connection,
         seed_cloud_family,
+        seed_cloud_mailbox_address,
         seed_knowledge_file,
         seed_external_source,
     )

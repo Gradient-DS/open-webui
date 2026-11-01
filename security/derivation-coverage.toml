@@ -1,6 +1,6 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
 # Phase 4b audited all 27 previously labelled untyped JSON write bodies.
-# 27 blind body operations remain: 20 JSON writes, 1 JSON read, 6 multipart.
+# 26 blind body operations remain: 20 JSON writes, 1 JSON read, 5 multipart.
 # The writes include typed boolean/integer-only bodies, author-defined
 # valve bodies, an arbitrary config-import blob, and typed maps whose
 # dynamic keys the derivation deliberately does not traverse.
@@ -22,6 +22,10 @@ reason = "UpdateActiveMemberForm already declares only is_active (boolean). Ther
 [[waived]]
 id = "POST /api/v1/channels/{id}/messages/{message_id}/pin"
 reason = "PinMessageForm already declares only is_pinned (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/connections/{connection_id}/authorize"
+reason = "AuthorizationForm declares a single boolean flag selecting silent consent; there is no string field to plant."
 
 [[waived]]
 id = "POST /api/v1/configs/2fa"
