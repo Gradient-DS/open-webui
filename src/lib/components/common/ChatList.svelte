@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { getContext } from 'svelte';
 	import dayjs from 'dayjs';
 	import calendar from 'dayjs/plugin/calendar';
@@ -155,7 +156,7 @@
 						on:click={() => onChatClick?.(chat.id)}
 					>
 						<div class="text-ellipsis line-clamp-1 w-full">
-							{chat.title}
+							<ChatTitle title={chat.title} />
 						</div>
 					</a>
 

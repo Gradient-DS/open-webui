@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { toast } from 'svelte-sonner';
 	import { getContext } from 'svelte';
 
@@ -294,7 +295,7 @@
 										on:click={() => (show = false)}
 									>
 										<div class="text-ellipsis line-clamp-1 w-full">
-											{chat?.title}
+											<ChatTitle title={chat?.title} />
 										</div>
 									</a>
 
@@ -460,7 +461,7 @@
 													<td class="px-3 py-1 w-2/3">
 														<a href="/c/{chat.id}" target="_blank">
 															<div class=" hover:underline line-clamp-1">
-																{chat.title}
+																<ChatTitle title={chat.title} />
 															</div>
 														</a>
 													</td>

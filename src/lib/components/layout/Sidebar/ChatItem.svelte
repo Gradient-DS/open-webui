@@ -15,6 +15,7 @@
 </script>
 
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import type { Readable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
 	import { toast } from 'svelte-sonner';
@@ -560,7 +561,7 @@
 				? 'font-normal text-gray-800 dark:text-gray-200'
 				: ''} {($mobile || showInlineActions) && !readonly ? 'pr-12' : ''}"
 		>
-			{title}
+			<ChatTitle {title} />
 		</div>
 	</div>
 
@@ -582,7 +583,7 @@
 	}}
 >
 	<div class=" text-sm text-gray-500 flex-1 line-clamp-3">
-		{$i18n.t('This will delete')} <span class="  font-normal">{title}</span>.
+		{$i18n.t('This will delete')} <span class="  font-normal"><ChatTitle {title} /></span>.
 	</div>
 </DeleteConfirmDialog>
 
@@ -592,7 +593,7 @@
 			<div class="flex items-center gap-1">
 				<ChatIcon className=" size-[1.125rem]" strokeWidth="1.5" />
 				<div class=" text-xs text-white line-clamp-1">
-					{title}
+					<ChatTitle {title} />
 				</div>
 			</div>
 		</div>

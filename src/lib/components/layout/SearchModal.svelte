@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { toast } from 'svelte-sonner';
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	const i18n = getContext('i18n');
@@ -755,7 +756,7 @@
 									}}
 								>
 									<div class="text-ellipsis line-clamp-1 w-full">
-										{chat?.title}
+										<ChatTitle title={chat?.title} />
 									</div>
 									{#if chat?.snippet}
 										<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-0.5">

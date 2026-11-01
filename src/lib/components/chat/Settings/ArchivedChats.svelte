@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	// @ts-ignore
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -318,14 +319,14 @@
 						<a
 							class="mr-auto min-w-0 max-w-xl flex-1 self-center truncate text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-white"
 							href={chatUrl}
-							title={chat?.title}
+							title={chat?.title || $i18n.t('New Chat')}
 							on:click={(event) => {
 								event.preventDefault();
 								showSettings.set(false);
 								goto(chatUrl);
 							}}
 						>
-							{chat?.title}
+							<ChatTitle title={chat?.title} />
 						</a>
 						<div
 							class="hidden w-24 shrink-0 self-center justify-end text-gray-400 dark:text-gray-600 sm:flex"

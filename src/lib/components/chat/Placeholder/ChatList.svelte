@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 
@@ -232,7 +233,7 @@
 							? 'font-normal text-gray-800 dark:text-gray-200'
 							: ''}"
 					>
-						{chat?.title}
+						<ChatTitle title={chat?.title} />
 					</div>
 				</div>
 
