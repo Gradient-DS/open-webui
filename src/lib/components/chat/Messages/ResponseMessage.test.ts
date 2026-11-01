@@ -3,6 +3,22 @@ import { expect, it } from 'vitest';
 import { canRegenerateResponse } from '$lib/utils/features';
 
 const config = { features: { enable_v2_threads: true } };
+it('hides answer deletion under v2 even when multiple answer versions are visible', () => {
+	const source = readFileSync('src/lib/components/chat/Messages/ResponseMessage.svelte', 'utf8');
+	const expression = source.match(
+		/\{#if\s+([^{}]+)\}\s*<Tooltip content=\{\$i18n\.t\('Delete'\)\}/
+	)?.[1];
+	expect(expression).toBeTruthy();
+	const visible = new Function('$config', 'siblings', `return ${expression};`);
+	for (const v2 of [true, false]) {
+		for (const count of [0, 1, 2, 3]) {
+			expect(visible({ features: { enable_v2_threads: v2 } }, Array(count))).toBe(
+				!v2 && count > 1
+			);
+		}
+	}
+});
+
 it('permits v2 regeneration only for the last finished answer while idle', () => {
 	for (const last of [true, false])
 		for (const done of [true, false])

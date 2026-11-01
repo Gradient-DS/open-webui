@@ -1030,6 +1030,7 @@
 	};
 
 	const deleteMessageHandler = async () => {
+		if ($config?.features?.enable_v2_threads) return;
 		deleteMessage(message.id);
 	};
 
@@ -2158,7 +2159,7 @@
 									{/if}
 
 									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete_message ?? true)}
-										{#if siblings.length > 1}
+										{#if !$config?.features?.enable_v2_threads && siblings.length > 1}
 											<Tooltip content={$i18n.t('Delete')} placement="bottom">
 												<button
 													type="button"
