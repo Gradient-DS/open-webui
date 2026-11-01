@@ -20,7 +20,7 @@
 	});
 </script>
 
-{#if state !== 'sign_in' && !$sessionRedirecting}
+{#if state !== 'reconnect' && state !== 'sign_in' && !$sessionRedirecting}
 	<p role="status">{text[state]}</p>
 	<button onclick={retry}>{$i18n.t('Retry')}</button>
 {/if}
