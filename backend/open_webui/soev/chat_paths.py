@@ -20,6 +20,8 @@ class Organizations(Protocol):
     async def remove(self, user_id: str, chat_id: str) -> None: ...
     async def legacy_share(self, share_id: str) -> tuple[str, str, str | None] | None: ...
     async def folder_records(self, folder_id: str) -> dict[str, str]: ...
+    async def read_states(self, user_id: str) -> dict[str, float]: ...
+    async def set_read_at(self, user_id: str, conversation_id: str, read_at: float | None) -> float | None: ...
 
 
 class FeedbackForm(BaseModel):
@@ -67,7 +69,7 @@ class ChatPaths:
 
     async def record(self, user_id: str, chat_id: str) -> Organization:
         for record in await self.records(user_id):
-            if record.id == chat_id:
+            if record.id == chat_id or record.thread_id == chat_id or chat_id in record.branch_thread_ids:
                 return record
         # A thread shared with the caller need not have a local organisational
         # row. Its platform read is the authority, never the local mapping.
@@ -77,10 +79,12 @@ class ChatPaths:
         return [item async for page in self.authorized_pages(user_id, q=q) for item in page]
 
     async def authorized_pages(self, user_id: str, *, q: str = ''):
-        records, page = await asyncio.gather(self.records(user_id), self.client.index(q=q, limit=200, cursor=''))
+        records, reads, page = await asyncio.gather(
+            self.records(user_id), self.organizations.read_states(user_id), self.client.index(q=q, limit=200, cursor='')
+        )
         cursor, seen = '', set()
         while True:
-            yield threads.join_index(page, records)['items']
+            yield threads.join_index(page, records, reads)['items']
             if page.next_cursor is None:
                 return
             if page.next_cursor in seen:
@@ -137,7 +141,7 @@ class ChatPaths:
                 **item,
                 'id': (item.get('conversation_id') if item['owned'] else None)
                 or (item['thread_id'] if readonly else org.get('id', item['thread_id'])),
-                'last_read_at': org.get('last_read_at'),
+                'last_read_at': item.get('last_read_at', org.get('last_read_at')),
                 'readonly': readonly,
                 'pinned': org.get('pinned', False),
                 'folder_id': org.get('folder_id'),
@@ -189,9 +193,7 @@ class ChatPaths:
         if sort_by == 'title':
             return (item['title'] or '', item['thread_id'])
         if sort_by == 'unread_updated_at':
-            org = item['organization'] or {}
-            updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
-            return (updated > (org.get('last_read_at') or 0), item['updated_at'], item['thread_id'])
+            return (ChatPaths.is_unread(item), item['updated_at'], item['thread_id'])
         return (item['updated_at'], item['thread_id'])
 
     async def projection(self, user_id: str, chat_id: str, *, thread_id: str = '', current: bool = False, **kwargs):
@@ -269,6 +271,23 @@ class ChatPaths:
         invalidate()
         return result
 
+    @staticmethod
+    def is_unread(item: dict) -> bool:
+        answered = item.get('answered_at')
+        if not answered:
+            return False
+        read_at = item.get('last_read_at', (item.get('organization') or {}).get('last_read_at'))
+        return dt.datetime.fromisoformat(answered.replace('Z', '+00:00')).timestamp() > (read_at or 0)
+
+    async def mark_read(self, user_id: str, conversation_id: str) -> dict:
+        read_at = time.time()
+        record = await self.record(user_id, conversation_id)
+        # Authorize with the same principal and current-version boundary as opening the chat.
+        await self.client.projection(record.thread_id, current=True, window=1)
+        saved = await self.organizations.set_read_at(user_id, record.thread_id, read_at)
+        invalidate()
+        return {'chat_id': record.thread_id, 'last_read_at': saved}
+
     async def organize(self, user_id: str, chat_id: str, changes: dict) -> Organization:
         if set(changes) - {'folder_id', 'pinned', 'archived', 'last_read_at'}:
             raise ThreadError(422, 'invalid_request')
@@ -287,6 +306,8 @@ class ChatPaths:
         except ValidationError:
             raise ThreadError(422, 'invalid_request') from None
         await self.organizations.put(user_id, result)
+        if 'last_read_at' in changes:
+            await self.organizations.set_read_at(user_id, record.thread_id, changes['last_read_at'])
         invalidate()
         return result
 
@@ -301,13 +322,7 @@ class ChatPaths:
             items = [joined.get(item['thread_id'], item) for item in items]
         for item in items:
             org = item['organization'] or {}
-            updated = dt.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00')).timestamp()
-            if (
-                not item['owned']
-                or item.get('readonly', False)
-                or org.get('archived')
-                or updated <= (org.get('last_read_at') or 0)
-            ):
+            if not item['owned'] or item.get('readonly', False) or org.get('archived') or not self.is_unread(item):
                 continue
             folder, seen = org.get('folder_id'), set()
             while folder and folder not in seen:
@@ -341,7 +356,9 @@ class ChatPaths:
             if archived is not None:
                 changes = {'archived': archived}
             else:
-                changes = {'last_read_at': int(time.time())}
+                await self.mark_read(user_id, item.get('conversation_id') or item['thread_id'])
+                count += 1
+                continue
             await self.organize(user_id, item.get('conversation_id') or org.get('id', item['thread_id']), changes)
             count += 1
         return count

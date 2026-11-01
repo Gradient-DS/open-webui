@@ -23,11 +23,48 @@ chat = sa.table(
 branches = sa.table('chat_thread', sa.column('chat_id', sa.String), sa.column('thread_id', sa.String))
 legacy_shares = sa.table('shared_chat', sa.column('id'), sa.column('chat_id'), sa.column('user_id'))
 FIELDS = ('id', 'thread_id', 'folder_id', 'pinned', 'archived', 'last_read_at')
+reads = sa.table(
+    'thread_read',
+    sa.column('user_id', sa.String),
+    sa.column('conversation_id', sa.String),
+    sa.column('last_read_at', sa.Float(precision=53)),
+)
 
 
 class ThreadOrganizations:
     def __init__(self, session: Callable = get_async_db) -> None:
         self.session = session
+
+    async def read_states(self, user_id: str) -> dict[str, float]:
+        async with self.session() as db:
+            return dict(
+                (
+                    await db.execute(
+                        sa.select(reads.c.conversation_id, reads.c.last_read_at).where(reads.c.user_id == user_id)
+                    )
+                ).all()
+            )
+
+    async def set_read_at(self, user_id: str, conversation_id: str, read_at: float | None) -> float | None:
+        async with self.session() as db:
+            if read_at is None:
+                await db.execute(
+                    reads.delete().where(reads.c.user_id == user_id, reads.c.conversation_id == conversation_id)
+                )
+                await db.commit()
+                return None
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            insert = sqlite_insert if db.bind.dialect.name == 'sqlite' else pg_insert
+            statement = insert(reads).values(user_id=user_id, conversation_id=conversation_id, last_read_at=read_at)
+            statement = statement.on_conflict_do_update(
+                index_elements=[reads.c.user_id, reads.c.conversation_id],
+                set_={'last_read_at': sa.case((reads.c.last_read_at < read_at, read_at), else_=reads.c.last_read_at)},
+            ).returning(reads.c.last_read_at)
+            saved = (await db.execute(statement)).scalar_one()
+            await db.commit()
+            return saved
 
     async def context_thread_id(self, user_id: str, chat_id: str) -> str | None:
         # Resolve only the attaching container owner's mapping; source access
@@ -97,6 +134,8 @@ class ThreadOrganizations:
 
     async def put(self, user_id: str, record: Organization) -> None:
         values = {name: getattr(record, name) for name in FIELDS if name != 'id'}
+        if values['last_read_at'] is not None:
+            values['last_read_at'] = int(values['last_read_at'])
         async with self.session() as db:
             owner = (
                 await db.execute(sa.select(chat.c.user_id, chat.c.thread_id).where(chat.c.id == record.id))

@@ -27,6 +27,8 @@ function callback(name: string, state: Record<string, any>) {
 	state.updateThreadReasoning ??= updateThreadReasoning;
 	state.retainReasoningTiming ??= retainReasoningTiming;
 	state.createMessagesList ??= (history: any) => Object.values(history.messages);
+	state.updateLastReadAt ??= vi.fn();
+	state.$temporaryChatEnabled ??= false;
 
 	let expression: ts.Node | undefined;
 	const visit = (node: ts.Node) => {
@@ -46,6 +48,66 @@ function callback(name: string, state: Record<string, any>) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+it.each([true, false])('persists reads over HTTP only for v2=%s', async (v2) => {
+	const state = {
+		$config: { features: { enable_v2_threads: v2 } },
+		localStorage: { token: 'token' },
+		markConversationRead: vi.fn().mockResolvedValue({ chat_id: 'conversation', last_read_at: 1 }),
+		$socket: { emit: vi.fn() }
+	};
+	callback('updateLastReadAt', state)('conversation');
+	if (v2) {
+		expect(state.markConversationRead).toHaveBeenCalledExactlyOnceWith('token', 'conversation');
+		expect(state.$socket.emit).not.toHaveBeenCalled();
+	} else {
+		expect(state.markConversationRead).not.toHaveBeenCalled();
+		expect(state.$socket.emit).toHaveBeenCalledWith('events:chat', {
+			chat_id: 'conversation',
+			data: { type: 'last_read_at' }
+		});
+	}
+});
+
+it.each([true, false])(
+	'marks a completed answer read only when its conversation is open=%s',
+	async (open) => {
+		const message = { id: 'answer', content: 'Answer', model: 'model', done: false };
+		const state = {
+			$config: { features: { enable_v2_threads: true } },
+			$chatId: open ? 'conversation' : 'other',
+			$temporaryChatEnabled: false,
+			$settings: {},
+			$showCallOverlay: false,
+			history: { currentId: 'answer', messages: { answer: message } },
+			followStreamingResponse: vi.fn(),
+			updateThreadReasoning: vi.fn(),
+			getOutputText: () => '',
+			removeAllDetails: (content: string) => content,
+			dispatchCallOverlayAudio: vi.fn(),
+			eventTarget: { dispatchEvent: vi.fn() },
+			CustomEvent: class {
+				constructor(
+					public name: string,
+					public options: unknown
+				) {}
+			},
+			turnAnswered: () => true,
+			taskIds: null,
+			tick: vi.fn(),
+			scheduleResponseScrollToBottom: vi.fn(),
+			chatCompletedHandler: vi.fn(),
+			processNextInQueue: vi.fn(),
+			updateLastReadAt: vi.fn()
+		};
+		const handler = callback('chatCompletionEventHandler', state);
+		await handler({ content: 'Answer' }, message, 'conversation');
+		expect(state.updateLastReadAt).not.toHaveBeenCalled();
+		await handler({ done: true }, message, 'conversation');
+		expect(state.updateLastReadAt).toHaveBeenCalledTimes(open ? 1 : 0);
+		if (open) expect(state.updateLastReadAt).toHaveBeenCalledWith('conversation');
+	}
+);
 
 it('applies v2 tag events and refreshes global tags without blocking or replacing the chat', async () => {
 	const chat = { id: 'thread' };

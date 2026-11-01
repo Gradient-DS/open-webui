@@ -29,6 +29,12 @@ async def organization_store(monkeypatch):
         )
         await conn.execute(sa.text('CREATE TABLE shared_chat (id TEXT PRIMARY KEY, chat_id TEXT, user_id TEXT)'))
         await conn.execute(sa.text('CREATE TABLE chat_thread (thread_id TEXT PRIMARY KEY, chat_id TEXT)'))
+        await conn.execute(
+            sa.text("""CREATE TABLE thread_read (
+            user_id TEXT, conversation_id TEXT, last_read_at FLOAT,
+            PRIMARY KEY (user_id, conversation_id)
+        )""")
+        )
         await conn.execute(sa.text("INSERT INTO chat (id, user_id) VALUES ('fictional-legacy', 'fictional-fern')"))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -114,3 +120,19 @@ async def test_retired_link_and_folder_mapping_need_no_snapshot_columns(organiza
     assert await repository.legacy_share('fictional-missing') is None
     assert await repository.folder_records('fictional-folder') == {'fictional-thread': 'fictional-owner'}
     assert not any(re.search(r'shared_chat\.(chat|title)\b', sql) for sql in statements)
+
+
+@pytest.mark.asyncio
+async def test_read_watermarks_are_precise_monotonic_and_reader_scoped(organization_store):
+    repository, session, statements = organization_store
+    await repository.set_read_at('owner', 'conversation', 1792922400.25)
+    await repository.set_read_at('reader', 'conversation', 1792922400.5)
+    assert await repository.set_read_at('reader', 'conversation', 1792922400.125) == 1792922400.5
+    reloaded = ThreadOrganizations(session)
+    assert await reloaded.read_states('owner') == {'conversation': 1792922400.25}
+    assert await reloaded.read_states('reader') == {'conversation': 1792922400.5}
+    assert await reloaded.read_states('other') == {}
+    assert await reloaded.list('reader') == []
+    await repository.set_read_at('reader', 'conversation', None)
+    assert await reloaded.read_states('reader') == {}
+    assert await reloaded.read_states('owner') == {'conversation': 1792922400.25}

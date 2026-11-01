@@ -1,11 +1,38 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { addTagById, getTagsById } from './index';
+import { addTagById, getTagsById, markChatReadById } from './index';
 
 vi.mock('$lib/stores', async () => ({
 	config: (await import('svelte/store')).writable(undefined)
 }));
 vi.mock('$lib/utils', () => ({ getTimeRange: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
+
+it('persists a conversation read without sending a client timestamp or version id', async () => {
+	const fetch = vi.fn(
+		async () => new Response(JSON.stringify({ chat_id: 'conversation', last_read_at: 12.5 }))
+	);
+	vi.stubGlobal('fetch', fetch);
+	expect(await markChatReadById('token', 'conversation')).toEqual({
+		chat_id: 'conversation',
+		last_read_at: 12.5
+	});
+	expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/threads/conversation/read', {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: 'Bearer token'
+		}
+	});
+});
+
+it('surfaces a refused read acknowledgement', async () => {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async () => new Response(JSON.stringify({ state: 'unavailable' }), { status: 404 }))
+	);
+	await expect(markChatReadById('token', 'conversation')).rejects.toBe('This chat is unavailable');
+});
 
 it('adapts canonical public tags for the existing tag component', async () => {
 	vi.stubGlobal(

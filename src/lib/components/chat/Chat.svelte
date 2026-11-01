@@ -88,7 +88,7 @@
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isLLM } from '$lib/utils/assistants';
-	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
+	import { refreshChatList, refreshFolderChatLists, markConversationRead } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -1000,7 +1000,7 @@
 		prefetchLiveGrants();
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
-		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
 			noteChatDebug('marking outgoing chat read', { outgoingChatId: $chatId });
 			updateLastReadAt($chatId);
 		}
@@ -1070,7 +1070,7 @@
 		clearTimeout(saveControlsTimer);
 		await saveControls();
 
-		if ($chatId && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && !$temporaryChatEnabled) {
 			updateLastReadAt($chatId);
 		}
 
@@ -1403,6 +1403,10 @@
 	};
 
 	const updateLastReadAt = (id) => {
+		if ($config?.features?.enable_v2_threads) {
+			void markConversationRead(localStorage.token, id).catch(console.error);
+			return;
+		}
 		$socket?.emit('events:chat', {
 			chat_id: id,
 			data: { type: 'last_read_at' }
@@ -1996,7 +2000,7 @@
 			try {
 				clearTimeout(saveControlsTimer);
 				saveControls();
-				if (chatIdProp && !$temporaryChatEnabled) {
+				if (!$config?.features?.enable_v2_threads && chatIdProp && !$temporaryChatEnabled) {
 					updateLastReadAt(chatIdProp);
 				}
 				pageSubscribe();
@@ -2414,7 +2418,7 @@
 
 		// Mark the outgoing chat as read before resetting; in-place created chats
 		// keep chatIdProp undefined, so navigateHandler never marks them read.
-		if ($chatId && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && !$temporaryChatEnabled) {
 			updateLastReadAt($chatId);
 		}
 
@@ -2786,6 +2790,7 @@
 				tags = page.tags.map((name) => ({ name }));
 				const last = history.currentId ? history.messages[history.currentId] : null;
 				if (!last || last.role !== 'assistant' || !last.done) refreshThreadProjection(id);
+				else if (!last.error && !$temporaryChatEnabled) updateLastReadAt(id);
 			} catch (error) {
 				toast.error($i18n.t(`${error}`));
 			}
@@ -3458,7 +3463,7 @@
 		history = history;
 	};
 
-	const chatCompletionEventHandler = async (data, message, chatId) => {
+	const chatCompletionEventHandler = async (data, message, conversationId: string) => {
 		followStreamingResponse(message.id);
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
 		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
@@ -3529,6 +3534,9 @@
 
 		if (done) {
 			message.done = true;
+			if ($config?.features?.enable_v2_threads && $chatId === conversationId && !$temporaryChatEnabled && !message.error) {
+				updateLastReadAt(conversationId);
+			}
 			const visibleContent =
 				getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
 
@@ -3567,14 +3575,14 @@
 			// (outlet filters, chat save, title gen, follow-ups, tags)
 			// without blocking the user from sending new messages.
 			chatCompletedHandler(
-				chatId,
+				conversationId,
 				message.model,
 				message.id,
 				createMessagesList(history, message.id)
 			);
 
 			// Process next queued request if any
-			await processNextInQueue(chatId);
+			await processNextInQueue(conversationId);
 		}
 
 		await tick();

@@ -6,6 +6,7 @@
 	import { user, WEBUI_NAME } from '$lib/stores';
 	import { ThreadError, type ProjectionPage } from '$lib/apis/threads';
 	import { buildThreadHistory, mergeProjection, type ThreadHistory } from '$lib/utils/threads';
+	import { markConversationRead } from '$lib/stores/chatList';
 	import { sharingAPI, shareStateText } from '$lib/utils/threadSharing';
 	import Message from './Messages/Message.svelte';
 
@@ -36,6 +37,7 @@
 		older = false;
 		let active = true;
 		let pending = false;
+		let readVersion = '';
 		const api = sharingAPI(token);
 		if (!identity || !token) {
 			void goto(`/auth?redirect=${encodeURIComponent(`/s/${id}`)}`);
@@ -59,6 +61,12 @@
 				page = next;
 				history = nextHistory;
 				error = '';
+				const last = next.messages.at(-1);
+				const version = `${next.thread_id}:${next.generation}:${last?.version ?? ''}:${last?.finished}`;
+				if (version !== readVersion) {
+					readVersion = version;
+					void markConversationRead(token, next.thread_id).catch(console.error);
+				}
 			} catch (e) {
 				if (!active) return;
 				clear();

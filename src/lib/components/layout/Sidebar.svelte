@@ -393,7 +393,7 @@
 		if (res.folder_unread_counts) {
 			applyFolderUnreadCounts(res.folder_unread_counts);
 		}
-		setAllChatsRead();
+		setAllChatsRead(Boolean($config?.features?.enable_v2_threads));
 		for (const folder of Object.values(folderRegistry)) {
 			folder?.setAllChatsRead?.();
 		}
@@ -1592,6 +1592,7 @@
 										title={chat.title}
 										createdAt={chat.created_at}
 										updatedAt={chat.updated_at}
+										answeredAt={chat.answered_at ?? null}
 										lastReadAt={chat.last_read_at}
 										active={chat.active ?? false}
 										readonly={true}
@@ -1782,6 +1783,7 @@
 													title={chat.title}
 													createdAt={chat.created_at}
 													updatedAt={chat.updated_at}
+													answeredAt={chat.answered_at ?? null}
 													lastReadAt={chat.last_read_at}
 													active={chat.active ?? false}
 													readonly={chat.readonly ?? false}
@@ -1847,6 +1849,7 @@
 											title={chat.title}
 											createdAt={chat.created_at}
 											updatedAt={chat.updated_at}
+											answeredAt={chat.answered_at ?? null}
 											lastReadAt={chat.last_read_at}
 											active={chat.active ?? false}
 											readonly={chat.readonly ?? false}

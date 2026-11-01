@@ -63,6 +63,7 @@ class IndexItem(WireModel):
     title: str | None
     tags: list[str] = Field(default_factory=list)
     updated_at: str
+    answered_at: str | None = None
     parent_thread: str | None
     parent_position: int | None
     shared: bool
@@ -176,16 +177,23 @@ class Organization(WireModel):
     folder_id: str | None = None
     pinned: bool = False
     archived: bool = False
-    last_read_at: int | None = None
+    last_read_at: float | None = None
     branch_thread_ids: list[str] = Field(default_factory=list, exclude=True)
 
 
-def join_index(page: IndexPage, records: list[Organization]) -> dict:
+def join_index(page: IndexPage, records: list[Organization], reads: dict[str, float] | None = None) -> dict:
     by_thread = {record.thread_id: record for record in records}
     items = []
     for item in page.items:
         record = by_thread.get(item.conversation_id if item.owned and item.conversation_id else item.thread_id)
-        items.append({**item.model_dump(), 'organization': record.model_dump() if record else None})
+        key = item.conversation_id if item.owned and item.conversation_id else item.thread_id
+        items.append(
+            {
+                **item.model_dump(),
+                'organization': record.model_dump() if record else None,
+                'last_read_at': (reads or {}).get(key, record.last_read_at if record else None),
+            }
+        )
     return {'items': items, 'next_cursor': page.next_cursor}
 
 

@@ -842,6 +842,19 @@ export const toggleChatPinnedStatusById = async (token: string, id: string) => {
 	return res;
 };
 
+export const markChatReadById = async (token: string, id: string) => {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/threads/${encodeURIComponent(id)}/read`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	});
+	if (!response.ok) throw getErrorDetail(await response.json());
+	return response.json() as Promise<{ chat_id: string; last_read_at: number }>;
+};
+
 export const markChatUnreadById = async (token: string, id: string) => {
 	let error = null;
 

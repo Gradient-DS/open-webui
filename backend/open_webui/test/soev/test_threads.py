@@ -47,6 +47,7 @@ def index_item(identifier='fictional-thread', parent=None, at=None, *, owned=Tru
         'owned': owned,
         'title': 'Fictional title',
         'updated_at': '2026-10-25T10:00:00Z',
+        'answered_at': '2026-10-25T10:00:00Z',
         'parent_thread': parent,
         'parent_position': at,
         'shared': False,

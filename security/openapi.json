@@ -38843,6 +38843,48 @@
         "summary": "Forks"
       }
     },
+    "/api/v1/threads/{thread_id}/read": {
+      "post": {
+        "operationId": "mark_read_api_v1_threads__thread_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Read"
+      }
+    },
     "/api/v1/threads/{thread_id}/versions": {
       "get": {
         "operationId": "versions_api_v1_threads__thread_id__versions_get",

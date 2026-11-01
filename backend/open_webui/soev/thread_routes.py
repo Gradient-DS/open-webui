@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,6 +12,16 @@ from open_webui.soev import threads
 from open_webui.soev.threads import CreatedThread, Organization, ThreadError
 
 NO_STORE = {'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'}
+
+
+async def read_states(request: Request, user_id: str) -> dict[str, float]:
+    repository = getattr(request.app.state, 'thread_organizations', None)
+    return await repository.read_states(user_id) if repository is not None else {}
+
+
+def require_threads_enabled() -> None:
+    if not threads.enabled():
+        raise ThreadError(404, 'unavailable')
 
 
 def projection_response(result: threads.ProjectionResult) -> Response:
@@ -70,8 +80,7 @@ def create_thread_router(
     from open_webui.utils.auth import get_verified_user
 
     async def require_enabled(user=Depends(get_verified_user)):
-        if not threads.enabled():
-            raise ThreadError(404, 'unavailable')
+        require_threads_enabled()
         return user
 
     router = APIRouter(route_class=PrivateRoute)
@@ -82,13 +91,22 @@ def create_thread_router(
 
     @router.get('')
     async def index(
+        request: Request,
         q: str = Query('', max_length=500),
         limit: int = Query(50, ge=1, le=200),
         cursor: str = '',
         user=Depends(require_enabled),
     ):
         page = await threads.build_client().index(q=q, limit=limit, cursor=cursor)
-        return threads.join_index(page, await organizations(user.id))
+        return threads.join_index(page, await organizations(user.id), await read_states(request, user.id))
+
+    @router.post('/{thread_id}/read')
+    async def mark_read(thread_id: str, request: Request, user=Depends(require_enabled)):
+        from open_webui.soev.chat_routes import paths
+        from open_webui.soev.thread_sharing import require_header_mutation
+
+        require_header_mutation(request)
+        return await paths(request).mark_read(user.id, thread_id)
 
     @router.get('/{thread_id}/forks')
     async def forks(

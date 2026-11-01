@@ -45,7 +45,8 @@
 		settings,
 		user
 	} from '$lib/stores';
-	import { refreshChatList } from '$lib/stores/chatList';
+	import { refreshChatList, chatReadAt, clearChatReadAt } from '$lib/stores/chatList';
+	import { answerTimestamp, isChatUnread } from '$lib/utils/chatReadState';
 
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -72,6 +73,7 @@
 	export let title;
 	export let createdAt: number | null = null;
 	export let updatedAt: number | null = null;
+	export let answeredAt: string | null = null;
 	export let lastReadAt: number | null = null;
 	export let active = false;
 
@@ -121,21 +123,24 @@
 		closeActiveHoverPreview = closeHoverPreview;
 	}
 
-	// Local state: tracks the last updatedAt seen while the user was viewing
+	// Local state: tracks the last activity seen while the user was viewing
 	// this chat.  Survives prop refreshes from sidebar data re-fetches that
 	// would overwrite the `lastReadAt` prop with a stale server value.
 	let viewedAt: number | null = null;
 
 	$: if (id === $chatId) {
-		viewedAt = updatedAt ?? Date.now() / 1000;
+		viewedAt = $config?.features?.enable_v2_threads
+			? answerTimestamp(answeredAt)
+			: updatedAt ?? Date.now() / 1000;
 	}
 
-	$: effectiveReadAt = Math.max(lastReadAt ?? 0, viewedAt ?? 0) || null;
+	$: effectiveReadAt = Math.max(lastReadAt ?? 0, viewedAt ?? 0, $chatReadAt[id] ?? 0) || null;
 
-	$: unread =
-		id !== $chatId &&
-		!active &&
-		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
+	$: unread = isChatUnread(
+		{ id, answered_at: answeredAt, updated_at: updatedAt, last_read_at: effectiveReadAt, active },
+		Boolean($config?.features?.enable_v2_threads),
+		$chatId
+	);
 	$: showMenu =
 		id === $chatId || confirmEdit || mouseOver || focusWithin || menuOpen || selected;
 	$: chatItemClass = ` min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 ${
@@ -164,7 +169,9 @@
 
 		// Optimistically mark as read in UI when clicked
 		unread = false;
-		lastReadAt = Date.now() / 1000;
+		lastReadAt = $config?.features?.enable_v2_threads
+			? answerTimestamp(answeredAt)
+			: Date.now() / 1000;
 
 		if ($mobile) {
 			event?.preventDefault();
@@ -196,6 +203,7 @@
 		if (!res) return;
 
 		viewedAt = null;
+		clearChatReadAt(id);
 		lastReadAt = res.last_read_at ?? 0;
 		onReadStateChange(res);
 	};

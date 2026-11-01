@@ -26,6 +26,7 @@
 	import Loader from '../common/Loader.svelte';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
+	import { clearChatReadAt } from '$lib/stores/chatList';
 	import { config, user, chatId as currentChatId, tags } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 	import Messages from '../chat/Messages.svelte';
@@ -97,6 +98,7 @@
 		});
 
 		if (res) {
+			clearChatReadAt(id);
 			await refreshSidebar();
 		}
 	};

@@ -36,6 +36,7 @@ export type IndexItem = {
 	title: string | null;
 	tags: string[];
 	updated_at: string;
+	answered_at?: string | null;
 	parent_thread: string | null;
 	parent_position: number | null;
 };
@@ -49,7 +50,10 @@ export type Organization = {
 	last_read_at: number | null;
 };
 
-export type SidebarItem = IndexItem & { organization: Organization | null };
+export type SidebarItem = IndexItem & {
+	organization: Organization | null;
+	last_read_at?: number | null;
+};
 export type Page<T> = { items: T[]; next_cursor: string | null };
 export type ThreadState =
 	| 'reconnect'

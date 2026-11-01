@@ -25,6 +25,18 @@ class FictionalOrganizations:
             )
         ]
         self.writes = []
+        self.reads = {}
+
+    async def read_states(self, user_id):
+        return dict(self.reads.get(user_id, {}))
+
+    async def set_read_at(self, user_id, conversation_id, read_at):
+        reads = self.reads.setdefault(user_id, {})
+        if read_at is None:
+            reads.pop(conversation_id, None)
+            return None
+        reads[conversation_id] = max(reads.get(conversation_id, 0), read_at)
+        return reads[conversation_id]
 
     async def list(self, user_id):
         return list(self.records)
@@ -301,6 +313,11 @@ async def dark_api(monkeypatch):
     records = FictionalOrganizations()
     api = FastAPI()
     api.state.thread_organizations = records
+    from open_webui.soev.thread_routes import create_thread_router
+
+    read_router = create_thread_router(records.list)
+    read_router.routes = [route for route in read_router.routes if route.path in {'', '/{thread_id}/read'}]
+    api.include_router(read_router, prefix='/api/v1/threads')
     for router, prefix in [
         (chats.router, 'chats'),
         (evaluations.router, 'evaluations'),
@@ -1608,6 +1625,110 @@ async def test_delete_platform_conversation_without_local_organization(dark_api)
     dark_api.records.records.clear()
     await ChatPaths(dark_api.client, dark_api.records).delete('fictional-fern', 'fictional-thread')
     assert [call.url.path for call in dark_api.calls] == ['/v1/chat/threads/fictional-thread']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['title', 'tags', 'pinned'])
+async def test_metadata_changes_do_not_make_a_read_answer_unread(dark_api, change):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    answered = dark_api.visible[0]['answered_at']
+    await dark_api.records.set_read_at('fictional-fern', 'fictional-thread', 1792922400.5)
+    dark_api.visible[0]['updated_at'] = '2026-11-01T12:00:00Z'
+    if change == 'pinned':
+        await service.organize('fictional-fern', 'fictional-chat', {'pinned': True})
+    else:
+        dark_api.visible[0][change] = 'Renamed' if change == 'title' else ['new_tag']
+    row = (await service.listing('fictional-fern'))[0]
+    assert row['answered_at'] == answered
+    assert not service.is_unread(row)
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
+
+
+@pytest.mark.asyncio
+async def test_answer_while_away_then_open_and_finish_while_open(dark_api, monkeypatch):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    await dark_api.records.set_read_at('fictional-fern', 'fictional-thread', 1792922400.25)
+    dark_api.visible[0]['answered_at'] = '2026-10-25T10:00:00.500Z'
+    assert service.is_unread((await service.listing('fictional-fern'))[0])
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 1}
+    monkeypatch.setattr('open_webui.soev.chat_paths.time.time', lambda: 1792922400.75)
+    opened = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    assert opened.status_code == 200, opened.text
+    assert opened.json() == {'chat_id': 'fictional-thread', 'last_read_at': 1792922400.75}
+    assert not service.is_unread((await service.listing('fictional-fern'))[0])
+    dark_api.visible[0]['answered_at'] = '2026-10-25T10:00:01.125Z'
+    monkeypatch.setattr('open_webui.soev.chat_paths.time.time', lambda: 1792922401.25)
+    finished = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    assert finished.status_code == 200
+    assert not service.is_unread((await service.listing('fictional-fern'))[0])
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing', [True, False])
+async def test_older_or_empty_index_has_no_unread_answer(dark_api, missing):
+    if missing:
+        dark_api.visible[0].pop('answered_at')
+    else:
+        dark_api.visible[0]['answered_at'] = None
+    response = await dark_api.browser.get('/api/v1/chats/list?include_folders=true')
+    assert response.status_code == 200, response.text
+    row = response.json()[0]
+    assert row['answered_at'] is None
+    assert not ChatPaths.is_unread(row)
+    assert await ChatPaths(dark_api.client, dark_api.records).folder_counts(
+        'fictional-fern', {'fictional-folder': None}
+    ) == {'fictional-folder': 0}
+
+
+@pytest.mark.asyncio
+async def test_read_watermark_uses_conversation_id_across_versions(dark_api):
+    root = 'fictional-thread'
+    dark_api.visible[:] = [{**index_item('fictional-child', root, 1), 'conversation_id': root, 'version_count': 2}]
+    response = await dark_api.browser.post('/api/v1/threads/' + root + '/read')
+    assert response.status_code == 200, response.text
+    assert response.json()['chat_id'] == root
+    assert set(dark_api.records.reads['fictional-fern']) == {root}
+    row = (await dark_api.browser.get('/api/v1/chats/list?include_folders=true')).json()[0]
+    assert row['id'] == root and row['thread_id'] == 'fictional-child'
+    assert not ChatPaths.is_unread(row)
+    index = (await dark_api.browser.get('/api/v1/threads')).json()['items'][0]
+    assert index['answered_at'] == row['answered_at']
+    assert index['last_read_at'] == response.json()['last_read_at']
+
+
+@pytest.mark.asyncio
+async def test_read_refusal_does_not_persist_and_read_endpoint_is_v2_only(dark_api, monkeypatch):
+    dark_api.state['allowed'] = False
+    response = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    assert response.status_code == 404 and response.json() == {'state': 'unavailable'}
+    assert not dark_api.records.reads
+    monkeypatch.setattr(threads, 'enabled', lambda: False)
+    response = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    assert response.status_code == 404
+    assert not dark_api.records.reads
+
+
+@pytest.mark.asyncio
+async def test_shared_reader_read_does_not_mutate_owner_organization(dark_api):
+    dark_api.visible[0]['owned'] = False
+    dark_api.records.records.clear()
+    response = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    assert response.status_code == 200, response.text
+    assert not dark_api.records.writes
+    row = (await dark_api.browser.get('/api/v1/chats/list?include_folders=true')).json()[0]
+    assert row['readonly'] and not ChatPaths.is_unread(row)
+    assert row['answered_at'] == dark_api.visible[0]['answered_at']
+    assert await dark_api.records.read_states('fictional-other') == {}
+
+
+@pytest.mark.asyncio
+async def test_mark_unread_clears_the_v2_watermark(dark_api):
+    await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
+    response = await dark_api.browser.post('/api/v1/chats/fictional-thread/unread')
+    assert response.status_code == 200, response.text
+    row = (await dark_api.browser.get('/api/v1/chats/list?include_folders=true')).json()[0]
+    assert ChatPaths.is_unread(row)
 
 
 @pytest.mark.asyncio
