@@ -86,3 +86,14 @@ describe('composer preferences', () => {
 		expect(chosen.selectedToolIds).toEqual(['tool']);
 	});
 });
+
+it('existing chats inherit user choices only for features the chat has not saved', () => {
+	expect(composerFromFeatures(undefined, chosen)).toEqual(chosen);
+	expect(composerFromFeatures(null, chosen)).toEqual(chosen);
+	expect(composerFromFeatures({}, chosen)).toEqual(chosen);
+	expect(composerFromFeatures({ web_search: false, tool_ids: [] }, chosen)).toEqual({
+		...chosen,
+		webSearchEnabled: false,
+		selectedToolIds: []
+	});
+});

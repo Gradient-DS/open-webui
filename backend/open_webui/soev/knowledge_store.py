@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.principal_refs import collection_access
 from open_webui.soev.request_cache import memoized
 
 
@@ -108,12 +109,39 @@ class SoevKnowledgeTable:
         return [row async for row in client.pages(path, as_user=ref, params=params)]
 
     async def _send(self, method, path, body=None, *, user_id=None, idempotency_key=None):
+        if body is not None and 'principals' in body and 'writers' in body:
+            body = await collection_access(body)
         if idempotency_key is None:
             operation = json.dumps([method, path, body], sort_keys=True, separators=(',', ':'))
             idempotency_key = hashlib.sha256(operation.encode()).hexdigest()
-        return await self._client.send(
+        result = await self._client.send(
             method, path, body, as_user=self._user_ref(user_id), idempotency_key=idempotency_key
         )
+        if isinstance(result, dict) and 'source_kind' in result and 'created_by' in result:
+            return (await self._with_owners([result]))[0]
+        return result
+
+    @staticmethod
+    async def _with_owners(rows):
+        from sqlalchemy import select
+
+        from open_webui.internal.db import get_async_db_context
+        from open_webui.models.users import User
+        from open_webui.soev.principal_refs import is_canonical_person_ref
+
+        people = {
+            ref
+            for row in rows
+            for ref in [row.get('created_by'), *row.get('principals', []), *row.get('writers', [])]
+            if is_canonical_person_ref(ref)
+        }
+        if not people:
+            return rows
+        async with get_async_db_context() as db:
+            owners = dict((await db.execute(select(User.person_id, User.id).where(User.person_id.in_(people)))).all())
+        return [
+            {**row, '_owui_owner_id': owners.get(row.get('created_by')), '_owui_person_ids': owners} for row in rows
+        ]
 
     @staticmethod
     def _path(key):
@@ -121,13 +149,20 @@ class SoevKnowledgeTable:
 
     async def _collection(self, key, *, user_id=None):
         try:
-            return await self._get(self._path(key), user_id=user_id)
+            row = await self._get(self._path(key), user_id=user_id)
+            return (await self._with_owners([row]))[0]
         except SoevApiError as error:
             if error.status == 404:
                 return None
             raise
 
     async def _collections(self, *, user_id=None, as_service=False):
+        return await memoized(
+            ('collections', self, self._user_ref(user_id), as_service),
+            lambda: self._load_collections(user_id=user_id, as_service=as_service),
+        )
+
+    async def _load_collections(self, *, user_id=None, as_service=False):
         from open_webui.soev import ingest
 
         rows, queued, running = await asyncio.gather(
@@ -136,14 +171,16 @@ class SoevKnowledgeTable:
             self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
         )
         hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
-        return [
-            row
-            for row in rows
-            if row['key'] not in hidden
-            and not ingest.is_attachments_collection(row['key'])
-            and not ingest.is_assistant_collection(row['key'])
-            and not ingest.is_folder_collection(row['key'])
-        ]
+        return await self._with_owners(
+            [
+                row
+                for row in rows
+                if row['key'] not in hidden
+                and not ingest.is_attachments_collection(row['key'])
+                and not ingest.is_assistant_collection(row['key'])
+                and not ingest.is_folder_collection(row['key'])
+            ]
+        )
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
@@ -167,9 +204,10 @@ class SoevKnowledgeTable:
     async def insert_new_knowledge(self, user_id, form_data, db=None):
         body = self._projection.collection_create_body(form_data, service_principal=self._service_principal)
         body['key'] = str(uuid4())
-        return self._knowledge(
+        knowledge = self._knowledge(
             await self._send('POST', '/v1/collections', body, user_id=user_id, idempotency_key='kb:' + body['key'])
         )
+        return knowledge.model_copy(update={'user_id': user_id})
 
     async def get_knowledge_by_id(self, id, db=None):
         return self._knowledge(await self._collection(id))
@@ -237,7 +275,7 @@ class SoevKnowledgeTable:
 
     @staticmethod
     def _matches_collection(row, user_id, filters, owner, knowledge_type):
-        owned = row.get('created_by') == f'owui:user:{user_id}'
+        owned = row.get('_owui_owner_id') == user_id or row.get('created_by') == f'owui:user:{user_id}'
         if filters.get('type') not in (None, '', knowledge_type):
             return False
         if filters.get('view_option') == 'created' and not owned:
@@ -263,7 +301,7 @@ class SoevKnowledgeTable:
 
     async def get_knowledge_items_by_user_id(self, user_id, db=None):
         rows = await self._collections(user_id=user_id)
-        return [self._knowledge(row) for row in rows if row.get('created_by') == f'owui:user:{user_id}']
+        return [self._knowledge(row) for row in rows if self._knowledge(row).user_id == user_id]
 
     async def get_knowledge_by_id_and_user_id(self, id, user_id, db=None):
         row = await self._collection(id, user_id=user_id)
@@ -292,7 +330,7 @@ class SoevKnowledgeTable:
             if error.status == 404:
                 return []
             raise
-        return self.collection_grants(row)
+        return self.collection_grants((await self._with_owners([row]))[0])
 
     async def set_collection_access(self, id, access_grants, *, fields=None):
         current = await self._collection(id)
@@ -439,9 +477,11 @@ class SoevKnowledgeTable:
             return result
         rows = [row for row in await self._pages('/v1/collections', user_id=user_id) if row['key'] in requested]
         files = await self._unlanded_files_by_collection(row['key'] for row in rows)
-        for row in rows:
+        pending = await asyncio.gather(
+            *(self._unlanded(row['key'], collection=row, user_id=user_id, files=files[row['key']]) for row in rows)
+        )
+        for row, unlanded in zip(rows, pending):
             key = row['key']
-            unlanded = await self._unlanded(key, collection=row, user_id=user_id, files=files[key])
             count = row['document_count'] + len(unlanded)
             if count:
                 result[key] = count

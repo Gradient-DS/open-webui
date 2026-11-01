@@ -1292,6 +1292,7 @@ async def get_chat_by_id(
     request: Request,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
+    current: bool = False,
 ):
     chat = await Chats.get_chat_by_id_for_user(
         id,
@@ -2027,6 +2028,7 @@ async def update_shared_chat_access_by_id(
 
 
 @router.get('/shared/{id}/access', response_model=list)
+@router.get('/{id}/share', response_model=list)
 async def get_shared_chat_access_by_id(
     id: str,
     user=Depends(get_verified_user),

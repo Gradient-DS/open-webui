@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
+from open_webui.test.soev.fake_api import person_ref
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -43,8 +44,16 @@ async def offboard_store(identity_config, chat_http, monkeypatch, platform_capab
     async with engine.begin() as conn:
         await conn.run_sync(database.Base.metadata.create_all)
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        get_user = type(Users).get_user_by_id.__get__(Users)
+        fallback_user = Users.get_user_by_id
+
+        async def user_by_id(user_id, db=None):
+            return await get_user(user_id, db=db) if db is not None else await fallback_user(user_id)
+
+        monkeypatch.setattr(Users, 'get_user_by_id', user_by_id)
         for uid in ['fern', 'lark']:
             await Users.insert_new_user(uid, uid.title(), f'{uid}@example.invalid', role='user', db=db)
+            (await db.get(User, uid)).person_id = person_ref(uid)
         for cls, rid in [
             (Model, 'assistant'),
             (Prompt, 'prompt'),
@@ -69,8 +78,8 @@ async def offboard_store(identity_config, chat_http, monkeypatch, platform_capab
                     'name': key,
                     'source_kind': kind,
                     'visibility': 'restricted',
-                    'principals': ['owui:user:fern'],
-                    'writers': ['owui:user:fern'],
+                    'principals': [person_ref('fern')],
+                    'writers': [person_ref('fern')],
                 },
                 as_user='owui:user:fern',
                 idempotency_key='seed:' + key,
@@ -112,7 +121,7 @@ async def test_modes_move_or_delete_resources_before_local_deletion(offboard_sto
         assert len(owner_calls) == 1
         assert 'X-Soev-' + 'Subject' not in owner_calls[0].headers
         body = json.loads(owner_calls[0].content)
-        assert body['owner'] == ('owui:user:lark' if mode == 'transfer' else expected_owner)
+        assert body['owner'] == (person_ref('lark') if mode == 'transfer' else expected_owner)
         if mode == 'archive':
             archive = (await store.db.execute(select(Archive))).scalar_one()
             assert body['readers'] == ['platform:group:acb96241-0178-4089-b438-fae30a08d3ee']
@@ -141,8 +150,8 @@ async def test_chat_attachments_are_never_transferred_to_another_person(offboard
             'name': key,
             'source_kind': 'local',
             'visibility': 'restricted',
-            'principals': ['owui:user:fern'],
-            'writers': ['owui:user:fern'],
+            'principals': [person_ref('fern')],
+            'writers': [person_ref('fern')],
         },
         as_user='owui:user:fern',
         idempotency_key='seed:' + key,
@@ -178,8 +187,8 @@ async def test_a_shared_assistants_files_collection_is_listed_as_its_assistant_o
             'key': key,
             'name': 'Assistant files',
             'visibility': 'restricted',
-            'principals': ['owui:user:fern', 'owui:user:lark'],
-            'writers': ['owui:user:fern'],
+            'principals': [person_ref('fern'), person_ref('lark')],
+            'writers': [person_ref('fern')],
         },
         as_user='owui:user:fern',
         idempotency_key='seed:' + key,
@@ -375,9 +384,17 @@ async def test_transfer_can_snapshot_chats_without_transferring_them(offboard_st
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('target', ['fern', 'missing'])
+@pytest.mark.parametrize('target', ['fern', 'missing', 'unbound', 'pending'])
 async def test_transfer_refuses_invalid_target_before_remote_changes(offboard_store, target):
     store = offboard_store
+    if target in {'unbound', 'pending'}:
+        user = await store.db.get(store.classes[0], 'lark')
+        if target == 'unbound':
+            user.person_id = None
+        else:
+            user.role = 'pending'
+        await store.db.commit()
+        target = 'lark'
     with pytest.raises(store.identity.SoevApiError) as error:
         await store.module.offboard_user(
             'fern',
@@ -387,6 +404,7 @@ async def test_transfer_refuses_invalid_target_before_remote_changes(offboard_st
         )
     assert error.value.status == 422
     assert store.api.requests == []
+    assert await store.db.get(store.classes[0], 'fern') is not None
 
 
 @pytest.mark.asyncio

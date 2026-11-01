@@ -1,5 +1,6 @@
 """Missing reference MIME is filled only with the owner's current login token."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -33,6 +34,8 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
     ctx = token_app
     file = await reference()
     other = await reference('moss')
+    clock = [file.meta['soev_job']['submitted_at']]
+    monkeypatch.setattr(jobs, 'time', SimpleNamespace(time=lambda: clock[0]))
     sent = []
 
     def handle(request):
@@ -52,7 +55,7 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
         monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: transport)
         # The autonomous poller cannot fill MIME or mark this reference completed.
         assert await jobs.poll_once(env.client.as_service(), now=file.meta['soev_job']['submitted_at']) == 0
-        assert all('/jobs/' in request.url.path for request in sent)
+        assert sent == []
         sent.clear()
         response = await ctx.browser.get('/call/product')
     assert response.status_code == 200
@@ -60,7 +63,7 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
     assert len(metadata) == 1
     assert metadata[0].url.path.endswith('/' + file.id)
     assert metadata[0].headers['X-Soev-User-Token'] == 'fictional-access-token'
-    assert all('X-Soev-User-Token' not in r.headers for r in sent if '/jobs/' in r.url.path)
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-access-token' for r in sent if '/jobs/' in r.url.path)
     row = await env.files.Files.get_file_by_id(file.id)
     if lookup == 'success':
         assert row.meta['content_type'] == 'application/pdf'
@@ -73,6 +76,7 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
         env.events.assert_not_awaited()
     if lookup != 'success':
         lookup = 'success'
+        clock[0] += 5
         monkeypatch.setattr(env.files.Files, 'update_file_metadata_by_id', metadata_write)
         async with type(ctx.browser)(transport=httpx.MockTransport(handle)) as transport:
             monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: transport)

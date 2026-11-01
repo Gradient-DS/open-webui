@@ -41,9 +41,15 @@
 	export let submitMessage: Function = () => {};
 	export let addMessages: Function = () => {};
 	export let onToolCallResolved: Function = () => {};
+	export let switchThreadVersion: (id: string) => Promise<void> = async () => {};
+	export let editThreadMessage: (
+		messageId: string,
+		content: string
+	) => Promise<void> = async () => {};
 	export let forkHandler: Function | null = null;
 
 	export let readOnly = false;
+	export let allowRegenerate = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	export let editCodeBlock = true;
@@ -203,6 +209,13 @@
 	};
 
 	const gotoMessage = async (message, idx) => {
+		if ($config?.features?.enable_v2_threads) {
+			if (readOnly || !allowRegenerate) return;
+			const targets = message.threadVersions ?? [];
+			const target = targets[Math.max(0, Math.min(idx, targets.length - 1))];
+			if (target) await switchThreadVersion(target.threadId);
+			return;
+		}
 		// Determine the correct sibling list (either parent's children or root messages)
 		let siblings;
 		if (message.parentId !== null) {
@@ -246,6 +259,15 @@
 	};
 
 	const showPreviousMessage = async (message) => {
+		if ($config?.features?.enable_v2_threads) {
+			const targets = message.threadVersions ?? [];
+			return gotoMessage(
+				message,
+				targets.findIndex((target: { threadId: string }) =>
+					message.id.startsWith(`${target.threadId}:`)
+				) + -1
+			);
+		}
 		if (message.parentId !== null) {
 			let messageId =
 				history.messages[message.parentId].childrenIds[
@@ -295,6 +317,15 @@
 	};
 
 	const showNextMessage = async (message) => {
+		if ($config?.features?.enable_v2_threads) {
+			const targets = message.threadVersions ?? [];
+			return gotoMessage(
+				message,
+				targets.findIndex((target: { threadId: string }) =>
+					message.id.startsWith(`${target.threadId}:`)
+				) + 1
+			);
+		}
 		if (message.parentId !== null) {
 			let messageId =
 				history.messages[message.parentId].childrenIds[
@@ -357,6 +388,10 @@
 	};
 
 	const editMessage = async (messageId, { content, files, output = undefined }, submit = true) => {
+		if ($config?.features?.enable_v2_threads) {
+			if (!readOnly && allowRegenerate && submit) await editThreadMessage(messageId, content);
+			return;
+		}
 		if ((selectedModels ?? []).filter((id) => id).length === 0) {
 			toast.error($i18n.t('Model not selected'));
 			return;
@@ -565,6 +600,7 @@
 								{saveMessage}
 								{submitMessage}
 								{regenerateResponse}
+								{allowRegenerate}
 								{continueResponse}
 								{mergeResponses}
 								{addMessages}

@@ -234,6 +234,10 @@ class UserInfoResponse(UserStatus):
     is_active: bool = False
 
 
+class UserSearchResponse(UserInfoResponse):
+    person_id: str | None = None
+
+
 class UserIdNameResponse(BaseModel):
     id: str
     name: str
@@ -247,6 +251,11 @@ class UserIdNameStatusResponse(UserStatus):
 
 class UserInfoListResponse(BaseModel):
     users: list[UserInfoResponse]
+    total: int
+
+
+class UserSearchListResponse(BaseModel):
+    users: list[UserSearchResponse]
     total: int
 
 
@@ -474,6 +483,8 @@ class UsersTable:
             stmt = select(User)
 
             if filter:
+                if filter.get('platform_people'):
+                    stmt = stmt.filter(User.person_id.isnot(None))
                 query_key = filter.get('query')
                 if query_key:
                     stmt = stmt.filter(

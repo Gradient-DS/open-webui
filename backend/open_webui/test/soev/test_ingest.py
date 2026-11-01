@@ -17,6 +17,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from open_webui.test.soev.fake_api import person_ref
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 FILE_BYTES = b'%PDF-1.7 stored file content'
@@ -57,8 +58,8 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
             'key': 'kb',
             'name': 'Research',
             'visibility': 'restricted',
-            'principals': [SERVICE, 'owui:user:alice'],
-            'writers': ['owui:user:alice'],
+            'principals': [SERVICE, person_ref('alice')],
+            'writers': [person_ref('alice')],
         },
         as_user='owui:user:alice',
         idempotency_key='collection:kb',
@@ -367,8 +368,8 @@ async def test_the_attachments_collection_is_created_once_per_user(env):
             'name': 'Chat attachments',
             'personal': True,
             'visibility': 'restricted',
-            'principals': [SERVICE, f'owui:user:{user}'],
-            'writers': [f'owui:user:{user}'],
+            'principals': [SERVICE, person_ref(user)],
+            'writers': [person_ref(user)],
             'tags': ['chat-attachments'],
         }
         assert request.headers['Idempotency-Key'] == f'kb:{key}'
@@ -376,6 +377,84 @@ async def test_the_attachments_collection_is_created_once_per_user(env):
         assert len(reads) == 2
         assert all('X-Soev-User-Token' in r.headers for r in [request, *reads])
     assert 'owui-attachments-alice' != env.module.attachments_collection_key('bob')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'user',
+    [
+        None,
+        SimpleNamespace(person_id=None),
+        SimpleNamespace(person_id=''),
+        SimpleNamespace(person_id='owui:user:alice'),
+        SimpleNamespace(person_id='platform:user:invalid'),
+    ],
+    ids=['missing-user', 'unbound', 'empty', 'local-ref', 'invalid-person'],
+)
+async def test_attachments_require_a_valid_person_binding_before_calling_the_platform(env, monkeypatch, user):
+    from open_webui.models.users import Users
+
+    monkeypatch.setattr(Users, 'get_user_by_id', AsyncMock(return_value=user))
+    with pytest.raises(ValueError, match='no valid platform person binding.*users.person_id'):
+        await env.module.ensure_attachments_collection('alice', env.client)
+    assert env.api.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_personal_collection_does_not_implicitly_grant_its_creator_access(env):
+    key = env.module.attachments_collection_key('alice')
+    await env.client.send(
+        'POST',
+        '/v1/collections',
+        {
+            'key': key,
+            'name': 'Chat attachments',
+            'personal': True,
+            'visibility': 'restricted',
+            'principals': [SERVICE],
+            'writers': [],
+        },
+        as_user='owui:user:alice',
+        idempotency_key='personal:unlisted',
+    )
+    assert (await env.client.as_service().get(f'/v1/collections/{key}'))['principals'] == [SERVICE]
+    with pytest.raises(env.module.SoevApiError) as error:
+        await env.client.get(f'/v1/collections/{key}', as_user='owui:user:alice')
+    assert error.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_an_ingested_chat_upload_is_readable_by_its_bound_owner_and_hidden_from_other_users(env):
+    from open_webui.utils import agent_v2
+
+    file = await new_file(env)
+    key = await env.module.ensure_attachments_collection('alice', env.client)
+    job = await env.module.submit(file, collection_key=key, user_id='alice', text='Uploaded report', client=env.client)
+    env.api.advance(job, 'SUCCEEDED')
+    await env.files.Files.set_status(file.id, 'completed')
+    entry = {'type': 'file', 'id': file.id, 'name': 'Report.pdf'}
+    assert await agent_v2._attachments({'user_id': 'alice', 'files': [entry]}) == {
+        'attachments': [{'collection_key': key, 'file_id': file.id, 'name': 'Report.pdf'}]
+    }
+    with pytest.raises(env.module.SoevApiError) as error:
+        await env.client.get(f'/v1/collections/{key}/documents/{file.id}', as_user='owui:user:bob')
+    assert error.value.status == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['create', 'access'])
+@pytest.mark.parametrize('field', ['principals', 'writers'])
+async def test_the_platform_refuses_local_user_refs_in_collection_acls(env, operation, field):
+    body = {'visibility': 'restricted', 'principals': [SERVICE, person_ref('alice')], 'writers': [person_ref('alice')]}
+    body[field].append('owui:user:alice')
+    method, path = ('POST', '/v1/collections') if operation == 'create' else ('PUT', '/v1/collections/kb/access')
+    if operation == 'create':
+        body.update(key='invalid-acl', name='Invalid')
+    with pytest.raises(env.module.SoevApiError) as error:
+        await env.client.send(
+            method, path, body, as_user='owui:user:alice', idempotency_key=f'invalid:{operation}:{field}'
+        )
+    assert error.value.status == 403 and error.value.code == 'principal_not_claimable'
 
 
 @pytest.mark.asyncio

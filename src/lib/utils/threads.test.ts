@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import websearch from './fixtures/projection-websearch.json';
+import { buildFullSourceList } from './citations';
 import {
 	ThreadError,
 	stateText,
@@ -10,6 +12,7 @@ import {
 } from '$lib/apis/threads';
 import {
 	buildThreadHistory,
+	extendProjectionToTurn,
 	filterSidebar,
 	mergeProjection,
 	ThreadSidebar,
@@ -77,6 +80,7 @@ const api = (): ThreadAPI => ({
 		notModified: false
 	})),
 	forks: vi.fn(async () => ({ items: [fork()], next_cursor: null })),
+	versions: vi.fn(async () => ({ items: [] })),
 	fork: vi.fn(async () => ({ thread_id: 'fictional-fork' })),
 	index: vi.fn(async () => ({ items: [], next_cursor: null }))
 });
@@ -91,6 +95,83 @@ const deferred = <T>() => {
 };
 
 describe('projection history', () => {
+	it('folds the live web-search projection into one assistant per turn with reasoning, tools and citations', () => {
+		const history = buildThreadHistory(websearch, []);
+		const messages = Object.values(history.messages);
+		expect(messages.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
+		const [first, , last] = messages;
+		expect(first.content).toContain('<details type="reasoning"');
+		expect(first.content).toContain('I should search the web for this.');
+		expect(first.content).toContain('<details type="tool_calls"');
+		expect(first.content).toContain('Python 3.14.0 is uitgebracht');
+		expect(first.content).toContain('Python [1][2].');
+		expect(first.statusHistory).toEqual(
+			expect.arrayContaining([expect.objectContaining({ action: 'web_search', done: true })])
+		);
+		expect(first.sources).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					n: 1,
+					source: expect.objectContaining({
+						url: 'https://www.python.org/downloads/release/python-3140/'
+					})
+				})
+			])
+		);
+		expect(buildFullSourceList(first.sources as unknown[])).toHaveLength(5);
+		expect(last.content).toContain('Template strings');
+		expect(last.content).toContain('[15]');
+		expect(last.position).toBe(23);
+		expect(last.version).toBe(websearch.messages.at(-1)!.version);
+		expect(first.id).toBe(`${websearch.thread_id}:${websearch.generation}:3`);
+	});
+
+	it('keeps a turn id as tool steps arrive and forks at their original platform positions', () => {
+		const projected = { ...websearch, messages: websearch.messages.slice(0, 1) };
+		const initial = Object.values(buildThreadHistory(projected, []).messages)[0];
+		const history = buildThreadHistory(websearch, [
+			{ ...fork('child', 4), parent_thread: websearch.thread_id }
+		]);
+		const finished = Object.values(history.messages)[0];
+		expect(finished.id).toBe(initial.id);
+		expect(finished.position).toBe(5);
+		expect(finished.positions).toEqual([3, 4, 5]);
+		expect(history.versions[5]).toContainEqual({ threadId: 'child', at: 4 });
+	});
+
+	it('inserts markers at code point offsets and ignores unknown optional fields', () => {
+		const projected = page([2]);
+		projected.messages[0].content = {
+			role: 'assistant',
+			text: '😀 Hi',
+			future: true,
+			markers: [
+				null,
+				{ at: 1, text: ' [7]', cited: [{ written: 7, source: 'https://example.com' }] }
+			],
+			tool_calls: [null, { future: true }]
+		};
+		const [answer] = Object.values(buildThreadHistory(projected, []).messages);
+		expect(answer.content).toBe('😀 [7] Hi');
+		expect(buildFullSourceList(answer.sources as unknown[])).toHaveLength(1);
+		expect(answer).not.toHaveProperty('future');
+	});
+
+	it('keeps texts in order, ignores unknown keys and preserves enriched sources', () => {
+		const projected = page([2, 4, 6]);
+		projected.messages.forEach((m, i) => {
+			m.content = { role: 'assistant', text: ['First', '', 'Last'][i], future: { anything: true } };
+		});
+		(projected.messages[2].content as Record<string, unknown>).sources = [
+			{ n: 7, source: { id: 'url', name: 'Title', url: 'url' }, document: ['Snippet'] }
+		];
+		const [answer] = Object.values(buildThreadHistory(projected, []).messages);
+		expect(answer.content).toBe('First\n\nLast');
+		expect(answer.sources).toEqual(
+			(projected.messages[2].content as Record<string, unknown>).sources
+		);
+	});
+
 	it('builds a linked active branch with immutable versions and no orphan parents at a page boundary', () => {
 		const history = buildThreadHistory(page([5, 6]), []);
 		const [first, last] = Object.values(history.messages);
@@ -159,6 +240,81 @@ describe('projection history', () => {
 		expect(() => mergeProjection(current, { ...page([1]), generation: 'restored' })).toThrow(
 			ThreadError
 		);
+	});
+});
+
+describe('whole turn paging', () => {
+	const toolPage = (positions: number[], cursor: string | null = null) => ({
+		...page(positions, cursor),
+		messages: positions.map((position) => ({
+			...message(position),
+			content: { role: position === 1 ? 'user' : position % 2 ? 'tool' : 'assistant', text: '' }
+		}))
+	});
+
+	it('extends a single tool-heavy turn to its user message and removes the older button cursor', async () => {
+		const older = vi.fn(async () => toolPage(Array.from({ length: 20 }, (_, i) => i + 1)));
+		const result = await extendProjectionToTurn(
+			toolPage(
+				Array.from({ length: 20 }, (_, i) => i + 21),
+				'before-21'
+			),
+			older
+		);
+		expect(older).toHaveBeenCalledExactlyOnceWith('before-21');
+		expect(result.messages).toHaveLength(40);
+		expect(result.messages[0].content).toMatchObject({ role: 'user' });
+		expect(Boolean(result.next_cursor)).toBe(false);
+		expect(Object.values(buildThreadHistory(result, []).messages).map((m) => m.role)).toEqual([
+			'user',
+			'assistant'
+		]);
+	});
+
+	it('extends multiple pages, keeping a cursor only for older turns', async () => {
+		const older = vi
+			.fn()
+			.mockResolvedValueOnce(toolPage([6, 7], 'before-6'))
+			.mockResolvedValueOnce(page([3, 4, 5], 'before-3'));
+		const result = await extendProjectionToTurn(toolPage([8, 9], 'before-8'), older);
+		expect(older.mock.calls).toEqual([['before-8'], ['before-6']]);
+		expect(result.messages.map((m) => m.position)).toEqual([3, 4, 5, 6, 7, 8, 9]);
+		expect(result.next_cursor).toBe('before-3');
+	});
+
+	it('leaves a page starting at a user message alone', async () => {
+		const older = vi.fn();
+		const initial = page([3, 4], 'before-3');
+		expect(await extendProjectionToTurn(initial, older)).toBe(initial);
+		expect(older).not.toHaveBeenCalled();
+	});
+
+	it('stops at the beginning even if no user message exists', async () => {
+		const older = vi.fn(async () => toolPage([2]));
+		const result = await extendProjectionToTurn(toolPage([3, 4], 'before-3'), older);
+		expect(result.messages.map((m) => m.position)).toEqual([2, 3, 4]);
+		expect(result.next_cursor).toBeNull();
+	});
+
+	it('bounds a load to ten transport pages without publishing an incomplete turn', async () => {
+		let position = 100;
+		const older = vi.fn(async () => toolPage([--position], `before-${position}`));
+		await expect(extendProjectionToTurn(toolPage([100], 'before-100'), older)).rejects.toThrow(
+			ThreadError
+		);
+		expect(older).toHaveBeenCalledTimes(9);
+	});
+
+	it('rejects repeated cursors and generation changes', async () => {
+		await expect(
+			extendProjectionToTurn(toolPage([4], 'same'), async () => toolPage([2], 'same'))
+		).rejects.toThrow(ThreadError);
+		await expect(
+			extendProjectionToTurn(toolPage([4], 'older'), async () => ({
+				...toolPage([1, 2]),
+				generation: 'changed'
+			}))
+		).rejects.toThrow(ThreadError);
 	});
 });
 
@@ -534,4 +690,140 @@ it('filters by the public index tags independently of ownership and title search
 		owned,
 		shared
 	]);
+});
+
+describe('conversation version lineage', () => {
+	const root = {
+		thread_id: 'root',
+		parent_thread: null,
+		parent_position: null,
+		version_kind: null
+	};
+	const version = (id: string, parent: string, kind: 'edit' | 'regenerate', at = 2) => ({
+		thread_id: id,
+		parent_thread: parent,
+		parent_position: at,
+		version_kind: kind
+	});
+	const choices = (ids: string[], at = 2) => ids.map((threadId) => ({ threadId, at }));
+	const branch = (id: string, versions: Parameters<typeof buildThreadHistory>[1], position = 3) => {
+		const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, id), versions);
+		const input = Object.values(history.messages).find(
+			(message) => message.positions[0] === position
+		)!;
+		return {
+			input: input.threadVersions,
+			answer: history.messages[input.childrenIds[0]]?.threadVersions
+		};
+	};
+	it.each(['root', 'v2', 'v3'])(
+		'puts regenerate-only arrows under answers when viewing %s',
+		(id) => {
+			const versions = [
+				root,
+				version('v2', 'root', 'regenerate'),
+				version('v3', 'v2', 'regenerate')
+			];
+			expect(branch(id, versions)).toEqual({
+				input: undefined,
+				answer: choices(['root', 'v2', 'v3'])
+			});
+		}
+	);
+	it.each(['root', 'edit1', 'edit2'])(
+		'puts edit-only arrows under user messages when viewing %s',
+		(id) => {
+			const versions = [root, version('edit1', 'root', 'edit'), version('edit2', 'edit1', 'edit')];
+			expect(branch(id, versions)).toEqual({
+				input: choices(['root', 'edit1', 'edit2']),
+				answer: undefined
+			});
+		}
+	);
+	it('keeps regenerations of an edit beneath that edited user message', () => {
+		const versions = [
+			root,
+			version('edit', 'root', 'edit'),
+			version('regen', 'edit', 'regenerate')
+		];
+		expect(branch('root', versions)).toEqual({
+			input: choices(['root', 'edit']),
+			answer: undefined
+		});
+		expect(branch('edit', versions)).toEqual({
+			input: choices(['root', 'edit']),
+			answer: choices(['edit', 'regen'])
+		});
+		expect(branch('regen', versions)).toEqual({
+			input: choices(['root', 'regen']),
+			answer: choices(['edit', 'regen'])
+		});
+	});
+	it('keeps the original answer group separate from edits and their regenerations', () => {
+		const versions = [
+			root,
+			version('original-regen', 'root', 'regenerate'),
+			version('edit', 'original-regen', 'edit'),
+			version('edit-regen', 'edit', 'regenerate')
+		];
+		expect(branch('original-regen', versions)).toEqual({
+			input: choices(['original-regen', 'edit']),
+			answer: choices(['root', 'original-regen'])
+		});
+		expect(branch('edit-regen', versions)).toEqual({
+			input: choices(['root', 'edit-regen']),
+			answer: choices(['edit', 'edit-regen'])
+		});
+	});
+	it('retains earlier answer alternatives under a later edited turn', () => {
+		const versions = [
+			root,
+			version('v2', 'root', 'regenerate'),
+			version('v3', 'v2', 'regenerate'),
+			version('edit', 'v3', 'edit', 4)
+		];
+		expect(branch('edit', versions)).toEqual({
+			input: undefined,
+			answer: choices(['root', 'v2', 'edit'])
+		});
+		expect(branch('edit', versions, 5)).toEqual({
+			input: choices(['v3', 'edit'], 4),
+			answer: undefined
+		});
+	});
+	it('does not reveal forks into another conversation or any reader arrows', () => {
+		const source = page([1, 2, 3, 4], null, 'root');
+		const owned = buildThreadHistory(source, [
+			{ ...root, parent_thread: 'external', parent_position: 2 }
+		]);
+		expect(Object.values(owned.messages).every((message) => !message.threadVersions)).toBe(true);
+		const reader = buildThreadHistory({ ...source, preferences: null }, []);
+		expect(Object.values(reader.messages).every((message) => !message.threadVersions)).toBe(true);
+	});
+});
+
+it('keeps one sidebar row per conversation across changing current versions and search pages', async () => {
+	const backend = api();
+	const first = { ...sidebarItem('v1', true), conversation_id: 'root', version_count: 1 };
+	const latest = { ...first, thread_id: 'v2', version_count: 2 };
+	const reader = { ...sidebarItem('shared'), owned: false };
+	vi.mocked(backend.index)
+		.mockResolvedValueOnce({ items: [first, reader], next_cursor: 'next' })
+		.mockResolvedValueOnce({ items: [latest], next_cursor: null });
+	const sidebar = new ThreadSidebar(backend);
+	await sidebar.search('question');
+	await sidebar.more();
+	expect(sidebar.snapshot.items).toEqual([latest, reader]);
+	expect(filterSidebar(sidebar.snapshot.items, { pinned: true })).toEqual([latest]);
+	expect(backend.index).toHaveBeenCalledTimes(2);
+	expect(backend.projection).not.toHaveBeenCalled();
+});
+
+it('waits for the branch point to be paged in before showing its arrows', () => {
+	const versions = [
+		{ thread_id: 'root', parent_thread: null, parent_position: null },
+		{ thread_id: 'v2', parent_thread: 'root', parent_position: 2 }
+	];
+	const history = buildThreadHistory(page([25, 26], 'older', 'v2'), versions);
+	expect(Object.values(history.messages).every((message) => !message.threadVersions)).toBe(true);
 });

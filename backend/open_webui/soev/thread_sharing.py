@@ -11,9 +11,11 @@ from open_webui.soev import acting
 from open_webui.soev.threads import Share, ThreadError
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from open_webui.models.users import UserModel
     from open_webui.soev.chat_paths import ChatPaths
-    from open_webui.soev.threads import ProjectionResult, ThreadClient
+    from open_webui.soev.threads import IndexItem, ProjectionResult, ThreadClient
 
 
 def require_header_mutation(request: Request) -> None:
@@ -43,6 +45,41 @@ async def all_shares(client: ThreadClient, thread_id: str) -> list[Share]:
             raise ThreadError(502, 'reconnect')
         seen.add(page.next_cursor)
         cursor = page.next_cursor
+
+
+async def named_shares(shares: list[Share], user: UserModel, db: AsyncSession | None = None) -> list[dict]:
+    from sqlalchemy import select
+
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.folders import Folders
+    from open_webui.models.groups import Groups
+    from open_webui.models.users import User
+    from open_webui.utils.access_control.folders import has_folder_access
+
+    names = {}
+    people = {share.audience.id for share in shares if share.audience.kind == 'person'}
+    groups = {share.audience.id for share in shares if share.audience.kind == 'group'}
+    folders = {share.audience.id for share in shares if share.audience.kind == 'folder'}
+    if not shares:
+        return []
+    async with get_async_db_context(db) as session:
+        if people:
+            rows = await session.execute(select(User.person_id, User.name).where(User.person_id.in_(people)))
+            names.update({('person', ref): name for ref, name in rows})
+        if groups:
+            visible = await Groups.get_groups(filter={} if user.role == 'admin' else {'member_id': user.id}, db=session)
+            names.update({('group', f'platform:group:{group.id}'): group.name for group in visible})
+        for id in folders:
+            folder = await Folders.get_folder_by_id(id, db=session)
+            if folder and await has_folder_access(user.id, folder, 'read', session):
+                names[('folder', id)] = folder.name
+    return [
+        {
+            **share.model_dump(),
+            **({'name': names[key]} if (key := (share.audience.kind, share.audience.id)) in names else {}),
+        }
+        for share in shares
+    ]
 
 
 async def resolve(service: ChatPaths, user_id: str, identifier: str) -> str:
@@ -104,26 +141,60 @@ async def revoke_all(service: ChatPaths, thread_id: str) -> None:
         await service.client.unshare(thread_id, share.audience)
 
 
-async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
-    records = await service.organizations.list(user_id)
+async def shared_versions(service: ChatPaths, item: IndexItem, *, all_versions: bool) -> list[IndexItem]:
+    if (item.version_count or 1) == 1:
+        return [item]
+    # The conversation flag can refer to an older version; never substitute an unshared current version.
+    if not all_versions and (await service.client.shares(item.thread_id)).items:
+        return [item]
+    versions = (await service.client.versions(item.thread_id)).items
+    selected = []
+    for version in sorted(versions, key=lambda version: (version.updated_at, version.thread_id), reverse=True):
+        if not all_versions:
+            if version.thread_id == item.thread_id or not (await service.client.shares(version.thread_id)).items:
+                continue
+        selected.append(
+            item.model_copy(
+                update={
+                    'thread_id': version.thread_id,
+                    'parent_thread': version.parent_thread,
+                    'parent_position': version.parent_position,
+                }
+            )
+        )
+        if not all_versions:
+            break
+    return selected
+
+
+async def owned_shared(service: ChatPaths, user_id: str, *, all_versions: bool = False) -> list[dict]:
+    records = await service.records(user_id)
     owned = {thread_id for record in records for thread_id in [record.thread_id, *record.branch_thread_ids]}
+    if not owned:
+        return []
+    pending = set(owned)
+
     items, cursor, seen = [], '', set()
     while True:
         page = await service.client.index(limit=200, cursor=cursor)
         for item in page.items:
-            if item.thread_id not in owned:
+            conversation = (item.conversation_id if item.owned else None) or item.thread_id
+            if conversation not in pending:
+                continue
+            pending.discard(conversation)
+            if not item.owned or not item.shared:
                 continue
             try:
-                shares = await all_shares(service.client, item.thread_id)
+                versions = await shared_versions(service, item, all_versions=all_versions)
             except ThreadError as error:
-                if error.state == 'unavailable':
-                    continue
-                raise
-            if shares:
-                # A shared old branch needs its own stable id in this list so
-                # unsharing it cannot accidentally address the current branch.
-                items.append({**item.model_dump(), 'id': item.thread_id, 'share_id': item.thread_id})
-        if page.next_cursor is None:
+                if error.state != 'unavailable':
+                    raise
+                continue
+            items.extend(
+                {**version.model_dump(exclude={'shared'}), 'id': version.thread_id, 'share_id': version.thread_id}
+                for version in versions
+            )
+        if not pending or page.next_cursor is None:
             return items
         if page.next_cursor in seen:
             raise ThreadError(502, 'reconnect')
@@ -141,6 +212,7 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
         ('GET', '/shared'),
         ('DELETE', '/share/all'),
         ('GET', '/shared/{id}/access'),
+        ('GET', '/{id}/share'),
         ('POST', '/{id}/share'),
         ('DELETE', '/{id}/share'),
     }:
@@ -173,7 +245,7 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
 async def shared_listing(service: ChatPaths, request: Request, user: UserModel) -> list[dict] | bool:
     from open_webui.soev.chat_routes import integer
 
-    items = await owned_shared(service, user.id)
+    items = await owned_shared(service, user.id, all_versions=request.method == 'DELETE')
     if request.method == 'DELETE':
         for item in items:
             try:
@@ -200,7 +272,7 @@ async def manage(service: ChatPaths, request: Request, user: UserModel) -> dict 
     record = await service.record(user.id, request.path_params['id'])
     if request.method == 'GET':
         return {
-            'items': [share.model_dump() for share in await all_shares(service.client, record.thread_id)],
+            'items': await named_shares(await all_shares(service.client, record.thread_id), user),
             'next_cursor': None,
         }
     if request.method == 'DELETE':

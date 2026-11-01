@@ -7,10 +7,14 @@ import hashlib
 import json
 import re
 from urllib.parse import quote, unquote
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 from open_webui.test.soev.fake_chat import FakeChatApi
+
+
+def person_ref(user_id):
+    return 'platform:user:' + str(uuid5(NAMESPACE_URL, f'owui-test-person:{user_id}'))
 
 
 class Problem(Exception):
@@ -29,6 +33,7 @@ class FakeSoevApi:
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
+        self.job_subjects = {}
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
@@ -139,7 +144,10 @@ class FakeSoevApi:
         return httpx.Response(204)
 
     def _closure(self, ref):
-        return {ref} | {group for group, members in self.groups.items() if ref in members}
+        refs = {ref}
+        if ref and ref.startswith('owui:user:'):
+            refs.add(person_ref(ref.removeprefix('owui:user:')))
+        return refs | {group for group, members in self.groups.items() if refs.intersection(members)}
 
     def _readable(self, row, ref):
         return row['visibility'] == 'public' or bool(self._closure(ref).intersection(row['principals']))
@@ -365,12 +373,17 @@ class FakeSoevApi:
         raise Problem(404, 'route_not_found')
 
     def _create(self, body, subject):
+        self._validate_collection_access(body)
         key = body['key']
         if key in self.collections:
             if self.creation_bodies[key] != (body, subject):
                 raise Problem(409, 'collection_exists')
             return httpx.Response(200, json=self._view(self.collections[key], subject))
         self.creation_bodies[key] = copy.deepcopy((body, subject))
+        owner = (
+            person_ref(subject.removeprefix('owui:user:')) if subject and subject.startswith('owui:user:') else subject
+        )
+        retained = {owner} if owner and not body.get('personal') else set()
         row = {
             'key': key,
             'source_kind': body.get('source_kind', 'local'),
@@ -381,9 +394,10 @@ class FakeSoevApi:
             'chunking': {},
             'metadata_spec': {},
             'visibility': body['visibility'],
-            'principals': sorted(set(body['principals']) | ({subject} if subject else set())),
-            'writers': sorted(set(body['writers']) | ({subject} if subject else set())),
-            'created_by': subject,
+            'principals': sorted(set(body['principals']) | retained),
+            'writers': sorted(set(body['writers']) | retained),
+            'created_by': owner,
+            'personal': body.get('personal', False),
             'retention_days': None,
             'tags': body.get('tags', []),
             'meta': copy.deepcopy(body.get('meta', {})),
@@ -392,6 +406,10 @@ class FakeSoevApi:
         }
         self.collections[key], self.folders[key] = row, {}
         return httpx.Response(201, json=self._view(row, subject))
+
+    def _validate_collection_access(self, body):
+        if any(ref.startswith('owui:user:') for field in ('principals', 'writers') for ref in body[field]):
+            raise Problem(403, 'principal_not_claimable')
 
     def _collection_route(self, method, parts, body, row, credential, subject):
         if method == 'GET':
@@ -406,6 +424,7 @@ class FakeSoevApi:
         if method == 'PUT' and parts[-1] == 'access':
             if set(body) != {'visibility', 'principals', 'writers'}:
                 raise Problem(422, 'invalid_field', 'request:schema')
+            self._validate_collection_access(body)
             return self._job('update_collection_access', row['key'], credential, copy.deepcopy(body))
         raise Problem(404, 'route_not_found')
 
@@ -484,6 +503,7 @@ class FakeSoevApi:
             raise Problem(413, 'inline_budget_exceeded', 'inline:budget')
         response = self._job('ingest', body['collection_key'], credential)
         job = self.jobs[response.json()['job_id']]
+        self.job_subjects[job['job_id']] = subject
         job['documents'] = copy.deepcopy(documents)
         job['items'] = [
             {
@@ -540,6 +560,12 @@ class FakeSoevApi:
         if len(parts) == 2 and request.method == 'POST':
             return self._create_ingest(body, credential, subject)
         rows = [row for jid, row in self.jobs.items() if self.job_owners[jid] == credential]
+        if request.method == 'GET':
+            rows = [
+                row
+                for row in rows
+                if row['job_id'] not in self.job_subjects or self.job_subjects[row['job_id']] == subject
+            ]
         if len(parts) >= 3:
             rows = [row for row in rows if row['job_id'] == parts[2]]
             if not rows:

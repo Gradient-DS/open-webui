@@ -27,7 +27,9 @@ def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
     return KnowledgeModel(
         id=collection['key'],
-        user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
+        user_id=creator.removeprefix('owui:user:')
+        if creator.startswith('owui:user:')
+        else collection.get('_owui_owner_id') or '',
         type=collection['source_kind'],
         name=collection['name'],
         description=collection['description'] or '',
@@ -98,6 +100,8 @@ def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantMo
         for ref in collection[field]:
             if ref in excluded:
                 continue
+            if user_id := collection.get('_owui_person_ids', {}).get(ref):
+                ref = f'owui:user:{user_id}'
             if ref == 'platform:pseudo:owui':
                 identities.add(('user', '*', permission))
                 continue

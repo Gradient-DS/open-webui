@@ -15,6 +15,7 @@ from open_webui.models.files import Files
 from open_webui.models.models import ModelModel, Models
 from open_webui.soev import acting, identity, ingest, knowledge_sharing, projection
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.principal_refs import collection_access, person_ref
 
 log = logging.getLogger(__name__)
 
@@ -36,15 +37,17 @@ def file_ids(meta: dict | None) -> list[str]:
     )
 
 
-def access(model: ModelModel, owner: str) -> dict:
+async def access(model: ModelModel, owner: str) -> dict:
     """The collection's access: the assistant's grants, with its owner reading and writing."""
     grants = knowledge_sharing.grant_dicts(model.access_grants)
     visibility, readers, writers = projection.access_of(grants, service_principal=config.SOEV_API_SERVICE_PRINCIPAL)
-    return {
-        'visibility': visibility,
-        'principals': sorted(set(readers) | {owner}),
-        'writers': sorted(set(writers) | {owner}),
-    }
+    return await collection_access(
+        {
+            'visibility': visibility,
+            'principals': sorted(set(readers) | {owner}),
+            'writers': sorted(set(writers) | {owner}),
+        }
+    )
 
 
 def _path(key: str) -> str:
@@ -56,11 +59,11 @@ async def ensure_collection(model: ModelModel, client: SoevClient) -> str:
     per call: a collection deleted with its assistant's last file is created again later under the same key."""
     key = ingest.assistant_collection_key(model.id)
     owner = f'owui:user:{model.user_id}'
-    body = access(model, owner)
+    body = await access(model, owner)
     try:
         await client.get(_path(key), as_user=owner)
     except SoevApiError as error:
-        if error.code != 'collection_not_found':
+        if error.status != 404:
             raise
         await client.send(
             'POST',
@@ -81,7 +84,8 @@ async def _delete_collection(model_id: str, client: SoevClient) -> None:
     collection = await existing(model_id, client=client)
     if collection is None:
         return
-    if collection['created_by'] != acting.requester_ref():
+    requester = acting.requester_ref()
+    if requester is None or collection['created_by'] != await person_ref(requester.removeprefix('owui:user:')):
         raise PermissionError('Assistant collection requires its owner request')
     await client.send(
         'DELETE',
@@ -158,13 +162,14 @@ async def narrow(model_id: str, planned, *, client: SoevClient | None = None) ->
     collection = await existing(model_id, client=client)
     if collection is None:
         return
-    if collection['created_by'] != acting.requester_ref():
+    requester = acting.requester_ref()
+    if requester is None or collection['created_by'] != await person_ref(requester.removeprefix('owui:user:')):
         raise PermissionError('Assistant collection requires its owner request')
     ids = set(file_ids(planned.meta.model_dump() if planned is not None else None))
     if not ids:
         await _delete_collection(model_id, client)
         return
-    wanted = access(planned, acting.requester_ref())
+    wanted = await access(planned, acting.requester_ref())
     body = {
         'visibility': 'restricted',
         'principals': sorted(set(collection['principals']) & set(wanted['principals'])),

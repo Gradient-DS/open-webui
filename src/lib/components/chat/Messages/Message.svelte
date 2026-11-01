@@ -16,7 +16,7 @@
 	export let selectedModels = [];
 	export let idx = 0;
 
-	export let history;
+	export let history: any;
 	export let messageId;
 
 	export let user;
@@ -43,11 +43,22 @@
 	export let forkHandler: Function | null = null;
 	export let triggerScroll;
 	export let readOnly = false;
+	export let allowRegenerate = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	export let editCodeBlock = true;
 	export let topPadding = false;
 	export let onInsertToNote: ((content: string) => void) | null = null;
+
+	$: versionSiblings = $config?.features?.enable_v2_threads
+		? !readOnly && allowRegenerate
+			? (history.messages[messageId]?.threadVersions ?? []).map((target: { threadId: string }) =>
+					target.threadId === history.messages[messageId]?.id.split(':')[0]
+						? messageId
+						: target.threadId
+				)
+			: []
+		: null;
 
 	// Safari's content-visibility implementation has paint bugs that leave
 	// on-screen messages blank (#26712), so skip virtualization there
@@ -68,18 +79,19 @@
 				{history}
 				{messageId}
 				isFirstMessage={idx === 0}
-				siblings={history.messages[messageId].parentId !== null
-					? (history.messages[history.messages[messageId].parentId]?.childrenIds ?? [])
-					: (Object.values(history.messages)
-							.filter((message) => message.parentId === null)
-							.map((message) => message.id) ?? [])}
+				siblings={versionSiblings ??
+					(history.messages[messageId].parentId !== null
+						? (history.messages[history.messages[messageId].parentId]?.childrenIds ?? [])
+						: (Object.values(history.messages)
+								.filter((message) => message.parentId === null)
+								.map((message) => message.id) ?? []))}
 				{gotoMessage}
 				{showPreviousMessage}
 				{showNextMessage}
 				{editMessage}
 				{deleteMessage}
 				{allowDelete}
-				readOnly={readOnly || Boolean($config?.features?.enable_v2_threads)}
+				readOnly={readOnly || Boolean($config?.features?.enable_v2_threads && !allowRegenerate)}
 				{compactPreview}
 				{editCodeBlock}
 				{topPadding}
@@ -92,7 +104,9 @@
 				{messageId}
 				{selectedModels}
 				isLastMessage={messageId === history.currentId}
-				siblings={history.messages[history.messages[messageId].parentId]?.childrenIds ?? []}
+				siblings={versionSiblings ??
+					history.messages[history.messages[messageId].parentId]?.childrenIds ??
+					[]}
 				{setInputText}
 				{gotoMessage}
 				{showPreviousMessage}
@@ -107,6 +121,7 @@
 				{allowDelete}
 				{continueResponse}
 				{regenerateResponse}
+				{allowRegenerate}
 				{addMessages}
 				{onToolCallResolved}
 				{forkHandler}

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from time import monotonic
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -19,6 +20,8 @@ from open_webui.soev.principal_refs import is_canonical_person_ref, is_canonical
 
 log = logging.getLogger(__name__)
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+_completed_pull: tuple[asyncio.AbstractEventLoop, float] | None = None
+_snapshot_flight: tuple[asyncio.AbstractEventLoop, asyncio.Task] | None = None
 
 
 class PlatformGroup(BaseModel):
@@ -167,13 +170,14 @@ async def _publish_snapshot(
 
 
 async def reconcile(*, db: AsyncSession | None = None, scheduled: bool = False) -> None:
-    global _lock
+    global _lock, _completed_pull
     if not config.SOEV_API_URL:
         return
     loop = asyncio.get_running_loop()
     if _lock is None or _lock[0] is not loop:
         _lock = (loop, asyncio.Lock())
     async with _lock[1], get_async_db_context(db) as session:
+        local_started = monotonic()
         token = str(uuid4())
         bound = config.SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS
         conditions = [GroupSnapshot.id == 'directory', GroupSnapshot.lease_until <= DatabaseTime()]
@@ -205,6 +209,8 @@ async def reconcile(*, db: AsyncSession | None = None, scheduled: bool = False) 
                     groups = await _fetch_with_heartbeat(session, token)
                     await _database_timeouts(session, remaining)
                     await _publish_snapshot(session, token, started, groups)
+                    # Never defer the next scheduled start by the pull's latency.
+                    _completed_pull = (loop, local_started + _interval())
         except BaseException:
             # Cleanup is bounded too; a failed cleanup leaves only a short lease.
             async with asyncio.timeout(bound / 3):
@@ -301,8 +307,18 @@ async def _replace_snapshot(session: AsyncSession, groups: dict[str, PlatformGro
 
 
 async def ensure_snapshot(*, db: AsyncSession | None = None) -> None:
+    global _snapshot_flight
     if not config.SOEV_API_URL:
         return
+    loop = asyncio.get_running_loop()
+    if _completed_pull is not None and _completed_pull[0] is loop and monotonic() < _completed_pull[1]:
+        return
+    if _snapshot_flight is None or _snapshot_flight[0] is not loop or _snapshot_flight[1].done():
+        _snapshot_flight = (loop, asyncio.create_task(_ensure_snapshot(db=db)))
+    await asyncio.shield(_snapshot_flight[1])
+
+
+async def _ensure_snapshot(*, db: AsyncSession | None = None) -> None:
     try:
         if await _pull_due(db=db):
             await reconcile(db=db, scheduled=True)
@@ -325,8 +341,11 @@ def start_reconciler(app: FastAPI) -> None:
 
 async def stop_reconciler(app: FastAPI, *, timeout: float = 10.0) -> None:
     app.state.soev_group_reconciler_stop.set()
-    task = app.state.soev_group_reconciler
-    task.cancel()
-    done, _ = await asyncio.wait({task}, timeout=timeout)
-    if not done:
+    tasks = {app.state.soev_group_reconciler}
+    if _snapshot_flight is not None and _snapshot_flight[0] is asyncio.get_running_loop():
+        tasks.add(_snapshot_flight[1])
+    for task in tasks:
+        task.cancel()
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    if pending:
         log.warning('soev group reconciler did not stop within %ss', timeout)

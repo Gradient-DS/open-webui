@@ -57,7 +57,7 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
 
 def test_body_builder_can_plant_each_derived_field():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (194, 2151)
+    assert (len(fields), sum(map(len, fields.values()))) == (195, 2152)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name
@@ -271,8 +271,21 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 531
+    assert len(plane.operations()) == 533
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
+
+
+@pytest.mark.parametrize('path', ['/api/v1/chats/{id}/share', '/api/v1/chats/shared/{id}/access'])
+def test_chat_share_access_is_driven_as_a_read_of_the_owned_chat(path):
+    route = f'GET {path}'
+    spec = {'paths': {path: {'get': seeds.SPEC['paths'][path]['get']}}}
+    client = fake_client()
+    assert plane._read_before_destroy(route)[0] == 0
+    assert route in seeds.ordinary_targets()
+    assert route not in seeds.DESTRUCTIVE
+    outcomes = plane.drive_every_route(client, {(path, 'id'): 'owned-chat'}, spec=spec)
+    client.request.assert_called_once_with('GET', path.replace('{id}', 'owned-chat'))
+    assert outcomes[route].entered
 
 
 @pytest.mark.parametrize('pass_name', ['seeding', 'drive'])
@@ -844,3 +857,16 @@ def test_soev_unconfigured_is_a_crash_in_drive_mode(monkeypatch):
     client.request.return_value = response(503, {'detail': {'code': 'soev_not_configured'}})
     outcome = plane._drive_response(client, 'GET /local', '/local', 'drive')
     assert outcome.crashed
+
+
+def test_conversation_versions_is_a_platform_owner_read(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    path = '/api/v1/threads/{thread_id}/versions'
+    route = f'GET {path}'
+    client = fake_client()
+    spec = {'paths': {path: {'get': seeds.SPEC['paths'][path]['get']}}}
+    assert route in seeds.ordinary_targets() and route not in seeds.DESTRUCTIVE
+    assert route in seeds.SOEV_BACKED
+    outcomes = plane.drive_every_route(client, {(path, 'thread_id'): 'owner-thread'}, spec=spec)
+    client.request.assert_called_once_with('GET', '/api/v1/threads/owner-thread/versions')
+    assert outcomes[route].entered

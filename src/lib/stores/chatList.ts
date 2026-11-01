@@ -1,10 +1,12 @@
 import { get, readonly, writable } from 'svelte/store';
-import { getChatList, getPinnedChatList } from '$lib/apis/chats';
+import { getChatList, getPinnedChatList, markChatReadById } from '$lib/apis/chats';
+import { answerTimestamp } from '$lib/utils/chatReadState';
 
 type ChatListItem = {
 	id: string;
 	readonly?: boolean;
 	owned?: boolean;
+	answered_at?: string | null;
 	[key: string]: unknown;
 };
 
@@ -13,6 +15,20 @@ const pinnedChatsStore = writable<ChatListItem[]>([]);
 
 export const chats = readonly(chatsStore);
 export const pinnedChats = readonly(pinnedChatsStore);
+const readAtStore = writable<Record<string, number>>({});
+let readSession = 0;
+export const chatReadAt = readonly(readAtStore);
+
+export const clearChatReadAt = (chatId: string) => {
+	readAtStore.update(({ [chatId]: ignored, ...rest }) => rest);
+};
+
+export const markConversationRead = async (token: string, conversationId: string) => {
+	const session = readSession;
+	const result = await markChatReadById(token, conversationId);
+	if (session === readSession) setChatReadAt(result.chat_id, result.last_read_at);
+	return result;
+};
 
 let currentPage = 1;
 let paginationReady = false;
@@ -126,6 +142,10 @@ export const setChatActive = (chatId: string, active: boolean): boolean => {
 };
 
 export const setChatReadAt = (chatId: string, lastReadAt: number): boolean => {
+	readAtStore.update((reads) => ({
+		...reads,
+		[chatId]: Math.max(reads[chatId] ?? 0, lastReadAt)
+	}));
 	let found = false;
 	const updateChat = (chat: ChatListItem) => {
 		if (chat.id !== chatId) {
@@ -140,14 +160,18 @@ export const setChatReadAt = (chatId: string, lastReadAt: number): boolean => {
 	return found;
 };
 
-export const setAllChatsRead = () => {
-	const updateChat = (chat: ChatListItem) => ({ ...chat, last_read_at: chat.updated_at });
+export const setAllChatsRead = (v2 = false) => {
+	const updateChat = (chat: ChatListItem) => ({
+		...chat,
+		last_read_at: v2 ? answerTimestamp(chat.answered_at) : chat.updated_at
+	});
 
 	chatsStore.update((items) => (items ? items.map(updateChat) : items));
 	pinnedChatsStore.update((items) => items.map(updateChat));
 };
 
 export const resetChatListState = () => {
+	readSession += 1;
 	requestGeneration += 1;
 	currentPage = 1;
 	paginationReady = false;
@@ -155,4 +179,5 @@ export const resetChatListState = () => {
 	loadingNextPage = false;
 	chatsStore.set(null);
 	pinnedChatsStore.set([]);
+	readAtStore.set({});
 };

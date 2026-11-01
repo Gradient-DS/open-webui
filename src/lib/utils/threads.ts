@@ -1,6 +1,8 @@
+import { reasoningBlock } from './threadReasoning';
 import {
 	ThreadError,
 	type IndexItem,
+	type ThreadVersion,
 	type MessageView,
 	type ProjectionPage,
 	type ThreadAPI,
@@ -18,6 +20,7 @@ export type HistoryMessage = {
 	done: boolean;
 	timestamp: number;
 	position: number;
+	positions: number[];
 	version: string | null;
 	[key: string]: unknown;
 };
@@ -33,72 +36,251 @@ const emptyHistory = (): ThreadHistory => ({ messages: {}, currentId: null, vers
 const messageId = (page: ProjectionPage, position: number) =>
 	`${page.thread_id}:${page.generation}:${position}`;
 
-// 7a leaves content as JsonValue. Accept text and OWUI presentation fields;
-// reject other shapes instead of displaying raw runtime state as JSON.
+const record = (value: unknown): Record<string, unknown> | null =>
+	value !== null && typeof value === 'object' && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+
+const escapeHtml = (text: string) =>
+	text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const presentation = (content: unknown): Record<string, unknown> => {
 	if (typeof content === 'string') return { role: 'assistant', content };
-	if (!content || typeof content !== 'object' || Array.isArray(content)) {
-		throw new ThreadError('reconnect');
-	}
-	const value = content as Record<string, unknown>;
-	if (!['content', 'text', 'output'].some((key) => key in value))
-		throw new ThreadError('reconnect');
+	const value = record(content);
+	if (!value) throw new ThreadError('reconnect');
 	const text = value.content ?? value.text ?? '';
-	if (
-		typeof text !== 'string' ||
-		(value.role !== undefined && !['user', 'assistant'].includes(String(value.role)))
-	) {
-		throw new ThreadError('reconnect');
-	}
-	const result: Record<string, unknown> = { role: value.role ?? 'assistant', content: text };
-	for (const key of [
-		'output',
-		'sources',
-		'files',
-		'statusHistory',
-		'reasoning',
-		'model',
-		'timestamp',
-		'notices'
-	]) {
-		if (value[key] !== undefined) result[key] = value[key];
-	}
-	return result;
+	if (typeof text !== 'string') throw new ThreadError('reconnect');
+	return { ...value, role: value.role ?? 'assistant', content: text };
 };
 
-export const buildThreadHistory = (page: ProjectionPage, forks: IndexItem[]): ThreadHistory => {
+const toolDescriptions: Record<string, string> = {
+	web_search: 'Searching the web…',
+	fetch: 'Fetching web pages...'
+};
+
+const assistantContent = (fields: Record<string, unknown>) => {
+	const parts: string[] = [];
+	if (typeof fields.reasoning === 'string' && fields.reasoning.trim()) {
+		parts.push(reasoningBlock(fields.reasoning, true, 0));
+	}
+	const text = Array.from(fields.content as string);
+	let at = 0;
+	let marked = '';
+	const sources: unknown[] = Array.isArray(fields.sources) ? [...fields.sources] : [];
+	const markers = (Array.isArray(fields.markers) ? fields.markers : [])
+		.map(record)
+		.filter((marker): marker is Record<string, unknown> => marker !== null);
+	for (const marker of markers.sort((a, b) => Number(a.at) - Number(b.at))) {
+		if (
+			!Number.isInteger(marker.at) ||
+			Number(marker.at) < at ||
+			Number(marker.at) > text.length ||
+			typeof marker.text !== 'string'
+		)
+			continue;
+		marked += text.slice(at, Number(marker.at)).join('') + marker.text;
+		at = Number(marker.at);
+		for (const cited of Array.isArray(marker.cited) ? marker.cited : []) {
+			const citation = record(cited);
+			if (!citation || typeof citation.source !== 'string' || !Number.isInteger(citation.written))
+				continue;
+			if (!sources.some((source) => record(source)?.n === citation.written)) {
+				sources.push({
+					n: citation.written,
+					source: { id: citation.source, name: citation.source, url: citation.source },
+					document: [''],
+					metadata: [{ source: citation.source, name: citation.source }]
+				});
+			}
+		}
+	}
+	marked += text.slice(at).join('');
+	if (marked) parts.push(marked);
+	const statuses: unknown[] = Array.isArray(fields.statusHistory) ? [...fields.statusHistory] : [];
+	for (const entry of Array.isArray(fields.tool_calls) ? fields.tool_calls : []) {
+		const call = record(entry);
+		if (!call || typeof call.name !== 'string' || typeof call.id !== 'string') continue;
+		const status = statuses.map(record).find((status) => status?.call_id === call.id) ?? {
+			action: call.name,
+			call_id: call.id,
+			description: toolDescriptions[call.name] ?? 'Executing tool…',
+			done: true
+		};
+		if (!statuses.includes(status)) statuses.push(status);
+		parts.push(
+			`<details type="tool_calls" done="true" name="${escapeHtml(call.name)}">\n<summary>${escapeHtml(String(status.description ?? call.name))}</summary>\n</details>`
+		);
+	}
+	return { content: parts.join('\n\n'), sources, statusHistory: statuses };
+};
+
+export const buildThreadHistory = (
+	page: ProjectionPage,
+	forks: (Pick<ThreadVersion, 'thread_id' | 'parent_thread' | 'parent_position'> &
+		Partial<Pick<ThreadVersion, 'version_kind'>>)[]
+): ThreadHistory => {
 	const history = emptyHistory();
+	const seen = new Set<number>();
+	const anchors = new Map<number, number>();
 	let previous: HistoryMessage | undefined;
 	for (const view of [...page.messages].sort((a, b) => a.position - b.position)) {
-		const id = messageId(page, view.position);
-		if (history.messages[id]) throw new ThreadError('reconnect');
+		if (!Number.isInteger(view.position) || view.position < 1 || seen.has(view.position))
+			throw new ThreadError('reconnect');
+		seen.add(view.position);
 		const fields = presentation(view.content);
+		if (!['user', 'assistant', 'tool'].includes(String(fields.role))) continue;
+		const role = fields.role === 'user' ? 'user' : 'assistant';
+		const shown =
+			fields.role === 'assistant'
+				? assistantContent(fields)
+				: {
+						content: fields.role === 'tool' ? '' : (fields.content as string),
+						sources: fields.sources,
+						statusHistory: fields.statusHistory
+					};
+		if (role === 'assistant' && previous?.role === 'assistant') {
+			previous.content = [previous.content, shown.content].filter(Boolean).join('\n\n');
+			for (const key of ['sources', 'statusHistory', 'files', 'output']) {
+				const added = key in shown ? shown[key as keyof typeof shown] : fields[key];
+				if (Array.isArray(added) && added.length)
+					previous[key] = [
+						...(Array.isArray(previous[key]) ? (previous[key] as unknown[]) : []),
+						...added
+					];
+			}
+			if (fields.model) previous.model = fields.model;
+			previous.done = previous.done && view.finished;
+			previous.position = view.position;
+			previous.version = view.version;
+			previous.positions.push(view.position);
+			continue;
+		}
+		const id = messageId(page, view.position);
 		const message: HistoryMessage = {
-			...fields,
 			id,
 			parentId: previous?.id ?? null,
 			childrenIds: [],
-			role: fields.role as HistoryMessage['role'],
-			content: fields.content as string,
+			role,
+			content: shown.content,
 			timestamp: typeof fields.timestamp === 'number' ? fields.timestamp : 0,
 			done: view.finished,
 			position: view.position,
+			positions: [view.position],
 			version: view.version
 		};
+		for (const key of ['output', 'files', 'reasoning', 'model', 'notices']) {
+			if (fields[key] !== undefined) message[key] = fields[key];
+		}
+		if (Array.isArray(shown.sources) && shown.sources.length) message.sources = shown.sources;
+		if (Array.isArray(shown.statusHistory) && shown.statusHistory.length)
+			message.statusHistory = shown.statusHistory;
 		if (previous) previous.childrenIds.push(id);
 		history.messages[id] = message;
 		previous = message;
 	}
+	for (const message of Object.values(history.messages)) {
+		for (const position of message.positions) anchors.set(position, message.position);
+	}
 	history.currentId = previous?.id ?? null;
-	// Fork index rows carry no message bodies. Arrows load their projection on demand.
+	// A folded bubble anchors every underlying fork position; each target keeps its original cursor.
 	for (const fork of forks) {
 		if (fork.parent_thread !== page.thread_id || fork.parent_position === null) continue;
 		const at = fork.parent_position;
-		const targets = history.versions[at] ?? [{ threadId: page.thread_id, at }];
+		const anchor = anchors.get(at) ?? at;
+		const targets = history.versions[anchor] ?? [{ threadId: page.thread_id, at }];
 		if (!targets.some((target) => target.threadId === fork.thread_id)) {
 			targets.push({ threadId: fork.thread_id, at });
 		}
-		history.versions[at] = targets;
+		history.versions[anchor] = targets;
+	}
+	// Follow the selected lineage so siblings remain reachable from every version.
+	const byId = new Map(forks.map((version) => [version.thread_id, version]));
+	const lineage = new Map<string, { cutoff: number; child?: string }>();
+	lineage.set(page.thread_id, { cutoff: Infinity });
+	let selected = byId.get(page.thread_id);
+	while (
+		selected?.parent_thread &&
+		byId.has(selected.parent_thread) &&
+		selected.parent_position !== null
+	) {
+		if (lineage.has(selected.parent_thread)) break;
+		lineage.set(selected.parent_thread, {
+			cutoff: selected.parent_position,
+			child: selected.thread_id
+		});
+		selected = byId.get(selected.parent_thread);
+	}
+	const branchRoot = (parent: string, at: number) => {
+		const seen = new Set<string>();
+		let node = byId.get(parent);
+		while (
+			node?.parent_thread &&
+			byId.has(node.parent_thread) &&
+			node.parent_position === at &&
+			!seen.has(parent)
+		) {
+			seen.add(parent);
+			parent = node.parent_thread;
+			node = byId.get(parent);
+		}
+		return parent;
+	};
+	const groups = new Map<string, typeof forks>();
+	for (const version of forks) {
+		if (
+			!version.parent_thread ||
+			!byId.has(version.parent_thread) ||
+			version.parent_position === null
+		)
+			continue;
+		const root = branchRoot(version.parent_thread, version.parent_position);
+		const path = lineage.get(root);
+		if (!path || version.parent_position > path.cutoff) continue;
+		const key = `${root}:${version.parent_position}`;
+		groups.set(key, [...(groups.get(key) ?? []), version]);
+	}
+	for (const versions of groups.values()) {
+		const at = versions[0].parent_position!;
+		const root = branchRoot(versions[0].parent_thread!, at);
+		const targets = [root, ...versions.map((version) => version.thread_id)];
+		const active = [...targets].reverse().find((id) => lineage.has(id))!;
+		const visible = Object.values(history.messages);
+		const branch = visible.find((message) => message.positions[0] > at);
+		if (!branch || branch.positions[0] !== at + 1) continue;
+		if (branch.role !== 'user') continue;
+		const userRoot = (threadId: string) => {
+			const seen = new Set<string>();
+			let node = byId.get(threadId);
+			while (
+				node?.parent_thread &&
+				node.parent_position === at &&
+				node.version_kind === 'regenerate' &&
+				!seen.has(threadId)
+			) {
+				seen.add(threadId);
+				threadId = node.parent_thread;
+				node = byId.get(threadId);
+			}
+			return threadId;
+		};
+		const users = new Map<string, string[]>();
+		for (const threadId of targets) {
+			const user = userRoot(threadId);
+			users.set(user, [...(users.get(user) ?? []), threadId]);
+		}
+		const activeUser = userRoot(active);
+		const choice = (threadId: string): VersionTarget => ({
+			threadId: threadId === active ? page.thread_id : threadId,
+			at
+		});
+		if (users.size > 1) {
+			branch.threadVersions = [...users.keys()].map((threadId) =>
+				choice(threadId === activeUser ? active : threadId)
+			);
+		}
+		const answers = users.get(activeUser) ?? [];
+		const answer = history.messages[branch.childrenIds[0]];
+		if (answer && answers.length > 1) answer.threadVersions = answers.map(choice);
 	}
 	return history;
 };
@@ -115,6 +297,27 @@ export const mergeProjection = (current: ProjectionPage, older: ProjectionPage):
 		messages: [...messages.values()].sort((a, b) => a.position - b.position),
 		next_cursor: older.next_cursor
 	};
+};
+
+// Projection limits count tool results too, so a transport page can start inside a turn.
+export const extendProjectionToTurn = async (
+	page: ProjectionPage,
+	loadOlder: (cursor: string) => Promise<ProjectionPage>
+): Promise<ProjectionPage> => {
+	const cursors = new Set<string>();
+	for (let pages = 1; page.next_cursor; pages++) {
+		const first = page.messages.reduce<MessageView | undefined>(
+			(first, message) => (!first || message.position < first.position ? message : first),
+			undefined
+		);
+		if (first && record(first.content)?.role === 'user') return page;
+		// Retain the existing window on failure rather than replace it with a partial turn.
+		if (pages >= 10 || cursors.has(page.next_cursor)) throw new ThreadError('reconnect');
+		const cursor = page.next_cursor;
+		cursors.add(cursor);
+		page = mergeProjection(page, await loadOlder(cursor));
+	}
+	return page;
 };
 
 export type WindowSnapshot = {
@@ -386,6 +589,9 @@ export type SidebarSnapshot = {
 	state: ThreadState | null;
 };
 
+export const conversationId = (item: IndexItem) =>
+	item.owned ? item.conversation_id || item.thread_id : item.thread_id;
+
 export class ThreadSidebar {
 	private epoch = 0;
 	private query = '';
@@ -422,9 +628,9 @@ export class ThreadSidebar {
 			if (page.next_cursor !== null && page.next_cursor === cursor)
 				throw new ThreadError('reconnect');
 			const items = new Map(
-				replace ? [] : this.snapshot.items.map((item) => [item.thread_id, item] as const)
+				replace ? [] : this.snapshot.items.map((item) => [conversationId(item), item] as const)
 			);
-			for (const item of page.items) items.set(item.thread_id, item);
+			for (const item of page.items) items.set(conversationId(item), item);
 			this.snapshot = {
 				items: [...items.values()],
 				cursor: page.next_cursor,

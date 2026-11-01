@@ -5,7 +5,7 @@ import importlib
 import httpx
 import pytest
 import pytest_asyncio
-from open_webui.test.soev.fake_api import FakeSoevApi
+from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -52,10 +52,16 @@ def identity_config(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def fake_api(identity_config, eligible_identity, login_tokens):
+def fake_api(identity_config, eligible_identity, login_tokens, monkeypatch):
     """Use the login-token-only platform contract."""
     from open_webui.test.soev.fake_api import FakeSoevApi
 
+    identity, _ = identity_config
+
+    async def get_user(user_id, db=None):
+        return await identity.user_of(f'owui:user:{user_id}')
+
+    monkeypatch.setattr(identity.Users, 'get_user_by_id', get_user)
     fake = FakeSoevApi()
     return fake
 
@@ -86,6 +92,7 @@ def eligible_identity(identity_config, monkeypatch):
     async def user_of(ref, *, db=None):
         return identity.UserModel(
             id=ref.removeprefix('owui:user:'),
+            person_id=person_ref(ref.removeprefix('owui:user:')),
             role='user',
             email='person@example.invalid',
             name='Person',

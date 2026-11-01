@@ -163,7 +163,7 @@
 			{#if (snapshot.page.preferences as { fallback?: boolean } | null)?.fallback}
 				<p role="note">{$i18n.t('Older chat, only for you')}</p>
 			{/if}
-			{#if family && !Object.values(snapshot.history.messages).some((message) => message.position === family![0].at)}
+			{#if family && !Object.values(snapshot.history.messages).some( (message) => message.positions.includes(family![0].at) )}
 				{@render arrows(family)}
 			{/if}
 			<div role="list">
@@ -194,7 +194,7 @@
 						addMessages={noop}
 						triggerScroll={noop}
 					/>
-					{#if family?.[0].at === message.position}
+					{#if family && message.positions.includes(family[0].at)}
 						{@render arrows(family)}
 					{:else if snapshot.history.versions[message.position]}
 						{@render arrows(snapshot.history.versions[message.position])}

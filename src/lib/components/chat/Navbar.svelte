@@ -42,6 +42,7 @@
 
 	export let initNewChat: Function;
 	export let readOnly: boolean = false;
+	export let shareThreadId = '';
 	export let shareEnabled: boolean = false;
 	export let scrollTop = 0;
 	export let scrollToTop: (() => void) | null = null;
@@ -68,7 +69,7 @@
 	let showDownloadChatModal = false;
 </script>
 
-<ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
+<ShareChatModal bind:show={showShareChatModal} chatId={shareThreadId || $chatId} />
 
 <button
 	id="new-chat-button"

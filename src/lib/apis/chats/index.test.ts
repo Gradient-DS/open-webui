@@ -1,11 +1,38 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { addTagById, getTagsById } from './index';
+import { addTagById, getTagsById, markChatReadById } from './index';
 
 vi.mock('$lib/stores', async () => ({
 	config: (await import('svelte/store')).writable(undefined)
 }));
 vi.mock('$lib/utils', () => ({ getTimeRange: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
+
+it('persists a conversation read without sending a client timestamp or version id', async () => {
+	const fetch = vi.fn(
+		async () => new Response(JSON.stringify({ chat_id: 'conversation', last_read_at: 12.5 }))
+	);
+	vi.stubGlobal('fetch', fetch);
+	expect(await markChatReadById('token', 'conversation')).toEqual({
+		chat_id: 'conversation',
+		last_read_at: 12.5
+	});
+	expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/threads/conversation/read', {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: 'Bearer token'
+		}
+	});
+});
+
+it('surfaces a refused read acknowledgement', async () => {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async () => new Response(JSON.stringify({ state: 'unavailable' }), { status: 404 }))
+	);
+	await expect(markChatReadById('token', 'conversation')).rejects.toBe('This chat is unavailable');
+});
 
 it('adapts canonical public tags for the existing tag component', async () => {
 	vi.stubGlobal(
@@ -70,10 +97,12 @@ it('uses exact runtime creation and metadata bodies in v2 and preserves legacy b
 		await expect(createNewChat('token', { history: {} })).rejects.toBe(
 			'Reload this chat to continue'
 		);
-		await updateChatById('token', 'thread', { title: 'Changed', tags: ['grove'] });
+		const features = { web_search: false, document_writer: true, tool_ids: [] };
+		await updateChatById('token', 'thread', { title: 'Changed', tags: ['grove'], features });
 		expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({
 			title: 'Changed',
-			tags: ['grove']
+			tags: ['grove'],
+			features
 		});
 		await expect(updateChatById('token', 'thread', { history: {} })).rejects.toBe(
 			'Reload this chat to continue'
@@ -119,6 +148,31 @@ it('keeps search available in v2 while refusing unsupported bulk export', async 
 		await getChatById('token', 'thread', 'opaque cursor');
 		expect(fetch.mock.calls[1][0]).toBe('/api/v1/chats/thread?limit=20&before=opaque+cursor');
 		expect(fetch).toHaveBeenCalledTimes(2);
+	} finally {
+		config.set(previous);
+	}
+});
+
+it('opens the current version through one chats projection request', async () => {
+	const { config } = await import('$lib/stores');
+	const { getChatById } = await import('./index');
+	const { get } = await import('svelte/store');
+	const previous = get(config);
+	const fetcher = vi.fn(
+		async (_url: string) =>
+			new Response(JSON.stringify({ thread_id: 'current-version', messages: [] }))
+	);
+	vi.stubGlobal('fetch', fetcher);
+	try {
+		config.set({ features: { enable_v2_threads: true } } as NonNullable<
+			Parameters<typeof config.set>[0]
+		>);
+		const page = await getChatById('token', 'conversation', '', '', true);
+		expect(page.thread_id).toBe('current-version');
+		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(fetcher.mock.calls[0][0]).toBe(
+			'/api/v1/chats/conversation?limit=20&before=&current=true'
+		);
 	} finally {
 		config.set(previous);
 	}

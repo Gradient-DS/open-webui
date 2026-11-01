@@ -7,6 +7,7 @@ import httpx
 import pytest
 from open_webui.soev import acting, capabilities, model_catalog
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.test.soev.fake_api import person_ref
 
 
 @pytest.mark.asyncio
@@ -58,7 +59,7 @@ async def test_service_cannot_borrow_a_persons_collection_access(identity_config
     identity, _ = identity_config
     client = identity.build_client()
     ref = 'owui:user:fern'
-    readers = [ref]
+    readers = [person_ref('fern')]
     if shared_with_service:
         readers.append(identity.config.SOEV_API_SERVICE_PRINCIPAL)
     await client.send(
@@ -69,7 +70,7 @@ async def test_service_cannot_borrow_a_persons_collection_access(identity_config
             'name': 'Fictional notes',
             'visibility': 'restricted',
             'principals': readers,
-            'writers': [ref],
+            'writers': [person_ref('fern')],
         },
         as_user=ref,
         idempotency_key='fictional-private-create',

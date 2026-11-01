@@ -29,6 +29,8 @@ from open_webui.models.users import (
     UserGroupIdsModel,
     UserInfoListResponse,
     UserInfoResponse,
+    UserSearchListResponse,
+    UserSearchResponse,
     UserModel,
     UserRoleUpdateForm,
     Users,
@@ -156,12 +158,13 @@ async def get_all_users(
     return await Users.get_users(db=db)
 
 
-@router.get('/search', response_model=UserInfoListResponse)
+@router.get('/search', response_model=UserSearchListResponse)
 async def search_users(
     query: str | None = None,
     order_by: str | None = None,
     direction: str | None = None,
     page: int | None = 1,
+    platform_people: bool = False,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -173,14 +176,21 @@ async def search_users(
     filter = {}
     if query:
         filter['query'] = query
+    if platform_people:
+        filter['platform_people'] = True
 
-    return await Users.get_users(
+    result = await Users.get_users(
         filter=filter,
         sort={'order_by': order_by, 'direction': direction},
         skip=skip,
         limit=limit,
         db=db,
     )
+    result['users'] = [
+        UserSearchResponse(**target.model_dump(), person_id=target.person_id if platform_people else None)
+        for target in result['users']
+    ]
+    return result
 
 
 ############################

@@ -15969,6 +15969,128 @@
         "title": "UserProfileImageResponse",
         "type": "object"
       },
+      "UserSearchListResponse": {
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserSearchResponse"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users",
+          "total"
+        ],
+        "title": "UserSearchListResponse",
+        "type": "object"
+      },
+      "UserSearchResponse": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": [],
+            "title": "Groups"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "default": false,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "person_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Id"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status_emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Emoji"
+          },
+          "status_expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Expires At"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role"
+        ],
+        "title": "UserSearchResponse",
+        "type": "object"
+      },
       "UserSettings": {
         "additionalProperties": true,
         "properties": {
@@ -17808,16 +17930,66 @@
       },
       "open_webui__soev__thread_routes__ForkForm": {
         "additionalProperties": false,
+        "else": {
+          "not": {
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "version": {
+              "const": true
+            }
+          },
+          "required": [
+            "version"
+          ]
+        },
         "properties": {
           "at": {
             "exclusiveMinimum": 0.0,
             "title": "At",
             "type": "integer"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "regenerate",
+                  "edit"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "version": {
+            "default": false,
+            "title": "Version",
+            "type": "boolean"
           }
         },
         "required": [
           "at"
         ],
+        "then": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "regenerate",
+                "edit"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
         "title": "ForkForm",
         "type": "object"
       }
@@ -23478,6 +23650,16 @@
               "title": "Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -24389,6 +24571,53 @@
           }
         ],
         "summary": "Delete Shared Chat By Id",
+        "tags": [
+          "chats"
+        ]
+      },
+      "get": {
+        "operationId": "get_shared_chat_access_by_id_api_v1_chats__id__share_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {},
+                  "title": "Response Get Shared Chat Access By Id Api V1 Chats  Id  Share Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Shared Chat Access By Id",
         "tags": [
           "chats"
         ]
@@ -38427,6 +38656,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "if-none-match",
             "required": false,
@@ -38602,6 +38841,90 @@
           }
         ],
         "summary": "Forks"
+      }
+    },
+    "/api/v1/threads/{thread_id}/read": {
+      "post": {
+        "operationId": "mark_read_api_v1_threads__thread_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Read"
+      }
+    },
+    "/api/v1/threads/{thread_id}/versions": {
+      "get": {
+        "operationId": "versions_api_v1_threads__thread_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Versions"
       }
     },
     "/api/v1/threads:authorize": {
@@ -39806,6 +40129,16 @@
               "default": 1,
               "title": "Page"
             }
+          },
+          {
+            "in": "query",
+            "name": "platform_people",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Platform People",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -39813,7 +40146,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserInfoListResponse"
+                  "$ref": "#/components/schemas/UserSearchListResponse"
                 }
               }
             },

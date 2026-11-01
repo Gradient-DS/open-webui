@@ -6,7 +6,11 @@ type SessionBoundaryOptions = {
 	expiresAt: () => number | undefined;
 	onExpire: () => void;
 	reload: () => void;
-	waitForRetry: (signal?: AbortSignal | null) => Promise<void>;
+	waitForRetry: (
+		signal?: AbortSignal | null,
+		attempt?: number,
+		startedAt?: number
+	) => Promise<void>;
 };
 
 export const sessionLoginPath = (url: URL): string => {
@@ -113,6 +117,8 @@ export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 			method === 'GET' ||
 			(method === 'POST' && url.pathname === `${api.pathname}/threads:authorize`);
 		const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+		let attempt = 0;
+		let retryStartedAt: number | undefined;
 		while (current()) {
 			let response: Response | undefined;
 			try {
@@ -152,8 +158,17 @@ export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 				[502, 503].includes(response.status) ||
 				(response.status === 401 && verificationUnavailable)
 			) {
+				retryStartedAt ??= Date.now();
+				attempt++;
+				if (retryable) {
+					console.warn('Session read retry', {
+						method,
+						path: url.pathname,
+						status: response?.status ?? 'network error'
+					});
+				}
 				try {
-					await options.waitForRetry(signal);
+					await options.waitForRetry(signal, attempt, retryStartedAt);
 				} catch (error) {
 					if (!current()) return retiringRequest;
 					throw error;

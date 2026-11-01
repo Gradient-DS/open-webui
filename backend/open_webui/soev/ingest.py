@@ -13,6 +13,7 @@ from open_webui import config
 from open_webui.models.files import FileModel, Files
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.principal_refs import person_ref
 from open_webui.storage.provider import Storage
 from open_webui.utils.content_types import content_type_for
 
@@ -129,10 +130,11 @@ async def _text_chunks(text: str) -> AsyncIterator[bytes]:
 async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str:
     key = attachments_collection_key(user_id)
     ref = f'owui:user:{user_id}'
+    owner = await person_ref(user_id)
     try:
         collection = await client.get(f'/v1/collections/{quote(key, safe="")}', as_user=ref)
     except SoevApiError as error:
-        if error.code != 'collection_not_found':
+        if error.status != 404:
             raise
         await client.send(
             'POST',
@@ -142,8 +144,8 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
                 'name': 'Chat attachments',
                 'personal': True,
                 'visibility': 'restricted',
-                'principals': [config.SOEV_API_SERVICE_PRINCIPAL, ref],
-                'writers': [ref],
+                'principals': [config.SOEV_API_SERVICE_PRINCIPAL, owner],
+                'writers': [owner],
                 'tags': [ATTACHMENTS_TAG],
             },
             as_user=ref,

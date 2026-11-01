@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from open_webui import config
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
     RAG_EMBEDDING_CONTENT_PREFIX,
@@ -102,6 +103,8 @@ async def embed_knowledge_base_metadata(
     description: str,
 ) -> bool:
     """Generate and store embedding for knowledge base."""
+    if config.SOEV_API_URL:
+        return False
     try:
         content = f'{name}\n\n{description}' if description else name
         embedding = await request.app.state.EMBEDDING_FUNCTION(content, prefix=RAG_EMBEDDING_CONTENT_PREFIX)
@@ -206,14 +209,16 @@ async def get_knowledge_bases(
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
     # [Gradient] Catalog counts must use the requesting user's document visibility.
-    file_counts = await Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id)
-    writable_knowledge_base_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user.id,
-        resource_type='knowledge',
-        resource_ids=knowledge_base_ids,
-        permission='write',
-        user_group_ids=user_group_ids,
-        db=db,
+    file_counts, writable_knowledge_base_ids = await asyncio.gather(
+        Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id),
+        AccessGrants.get_accessible_resource_ids(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_ids=knowledge_base_ids,
+            permission='write',
+            user_group_ids=user_group_ids,
+            db=db,
+        ),
     )
 
     return KnowledgeAccessListResponse(
@@ -270,14 +275,16 @@ async def search_knowledge_bases(
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
     # [Gradient] Catalog counts must use the requesting user's document visibility.
-    file_counts = await Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id)
-    writable_knowledge_base_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user.id,
-        resource_type='knowledge',
-        resource_ids=knowledge_base_ids,
-        permission='write',
-        user_group_ids=user_group_ids,
-        db=db,
+    file_counts, writable_knowledge_base_ids = await asyncio.gather(
+        Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id),
+        AccessGrants.get_accessible_resource_ids(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_ids=knowledge_base_ids,
+            permission='write',
+            user_group_ids=user_group_ids,
+            db=db,
+        ),
     )
 
     return KnowledgeAccessListResponse(

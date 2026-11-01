@@ -146,6 +146,13 @@ description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_
 same_as = "share"
 
 [[parameter]]
+key = "chat_share_access"
+name = "id"
+prefix = "/api/v1/chats/{id}/share"
+description = "GET is the owner-only get_shared_chat_access_by_id alias of /chats/shared/{id}/access: read shared_chat grants using Chats.id, with no request body or writable fields. The POST and DELETE sharing operations also use this same owned chat id."
+same_as = "chat"
+
+[[parameter]]
 key = "shared_access"
 name = "id"
 prefix = "/api/v1/chats/shared/{id}"
@@ -1133,7 +1140,7 @@ backed_by = "soev-solutions"
 key = "platform_thread"
 name = "thread_id"
 prefix = "/api/v1/threads/{thread_id}"
-description = "soev/thread_routes.py reads and forks soev-api threads; reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
+description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
 same_as = "meeting"
 
 # The v2 router dependency refuses these before loading or looking up any function.
@@ -1264,3 +1271,11 @@ route = "POST /api/chat/actions/{action_id}"
 status = 400
 detail = "Action not found:"
 reason = "main.py still mounts chat/actions and verifies chat ownership. utils/actions.py looks up the action before model dispatch; v2 cannot install the fictional action because function creation is refused. Keep probing the route with an owned chat and readable model."
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread_versions"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}/versions"
+description = "Owner-only conversation versions read; readers receive the same 404 as a missing thread. Requires ENABLE_V2_THREADS and uses the admin-owned meeting thread."
+same_as = "meeting"

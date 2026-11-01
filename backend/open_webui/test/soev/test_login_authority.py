@@ -8,6 +8,7 @@ from open_webui.soev import acting
 from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.knowledge_store import SoevKnowledgeTable
 from open_webui.soev.request_cache import request_cache
+from open_webui.test.soev.fake_api import person_ref
 from open_webui.test.soev.test_keycloak_token import token_app  # noqa: F401
 
 
@@ -27,6 +28,8 @@ async def test_main_routes_use_only_login_authority(
 
     ctx = token_app
     ctx.user.role = 'admin'
+    ctx.user.person_id = person_ref(ctx.user.id)
+    monkeypatch.setattr(ctx.auth.Users, 'get_user_by_id', AsyncMock(return_value=ctx.user))
     monkeypatch.setattr(features, 'is_feature_enabled', lambda feature: True)
     monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
     monkeypatch.setattr(knowledge.Config, 'get', AsyncMock(return_value={}))

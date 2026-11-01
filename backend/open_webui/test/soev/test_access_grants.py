@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
+from open_webui.test.soev.fake_api import person_ref
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -26,6 +27,36 @@ async def env(identity_config, fake_api, monkeypatch):
     models = importlib.import_module('open_webui.models.access_grants')
     module = importlib.import_module('open_webui.soev.access_grants')
     stores = importlib.import_module('open_webui.soev.knowledge_store')
+    database = importlib.import_module('open_webui.internal.db')
+    users = importlib.import_module('open_webui.models.users')
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    async with engine.begin() as connection:
+        await connection.run_sync(users.User.__table__.create)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def people_context(db=None):
+        async with sessions() as session:
+            yield session
+
+    monkeypatch.setattr(database, 'get_async_db_context', people_context)
+    async with sessions() as session:
+        session.add_all(
+            [
+                users.User(
+                    id=name,
+                    name=name.title(),
+                    email=f'{name}@example.invalid',
+                    role='user',
+                    person_id=person_ref(name),
+                    last_active_at=0,
+                    updated_at=0,
+                    created_at=0,
+                )
+                for name in ('owner', 'editor')
+            ]
+        )
+        await session.commit()
     api = fake_api
     original = httpx.AsyncClient
     monkeypatch.setattr(
@@ -54,7 +85,8 @@ async def env(identity_config, fake_api, monkeypatch):
     )
     api.groups.update({'platform:group:readers': ['owui:user:reader'], 'platform:group:writers': ['owui:user:writer']})
     api.requests.clear()
-    return SimpleNamespace(api=api, table=table, store=store, models=models, module=module)
+    yield SimpleNamespace(api=api, table=table, store=store, models=models, module=module)
+    await engine.dispose()
 
 
 def subject(request):
@@ -221,12 +253,14 @@ async def test_setting_grants_commissions_one_atomic_access_job(env):
     assert json.loads(writes[0].content) == {
         'visibility': 'restricted',
         'principals': sorted(
-            [SERVICE, 'platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
+            [SERVICE, 'platform:group:editors', person_ref('editor'), person_ref('owner'), 'platform:pseudo:owui']
         ),
-        'writers': sorted(['platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
+        'writers': sorted(
+            ['platform:group:editors', person_ref('editor'), person_ref('owner'), 'platform:pseudo:owui']
+        ),
     }
     assert all(subject(request) == 'owui:user:owner' for request in writes)
-    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
+    assert env.api.collections['kb']['writers'] == sorted([person_ref('owner'), 'platform:group:writers'])
     assert len(env.api.jobs) == 1
     env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
     projected = await env.table.get_grants_by_resource('knowledge', 'kb')
@@ -245,12 +279,12 @@ async def test_revoke_all_access_returns_to_owner_only(env):
     """Revocation keeps the owner as writer and restores restricted readers through the access job."""
     removed = await env.table.revoke_all_access('knowledge', 'kb')
     assert removed == 3
-    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
+    assert env.api.collections['kb']['writers'] == sorted([person_ref('owner'), 'platform:group:writers'])
     job_id = next(iter(env.api.jobs))
     assert env.api.job_effects[job_id] == {
         'visibility': 'restricted',
-        'principals': [SERVICE, 'owui:user:owner'],
-        'writers': ['owui:user:owner'],
+        'principals': [SERVICE, person_ref('owner')],
+        'writers': [person_ref('owner')],
     }
     env.api.advance(job_id, 'SUCCEEDED')
     assert await env.table.get_grants_by_resource('knowledge', 'kb') == []

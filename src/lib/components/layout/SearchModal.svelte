@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { toast } from 'svelte-sonner';
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	const i18n = getContext('i18n');
@@ -25,6 +26,7 @@
 	import Loader from '../common/Loader.svelte';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
+	import { clearChatReadAt } from '$lib/stores/chatList';
 	import { config, user, chatId as currentChatId, tags } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 	import Messages from '../chat/Messages.svelte';
@@ -96,6 +98,7 @@
 		});
 
 		if (res) {
+			clearChatReadAt(id);
 			await refreshSidebar();
 		}
 	};
@@ -755,7 +758,7 @@
 									}}
 								>
 									<div class="text-ellipsis line-clamp-1 w-full">
-										{chat?.title}
+										<ChatTitle title={chat?.title} />
 									</div>
 									{#if chat?.snippet}
 										<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-0.5">

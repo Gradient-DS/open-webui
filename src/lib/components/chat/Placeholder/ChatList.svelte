@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ChatTitle from '$lib/components/common/ChatTitle.svelte';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 
@@ -19,6 +20,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { chatId, socket, config } from '$lib/stores';
+	import { chatReadAt } from '$lib/stores/chatList';
+	import { isChatUnread } from '$lib/utils/chatReadState';
 
 	dayjs.extend(localizedFormat);
 
@@ -26,6 +29,7 @@
 		id: string;
 		title?: string;
 		updated_at?: number | null;
+		answered_at?: string | null;
 		created_at?: number | null;
 		last_read_at?: number | null;
 		active?: boolean;
@@ -176,10 +180,11 @@
 
 		{#each chatList as chat, idx (chat.id)}
 			{@const unread =
-				chat.id !== $chatId &&
-				!chat.active &&
-				(chat.last_read_at == null ||
-					(chat.updated_at != null && chat.updated_at > chat.last_read_at))}
+				isChatUnread(
+					{ ...chat, last_read_at: Math.max(chat.last_read_at ?? 0, $chatReadAt[chat.id] ?? 0) || null },
+					Boolean($config?.features?.enable_v2_threads),
+					$chatId
+				)}
 			{#if (idx === 0 || (idx > 0 && chat.time_range !== chatList[idx - 1].time_range)) && chat?.time_range}
 				<div
 					class="w-full text-xs text-gray-500 dark:text-gray-500 font-normal {idx === 0
@@ -232,7 +237,7 @@
 							? 'font-normal text-gray-800 dark:text-gray-200'
 							: ''}"
 					>
-						{chat?.title}
+						<ChatTitle title={chat?.title} />
 					</div>
 				</div>
 

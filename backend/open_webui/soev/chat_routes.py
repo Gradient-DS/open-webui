@@ -100,7 +100,9 @@ async def chat_read(service, request, user, identifier, route):
             folder_id=request.path_params.get('folder_id'),
             archived=route.startswith('/archived'),
             pinned=True if route == '/pinned' else None,
-            page=integer(request, 'page', 1) if 'page' in request.query_params and route != '/archived/count' else None,
+            page=integer(request, 'page', 1)
+            if route in {'/', '/list'} or ('page' in request.query_params and route != '/archived/count')
+            else None,
             include_pinned=boolean(request, 'include_pinned', route not in {'/', '/list'}),
             include_folders=boolean(request, 'include_folders', route not in {'/', '/list'}),
             sort_by=request.query_params.get('sort_by', 'updated_at'),
@@ -113,13 +115,16 @@ async def chat_read(service, request, user, identifier, route):
             identifier,
             window=integer(request, 'limit', 20),
             before=request.query_params.get('before', ''),
+            thread_id=request.query_params.get('thread_id', ''),
+            current=boolean(request, 'current', not bool(request.query_params.get('thread_id'))),
             etag=request.headers.get('If-None-Match'),
         )
         headers = {'ETag': result.etag} if result.etag else {}
+        page = None if result.not_modified else await service.presentation(user.id, result.page)
         return (
             Response(status_code=304, headers=headers)
             if result.not_modified
-            else JSONResponse(result.page.model_dump(), headers=headers)
+            else JSONResponse(page.model_dump(), headers=headers)
         )
     if route == '/{id}/tags':
         projection = await service.projection(user.id, identifier, window=1)
@@ -145,10 +150,10 @@ async def chat_write(service, request, user, identifier, route):
     if route == '/new':
         form = await body(request)
         if form.get('temporary'):
-            refused()  # The runtime OpenThread contract has no temporary/TTL field.
+            refused()
         if set(form) - {'agent', 'input', 'model'} or not isinstance(form.get('agent'), str) or 'input' not in form:
             raise ThreadError(422, 'invalid_request')
-        return (await service.create(user.id, **form)).model_dump()
+        return (await service.create(user.id, agent=form['agent'])).model_dump()
     if route == '/{id}/fork':
         form = await body(request)
         if set(form) != {'at'} or type(form['at']) is not int:
@@ -162,7 +167,7 @@ async def chat_write(service, request, user, identifier, route):
         positions = [message.position for message in projection.page.messages if message.finished]
         if not positions:
             refused()
-        return (await service.fork(user.id, identifier, max(positions), clone=True)).model_dump()
+        return (await service.fork(user.id, projection.page.thread_id, max(positions), clone=True)).model_dump()
     if route in {'/{id}/pin', '/{id}/archive', '/{id}/unread', '/{id}/folder'}:
         return await organize(service, request, user, identifier, route)
     if route in {'/read', '/archive/all', '/unarchive/all'}:
@@ -193,11 +198,11 @@ async def metadata_write(service, request, user, identifier, route):
             raise ThreadError(422, 'invalid_request')
         form = {'tags': [form['name']]}
         action = 'remove' if request.method == 'DELETE' else 'add'
-    page = await service.metadata(user.id, identifier, form, tag_action=action)
+    metadata = await service.metadata(user.id, identifier, form, tag_action=action)
     from open_webui.soev.thread_metadata import emit_metadata
 
-    await emit_metadata(user.id, identifier, page, form)
-    return page.tags if route == '/{id}/tags' else page.model_dump()
+    await emit_metadata(user.id, identifier, metadata, form)
+    return metadata.tags if route == '/{id}/tags' else metadata.model_dump()
 
 
 async def organize(service, request, user, identifier, route):

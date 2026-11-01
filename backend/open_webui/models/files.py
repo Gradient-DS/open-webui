@@ -10,7 +10,7 @@ import time
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
+from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -518,6 +518,33 @@ class FilesTable:
                 for file in result.scalars().all()
                 if isinstance(file.meta.get('soev_job'), dict)
             ]
+
+    async def claim_soev_job_poll(self, id: str, user_id: str, *, now: int, interval: int) -> FileModel | None:
+        async with get_async_db_context() as db:
+            result = await db.execute(select(File).filter_by(id=id, user_id=user_id).with_for_update())
+            file = result.scalar_one_or_none()
+            if file is None or not isinstance((file.meta or {}).get('soev_job'), dict):
+                return None
+            previous = file.meta.get('soev_job_polled_at', 0)
+            if now - previous < interval:
+                return None
+            metadata = {**file.meta, 'soev_job_polled_at': now}
+            # The conditional write also serializes claims on SQLite, where FOR UPDATE is ignored.
+            claimed = await db.execute(
+                update(File)
+                .where(
+                    File.id == id,
+                    File.user_id == user_id,
+                    File.meta['soev_job']['job_id'].as_string() == file.meta['soev_job']['job_id'],
+                    func.coalesce(File.meta['soev_job_polled_at'].as_integer(), 0) == previous,
+                )
+                .values(meta=metadata)
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+            if claimed.rowcount != 1:
+                return None
+            return FileModel.model_validate(file).model_copy(update={'meta': metadata})
 
     async def get_unlanded_files_for_collection(
         self, collection_key: str, db: AsyncSession | None = None

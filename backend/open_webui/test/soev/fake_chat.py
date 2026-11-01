@@ -2,7 +2,9 @@
 
 import asyncio
 import copy
+import hashlib
 import json
+import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -55,6 +57,8 @@ class FakeChatApi:
 
     def handle(self, request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
         self.requests.append(request)
+        if request.url.path == '/v1/chat/threads:reserve':
+            return self._reserve(request, body or {}, owner)
         parts = request.url.path.split('/')[4:]
         if not parts or parts == ['']:
             return self._open(request, body or {}, owner)
@@ -75,6 +79,34 @@ class FakeChatApi:
             headers={'Content-Type': 'application/problem+json'},
         )
 
+    @staticmethod
+    def metadata(request: httpx.Request, current: dict) -> httpx.Response:
+        def headers():
+            digest = hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest()
+            return {'ETag': f'"{digest}"'}
+
+        if request.method == 'PATCH':
+            if request.headers.get('If-Match') != headers()['ETag']:
+                return FakeChatApi.problem(412, 'precondition_failed')
+            changes = json.loads(request.content)
+            if 'title' in changes:
+                title = changes['title']
+                current['title'] = unicodedata.normalize('NFC', title).strip() or None if title is not None else None
+            if 'preferences' in changes:
+                preferences = changes['preferences']
+                if 'tags' in preferences:
+                    preferences['tags'] = list(
+                        dict.fromkeys(
+                            '_'.join(unicodedata.normalize('NFC', tag.casefold()).split())
+                            for tag in preferences['tags']
+                        )
+                    )
+                current['preferences'] = preferences
+                current['tags'] = preferences.get('tags', [])
+            saved = {key: current[key] for key in ('thread_id', 'title', 'preferences', 'tags')}
+            return httpx.Response(200, json=saved, headers=headers())
+        return httpx.Response(200, json=current, headers=headers())
+
     def _new(self, owner: tuple[str, str | None], events: list[dict]) -> dict[str, Any]:
         thread_id = f'thr-{len(self.threads) + 1}'
         thread = {'thread_id': thread_id, 'owner': owner, 'events': events, 'state': 'finished'}
@@ -84,8 +116,35 @@ class FakeChatApi:
     def _open(self, request: httpx.Request, body: dict, owner: tuple[str, str | None]) -> httpx.Response:
         if request.method != 'POST' or 'agent' not in body:
             return self.problem(422, 'invalid_field')
-        thread = self._new(owner, [frame('opened', 1, {'agent': body['agent']})])
+        if refused := self._refusal(body, opening=True):
+            return refused
+        if 'thread_id' in body:
+            thread = self.threads.get(body['thread_id'])
+            if thread is None or thread['owner'] != owner:
+                return self.problem(404, 'not_found')
+            if thread['state'] != 'reserved' or thread['agent'] != body['agent']:
+                return self.problem(409, 'thread_active')
+            thread['events'].append(frame('opened', 1, {'agent': body['agent']}))
+        else:
+            thread = self._new(owner, [frame('opened', 1, {'agent': body['agent']})])
         return self._run(request, body, thread, opening=True)
+
+    def _reserve(self, request: httpx.Request, body: dict, owner: tuple[str, str | None]) -> httpx.Response:
+        if (
+            request.method != 'POST'
+            or set(body) - {'agent', 'title', 'temporary'}
+            or not isinstance(body.get('agent'), str)
+            or not body['agent']
+            or body.get('title') is not None
+            and not isinstance(body['title'], str)
+            or type(body.get('temporary', False)) is not bool
+        ):
+            return self.problem(422, 'invalid_field')
+        thread = self._new(owner, [])
+        thread.update(
+            state='reserved', agent=body['agent'], title=body.get('title'), temporary=body.get('temporary', False)
+        )
+        return httpx.Response(200, json={'thread_id': thread['thread_id']})
 
     def _operation(self, request: httpx.Request, body: dict, thread: dict, operation: str) -> httpx.Response:
         if operation == 'read':
@@ -121,7 +180,9 @@ class FakeChatApi:
     def _refusal(self, body: dict, *, opening: bool) -> httpx.Response | None:
         """soev-api refuses unknown body fields; the soev chat agent's input is
         ``{text, knowledge?, tools?, context?, documents?}``, each knowledge entry naming a KB by its key."""
-        allowed = {'input', 'model', 'principals'} | ({'agent', 'temporary'} if opening else {'answering'})
+        allowed = {'input', 'model', 'principals'} | (
+            {'agent', 'title', 'temporary', 'thread_id'} if opening else {'answering'}
+        )
         if set(body) - allowed:
             return self.problem(400, 'unknown_field')
         turn = body.get('input')
@@ -173,7 +234,7 @@ class FakeChatApi:
         self, request: httpx.Request, thread: dict, recorded: list[tuple[str, dict]], *, opening: bool = False
     ) -> httpx.Response:
         headers = self._headers(thread) if opening else {}
-        if request.headers.get('Accept') != 'text/event-stream':
+        if not opening and request.headers.get('Accept') != 'text/event-stream':
             return httpx.Response(201 if opening else 200, json=self._view(thread), headers=headers)
         content = b''.join(sse(kind, event) for kind, event in recorded)
         if self.close_after is not None:

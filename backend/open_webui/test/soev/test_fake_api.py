@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from open_webui.test.soev.fake_api import person_ref
 
 SERVICE = 'owui:service:webui'
 FILE_BYTES = b'file content'
@@ -67,15 +68,15 @@ def test_collection_replays_and_read_write_decisions(api):
     """Collection creation is replayable, while unreadable rows stay 404 and read does not imply write."""
     fake, client = api
     body, collection = seed(client)
-    assert collection['created_by'] == 'owui:user:alice'
-    assert collection['principals'] == [SERVICE, 'owui:user:alice']
-    assert collection['writers'] == ['owui:user:alice']
+    assert collection['created_by'] == person_ref('alice')
+    assert collection['principals'] == [SERVICE, person_ref('alice')]
+    assert collection['writers'] == [person_ref('alice')]
     assert send(client, 'POST', '/v1/collections', body, user='owui:user:alice').status_code == 200
     assert send(client, 'GET', '/v1/collections/kb').json()['caller_may_write'] is None
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:alice').json()['caller_may_write'] is True
     seed(client, 'other', 'owui:user:bob')
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').status_code == 404
-    fake.collections['kb']['principals'].append('owui:user:bob')
+    fake.collections['kb']['principals'].append(person_ref('bob'))
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').json()['caller_may_write'] is False
     refused = send(client, 'PATCH', '/v1/collections/kb', {'name': 'bad'}, user='owui:user:bob')
     assert refused.status_code == 403
@@ -99,7 +100,7 @@ def test_access_and_delete_jobs_advance_only_when_requested(api):
             client,
             'PUT',
             '/v1/collections/kb/access',
-            {'visibility': 'public', 'principals': [SERVICE, 'owui:user:alice'], 'writers': ['owui:user:alice']},
+            {'visibility': 'public', 'principals': [SERVICE, person_ref('alice')], 'writers': [person_ref('alice')]},
             operation=operation,
         )
         for _ in range(2)
@@ -480,15 +481,17 @@ def test_job_routes_conceal_unknown_and_other_credentials_jobs(api, suffix, meth
 
 
 def test_get_job_with_items_lists_each_document(api):
-    """Items are opt-in and subjects do not impose collection access on job reads."""
+    """Ingest jobs require the commissioning person; items are opt-in."""
     fake, client = api
     seed(client)
     seed(client, 'other', 'owui:user:bob')
-    job = ingest(client, inline_document(title='Notes'), file_document()).json()
+    job = ingest(client, inline_document(title='Notes'), file_document(), user='owui:user:alice').json()
     path = f'/v1/jobs/{job["job_id"]}'
-    assert 'items' not in send(client, 'GET', path, user='owui:user:bob').json()
-    assert 'items' not in send(client, 'GET', path + '?include_items=false').json()
-    response = send(client, 'GET', path + '?include_items=true', user='owui:user:bob')
+    assert send(client, 'GET', path, user='owui:user:bob').status_code == 404
+    assert send(client, 'GET', path).status_code == 404
+    assert 'items' not in send(client, 'GET', path, user='owui:user:alice').json()
+    assert 'items' not in send(client, 'GET', path + '?include_items=false', user='owui:user:alice').json()
+    response = send(client, 'GET', path + '?include_items=true', user='owui:user:alice')
     assert response.status_code == 200
     assert response.json()['items'] == [
         {
@@ -501,8 +504,10 @@ def test_get_job_with_items_lists_each_document(api):
         }
         for source_id in ('inline', 'file')
     ]
-    listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=AWAITING_UPLOAD').json()['data']
-    assert listed == [send(client, 'GET', path).json()]
+    listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=AWAITING_UPLOAD', user='owui:user:alice').json()[
+        'data'
+    ]
+    assert listed == [send(client, 'GET', path, user='owui:user:alice').json()]
     assert fake.jobs[job['job_id']]['progress']['total'] == 2
 
 

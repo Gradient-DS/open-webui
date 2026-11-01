@@ -30,7 +30,16 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents, threads
+from open_webui.soev import (
+    acting,
+    agent_threads,
+    assistant_files,
+    identity,
+    ingest,
+    live_documents,
+    model_catalog,
+    threads,
+)
 from open_webui.soev.chat_paths import Organizations
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
@@ -425,6 +434,9 @@ async def _chat_attachment(
     if key == f'file-{file.id}':
         # [Claude] Still in the v1 per-file collection: `migrate --uploads` did not ingest it.
         unavailable.append(Skipped('file', 'unmigrated', file_id, name))
+        return
+    if await Knowledges.knowledge_document(key, file_id, user_id=user_id) is None:
+        unavailable.append(Skipped('file', 'denied', file_id, name))
         return
     item = {'collection_key': key, 'file_id': file_id, 'name': name}
     if (file.meta or {}).get('source'):
@@ -1325,7 +1337,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     properties = {
         'title': whole.get('title') or whole.get('filename'),
         'source_id': whole.get('source_id'),
-        'source_url': whole.get('source_url') or whole.get('web_url'),
+        'source_url': whole.get('source_url') or whole.get('web_url') or whole.get('url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
         'granularity': _GRANULARITY.get(element.get('type')),
@@ -1533,11 +1545,9 @@ class AgentTurn:
                 raise threads.ThreadError(503, 'reconnect')
             records = await self.organizations.list(self.metadata['user_id'])
             record = next((r for r in records if r.id == self.metadata.get('chat_id')), None)
-            if record is None:
-                if not self.metadata.get('new_thread'):
-                    raise threads.ThreadError(404, 'unavailable')
+            if record is None and self.metadata.get('new_thread'):
                 return
-            self.thread_id = record.thread_id
+            self.thread_id = record.thread_id if record else threads._identifier(self.metadata.get('chat_id', ''))
             if self.metadata.get('follow_thread'):
                 self.position = 0
                 return
@@ -1872,19 +1882,10 @@ class AgentTurn:
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
         if self.metadata.get('follow_thread'):
-            stream = self.client.chat_stream(
-                self.path('events'),
-                None,
-                as_user=self.as_user,
-                thread_id=self.thread_id,
-                after=0,
-                follow=True,
-            )
-            async with aclosing(stream):
-                async for event in stream:
-                    yield event
-            return
-        path = self.path('inputs') if self.thread_id else _ROOT
+            path = _ROOT
+            body = {**body, 'thread_id': self.thread_id}
+        else:
+            path = self.path('inputs') if self.thread_id else _ROOT
         if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
             body = {**body, 'temporary': True}
         try:
@@ -1936,6 +1937,11 @@ class AgentTurn:
         answered = (payload.get('answered_model') if isinstance(payload, dict) else None) or event.data.get(
             'answered_model'
         )
+        if not answered and event.event == 'model_output':
+            model = payload.get('model')
+            answered = model_catalog.catalog_id(model, requested=self.model) if isinstance(model, str) else None
+        if isinstance(answered, str):
+            answered = model_catalog.catalog_id(answered)
         if isinstance(answered, str) and answered and answered != self.answered_model:
             self.answered_model = answered
             await self.emit('chat:completion', {'answered_model': answered})
@@ -2084,7 +2090,7 @@ class AgentTurn:
         self.model = body.get('model')
         self.documents = body.get('input', {}).get('documents', 'off')
         try:
-            self.emitter = await get_event_emitter(self.metadata)
+            self.emitter = await get_event_emitter(self.metadata, update_db=not threads.enabled())
             await self.notify()
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
@@ -2097,7 +2103,7 @@ class AgentTurn:
             # before any tool output numbers more; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
-            if not self.thread_id:
+            if not self.thread_id or self.metadata.get('follow_thread'):
                 body = {**body, 'agent': agent}
             events = self.events(body)
             async with aclosing(events):
@@ -2130,10 +2136,7 @@ async def call_agent_v2(
     turn = AgentTurn(identity.build_client(), metadata, user_ref, organizations)
     text = _input_text(metadata, form_data)
     try:
-        if metadata.get('follow_thread'):
-            chunks = turn.run({'input': {'text': text}, 'model': model}, agent)
-        else:
-            chunks = await _sent(turn, text, metadata, agent=agent, model=model)
+        chunks = await _sent(turn, text, metadata, agent=agent, model=model)
         if isinstance(chunks, dict):
             return chunks
     except Exception as error:
@@ -2183,10 +2186,73 @@ async def _opened(chunks: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]]
     return early
 
 
+async def _regenerated_input(
+    turn: AgentTurn, source: dict, model: str | None, *, edited_text: str | None = None
+) -> dict:
+    user = await Users.get_user_by_id(turn.metadata['user_id'])
+    if user is None or (
+        edited_text is None
+        and not (
+            user.role == 'admin'
+            or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
+        )
+    ):
+        raise threads.ThreadError(403, 'unavailable')
+    if (
+        set(source) != {'thread_id', 'position'}
+        or not isinstance(source['thread_id'], str)
+        or type(source['position']) is not int
+        or source['position'] <= 1
+    ):
+        raise threads.ThreadError(422, 'invalid_request')
+    position = source['position']
+    events = await turn.client.chat_events(
+        source['thread_id'], as_user=turn.as_user, after=position - 1, through=position
+    )
+    event = next(
+        (
+            event
+            for event in events
+            if event['position'] == position and event['type'] == 'input' and event.get('stream') == 'root'
+        ),
+        None,
+    )
+    if event is None or not isinstance(event['payload'].get('payload'), dict):
+        raise threads.ThreadError(422, 'invalid_request')
+    # Read the prepared input under the acting user's authority; never accept attachment references
+    # or tool settings supplied as a purported saved input by the browser.
+    value = dict(event['payload']['payload'])
+    if edited_text is not None:
+        if not edited_text.strip():
+            raise threads.ThreadError(422, 'invalid_request')
+        value['text'] = edited_text
+    tools = dict(value.get('tools') or {})
+    if not await _web_search_allowed(user.id):
+        tools.update(web_search='off', fetch='off')
+    if not await _live_documents_allowed():
+        tools.update(search_live_documents='off', list_live_folder='off', attach_live_document='off')
+    if not await _live_mail_allowed():
+        tools.update(search_mail='off', read_mail='off')
+    value['tools'] = tools
+    if not await _documents_allowed(user.id):
+        value['documents'] = 'off'
+    return {'input': value, **({'model': model} if model else {})}
+
+
 async def _sent(
     turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
 ) -> AsyncIterator[dict[str, Any]] | dict:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
+    source = (metadata.get('user_message') or {}).get('regenerate_from')
+    if threads.enabled() and source is not None:
+        if not isinstance(source, dict):
+            raise threads.ThreadError(422, 'invalid_request')
+        return turn.run(await _regenerated_input(turn, source, model), agent)
+    edited = (metadata.get('user_message') or {}).get('edit_from')
+    if threads.enabled() and edited is not None:
+        if not isinstance(edited, dict):
+            raise threads.ThreadError(422, 'invalid_request')
+        return turn.run(await _regenerated_input(turn, edited, model, edited_text=text), agent)
     entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
     if len(entries) > TEXTS:
         message = (

@@ -43,7 +43,7 @@ def _guard(method):
 def legacy_event_emitter(factory):
     @wraps(factory)
     async def guarded(*args, **kwargs):
-        if threads.enabled():
+        if threads.enabled() and kwargs.get('update_db') is not False:
             return _discard_event
         return await factory(*args, **kwargs)
 

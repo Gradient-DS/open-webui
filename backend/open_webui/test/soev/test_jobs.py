@@ -3,7 +3,7 @@
 import asyncio
 import importlib
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -11,6 +11,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from open_webui.test.soev import test_ingest
+from open_webui.test.soev.fake_api import person_ref
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -51,8 +52,8 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
             'key': 'kb',
             'name': 'Research',
             'visibility': 'restricted',
-            'principals': [test_ingest.SERVICE, 'owui:user:alice'],
-            'writers': ['owui:user:alice'],
+            'principals': [test_ingest.SERVICE, person_ref('alice')],
+            'writers': [person_ref('alice')],
         },
         as_user='owui:user:alice',
         idempotency_key='collection:kb',
@@ -70,6 +71,24 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     await engine.dispose()
 
 
+@contextmanager
+def owner_login(owner='alice'):
+    from open_webui.soev import acting
+
+    requester = acting._requester_ref.set(f'owui:user:{owner}')
+    resolver = acting._token_resolver.set(AsyncMock(return_value=f'fictional-login:owui:user:{owner}'))
+    try:
+        yield
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
+
+
+async def poll(env, *, now):
+    with owner_login():
+        return await env.jobs.poll_once(env.client, now=now)
+
+
 async def submitted(env, **meta):
     file = await test_ingest.new_file(env, **meta)
     await test_ingest.submit(env, file)
@@ -79,30 +98,15 @@ async def submitted(env, **meta):
 
 
 @pytest.mark.asyncio
-async def test_upload_recovery_is_service_only_even_inside_a_request(env):
-    from open_webui.soev import acting
-
+async def test_upload_recovery_uses_the_owner_login(env):
     file, job = await submitted(env)
     env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
     env.api.uploads.pop((job['job_id'], file.id))
-    resolver = AsyncMock(return_value='fictional-user-token')
-    token = acting._token_resolver.set(resolver)
-    requester = acting._requester_ref.set('owui:user:alice')
-    try:
-        assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
-    finally:
-        acting._requester_ref.reset(requester)
-        acting._token_resolver.reset(token)
+    assert await poll(env, now=job['submitted_at'] + 61) == 1
     assert any(request.url.path.endswith('/commit') for request in env.api.requests)
     assert any(request.url.path.endswith('/cancel') for request in env.api.requests)
     assert any(request.url.path == '/v1/jobs' for request in env.api.requests)
-    for request in env.api.requests:
-        if request.url.path.startswith('/v1/'):
-            assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
-            assert 'X-Soev-' + 'Subject' not in request.headers
-            assert 'X-Soev-User-Token' not in request.headers
-            assert b'acting_as' not in request.content
-    resolver.assert_not_awaited()
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
 
 
 async def assert_terminal(env, file, *, error=None):
@@ -127,14 +131,14 @@ async def test_a_succeeded_job_completes_the_file_and_emits_completed(env):
     """Successful jobs leave document membership and emit the persisted completed status."""
     file, job = await submitted(env)
     env.api.advance(job['job_id'], 'SUCCEEDED')
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 1) == 1
+    assert await poll(env, now=job['submitted_at'] + 1) == 1
     await assert_terminal(env, file)
     assert [(r.method, r.url.path) for r in env.api.requests] == [
         ('GET', f'/v1/jobs/{job["job_id"]}'),
         ('GET', f'/v1/collections/kb/documents/{file.id}'),
     ]
     assert env.api.requests[0].url.params['include_items'] == 'true'
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 2) == 0
+    assert await poll(env, now=job['submitted_at'] + 2) == 0
     assert len(env.api.requests) == 2
 
 
@@ -145,7 +149,7 @@ async def test_a_landed_document_is_moved_to_the_intended_folder(env, intended, 
     file, job = await submitted(env, relative_path=f'{intended}/report.pdf' if intended else 'report.pdf')
     env.api.advance(job['job_id'], 'SUCCEEDED')
     env.api.documents['kb', file.id]['path'] = landed
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert await poll(env, now=job['submitted_at']) == 1
     moves = [r for r in env.api.requests if r.url.path.endswith('/move')]
     if (intended or '') != (landed or ''):
         assert len(moves) == 1
@@ -176,7 +180,7 @@ async def test_an_item_failure_becomes_the_files_error_with_its_code(env, status
     if not items:
         env.api.jobs[job['job_id']]['items'] = []
     env.api.jobs[job['job_id']]['items'].insert(0, {'source_id': 'another-file', 'code': 'wrong', 'detail': 'wrong'})
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert await poll(env, now=job['submitted_at']) == 1
     await assert_terminal(env, file, error=code if code and items else status)
 
 
@@ -195,7 +199,7 @@ async def test_a_files_error_carries_only_fixed_codes(env, item, error):
     file, job = await submitted(env)
     env.api.advance(job['job_id'], 'COMPLETED_WITH_ERRORS', item_code='internal_error')
     env.api.jobs[job['job_id']]['items'][0].update(item, detail=item['reason'])
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert await poll(env, now=job['submitted_at']) == 1
     await assert_terminal(env, file, error=error)
 
 
@@ -206,11 +210,11 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
     monkeypatch.setattr(env.jobs.config, 'SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', 120)
     file, job = await submitted(env)
     env.api.advance(job['job_id'], status)
-    for age in (1, 120):
-        assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + age) == 0
-        assert await env.files.Files.get_file_by_id(file.id) == file
+    for age in (1, 116):
+        assert await poll(env, now=job['submitted_at'] + age) == 0
+        assert (await env.files.Files.get_file_by_id(file.id)).data == file.data
         env.events.assert_not_awaited()
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 121) == 1
+    assert await poll(env, now=job['submitted_at'] + 121) == 1
     await assert_terminal(env, file, error='did not complete within 120s')
     assert env.api.jobs[job['job_id']]['status'] == status
     assert all(r.method == 'GET' for r in env.api.requests)
@@ -220,7 +224,7 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
 @pytest.mark.parametrize('committed', [False, True])
 @pytest.mark.parametrize('age', [60, 61])
 async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, committed, age):
-    """An interrupted commit waits one minute before replaying the original commit key as the service."""
+    """An interrupted commit waits one minute before replaying the original key as the owner."""
     file = await test_ingest.new_file(env)
     send = env.client.send
 
@@ -237,9 +241,9 @@ async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, comm
     job = {**file.meta['soev_job'], 'committed': committed}
     file = await env.files.Files.update_file_metadata_by_id(file.id, {'soev_job': job})
     env.api.requests.clear()
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 59) == 0
-    assert await env.files.Files.get_file_by_id(file.id) == file
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + age) == 1
+    assert await poll(env, now=job['submitted_at'] + 55) == 0
+    assert (await env.files.Files.get_file_by_id(file.id)).data == file.data
+    assert await poll(env, now=job['submitted_at'] + age) == 1
     assert env.api.jobs[job['job_id']]['status'] == 'QUEUED'
     row = await env.files.Files.get_file_by_id(file.id)
     assert row.meta['soev_job']['committed'] is True
@@ -259,7 +263,7 @@ async def test_a_missing_upload_is_resubmitted_at_most_three_times(env):
         env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
         env.api.uploads.pop((job['job_id'], file.id))
         env.api.requests.clear()
-        assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
+        assert await poll(env, now=job['submitted_at'] + 61 + attempt * 5) == 1
         row = await env.files.Files.get_file_by_id(file.id)
         if attempt < 3:
             assert env.api.jobs[job['job_id']]['status'] == 'CANCELLED'
@@ -280,7 +284,7 @@ async def test_a_vanished_job_is_an_error(env):
     """A credential-scoped missing job becomes a visible failure with retained collection membership."""
     file, job = await submitted(env)
     del env.api.jobs[job['job_id']]
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert await poll(env, now=job['submitted_at']) == 1
     await assert_terminal(env, file, error='job disappeared')
 
 
@@ -306,22 +310,34 @@ async def test_the_row_is_written_before_the_event(env, monkeypatch, status):
 
     monkeypatch.setattr(env.files.Files, 'set_status', AsyncMock(side_effect=set_status))
     env.events.side_effect = emit
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert await poll(env, now=job['submitted_at']) == 1
     assert calls == ['write', 'emit']
 
 
 @pytest.mark.asyncio
-async def test_the_poller_never_carries_a_subject(env):
-    """Job reads, recovery commits, document reads, and moves use only the service credential."""
+@pytest.mark.parametrize('in_request', [False, True])
+async def test_service_only_poll_never_reads_or_completes_owner_jobs(env, in_request):
+    file, job = await submitted(env)
+    env.api.advance(job['job_id'], 'SUCCEEDED')
+    with owner_login() if in_request else nullcontext():
+        assert await env.jobs.poll_once(env.client.as_service(), now=job['submitted_at']) == 0
+    assert env.api.requests == []
+    assert (await env.files.Files.get_file_by_id(file.id)).data == file.data
+    env.events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_owner_reads_and_moves_use_the_login_token(env):
     file, job = await submitted(env, relative_path='a/b/report.pdf')
     env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
+    assert await poll(env, now=job['submitted_at'] + 61) == 1
     env.api.advance(job['job_id'], 'SUCCEEDED')
     env.api.documents['kb', file.id]['path'] = None
-    assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 62) == 1
+    assert await poll(env, now=job['submitted_at'] + 66) == 1
     assert len(env.api.requests) == 5
     assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
-    assert all(r.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret' for r in env.api.requests)
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
+    await assert_terminal(env, file)
 
 
 @pytest.mark.asyncio
@@ -336,18 +352,16 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
     if failure == 'api':
         env.api.failures.append(503)
     else:
-        service = env.client.as_service()
-        monkeypatch.setattr(env.client, 'as_service', lambda: service)
-        get = service.get
+        get = env.client.get
 
         async def fail_first(path, **kwargs):
             if path.endswith(first_job['job_id']):
                 raise ValueError('secret-assertion secret-key https://private.invalid')
             return await get(path, **kwargs)
 
-        monkeypatch.setattr(service, 'get', fail_first)
-    assert await env.jobs.poll_once(env.client, now=second_job['submitted_at']) == 1
-    assert await env.files.Files.get_file_by_id(first.id) == first
+        monkeypatch.setattr(env.client, 'get', fail_first)
+    assert await poll(env, now=second_job['submitted_at']) == 1
+    assert (await env.files.Files.get_file_by_id(first.id)).data == first.data
     assert (await env.files.Files.get_file_by_id(second.id)).meta['status'] == 'completed'
     env.events.assert_awaited_once()
     assert first.id in caplog.text
@@ -357,34 +371,58 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
 
 
 @pytest.mark.asyncio
-async def test_the_poller_is_idle_without_soev_api(env, monkeypatch):
-    """Disabled ticks skip client creation and row reads even when jobs are pending."""
+async def test_owner_reconciliation_is_idle_without_soev_api(env, monkeypatch):
     await submitted(env)
     monkeypatch.setattr(env.jobs.config, 'SOEV_API_URL', '')
-    build = Mock(side_effect=AssertionError('disabled tick built a client'))
-    rows = AsyncMock(side_effect=AssertionError('disabled tick read rows'))
+    build = Mock(side_effect=AssertionError('disabled reconciliation built a client'))
     monkeypatch.setattr(env.jobs.identity, 'build_client', build)
-    monkeypatch.setattr(env.files.Files, 'get_files_with_soev_jobs', rows)
-    await env.jobs._tick()
+    with owner_login():
+        assert await env.jobs.reconcile_owner_jobs('alice') == 0
     build.assert_not_called()
-    rows.assert_not_awaited()
     assert not env.api.requests
     env.events.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_the_lifespan_task_recovers_from_a_tick_failure_and_cancels_cleanly(env, monkeypatch, caplog):
-    """Each enabled tick builds a fresh client and startup failures cannot kill the lifespan task."""
+async def test_poll_is_rate_limited_across_clients_and_concurrent_requests(env):
+    file, job = await submitted(env)
+    now = job['submitted_at']
+    env.api.advance(job['job_id'], 'RUNNING')
+    with owner_login():
+        assert (
+            await asyncio.gather(*[env.jobs.poll_once(env.identity.build_client(), now=now) for _ in range(5)])
+            == [0] * 5
+        )
+        assert len(env.api.requests) == 1
+        assert await env.jobs.poll_once(env.identity.build_client(), now=now + 4) == 0
+        assert len(env.api.requests) == 1
+        env.api.advance(job['job_id'], 'SUCCEEDED')
+        assert await env.jobs.poll_once(env.identity.build_client(), now=now + 5) == 1
+    await assert_terminal(env, file)
+
+
+@pytest.mark.asyncio
+async def test_transient_read_error_is_logged_without_fallback_and_throttled(env, caplog):
+    file, job = await submitted(env)
+    env.api.failures.append(404)
+    assert await poll(env, now=job['submitted_at']) == 0
+    assert await poll(env, now=job['submitted_at'] + 1) == 0
+    assert len(env.api.requests) == 1
+    assert 'injected_failure' in caplog.text
+    assert (await env.files.Files.get_file_by_id(file.id)).data['status'] == 'processing'
+    env.events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('owner', [None, 'bob'])
+async def test_other_request_cannot_complete_an_owners_job(env, owner):
     file, job = await submitted(env)
     env.api.advance(job['job_id'], 'SUCCEEDED')
-    build = Mock(side_effect=[ValueError('secret-key https://private.invalid'), env.client, asyncio.CancelledError()])
-    monkeypatch.setattr(env.jobs.identity, 'build_client', build)
-    monkeypatch.setattr(env.jobs.config, 'SOEV_API_JOB_POLL_SECONDS', 0)
-    app = SimpleNamespace(state=SimpleNamespace())
-    env.jobs.start_job_poller(app)
-    await asyncio.wait_for(app.state.soev_job_poller, timeout=5)
-    assert build.call_count == 3
-    assert not app.state.soev_job_poller.cancelled()
-    await assert_terminal(env, file)
-    assert 'ValueError' in caplog.text
-    assert 'secret-key' not in caplog.text and 'private.invalid' not in caplog.text
+    if owner:
+        with owner_login(owner):
+            assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 0
+    else:
+        assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 0
+    assert env.api.requests == []
+    assert await env.files.Files.get_file_by_id(file.id) == file
+    env.events.assert_not_awaited()

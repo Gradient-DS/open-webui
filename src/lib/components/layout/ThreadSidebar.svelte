@@ -3,12 +3,15 @@
 	import type { Readable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
 	import { config } from '$lib/stores';
+	import { chatReadAt } from '$lib/stores/chatList';
+	import { isChatUnread } from '$lib/utils/chatReadState';
 	import { threadAPI, type SidebarItem, type ThreadAPI } from '$lib/apis/threads';
 	import ThreadState from '$lib/components/common/ThreadState.svelte';
 	import { threadCacheOrigin, watchThreadVisibility } from '$lib/utils/threadCache';
 	import {
 		filterSidebar,
 		ThreadSidebar,
+		conversationId,
 		type SidebarFilter,
 		type SidebarSnapshot
 	} from '$lib/utils/threads';
@@ -83,12 +86,12 @@
 			<ThreadState state={snapshot.state} retry={() => controller?.search(query)} />
 		{:else}
 			<ul>
-				{#each visible as item (item.thread_id)}
+				{#each visible as item (conversationId(item))}
 					<li data-folder-id={item.organization?.folder_id}>
 						<button onclick={() => onselect(item)}>
 							{#if item.organization?.pinned}<span aria-label={$i18n.t('Pinned')}>★</span>{/if}
 							{item.title ?? $i18n.t('New Chat')}
-							{#if (item.organization?.last_read_at ?? 0) * 1000 < Date.parse(item.updated_at)}
+							{#if isChatUnread({ answered_at: item.answered_at, last_read_at: Math.max(item.last_read_at ?? item.organization?.last_read_at ?? 0, $chatReadAt[conversationId(item)] ?? 0) }, true)}
 								<span aria-label={$i18n.t('Unread')}>•</span>
 							{/if}
 						</button>

@@ -506,3 +506,8 @@ reason = "The private sweep observed functions/create returning 403 after #535. 
 id = "POST /api/v1/functions/sync"
 runtime_soev_backed = "drive"
 reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
+
+[[waived]]
+id = "GET /api/v1/threads/{thread_id}/versions"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py proxies the owner-only conversation version list. The sealed stack has no soev-api; fake-platform tests verify the owner read, missing/reader 404, feature gate and private no-store headers. Private drive uses the existing owner thread fixture."

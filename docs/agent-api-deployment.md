@@ -96,7 +96,7 @@ platform calls; the platform owns remote expiry.
 explicit user reference. `as_service()` / `build_service_client()` explicitly
 select product authority for catalog/capability discovery, directory/group pushes,
 service inventory and grant projections, collection ownership
-operations, and credential-scoped job reads/commits. Those calls send neither
+operations, and service-commissioned job reads/commits. Those calls send neither
 person header. ThreadClient already requires the requester's token.
 
 ### Remaining legacy subject callers
@@ -105,11 +105,15 @@ None. OWUI has no subject signer, subject-header client, identity-link publishin
 or impersonation context. User calls require the requesting person's login token;
 service calls explicitly select `SoevClient.as_service()`.
 
-The durable job poller uses product authority. A completed reference that lacks
-MIME metadata stays processing until the owner's next authenticated request, when
-the document is read using that request's login token. References with supplied
-MIME metadata can finish in the poller. Failed lookups retain the durable job for
-a later owner request. Offline cutover work belongs to the platform migrator; see
+Durable file jobs reconcile during their owner's authenticated requests, including
+file status polling, open status streams, and knowledge file lists. Job and document
+reads use that person's current login token; the service file-job poller is removed.
+A database claim limits each file to one job read per `SOEV_API_JOB_POLL_SECONDS`
+(default and minimum five seconds), including failed reads and concurrent workers.
+Completed references fill missing MIME metadata before becoming ready. Terminal
+states persist before `file:status` is emitted, releasing queued composer messages.
+Failed lookups are logged and retain the durable job for a later owner request.
+Offline cutover work belongs to the platform migrator; see
 [cutover-handoff.md](cutover-handoff.md).
 
 ## Optional platform capabilities
@@ -231,6 +235,8 @@ The historical migration and fictional test-fixture exceptions are described
 above and enforced by the no-gateway-key assertion.
 
 ## Prepared platform thread UI
+
+New chats reserve an id via `POST /v1/chat/threads:reserve` without running input; the followed first turn streams `POST /v1/chat/threads` with that `thread_id`, and later turns use `/inputs`.
 
 `ENABLE_V2_THREADS` is a server-only switch, false by default. The authenticated
 configuration exposes `features.enable_v2_threads` only when that switch,

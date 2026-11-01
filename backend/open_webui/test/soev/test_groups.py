@@ -879,6 +879,7 @@ async def test_refresh_and_retry_cadence_respect_snapshot_bound(group_db, monkey
 
     now = snapshot_clock
     attempted_at = []
+    monkeypatch.setattr(group_mirror, 'monotonic', lambda: now[0])
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_RECONCILE_MINUTES', 15)
     monkeypatch.setattr(group_mirror.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
 

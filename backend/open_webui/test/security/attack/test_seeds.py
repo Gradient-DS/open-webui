@@ -67,6 +67,7 @@ def test_route_scoping_distinguishes_resources():
         ('/api/v1/knowledge/{id}/files', 'knowledge'),
         ('/api/v1/files/{id}/content', 'file'),
         ('/api/v1/chats/shared/{id}/access', 'shared_access'),
+        ('/api/v1/chats/{id}/share', 'chat_share_access'),
         ('/api/v1/chats/{id}/clone/shared', 'shared_clone'),
     ]:
         assert seeds.parameter_for(path, 'id')['key'] == key
@@ -974,6 +975,7 @@ LIVE_READS = [
     '/api/v1/chats/{id}',
     '/api/v1/chats/share/{share_id}',
     '/api/v1/chats/shared/{id}/access',
+    '/api/v1/chats/{id}/share',
     '/api/v1/knowledge/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',
@@ -1140,3 +1142,13 @@ def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alo
     assert (name, content, content_type) == ('data', '{"a": {"b": "p1"}}', 'application/json')
     assert filename.startswith('f-') and filename.endswith('.json') and '{token}' not in filename
     assert fields['form'] == {'idx': 'p1'}
+
+
+def test_conversation_versions_reuses_the_owner_thread_fixture(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    path = '/api/v1/threads/{thread_id}/versions'
+    parameter = seeds.parameter_for(path, 'thread_id')
+    assert parameter['key'] == 'platform_thread_versions'
+    assert parameter['same_as'] == 'meeting'
+    assert parameter['backed_by'] == 'soev-solutions'
+    assert f'GET {path}' in seeds.ordinary_targets()

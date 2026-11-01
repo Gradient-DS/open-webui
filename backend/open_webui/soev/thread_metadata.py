@@ -1,5 +1,6 @@
 """Owner metadata tasks persist through the same path as manual edits."""
 
+import asyncio
 import json
 import logging
 
@@ -8,12 +9,27 @@ from starlette.responses import StreamingResponse
 from open_webui.models.config import Config
 from open_webui.soev import task_turns
 from open_webui.soev.chat_routes import paths
-from open_webui.soev.threads import ProjectionPage
+from open_webui.soev.threads import ThreadMetadataResponse
 
 log = logging.getLogger(__name__)
+_metadata_tasks: set[asyncio.Task] = set()
 
 
-async def emit_metadata(user_id: str, chat_id: str, page: ProjectionPage, changes: dict) -> None:
+def detach_complete(ctx: dict) -> None:
+    async def run():
+        try:
+            await complete(ctx)
+        except Exception as error:
+            log.warning('Thread metadata task failed: status=%s', getattr(error, 'status', None))
+
+    # create_task retains the acting user's token context. The retained Request
+    # is only used for app state and headers, never its receive channel.
+    task = asyncio.create_task(run())
+    _metadata_tasks.add(task)
+    task.add_done_callback(_metadata_tasks.discard)
+
+
+async def emit_metadata(user_id: str, chat_id: str, metadata: ThreadMetadataResponse, changes: dict) -> None:
     from open_webui.socket.main import sio
 
     for field in ('title', 'tags'):
@@ -23,15 +39,16 @@ async def emit_metadata(user_id: str, chat_id: str, page: ProjectionPage, change
                 {
                     'chat_id': chat_id,
                     'message_id': None,
-                    'data': {'type': f'chat:{field}', 'data': getattr(page, field)},
+                    'data': {'type': f'chat:{field}', 'data': getattr(metadata, field)},
                 },
                 room=f'user:{user_id}',
             )
 
 
 async def generate(request, kind: str, chat_id: str, messages: list[dict], user) -> dict:
-    """Run the title or tags task as a soev.task/1 turn on the chat's thread."""
-    if not await Config.get(f'task.{kind}.enable'):
+    """Run a post-turn task as a soev.task/1 turn on the chat's thread."""
+    setting = 'follow_up' if kind == 'follow_ups' else kind
+    if not await Config.get(f'task.{setting}.enable'):
         return {}
     return await task_turns.complete_task(request, kind, {'chat_id': chat_id, 'messages': messages}, user)
 
@@ -48,7 +65,7 @@ def generated_value(response: dict, field: str):
 
 async def complete(ctx: dict) -> None:
     tasks = ctx.get('tasks') or {}
-    if not (tasks.get('title_generation') or tasks.get('tags_generation')):
+    if not (tasks.get('title_generation') or tasks.get('tags_generation') or tasks.get('follow_up_generation')):
         return
     service = paths(ctx['request'])
     user, metadata = ctx['user'], ctx['metadata']
@@ -56,15 +73,51 @@ async def complete(ctx: dict) -> None:
     if not chat_id:
         return
     messages = [*ctx['form_data'].get('messages', [])]
+    if metadata.get('user_message') and not any(message.get('role') == 'user' for message in messages):
+        messages.append({**metadata['user_message'], 'role': 'user'})
     if ctx.get('assistant_message'):
-        messages.append({'role': 'assistant', 'content': ctx['assistant_message'].get('content', '')})
-    for field in ('title', 'tags'):
-        if not tasks.get(f'{field}_generation'):
+        messages.append(
+            {
+                'id': metadata.get('message_id'),
+                'role': 'assistant',
+                'content': ctx['assistant_message'].get('content', ''),
+            }
+        )
+    for field, flag in (
+        ('title', 'title_generation'),
+        ('tags', 'tags_generation'),
+        ('follow_ups', 'follow_up_generation'),
+    ):
+        if not tasks.get(flag):
             continue
         try:
-            await complete_field(ctx['request'], service, user, chat_id, field, messages)
+            if field == 'follow_ups':
+                await complete_follow_ups(ctx, messages)
+            else:
+                await complete_field(ctx['request'], service, user, chat_id, field, messages)
         except Exception as error:
             log.warning('Thread metadata task failed: field=%s status=%s', field, getattr(error, 'status', None))
+
+
+async def complete_follow_ups(ctx: dict, messages: list[dict]) -> None:
+    from open_webui.socket.main import sio
+
+    metadata = ctx['metadata']
+    if not metadata.get('message_id'):
+        return
+    value = generated_value(
+        await generate(ctx['request'], 'follow_ups', metadata['chat_id'], messages, ctx['user']), 'follow_ups'
+    )
+    if value is not None:
+        await sio.emit(
+            'events',
+            {
+                'chat_id': metadata['chat_id'],
+                'message_id': metadata['message_id'],
+                'data': {'type': 'chat:message:follow_ups', 'data': {'follow_ups': value}},
+            },
+            room=f'user:{ctx["user"].id}',
+        )
 
 
 async def complete_field(request, service, user, chat_id: str, field: str, messages: list[dict]) -> None:
@@ -79,15 +132,14 @@ async def complete_field(request, service, user, chat_id: str, field: str, messa
     if value is None or (field == 'title' and not value):
         return
     changes = {field: value}
-    page = await service.metadata(user.id, chat_id, changes)
-    await emit_metadata(user.id, chat_id, page, changes)
+    metadata = await service.metadata(user.id, chat_id, changes)
+    await emit_metadata(user.id, chat_id, metadata, changes)
 
 
 async def finish_response(response, ctx: dict):
     tasks = ctx.get('tasks') or {}
-    if not (tasks.get('title_generation') or tasks.get('tags_generation')):
+    if not (tasks.get('title_generation') or tasks.get('tags_generation') or tasks.get('follow_up_generation')):
         return response
-    from open_webui.utils.middleware import update_assistant_message_from_stream
 
     if not isinstance(response, StreamingResponse):
         if isinstance(response, dict) and 'error' not in response:
@@ -96,21 +148,37 @@ async def finish_response(response, ctx: dict):
             await complete(ctx)
         return response
 
-    async def stream():
-        assistant = {}
-        failed = False
-        async for chunk in response.body_iterator:
-            text = chunk.decode() if isinstance(chunk, bytes) else chunk
-            for line in text.splitlines():
-                if line.startswith('data:') and line[5:].strip() != '[DONE]':
-                    try:
-                        failed |= 'error' in json.loads(line[5:])
-                    except ValueError:
-                        pass
-            update_assistant_message_from_stream(assistant, chunk)
-            yield chunk
-        if not failed:
-            ctx['assistant_message'] = assistant
-            await complete(ctx)
+    return StreamingResponse(
+        finish_stream(response, ctx), headers=dict(response.headers), background=response.background
+    )
 
-    return StreamingResponse(stream(), headers=dict(response.headers), background=response.background)
+
+async def finish_stream(response, ctx: dict):
+    from open_webui.utils.middleware import update_assistant_message_from_stream
+
+    assistant = {}
+    failed = False
+    scheduled = False
+    async for chunk in response.body_iterator:
+        text = chunk.decode() if isinstance(chunk, bytes) else chunk
+        terminal = False
+        for line in text.splitlines():
+            if not line.startswith('data:'):
+                continue
+            if line[5:].strip() == '[DONE]':
+                terminal = True
+            else:
+                try:
+                    failed |= 'error' in json.loads(line[5:])
+                except ValueError:
+                    pass
+        update_assistant_message_from_stream(assistant, chunk)
+        # Schedule before yielding [DONE]: the browser stops reading there.
+        if terminal and not failed and not scheduled:
+            ctx['assistant_message'] = assistant
+            detach_complete(ctx)
+            scheduled = True
+        yield chunk
+    if not failed and not scheduled:
+        ctx['assistant_message'] = assistant
+        detach_complete(ctx)
