@@ -344,3 +344,70 @@ it('grants what the Microsoft login connected once per session, before the first
 	expect(api.grantAutoConnected).toHaveBeenCalledTimes(1);
 	expect(liveGranted(get(liveGrants), 'mail')).toBe(true);
 });
+
+it('renews Outlook silently and waits for the token exchange', async () => {
+	const { reauthorizeMail } = await import('./live-connections');
+	vi.mocked(api.authorizeConnection).mockResolvedValue({
+		authorize_url: 'https://provider.invalid/silent'
+	});
+	vi.mocked(api.getConnection)
+		.mockResolvedValueOnce({ id: 'c', source_kind: 'outlook_mail', lifecycle: 'suspended:reauth' })
+		.mockResolvedValue({ id: 'c', source_kind: 'outlook_mail', lifecycle: 'enabled' });
+	const pending = reauthorizeMail('session', 'c');
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.authorizeConnection).toHaveBeenCalledWith('session', 'c', true);
+	receive({
+		origin: 'https://app.invalid',
+		source: popup,
+		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
+	});
+	await vi.advanceTimersByTimeAsync(1000);
+	await pending;
+	expect(api.authorizeConnection).toHaveBeenCalledOnce();
+	expect(api.getConnection).toHaveBeenCalledTimes(2);
+	expect(popup.close).toHaveBeenCalled();
+});
+
+it('continues interactive Outlook consent in the silent popup only after a trusted callback', async () => {
+	const { reauthorizeMail } = await import('./live-connections');
+	vi.mocked(api.authorizeConnection)
+		.mockResolvedValueOnce({ authorize_url: 'https://provider.invalid/silent' })
+		.mockResolvedValueOnce({ authorize_url: 'https://provider.invalid/interactive' });
+	vi.mocked(api.getConnection).mockResolvedValue({
+		id: 'c',
+		source_kind: 'outlook_mail',
+		lifecycle: 'enabled'
+	});
+	const pending = reauthorizeMail('session', 'c');
+	await vi.advanceTimersByTimeAsync(0);
+	const callback = {
+		origin: 'https://app.invalid',
+		source: popup,
+		data: { type: 'soev_connect', connection: 'c', result: 'interaction_required' }
+	};
+	for (const forged of [
+		{ ...callback, origin: 'https://other.invalid' },
+		{ ...callback, source: {} },
+		{ ...callback, data: { ...callback.data, connection: 'other' } }
+	])
+		receive(forged);
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.authorizeConnection).toHaveBeenCalledOnce();
+	receive(callback);
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.authorizeConnection).toHaveBeenLastCalledWith('session', 'c');
+	expect(popup.location.href).toBe('https://provider.invalid/interactive');
+	expect(window.open).toHaveBeenCalledOnce();
+	receive({ ...callback, data: { ...callback.data, result: 'pending' } });
+	await pending;
+	expect(popup.close).toHaveBeenCalled();
+});
+
+it('does not begin reauthorization if the consent popup is blocked', async () => {
+	const { reauthorizeMail } = await import('./live-connections');
+	vi.mocked(window.open).mockReturnValue(null);
+	await expect(reauthorizeMail('session', 'c')).rejects.toThrow(
+		'Allow popups to connect your account'
+	);
+	expect(api.authorizeConnection).not.toHaveBeenCalled();
+});

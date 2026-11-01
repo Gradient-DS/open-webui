@@ -54,7 +54,7 @@ describe('connect popup messages', () => {
 			expect(connectResult(invalid, trustedOrigins, popup, 'c')).toBeNull();
 		expect(connectResult(event, trustedOrigins, popup)).toBeNull();
 	});
-	it.each(['error', 'invalid'])('surfaces a %s callback', (result) => {
+	it.each(['error', 'invalid', 'interaction_required'])('surfaces a %s callback', (result) => {
 		expect(
 			connectResult({ ...event, data: { ...event.data, result } }, trustedOrigins, popup, 'c')
 		).toBe(result);
