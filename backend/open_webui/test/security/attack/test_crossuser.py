@@ -584,21 +584,59 @@ def test_seeded_task_list_distinguishes_owner_from_second_account_and_detects_le
     assert result.violations[0]['reason'] == 'second account received the same nonempty object as the owner'
 
 
-def test_conversation_versions_requires_an_owner_control_without_reader_allowances(monkeypatch):
+@pytest.mark.parametrize('suffix,method', [('versions', 'GET'), ('read', 'POST')])
+def test_conversation_routes_require_an_owner_control_without_stranger_allowances(monkeypatch, suffix, method):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
-    path = '/api/v1/threads/{thread_id}/versions'
-    route = f'GET {path}'
+    path = '/api/v1/threads/{thread_id}/' + suffix
+    route = f'{method} {path}'
     routes, admins = crossuser.targets()
     assert route in routes and route not in admins
     assert crossuser._owner_key(path, seeds.SURFACE) == 'admin'
-    assert route in seeds.SOEV_BACKED
+    assert (route in seeds.SOEV_BACKED) is (suffix == 'versions')
+    assert route in seeds.ordinary_targets() and route not in seeds.DESTRUCTIVE
     assert route not in crossuser._shared() and route not in crossuser.expected_refusals()
     assert route in source_operations()
     result = crossuser.Authorization(plane.Seeding())
-    owner = plane.Outcome(200, True, '{"items":[{"thread_id":"owner-version"}]}')
+    owner = plane.Outcome(
+        200,
+        True,
+        '{"items":[{"thread_id":"owner-version"}]}'
+        if suffix == 'versions'
+        else '{"chat_id":"owner-version","last_read_at":1792922400.75}',
+    )
     crossuser._check(
-        result, route, plane.Outcome(404, False, '{}'), owner, ['owner-version'], admin_only=False, control=True
+        result,
+        route,
+        plane.Outcome(404, False, '{"state":"unavailable"}'),
+        owner,
+        ['owner-version'],
+        admin_only=False,
+        control=True,
     )
     assert result.controls[route] == 200 and not result.violations
     crossuser._check(result, route, owner, owner, ['owner-version'], admin_only=False, control=True)
     assert result.violations
+
+
+def test_conversation_mark_read_crossuser_probe_reaches_authorization_without_sending_a_body(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/threads/{thread_id}/read'
+    entry = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
+    fields = seeds.resolve_fields(seeds.SeedContext(Mock(), Mock(), seeds.SURFACE), entries=[entry])
+    parameters = seeds.Resolved(fields=fields)
+    assert crossuser._benign(route, parameters, seeds.SPEC) == {'headers': {'Content-Type': 'application/json'}}
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"chat_id":"owner-thread","last_read_at":2}'),
+        plane.Outcome(200, True, '{"chat_id":"owner-thread","last_read_at":1}'),
+        (),
+        admin_only=False,
+        control=True,
+        resource_ids=['owner-thread'],
+    )
+    assert {item['reason'] for item in result.violations} == {
+        'second account received an object containing the seeded resource id',
+        'second account accepted a write to the owner resource',
+    }

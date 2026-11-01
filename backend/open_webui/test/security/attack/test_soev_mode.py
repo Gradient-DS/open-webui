@@ -59,6 +59,8 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'meeting',
         'agent_thread',
         'platform_thread',
+        'platform_thread_versions',
+        'platform_thread_read',
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
@@ -69,7 +71,14 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
 def test_platform_thread_seed_reuses_the_admin_owned_meeting(monkeypatch, mode):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    surface = {'parameter': [p for p in seeds.SURFACE['parameter'] if p['key'] in {'meeting', 'platform_thread'}]}
+    surface = {
+        'parameter': [
+            p
+            for p in seeds.SURFACE['parameter']
+            if p['key'] in {'meeting', 'platform_thread', 'platform_thread_versions', 'platform_thread_read'}
+        ],
+        'field': [p for p in seeds.SURFACE['field'] if p['route'] == 'POST /api/v1/threads/{thread_id}/read'],
+    }
     paths = {path for path in seeds.SPEC['paths'] if path.startswith('/api/v1/threads/')}
     spec = {'paths': {path: seeds.SPEC['paths'][path] for path in paths}}
     client, admin = Mock(), Mock()
@@ -82,11 +91,15 @@ def test_platform_thread_seed_reuses_the_admin_owned_meeting(monkeypatch, mode):
     if mode == 'waive':
         request.assert_not_called()
         assert resolved == {}
+        assert resolved.fields == {}
     else:
         request.assert_called_once()
         assert request.call_args.args == ('POST', '/api/v1/meetings')
         assert request.call_args.kwargs['actor'] is admin
         assert resolved == {(path, 'thread_id'): 'fictional-meeting-thread' for path in paths}
+        assert resolved.fields == {
+            'POST /api/v1/threads/{thread_id}/read': {'headers': {'Content-Type': 'application/json'}}
+        }
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
