@@ -2,9 +2,12 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import equal from 'fast-deep-equal';
 import { afterEach, expect, it, vi } from 'vitest';
+import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
+import type { ProjectionPage } from '$lib/apis/threads';
 
 // Exercise the component's callbacks without mounting its editor/media dependencies.
-const source = readFileSync('src/lib/components/chat/Chat.svelte', 'utf8').split('</script>')[0];
+const component = readFileSync('src/lib/components/chat/Chat.svelte', 'utf8');
+const source = component.split('</script>')[0];
 const script = ts.createSourceFile(
 	'Chat.ts',
 	source.slice(source.indexOf('>') + 1),
@@ -66,43 +69,82 @@ it('applies v2 tag events and refreshes global tags without blocking or replacin
 	expect(state.allTags.set).toHaveBeenCalledExactlyOnceWith(tags);
 });
 
-it.each([true, false])('preserves projection scroll when autoScroll=%s', async (autoScroll) => {
+it.each([true, false])('preserves projection viewport when autoScroll=%s', async (autoScroll) => {
 	vi.useFakeTimers();
 	const projected = {
-		currentId: 'answer',
-		messages: { answer: { role: 'assistant', done: true } }
+		currentId: 'server-answer',
+		messages: {
+			'server-user': { id: 'server-user', role: 'user', done: true },
+			'server-answer': { id: 'server-answer', role: 'assistant', done: true }
+		}
 	};
-	const container = { scrollTop: 250, scrollHeight: 2000 };
+	const previous = {
+		currentId: 'local-answer',
+		messages: {
+			'local-user': { id: 'local-user', role: 'user' },
+			'local-answer': { id: 'local-answer', role: 'assistant' }
+		}
+	};
+	const container = {
+		scrollTop: 250,
+		scrollHeight: 2000,
+		contains: () => true,
+		getBoundingClientRect: () => ({ top: 20, bottom: 620 })
+	};
 	const state: Record<string, any> = {
 		$chatId: 'thread',
 		$config: { features: { enable_v2_threads: true } },
 		generationController: null,
-		document: { visibilityState: 'visible' },
+		document: {
+			visibilityState: 'visible',
+			getElementById: (id: string) => {
+				if (!(id.slice('message-'.length) in state.history.messages)) return null;
+				const user = id.endsWith('user');
+				const top = user ? 0 : state.history === previous ? 200 : 500;
+				return {
+					getBoundingClientRect: () => ({
+						top: 20 + top - container.scrollTop,
+						bottom: 20 + top - container.scrollTop + (user ? 100 : 1500)
+					})
+				};
+			}
+		},
 		threadRefreshTimer: undefined,
 		threadPage: null,
-		localStorage: { token: 'token' },
-		getChatById: vi.fn().mockResolvedValue({ title: 'Grove', tags: [] }),
+		loadThreadProjection: vi.fn().mockResolvedValue({
+			thread_id: 'thread',
+			generation: 'generation',
+			title: 'Grove',
+			tags: [],
+			messages: []
+		}),
 		buildThreadHistory: () => projected,
-		history: { currentId: null, messages: {} },
+		createMessagesList: (history: any) => Object.values(history.messages),
+		history: previous,
 		messagesContainerElement: container,
 		autoScroll,
 		followScrollTop: null,
 		equal,
+		requestAnimationFrame: (fn: () => void) => {
+			fn();
+			return 1;
+		},
 		tick: vi.fn(async () => {
-			container.scrollTop = 0;
+			if (state.tick.mock.calls.length === 1) container.scrollTop = 0;
 		}),
 		chatTitle: { set: vi.fn() },
 		tags: [],
 		toast: { error: vi.fn() }
 	};
-	state.refreshThreadProjection = callback('refreshThreadProjection', state);
+	for (const name of ['captureThreadAnchor', 'replaceThreadProjection', 'refreshThreadProjection'])
+		state[name] = callback(name, state);
 	state.refreshThreadProjection('thread');
 	await vi.advanceTimersByTimeAsync(1000);
 	expect(state.toast.error).not.toHaveBeenCalled();
-	expect(container.scrollTop).toBe(autoScroll ? 2000 : 250);
+	// The same answer remains 50px above the viewport even though earlier content grew 300px.
+	expect(container.scrollTop).toBe(autoScroll ? 2000 : 550);
 	expect(state.autoScroll).toBe(autoScroll);
 	expect(state.followScrollTop).toBe(container.scrollTop);
-	// A metadata-only refresh retains history and message identity.
 	const history = state.history;
 	state.buildThreadHistory = () => structuredClone(projected);
 	state.tick.mockClear();
@@ -110,6 +152,7 @@ it.each([true, false])('preserves projection scroll when autoScroll=%s', async (
 	await vi.advanceTimersByTimeAsync(1000);
 	expect(state.history).toBe(history);
 	expect(state.tick).not.toHaveBeenCalled();
+	expect(state.toast.error).not.toHaveBeenCalled();
 });
 
 it.each([true, false])(
@@ -140,5 +183,295 @@ it.each([true, false])(
 		expect(state.refreshFolderChatLists).toHaveBeenCalledWith('folder');
 		expect(state.selectedFolder.set).toHaveBeenCalledWith(null);
 		expect(state.saveChatHandler).toHaveBeenCalledWith('thread', state.history);
+	}
+);
+
+const projection = (positions: number[], cursor: string | null): ProjectionPage => ({
+	thread_id: 'thread',
+	generation: 'generation',
+	title: 'Grove',
+	tags: [],
+	preferences: {},
+	messages: positions.map((position) => ({
+		position,
+		content: { role: position === 1 || position === 25 ? 'user' : 'assistant', text: '' },
+		finished: true,
+		version: `v${position}`
+	})),
+	next_cursor: cursor
+});
+
+it('uses whole turns when loading older messages and hides the button at the first turn', async () => {
+	const state: Record<string, any> = {
+		$chatId: 'thread',
+		threadPage: projection([25, 26], 'before-25'),
+		loadingOlderThread: false,
+		localStorage: { token: 'token' },
+		extendProjectionToTurn,
+		mergeProjection,
+		getChatById: vi
+			.fn()
+			.mockResolvedValueOnce(projection([21, 22, 23, 24], 'before-21'))
+			.mockResolvedValueOnce(
+				projection(
+					Array.from({ length: 20 }, (_, i) => i + 1),
+					null
+				)
+			),
+		replaceThreadProjection: vi.fn(),
+		toast: { error: vi.fn() }
+	};
+	state.loadThreadProjection = callback('loadThreadProjection', state);
+	await callback('loadOlderThread', state)();
+	expect(state.toast.error).not.toHaveBeenCalled();
+	expect(state.getChatById.mock.calls).toEqual([
+		['token', 'thread', 'before-25'],
+		['token', 'thread', 'before-21']
+	]);
+	expect(state.threadPage.messages).toHaveLength(26);
+	expect(state.threadPage.messages[0].content.role).toBe('user');
+	expect(state.threadPage.next_cursor).toBeNull();
+	expect(state.loadingOlderThread).toBe(false);
+	expect(state.replaceThreadProjection).toHaveBeenCalledExactlyOnceWith(state.threadPage);
+	// The component gates its older-messages button on this cursor.
+	expect(
+		component.includes('$config?.features?.enable_v2_threads && threadPage?.next_cursor')
+	).toBe(true);
+});
+
+it('loads the initial v2 chat through whole-turn paging', async () => {
+	const state: Record<string, any> = {
+		$chatId: 'thread',
+		chatIdProp: 'thread',
+		chatId: { set: vi.fn() },
+		$config: { features: { enable_v2_threads: true } },
+		$temporaryChatEnabled: false,
+		noteChatDebug: vi.fn(),
+		localStorage: { token: 'token' },
+		extendProjectionToTurn,
+		getChatById: vi
+			.fn()
+			.mockResolvedValueOnce(projection([21, 22], 'before-21'))
+			.mockResolvedValueOnce(
+				projection(
+					Array.from({ length: 20 }, (_, i) => i + 1),
+					null
+				)
+			),
+		threadPage: null,
+		buildThreadHistory,
+		history: {},
+		chat: null,
+		savedThreadFeatures: null,
+		restoreComposerPreferences: vi.fn(),
+		composerFromFeatures: vi.fn(),
+		composerPreferences: vi.fn(),
+		$settings: {},
+		lastSavedFeatures: '',
+		currentComposerPreferences: vi.fn(() => ({})),
+		tags: [],
+		chatTitle: { set: vi.fn() },
+		selectedModels: [],
+		normalizeSelectedModels: (m: any) => m
+	};
+	state.loadThreadProjection = callback('loadThreadProjection', state);
+	expect(await callback('loadChat', state)()).toBe('loaded');
+	expect(state.getChatById).toHaveBeenCalledTimes(2);
+	expect(Object.values(state.history.messages).map((m: any) => m.role)).toEqual([
+		'user',
+		'assistant'
+	]);
+	expect(state.threadPage.next_cursor).toBeNull();
+});
+
+const streamingState = () => {
+	let top = 0;
+	let frame = 0;
+	let now = 0;
+	const frames = new Map<number, () => void>();
+	const container = {
+		scrollHeight: 1000,
+		clientHeight: 300,
+		get scrollTop() {
+			return top;
+		},
+		set scrollTop(value: number) {
+			top = Math.min(value, this.scrollHeight - this.clientHeight);
+		}
+	};
+	const state: Record<string, any> = {
+		messagesContainerElement: container,
+		autoScroll: true,
+		$settings: {},
+		history: { messages: { answer: { id: 'answer', done: false } } },
+		followRAF: null,
+		followMessageId: null,
+		followScrollTop: null,
+		isNearTop: false,
+		FOLLOW_AFTER_DONE_MS: 600,
+		performance: { now: () => now },
+		requestAnimationFrame: (fn: () => void) => {
+			frames.set(++frame, fn);
+			return frame;
+		},
+		cancelAnimationFrame: (id: number) => frames.delete(id),
+		tick: async () => {},
+		scrollRAF: null
+	};
+	for (const name of [
+		'shouldAutoScrollResponse',
+		'handleResponseScroll',
+		'followStreamingResponse',
+		'scheduleResponseScrollToBottom'
+	])
+		state[name] = callback(name, state);
+	const step = async (ms = 16) => {
+		now += ms;
+		const pending = [...frames.values()];
+		frames.clear();
+		for (const fn of pending) await fn();
+	};
+	return { state, container, step, frames };
+};
+
+it.each([undefined, true, false])('respects scrollOnResponseGeneration=%s', async (setting) => {
+	const { state, container, step } = streamingState();
+	state.$settings.scrollOnResponseGeneration = setting;
+	state.followStreamingResponse('answer');
+	await step();
+	expect(container.scrollTop).toBe(setting === false ? 0 : 700);
+});
+
+it('follows height changes between chunks, stops on scroll up, and resumes at the bottom', async () => {
+	const { state, container, step } = streamingState();
+	state.followStreamingResponse('answer');
+	await step();
+	expect(container.scrollTop).toBe(700);
+	// A tool/reasoning block grows after the follow loop's own scroll, before its event arrives.
+	container.scrollHeight = 1500;
+	state.handleResponseScroll();
+	expect(state.autoScroll).toBe(true);
+	await step();
+	expect(container.scrollTop).toBe(1200);
+	container.scrollTop = 400;
+	state.handleResponseScroll();
+	expect(state.autoScroll).toBe(false);
+	container.scrollHeight = 1800;
+	await step();
+	expect(container.scrollTop).toBe(400);
+	container.scrollTop = 1500;
+	state.handleResponseScroll();
+	expect(state.autoScroll).toBe(true);
+	container.scrollHeight = 2100;
+	await step();
+	expect(container.scrollTop).toBe(1800);
+	// Resume even if scroll height is unchanged since the last follow.
+	container.scrollTop = 1796;
+	state.handleResponseScroll();
+	await step();
+	expect(container.scrollTop).toBe(1800);
+});
+
+it('checks the follow decision again when a scheduled scroll executes', async () => {
+	const { state, container, step } = streamingState();
+	state.scheduleResponseScrollToBottom();
+	state.autoScroll = false;
+	await step();
+	expect(container.scrollTop).toBe(0);
+});
+
+it('settles after done and stops when history is replaced or a new answer starts', async () => {
+	const { state, container, step, frames } = streamingState();
+	state.followStreamingResponse('answer');
+	state.followStreamingResponse('answer');
+	expect(frames.size).toBe(1);
+	await step();
+	state.history.messages.answer.done = true;
+	await step();
+	container.scrollHeight = 1300;
+	await step(500);
+	expect(container.scrollTop).toBe(1000);
+	await step(101);
+	expect(frames.size).toBe(0);
+	state.history.messages.next = { id: 'next', done: false };
+	state.followStreamingResponse('answer');
+	state.followStreamingResponse('next');
+	expect(frames.size).toBe(1);
+	delete state.history.messages.next;
+	await step();
+	expect(frames.size).toBe(0);
+});
+
+it('starts continuous following for v2 chunks even without text', async () => {
+	const { state, step, container } = streamingState();
+	Object.assign(state, {
+		dispatchCallOverlayAudio: vi.fn(),
+		navigator: {},
+		scheduleResponseScrollToBottom: vi.fn()
+	});
+	await callback('chatCompletionEventHandler', state)({}, state.history.messages.answer, 'thread');
+	await step();
+	container.scrollHeight = 1400;
+	await step();
+	expect(container.scrollTop).toBe(1100);
+});
+
+it('keeps already loaded older turns when refreshing the newest projection', async () => {
+	vi.useFakeTimers();
+	const current = projection([1, 2, 25, 26], null);
+	const latest = projection([25, 26, 27], 'before-25');
+	latest.messages[1].version = 'new-v26';
+	const state: Record<string, any> = {
+		$chatId: 'thread',
+		$config: { features: { enable_v2_threads: true } },
+		generationController: null,
+		document: { visibilityState: 'visible' },
+		threadRefreshTimer: undefined,
+		threadPage: current,
+		loadThreadProjection: vi.fn().mockResolvedValue(latest),
+		mergeProjection,
+		replaceThreadProjection: vi.fn(),
+		history: { currentId: 'answer', messages: { answer: { role: 'assistant', done: true } } },
+		chatTitle: { set: vi.fn() },
+		tags: [],
+		toast: { error: vi.fn() },
+		$i18n: { t: (text: string) => text }
+	};
+	state.refreshThreadProjection = callback('refreshThreadProjection', state);
+	state.refreshThreadProjection('thread');
+	await vi.advanceTimersByTimeAsync(1000);
+	expect(state.toast.error).not.toHaveBeenCalled();
+	expect(state.threadPage.messages.map((m: any) => m.position)).toEqual([1, 2, 25, 26, 27]);
+	expect(state.threadPage.messages.find((m: any) => m.position === 26).version).toBe('new-v26');
+	expect(state.threadPage.next_cursor).toBeNull();
+});
+
+it.each([false, true])(
+	'settles projection layout across frames and respects reader movement=%s',
+	async (move) => {
+		const container = { scrollTop: 0, scrollHeight: 1000 };
+		let frame = 0;
+		const projected = { currentId: null, messages: {} };
+		const state: Record<string, any> = {
+			$chatId: 'thread',
+			generationController: null,
+			messagesContainerElement: container,
+			autoScroll: true,
+			history: { currentId: 'old', messages: {} },
+			followScrollTop: null,
+			buildThreadHistory: () => projected,
+			equal,
+			tick: async () => {},
+			requestAnimationFrame: (fn: () => void) => {
+				if (++frame === 2) {
+					container.scrollHeight = 1500;
+					if (move) container.scrollTop = 400;
+				}
+				fn();
+				return frame;
+			}
+		};
+		await callback('replaceThreadProjection', state)(projection([], null));
+		expect(container.scrollTop).toBe(move ? 400 : 1500);
 	}
 );

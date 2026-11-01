@@ -211,6 +211,27 @@ export const mergeProjection = (current: ProjectionPage, older: ProjectionPage):
 	};
 };
 
+// Projection limits count tool results too, so a transport page can start inside a turn.
+export const extendProjectionToTurn = async (
+	page: ProjectionPage,
+	loadOlder: (cursor: string) => Promise<ProjectionPage>
+): Promise<ProjectionPage> => {
+	const cursors = new Set<string>();
+	for (let pages = 1; page.next_cursor; pages++) {
+		const first = page.messages.reduce<MessageView | undefined>(
+			(first, message) => (!first || message.position < first.position ? message : first),
+			undefined
+		);
+		if (first && record(first.content)?.role === 'user') return page;
+		// Retain the existing window on failure rather than replace it with a partial turn.
+		if (pages >= 10 || cursors.has(page.next_cursor)) throw new ThreadError('reconnect');
+		const cursor = page.next_cursor;
+		cursors.add(cursor);
+		page = mergeProjection(page, await loadOlder(cursor));
+	}
+	return page;
+};
+
 export type WindowSnapshot = {
 	page: ProjectionPage | null;
 	history: ThreadHistory;

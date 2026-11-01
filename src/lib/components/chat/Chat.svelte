@@ -126,7 +126,7 @@
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/chat';
 	import { generateThreadCompletion } from '$lib/apis/threadCompletion';
-	import { buildThreadHistory, mergeProjection } from '$lib/utils/threads';
+	import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
 	import type { ProjectionPage } from '$lib/apis/threads';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
@@ -539,6 +539,7 @@
 	onDestroy(() => {
 		generationController?.abort();
 		clearTimeout(threadRefreshTimer);
+		if (followRAF !== null) cancelAnimationFrame(followRAF);
 	});
 	let contextCompactionToastId = null;
 
@@ -2654,6 +2655,65 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
+	const loadThreadProjection = async (id: string, before = ''): Promise<ProjectionPage> =>
+		extendProjectionToTurn(await getChatById(localStorage.token, id, before), (cursor) =>
+			getChatById(localStorage.token, id, cursor)
+		);
+
+	const captureThreadAnchor = (projected: ReturnType<typeof buildThreadHistory>) => {
+		const container = messagesContainerElement;
+		if (!container) return null;
+		const viewport = container.getBoundingClientRect();
+		const previous = createMessagesList(history, history.currentId);
+		const next = createMessagesList(projected, projected.currentId);
+		for (const [index, message] of previous.entries()) {
+			const element = document.getElementById(`message-${message.id}`);
+			if (!element || !container.contains(element)) continue;
+			const rect = element.getBoundingClientRect();
+			if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+			// Live messages use local UUIDs; the projection replaces these with position IDs.
+			const target = projected.messages[message.id] ?? next[next.length - previous.length + index];
+			return target?.role === message.role
+				? { id: target.id, offset: rect.top - viewport.top }
+				: null;
+		}
+		return null;
+	};
+
+	const replaceThreadProjection = async (page: ProjectionPage) => {
+		const projected = buildThreadHistory(page, []);
+		if (equal(history, projected)) return;
+		const container = messagesContainerElement;
+		const wasAutoScroll = autoScroll;
+		const anchor = wasAutoScroll ? null : captureThreadAnchor(projected);
+		history = projected;
+		await tick();
+		let restoredTop: number | null = null;
+		// Wait for Messages' rAF rebuild, then settle content-visibility layout across frames.
+		for (let frame = 0; frame < 3; frame++) {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			await tick();
+			if ($chatId !== page.thread_id || generationController || history !== projected) return;
+			if (!container || container !== messagesContainerElement) return;
+			// Leave a reader's scroll alone if they move during the settling frames.
+			if (restoredTop !== null && Math.abs(container.scrollTop - restoredTop) >= 2) return;
+			if (wasAutoScroll) {
+				container.scrollTop = container.scrollHeight;
+			} else if (anchor) {
+				const element = document.getElementById(`message-${anchor.id}`);
+				if (element && container.contains(element)) {
+					container.scrollTop +=
+						element.getBoundingClientRect().top -
+						container.getBoundingClientRect().top -
+						anchor.offset;
+				}
+			}
+			followScrollTop = container.scrollTop;
+			restoredTop = container.scrollTop;
+			autoScroll = wasAutoScroll;
+		}
+	};
+
 	const refreshThreadProjection = (id: string) => {
 		clearTimeout(threadRefreshTimer);
 		threadRefreshTimer = setTimeout(async () => {
@@ -2663,23 +2723,19 @@
 				return;
 			}
 			try {
-				const page: ProjectionPage = await getChatById(localStorage.token, id);
+				let page = await loadThreadProjection(id);
 				if ($chatId !== id || generationController) return;
-				threadPage = page;
-				const projected = buildThreadHistory(page, []);
-				const container = messagesContainerElement;
-				const scrollTop = container?.scrollTop ?? 0;
-				const wasAutoScroll = autoScroll;
-				if (!equal(history, projected)) {
-					history = projected;
-					await tick();
-					if ($chatId !== id || generationController) return;
-					if (container && container === messagesContainerElement) {
-						container.scrollTop = wasAutoScroll ? container.scrollHeight : scrollTop;
-						followScrollTop = container.scrollTop;
-						autoScroll = wasAutoScroll;
-					}
+				// Keep older turns the reader has already loaded in this generation.
+				if (
+					threadPage?.thread_id === id &&
+					threadPage.generation === page.generation &&
+					(threadPage.messages[0]?.position ?? Infinity) < (page.messages[0]?.position ?? Infinity)
+				) {
+					page = mergeProjection(page, threadPage);
 				}
+				threadPage = page;
+				await replaceThreadProjection(page);
+				if ($chatId !== id || generationController) return;
 				chatTitle.set(page.title ?? $i18n.t('New Chat'));
 				tags = page.tags.map((name) => ({ name }));
 				const last = history.currentId ? history.messages[history.currentId] : null;
@@ -2704,7 +2760,11 @@
 			temporaryChatEnabled.set(false);
 		}
 
-		const loadedChat = await getChatById(localStorage.token, targetId).catch(() => null);
+		const loadedChat = await (
+			$config?.features?.enable_v2_threads
+				? loadThreadProjection(targetId)
+				: getChatById(localStorage.token, targetId)
+		).catch(() => null);
 		if (isStaleLoad()) return 'aborted';
 		if (!loadedChat) {
 			if (!embedded) await goto('/');
@@ -2899,10 +2959,10 @@
 		if (!current?.next_cursor || loadingOlderThread) return;
 		loadingOlderThread = true;
 		try {
-			const older = await getChatById(localStorage.token, id, current.next_cursor);
+			const older = await loadThreadProjection(id, current.next_cursor);
 			if ($chatId !== id || threadPage !== current) return;
 			threadPage = mergeProjection(current, older);
-			history = buildThreadHistory(threadPage!, []);
+			await replaceThreadProjection(threadPage!);
 		} catch (error) {
 			toast.error($i18n.t(`${error}`));
 		} finally {
@@ -2958,7 +3018,11 @@
 		if (!scrollRAF) {
 			scrollRAF = requestAnimationFrame(async () => {
 				scrollRAF = null;
-				await scrollToBottom();
+				await tick();
+				if (messagesContainerElement && shouldAutoScrollResponse()) {
+					messagesContainerElement.scrollTop = messagesContainerElement.scrollHeight;
+					followScrollTop = messagesContainerElement.scrollTop;
+				}
 			});
 		}
 	};
@@ -2968,18 +3032,40 @@
 	// and keep following briefly after `done` while the reveal catches up.
 	const FOLLOW_AFTER_DONE_MS = 600;
 	let followRAF: number | null = null;
+	let followMessageId: string | null = null;
 	// The position this follow last scrolled to: its own scroll events must not turn autoScroll off
 	// because the content already grew again by the time they are handled.
 	let followScrollTop: number | null = null;
+	const handleResponseScroll = () => {
+		if (!messagesContainerElement) return;
+		isNearTop = messagesContainerElement.scrollTop <= 100;
+		if (
+			followScrollTop !== null &&
+			Math.abs(messagesContainerElement.scrollTop - followScrollTop) < 2
+		) {
+			return;
+		}
+		followScrollTop = null;
+		autoScroll =
+			messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
+			messagesContainerElement.clientHeight + 5;
+	};
 	const followStreamingResponse = (messageId: string) => {
-		if (followRAF) return;
-		let lastHeight = -1;
+		if (followRAF !== null) {
+			if (followMessageId === messageId) return;
+			cancelAnimationFrame(followRAF);
+		}
+		followMessageId = messageId;
+		const message = history.messages[messageId];
 		let doneAt: number | null = null;
 		const step = () => {
+			if (!message || history.messages[messageId] !== message) {
+				followRAF = null;
+				return;
+			}
 			if (messagesContainerElement && shouldAutoScrollResponse()) {
 				const height = messagesContainerElement.scrollHeight;
-				if (height !== lastHeight) {
-					lastHeight = height;
+				if (height - messagesContainerElement.scrollTop > messagesContainerElement.clientHeight) {
 					messagesContainerElement.scrollTop = height;
 					followScrollTop = messagesContainerElement.scrollTop;
 				}
@@ -3322,6 +3408,7 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
+		followStreamingResponse(message.id);
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
 		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
 		const answeredModel = data.answered_model;
@@ -3422,9 +3509,7 @@
 			}
 
 			await tick();
-			if (shouldAutoScrollResponse()) {
-				scrollToBottom();
-			}
+			scheduleResponseScrollToBottom();
 
 			// Fire-and-forget: run chatCompletedHandler for background work
 			// (outlet filters, chat save, title gen, follow-ups, tags)
@@ -4302,6 +4387,7 @@
 		if (controller) {
 			generationController = controller;
 			generating = true;
+			followStreamingResponse(responseMessageId);
 		}
 		const complete = v2
 			? (token: string, body: Record<string, unknown>, url?: string) =>
@@ -5254,19 +5340,7 @@
 									class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 									id="messages-container"
 									bind:this={messagesContainerElement}
-									on:scroll={(e) => {
-										if (
-											followScrollTop !== null &&
-											Math.abs(messagesContainerElement.scrollTop - followScrollTop) < 2
-										) {
-											return;
-										}
-										followScrollTop = null;
-										autoScroll =
-											messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
-											messagesContainerElement.clientHeight + 5;
-										isNearTop = messagesContainerElement.scrollTop <= 100;
-									}}
+									on:scroll={handleResponseScroll}
 								>
 									<div class=" h-full w-full flex flex-col">
 										{#if $config?.features?.enable_v2_threads && threadPage?.next_cursor}

@@ -12,6 +12,7 @@ import {
 } from '$lib/apis/threads';
 import {
 	buildThreadHistory,
+	extendProjectionToTurn,
 	filterSidebar,
 	mergeProjection,
 	ThreadSidebar,
@@ -238,6 +239,81 @@ describe('projection history', () => {
 		expect(() => mergeProjection(current, { ...page([1]), generation: 'restored' })).toThrow(
 			ThreadError
 		);
+	});
+});
+
+describe('whole turn paging', () => {
+	const toolPage = (positions: number[], cursor: string | null = null) => ({
+		...page(positions, cursor),
+		messages: positions.map((position) => ({
+			...message(position),
+			content: { role: position === 1 ? 'user' : position % 2 ? 'tool' : 'assistant', text: '' }
+		}))
+	});
+
+	it('extends a single tool-heavy turn to its user message and removes the older button cursor', async () => {
+		const older = vi.fn(async () => toolPage(Array.from({ length: 20 }, (_, i) => i + 1)));
+		const result = await extendProjectionToTurn(
+			toolPage(
+				Array.from({ length: 20 }, (_, i) => i + 21),
+				'before-21'
+			),
+			older
+		);
+		expect(older).toHaveBeenCalledExactlyOnceWith('before-21');
+		expect(result.messages).toHaveLength(40);
+		expect(result.messages[0].content).toMatchObject({ role: 'user' });
+		expect(Boolean(result.next_cursor)).toBe(false);
+		expect(Object.values(buildThreadHistory(result, []).messages).map((m) => m.role)).toEqual([
+			'user',
+			'assistant'
+		]);
+	});
+
+	it('extends multiple pages, keeping a cursor only for older turns', async () => {
+		const older = vi
+			.fn()
+			.mockResolvedValueOnce(toolPage([6, 7], 'before-6'))
+			.mockResolvedValueOnce(page([3, 4, 5], 'before-3'));
+		const result = await extendProjectionToTurn(toolPage([8, 9], 'before-8'), older);
+		expect(older.mock.calls).toEqual([['before-8'], ['before-6']]);
+		expect(result.messages.map((m) => m.position)).toEqual([3, 4, 5, 6, 7, 8, 9]);
+		expect(result.next_cursor).toBe('before-3');
+	});
+
+	it('leaves a page starting at a user message alone', async () => {
+		const older = vi.fn();
+		const initial = page([3, 4], 'before-3');
+		expect(await extendProjectionToTurn(initial, older)).toBe(initial);
+		expect(older).not.toHaveBeenCalled();
+	});
+
+	it('stops at the beginning even if no user message exists', async () => {
+		const older = vi.fn(async () => toolPage([2]));
+		const result = await extendProjectionToTurn(toolPage([3, 4], 'before-3'), older);
+		expect(result.messages.map((m) => m.position)).toEqual([2, 3, 4]);
+		expect(result.next_cursor).toBeNull();
+	});
+
+	it('bounds a load to ten transport pages without publishing an incomplete turn', async () => {
+		let position = 100;
+		const older = vi.fn(async () => toolPage([--position], `before-${position}`));
+		await expect(extendProjectionToTurn(toolPage([100], 'before-100'), older)).rejects.toThrow(
+			ThreadError
+		);
+		expect(older).toHaveBeenCalledTimes(9);
+	});
+
+	it('rejects repeated cursors and generation changes', async () => {
+		await expect(
+			extendProjectionToTurn(toolPage([4], 'same'), async () => toolPage([2], 'same'))
+		).rejects.toThrow(ThreadError);
+		await expect(
+			extendProjectionToTurn(toolPage([4], 'older'), async () => ({
+				...toolPage([1, 2]),
+				generation: 'changed'
+			}))
+		).rejects.toThrow(ThreadError);
 	});
 });
 
