@@ -895,7 +895,7 @@
 		<div slot="content" class="w-full">
 			{#if (folders[folderId]?.childrenIds ?? []).length > 0 || chats !== null || hasMoreChats || chatsLoading}
 				<div
-					class="ml-3 pl-1 mt-[0.0625rem] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
+					class="ml-3 pl-1 mt-[0.0625rem] flex min-w-0 flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
 				>
 					{#if folders[folderId]?.childrenIds}
 						{@const children = folders[folderId]?.childrenIds
@@ -959,7 +959,6 @@
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
 							readonly={chat.readonly ?? chat.user_id !== $user?.id}
-							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {
 								dispatch('change', e.detail);

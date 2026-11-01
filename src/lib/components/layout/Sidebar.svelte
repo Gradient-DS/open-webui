@@ -1197,7 +1197,7 @@
 				</div>
 
 				<div
-					class="relative flex flex-col flex-1 overflow-y-auto scrollbar-hidden space-y-1.5 pt-2.5 pb-2.5"
+					class="relative flex min-w-0 flex-col flex-1 overflow-x-hidden overflow-y-auto scrollbar-hidden space-y-1.5 pt-2.5 pb-2.5"
 					on:scroll={(e) => {
 						if (e.target.scrollTop === 0) {
 							scrollTop = 0;
@@ -1595,7 +1595,6 @@
 										lastReadAt={chat.last_read_at}
 										active={chat.active ?? false}
 										readonly={true}
-										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
 											selectedChatId = chat.id;
@@ -1774,7 +1773,7 @@
 										name={$i18n.t('Pinned')}
 									>
 										<div
-											class="ml-3 pl-1 mt-[0.0625rem] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-700 dark:text-gray-300"
+											class="ml-3 pl-1 mt-[0.0625rem] flex min-w-0 flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-700 dark:text-gray-300"
 										>
 											{#each chatLists.pinned as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
 												<ChatItem
@@ -1786,7 +1785,6 @@
 													lastReadAt={chat.last_read_at}
 													active={chat.active ?? false}
 													readonly={chat.readonly ?? false}
-													{shiftKey}
 													selected={selectedChatId === chat.id}
 													on:select={() => {
 														selectedChatId = chat.id;
@@ -1810,7 +1808,7 @@
 							</div>
 						{/if}
 
-						<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
+						<div class=" min-w-0 flex-1 flex flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden">
 							<div class="pt-1.5">
 								{#if chatLists.own}
 									{#each chatLists.own as chat, idx (`chat-${chat?.id ?? idx}`)}
@@ -1852,7 +1850,6 @@
 											lastReadAt={chat.last_read_at}
 											active={chat.active ?? false}
 											readonly={chat.readonly ?? false}
-											{shiftKey}
 											selected={selectedChatId === chat.id}
 											on:select={() => {
 												selectedChatId = chat.id;

@@ -57,8 +57,6 @@
 	import ChatIcon from './icons/Chat.svelte';
 	import MoreHorizontalIcon from './icons/MoreHorizontal.svelte';
 	import SparklesIcon from './icons/Sparkles.svelte';
-	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
-	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
 	import { buildThreadHistory } from '$lib/utils/threads';
 	import { createMessagesList } from '$lib/utils';
@@ -78,7 +76,6 @@
 	export let active = false;
 
 	export let selected = false;
-	export let shiftKey = false;
 	export let readonly = false;
 
 	export let ownerName: string | null = null;
@@ -139,9 +136,9 @@
 		id !== $chatId &&
 		!active &&
 		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
-	$: showInlineActions =
+	$: showMenu =
 		id === $chatId || confirmEdit || mouseOver || focusWithin || menuOpen || selected;
-	$: chatItemClass = ` w-full flex justify-between rounded-xl px-2 py-1.5 ${
+	$: chatItemClass = ` min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 ${
 		id === $chatId || confirmEdit
 			? ($settings?.highContrastMode ?? false)
 				? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
@@ -549,7 +546,7 @@
 		</div>
 	{/if}
 
-	<div class="flex self-center flex-1 w-full min-w-0">
+	<div class="flex self-center flex-1 min-w-0">
 		{#if unread}
 			<div class="shrink-0 self-center pr-2.5 flex transition-opacity duration-300">
 				<div class="size-1.5 bg-sky-500 rounded-full"></div>
@@ -559,14 +556,14 @@
 			dir="auto"
 			class="text-left self-center overflow-hidden w-full h-5 truncate {unread
 				? 'font-normal text-gray-800 dark:text-gray-200'
-				: ''} {($mobile || showInlineActions) && !readonly ? 'pr-12' : ''}"
+				: ''} {($mobile || showMenu) && !readonly ? 'pr-6' : ''}"
 		>
 			<ChatTitle {title} />
 		</div>
 	</div>
 
 	<!-- Time ago indicator -->
-	{#if (updatedAt ?? createdAt) && !showInlineActions && !($mobile && !readonly)}
+	{#if (updatedAt ?? createdAt) && !showMenu && !($mobile && !readonly)}
 		<div class="shrink-0 self-center text-[0.625rem] text-gray-400 dark:text-gray-500 pl-2">
 			{formatTimeAgo((updatedAt ?? createdAt) as number)}
 		</div>
@@ -604,7 +601,7 @@
 <div
 	id="sidebar-chat-group"
 	bind:this={itemElement}
-	class=" w-full {className} relative group"
+	class=" min-w-0 max-w-full w-full {className} relative group"
 	draggable={!confirmEdit && !readonly}
 	on:mouseenter={() => {
 		mouseOver = true;
@@ -622,7 +619,7 @@
 	{#if confirmEdit}
 		<div
 			id="sidebar-chat-item"
-			class=" w-full flex justify-between rounded-xl px-2 py-1.5 {id === $chatId || confirmEdit
+			class=" min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 {id === $chatId || confirmEdit
 				? ($settings?.highContrastMode ?? false)
 					? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 					: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -637,7 +634,7 @@
 			<input
 				id="chat-title-input-{id}"
 				bind:value={chatTitle}
-				class=" bg-transparent w-full outline-hidden mr-10"
+				class=" bg-transparent min-w-0 flex-1 outline-hidden mr-8"
 				placeholder={generating ? $i18n.t('Generating...') : ''}
 				disabled={generating}
 				on:keydown={chatTitleInputKeydownHandler}
@@ -706,7 +703,7 @@
 			id="sidebar-chat-item-menu"
 			class="{$mobile
 				? 'selected'
-				: showInlineActions
+				: showMenu
 					? 'selected'
 					: 'hover-reveal'} absolute {className === 'pr-2'
 				? 'right-[0.5rem]'
@@ -728,36 +725,6 @@
 							<SparklesIcon strokeWidth="1.5" />
 						</button>
 					</Tooltip>
-				</div>
-			{:else if shiftKey && mouseOver}
-				<div class=" flex items-center self-center space-x-1.5">
-					<Tooltip content={$i18n.t('Archive')} className="flex items-center">
-						<button
-							class="flex size-5 items-center justify-center self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-							disabled={archiving}
-							on:click={() => {
-								archiveChatHandler(id);
-							}}
-							type="button"
-						>
-							<ArchiveBoxIcon className="size-3.5" strokeWidth="1.7" />
-						</button>
-					</Tooltip>
-
-					{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
-						<Tooltip content={$i18n.t('Delete')}>
-							<button
-								class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-								disabled={deleting}
-								on:click={() => {
-									showDeleteConfirm = true;
-								}}
-								type="button"
-							>
-								<GarbageBinIcon className="size-3.5" strokeWidth="1.7" />
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{:else}
 				<div class="flex self-center z-10 items-end">
