@@ -70,10 +70,12 @@ it('uses exact runtime creation and metadata bodies in v2 and preserves legacy b
 		await expect(createNewChat('token', { history: {} })).rejects.toBe(
 			'Reload this chat to continue'
 		);
-		await updateChatById('token', 'thread', { title: 'Changed', tags: ['grove'] });
+		const features = { web_search: false, document_writer: true, tool_ids: [] };
+		await updateChatById('token', 'thread', { title: 'Changed', tags: ['grove'], features });
 		expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({
 			title: 'Changed',
-			tags: ['grove']
+			tags: ['grove'],
+			features
 		});
 		await expect(updateChatById('token', 'thread', { history: {} })).rejects.toBe(
 			'Reload this chat to continue'

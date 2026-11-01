@@ -1,5 +1,6 @@
 """Fictional owner metadata flows through the browser and post-turn tasks."""
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -218,6 +219,8 @@ async def test_stream_runs_metadata_only_after_successful_drain(monkeypatch, fai
     response = await thread_metadata.finish_response(StreamingResponse(chunks()), {'tasks': {task: True}})
     done.assert_not_awaited()
     assert '[DONE]' in ''.join([chunk async for chunk in response.body_iterator])
+    if thread_metadata._metadata_tasks:
+        await asyncio.gather(*thread_metadata._metadata_tasks)
     assert done.await_count == (0 if failure else 1)
 
 
@@ -237,9 +240,60 @@ async def test_cancelled_stream_does_not_generate_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_done_precedes_slow_metadata_and_reader_close_does_not_cancel_it(monkeypatch):
+    from open_webui.soev import acting
+
+    started, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def complete(ctx):
+        started.set()
+        await release.wait()
+        assert ctx['assistant_message']['content'] == 'Answer'
+        assert await acting.user_token('owui:user:fictional-fern') == 'fictional-login'
+        finished.set()
+
+    monkeypatch.setattr(thread_metadata, 'complete', complete)
+
+    async def chunks():
+        yield 'data: {"choices":[{"delta":{"content":"Answer"}}]}\n\n'
+        yield 'data: [DONE]\n\n'
+        raise AssertionError('The browser must not need to drain past DONE')
+
+    response = await thread_metadata.finish_response(StreamingResponse(chunks()), {'tasks': {'title_generation': True}})
+    reader = response.body_iterator
+    await anext(reader)
+    requester = acting._requester_ref.set('owui:user:fictional-fern')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login'))
+    try:
+        assert await asyncio.wait_for(anext(reader), 1) == 'data: [DONE]\n\n'
+        await asyncio.wait_for(started.wait(), 1)
+        assert not finished.is_set()
+        await reader.aclose()
+        assert thread_metadata._metadata_tasks
+    finally:
+        # Simulate the authentication dependency exiting with the response.
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
+        release.set()
+        await asyncio.gather(*thread_metadata._metadata_tasks)
+        await reader.aclose()
+    assert finished.is_set()
+    assert not thread_metadata._metadata_tasks
+
+
+@pytest.mark.asyncio
+async def test_detached_metadata_exception_is_logged_and_discarded(monkeypatch, caplog):
+    monkeypatch.setattr(thread_metadata, 'complete', AsyncMock(side_effect=RuntimeError('metadata failed')))
+    thread_metadata.detach_complete({})
+    await asyncio.gather(*thread_metadata._metadata_tasks)
+    assert 'Thread metadata task failed' in caplog.text
+    assert not thread_metadata._metadata_tasks
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('follow_ups_only', [False, True])
-async def test_browser_session_completes_tasks_and_emits_saved_metadata_before_done(
+async def test_browser_session_completes_tasks_and_emits_saved_metadata_after_reader_close(
     dark_api, identity_config, monkeypatch, stream, follow_ups_only
 ):
     from open_webui.socket.main import sio
@@ -327,6 +381,7 @@ async def test_browser_session_completes_tasks_and_emits_saved_metadata_before_d
                 pass
             # Match threadCompletion.ts: stop reading immediately at [DONE].
             await response.body_iterator.aclose()
+            await asyncio.gather(*thread_metadata._metadata_tasks)
 
     submitted = [json.loads(call.content)['task'] for call in dark_api.calls if call.method == 'POST']
     assert submitted == (['follow_ups'] if follow_ups_only else ['title', 'tags', 'follow_ups'])

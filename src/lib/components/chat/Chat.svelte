@@ -1511,6 +1511,13 @@
 				return;
 			}
 			if (type === 'chat:tags') {
+				if ($config?.features?.enable_v2_threads) {
+					tags = event.data.data.map((name: string) => ({ name }));
+					void getAllTags(localStorage.token)
+						.then((value) => allTags.set(value))
+						.catch(console.error);
+					return;
+				}
 				chat = await getChatById(localStorage.token, $chatId);
 				tags = await getTagsById(localStorage.token, $chatId);
 				allTags.set(await getAllTags(localStorage.token));
@@ -2659,7 +2666,20 @@
 				const page: ProjectionPage = await getChatById(localStorage.token, id);
 				if ($chatId !== id || generationController) return;
 				threadPage = page;
-				history = buildThreadHistory(page, []);
+				const projected = buildThreadHistory(page, []);
+				const container = messagesContainerElement;
+				const scrollTop = container?.scrollTop ?? 0;
+				const wasAutoScroll = autoScroll;
+				if (!equal(history, projected)) {
+					history = projected;
+					await tick();
+					if ($chatId !== id || generationController) return;
+					if (container && container === messagesContainerElement) {
+						container.scrollTop = wasAutoScroll ? container.scrollHeight : scrollTop;
+						followScrollTop = container.scrollTop;
+						autoScroll = wasAutoScroll;
+					}
+				}
 				chatTitle.set(page.title ?? $i18n.t('New Chat'));
 				tags = page.tags.map((name) => ({ name }));
 				const last = history.currentId ? history.messages[history.currentId] : null;
@@ -4302,7 +4322,14 @@
 								});
 								_chatId = id;
 								chatId.set(id);
-								if (!embedded) window.history.replaceState(window.history.state, '', `/c/${id}`);
+								if (!embedded) {
+									window.history.replaceState(window.history.state, '', `/c/${id}`);
+									void refreshChatList(localStorage.token).catch(console.error);
+								}
+								const folderId = ($selectedFolder as { id: string } | null)?.id;
+								if (folderId) {
+									void refreshFolderChatLists(folderId).catch(console.error);
+								}
 								selectedFolder.set(null);
 								await saveChatHandler(id, history);
 							},

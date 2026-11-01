@@ -29,7 +29,13 @@ it('prepares the selected turn, creates once, moves to the folder, then follows 
 		.mockResolvedValueOnce(json({ id: 'thread', folder_id: 'folder' }))
 		.mockResolvedValueOnce(answer());
 	vi.stubGlobal('fetch', fetch);
-	const created = vi.fn();
+	const created = vi.fn(async () => {
+		expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+			'/api/chat/completions',
+			'/api/v1/chats/new',
+			'/api/v1/chats/thread/folder'
+		]);
+	});
 	const chunk = vi.fn();
 	await generateThreadCompletion(
 		'token',
@@ -71,6 +77,29 @@ it('appends subsequent turns without creating or following the previous turn', a
 		follow_thread: false
 	});
 	expect(created).not.toHaveBeenCalled();
+});
+
+it('marks the answer done at DONE while the connection is still open', async () => {
+	const cancel = vi.fn();
+	const stream = new ReadableStream({
+		start(controller) {
+			controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+		},
+		cancel
+	});
+	vi.stubGlobal(
+		'fetch',
+		vi
+			.fn()
+			.mockResolvedValue(new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }))
+	);
+	const chunk = vi.fn();
+	await generateThreadCompletion(
+		'token',
+		{ chat_id: 'thread' },
+		{ created: vi.fn(), chunk, signal: new AbortController().signal }
+	);
+	expect(chunk).toHaveBeenCalledWith({ done: true });
 });
 
 it('does not create a thread when preparation fails', async () => {

@@ -1228,7 +1228,10 @@ export const updateChatById = async (
 	variables: object | null = null
 ) => {
 	let error = null;
-	if (v2ThreadsEnabled() && Object.keys(chat).some((key) => !['title', 'tags'].includes(key))) {
+	if (
+		v2ThreadsEnabled() &&
+		Object.keys(chat).some((key) => !['title', 'tags', 'features'].includes(key))
+	) {
 		throw stateText.invalid_request;
 	}
 

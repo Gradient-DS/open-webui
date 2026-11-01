@@ -37,8 +37,8 @@ export const generateThreadCompletion = async (
 		if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 		const record = await createNewChat(token, prepared);
 		id = record.id;
-		await created(id!);
 		if (body.folder_id) await updateChatFolderIdById(token, id!, body.folder_id);
+		await created(id!);
 		follow = true;
 	}
 	const response = await fetch(`${url}/chat/completions`, {

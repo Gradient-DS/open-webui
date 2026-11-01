@@ -1,5 +1,6 @@
 """Owner metadata tasks persist through the same path as manual edits."""
 
+import asyncio
 import json
 import logging
 
@@ -11,6 +12,21 @@ from open_webui.soev.chat_routes import paths
 from open_webui.soev.threads import ThreadMetadataResponse
 
 log = logging.getLogger(__name__)
+_metadata_tasks: set[asyncio.Task] = set()
+
+
+def detach_complete(ctx: dict) -> None:
+    async def run():
+        try:
+            await complete(ctx)
+        except Exception as error:
+            log.warning('Thread metadata task failed: status=%s', getattr(error, 'status', None))
+
+    # create_task retains the acting user's token context. The retained Request
+    # is only used for app state and headers, never its receive channel.
+    task = asyncio.create_task(run())
+    _metadata_tasks.add(task)
+    task.add_done_callback(_metadata_tasks.discard)
 
 
 async def emit_metadata(user_id: str, chat_id: str, metadata: ThreadMetadataResponse, changes: dict) -> None:
@@ -142,7 +158,7 @@ async def finish_stream(response, ctx: dict):
 
     assistant = {}
     failed = False
-    terminal_chunks = []
+    scheduled = False
     async for chunk in response.body_iterator:
         text = chunk.decode() if isinstance(chunk, bytes) else chunk
         terminal = False
@@ -157,14 +173,12 @@ async def finish_stream(response, ctx: dict):
                 except ValueError:
                     pass
         update_assistant_message_from_stream(assistant, chunk)
-        # The browser cancels its reader at [DONE]. Finish tasks before
-        # publishing that marker so the disconnect cannot cancel them.
-        if terminal or terminal_chunks:
-            terminal_chunks.append(chunk)
-        else:
-            yield chunk
-    if not failed:
-        ctx['assistant_message'] = assistant
-        await complete(ctx)
-    for chunk in terminal_chunks:
+        # Schedule before yielding [DONE]: the browser stops reading there.
+        if terminal and not failed and not scheduled:
+            ctx['assistant_message'] = assistant
+            detach_complete(ctx)
+            scheduled = True
         yield chunk
+    if not failed and not scheduled:
+        ctx['assistant_message'] = assistant
+        detach_complete(ctx)
