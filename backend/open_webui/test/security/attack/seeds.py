@@ -524,11 +524,20 @@ def seed_cloud_family(ctx, parameter):
 
 
 def seed_cloud_mailbox_address(ctx, parameter):
-    return 'gedeeld@example.test'
+    connection = ctx.values['cloud_mail_connection']
+    mailbox = ctx.request(
+        'POST',
+        f'/api/v1/cloud-sync/connections/{connection}/mailboxes',
+        actor=ctx.admin,
+        json={'address': 'gedeeld@example.test'},
+    )
+    return _extract(mailbox, 'address', name=parameter['key'], via='POST cloud mailbox')
 
 
 def seed_cloud_connection(ctx, parameter):
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
+    provider = parameter.get('provider', 'onedrive')
+    family = parameter.get('family', 'live_documents')
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
     # soev-api keeps one connection per owner and provider: a later pass gets the
     # consented connection back, without an authorize URL, and needs no new consent.
@@ -544,18 +553,18 @@ def seed_cloud_connection(ctx, parameter):
                 timeout=30,
             )
             response.raise_for_status()
-    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
-    ctx.provide(parameter, 'cloud_grant', grant['id'])
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/{family}', actor=ctx.admin)
+    if 'cloud_grant' in parameter.get('provides', []):
+        ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
 
 
 def seed_cloud_authorize_connection(ctx, parameter):
-    # Authorizing an enabled connection suspends it, so this control needs a pending
-    # connection that is not the consented OneDrive fixture. With one connection per owner
-    # and provider that takes another provider; Outlook mail where the platform offers it.
-    policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.admin)
+    # Consent suspends enabled connections. Use the ordinary caller's connection,
+    # leaving the admin's consented OneDrive and Outlook fixtures untouched.
+    policy = ctx.request('GET', '/api/v1/cloud-sync/policy')
     provider = 'outlook_mail' if 'outlook_mail' in policy.get('providers_enabled', []) else 'onedrive'
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', json={'provider': provider})
     return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
 
