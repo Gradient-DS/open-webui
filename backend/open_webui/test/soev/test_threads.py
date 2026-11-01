@@ -230,16 +230,13 @@ async def test_index_requires_boolean_ownership(thread_http, owned):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'method,key,path', [('index', 'items', '/v1/threads'), ('owner_index', 'data', '/v1/chat/threads')]
-)
-async def test_indexes_read_shared_flags_with_requester_token(thread_http, method, key, path):
+async def test_indexes_read_shared_flags_with_requester_token(thread_http):
     requests, responses, client = thread_http
     responses.append(
         httpx.Response(
             200,
             json={
-                key: [
+                'items': [
                     {**index_item(), 'shared': True},
                     index_item('fictional-private'),
                     {**index_item('fictional-reader', owned=False), 'shared': False},
@@ -248,16 +245,16 @@ async def test_indexes_read_shared_flags_with_requester_token(thread_http, metho
             },
         )
     )
-    found = await getattr(client, method)(limit=3, cursor='opaque-index')
+    found = await client.index(limit=3, cursor='opaque-index')
     assert [item.shared for item in found.items] == [True, False, False]
     assert found.next_cursor == 'opaque-next'
     assert len(requests) == 1
     request = requests[0]
-    assert request.method == 'GET' and request.url.path == path
+    assert request.method == 'GET' and request.url.path == '/v1/threads'
     assert dict(request.url.params) == {
         'limit': '3',
         'cursor': 'opaque-index',
-        **({'q': ''} if method == 'index' else {}),
+        'q': '',
     }
     assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
@@ -266,21 +263,18 @@ async def test_indexes_read_shared_flags_with_requester_token(thread_http, metho
 @pytest.mark.asyncio
 @pytest.mark.parametrize('shared', ['missing', None, 'true', 1])
 @pytest.mark.parametrize('owned', [True, False])
-@pytest.mark.parametrize(
-    'method,key,path', [('index', 'items', '/v1/threads'), ('owner_index', 'data', '/v1/chat/threads')]
-)
-async def test_indexes_require_boolean_shared_without_fallback(thread_http, shared, owned, method, key, path):
+async def test_indexes_require_boolean_shared_without_fallback(thread_http, shared, owned):
     requests, responses, client = thread_http
     item = index_item(owned=owned)
     if shared == 'missing':
         del item['shared']
     else:
         item['shared'] = shared
-    responses.append(httpx.Response(200, json={key: [item], 'next_cursor': None}))
+    responses.append(httpx.Response(200, json={'items': [item], 'next_cursor': None}))
     with pytest.raises(ThreadError, match='reconnect') as error:
-        await getattr(client, method)()
+        await client.index()
     assert error.value.status == 502
-    assert [request.url.path for request in requests] == [path]
+    assert [request.url.path for request in requests] == ['/v1/threads']
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from open_webui.models.users import UserModel
     from open_webui.soev.chat_paths import ChatPaths
-    from open_webui.soev.threads import ProjectionResult, ThreadClient
+    from open_webui.soev.threads import IndexItem, ProjectionResult, ThreadClient
 
 
 def require_header_mutation(request: Request) -> None:
@@ -141,7 +141,33 @@ async def revoke_all(service: ChatPaths, thread_id: str) -> None:
         await service.client.unshare(thread_id, share.audience)
 
 
-async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
+async def shared_versions(service: ChatPaths, item: IndexItem, *, all_versions: bool) -> list[IndexItem]:
+    if (item.version_count or 1) == 1:
+        return [item]
+    # The conversation flag can refer to an older version; never substitute an unshared current version.
+    if not all_versions and (await service.client.shares(item.thread_id)).items:
+        return [item]
+    versions = (await service.client.versions(item.thread_id)).items
+    selected = []
+    for version in sorted(versions, key=lambda version: (version.updated_at, version.thread_id), reverse=True):
+        if not all_versions:
+            if version.thread_id == item.thread_id or not (await service.client.shares(version.thread_id)).items:
+                continue
+        selected.append(
+            item.model_copy(
+                update={
+                    'thread_id': version.thread_id,
+                    'parent_thread': version.parent_thread,
+                    'parent_position': version.parent_position,
+                }
+            )
+        )
+        if not all_versions:
+            break
+    return selected
+
+
+async def owned_shared(service: ChatPaths, user_id: str, *, all_versions: bool = False) -> list[dict]:
     records = await service.records(user_id)
     owned = {thread_id for record in records for thread_id in [record.thread_id, *record.branch_thread_ids]}
     if not owned:
@@ -150,14 +176,24 @@ async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
 
     items, cursor, seen = [], '', set()
     while True:
-        page = await service.client.owner_index(limit=200, cursor=cursor)
-        batch = [item for item in page.items if item.thread_id in pending]
-        items.extend(
-            {**item.model_dump(exclude={'shared'}), 'id': item.thread_id, 'share_id': item.thread_id}
-            for item in batch
-            if item.owned and item.shared
-        )
-        pending.difference_update(item.thread_id for item in batch)
+        page = await service.client.index(limit=200, cursor=cursor)
+        for item in page.items:
+            conversation = (item.conversation_id if item.owned else None) or item.thread_id
+            if conversation not in pending:
+                continue
+            pending.discard(conversation)
+            if not item.owned or not item.shared:
+                continue
+            try:
+                versions = await shared_versions(service, item, all_versions=all_versions)
+            except ThreadError as error:
+                if error.state != 'unavailable':
+                    raise
+                continue
+            items.extend(
+                {**version.model_dump(exclude={'shared'}), 'id': version.thread_id, 'share_id': version.thread_id}
+                for version in versions
+            )
         if not pending or page.next_cursor is None:
             return items
         if page.next_cursor in seen:
@@ -209,7 +245,7 @@ async def dispatch(service: ChatPaths, request: Request, user: UserModel, route:
 async def shared_listing(service: ChatPaths, request: Request, user: UserModel) -> list[dict] | bool:
     from open_webui.soev.chat_routes import integer
 
-    items = await owned_shared(service, user.id)
+    items = await owned_shared(service, user.id, all_versions=request.method == 'DELETE')
     if request.method == 'DELETE':
         for item in items:
             try:
