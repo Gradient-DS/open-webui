@@ -146,6 +146,13 @@ description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_
 same_as = "share"
 
 [[parameter]]
+key = "chat_share_access"
+name = "id"
+prefix = "/api/v1/chats/{id}/share"
+description = "GET is the owner-only get_shared_chat_access_by_id alias of /chats/shared/{id}/access: read shared_chat grants using Chats.id, with no request body or writable fields. The POST and DELETE sharing operations also use this same owned chat id."
+same_as = "chat"
+
+[[parameter]]
 key = "shared_access"
 name = "id"
 prefix = "/api/v1/chats/shared/{id}"

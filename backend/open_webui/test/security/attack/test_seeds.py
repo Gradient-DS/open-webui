@@ -67,6 +67,7 @@ def test_route_scoping_distinguishes_resources():
         ('/api/v1/knowledge/{id}/files', 'knowledge'),
         ('/api/v1/files/{id}/content', 'file'),
         ('/api/v1/chats/shared/{id}/access', 'shared_access'),
+        ('/api/v1/chats/{id}/share', 'chat_share_access'),
         ('/api/v1/chats/{id}/clone/shared', 'shared_clone'),
     ]:
         assert seeds.parameter_for(path, 'id')['key'] == key
@@ -974,6 +975,7 @@ LIVE_READS = [
     '/api/v1/chats/{id}',
     '/api/v1/chats/share/{share_id}',
     '/api/v1/chats/shared/{id}/access',
+    '/api/v1/chats/{id}/share',
     '/api/v1/knowledge/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',

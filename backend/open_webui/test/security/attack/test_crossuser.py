@@ -50,6 +50,35 @@ def test_oauth_sessions_keep_a_cross_user_refusal_and_require_a_positive_owner()
     assert not result.violations
 
 
+@pytest.mark.parametrize('path', ['/api/v1/chats/{id}/share', '/api/v1/chats/shared/{id}/access'])
+def test_chat_share_access_requires_an_owner_control_without_sharing_allowances(path):
+    route = f'GET {path}'
+    routes, admins = crossuser.targets()
+    assert route in routes and route not in admins
+    assert crossuser._owner_key(path, seeds.SURFACE) == 'admin'
+    assert route not in crossuser._shared()
+    assert route not in crossuser.expected_refusals()
+    assert route not in seeds.SOEV_BACKED
+    inventory = source_operations()
+    assert inventory[route][1] is inventory['GET /api/v1/chats/shared/{id}/access'][1]
+    result = crossuser.Authorization(plane.Seeding())
+    grants = '[{"id":"owner-grant","principal_id":"owner-principal","permission":"read"}]'
+    owner = plane.Outcome(200, True, grants)
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(404, False, '{"detail":"Not found"}'),
+        owner,
+        ['owner-principal'],
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls[route] == 200
+    assert not result.violations
+    crossuser._check(result, route, owner, owner, ['owner-principal'], admin_only=False, control=True)
+    assert result.violations
+
+
 def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():
     route = 'GET /api/v1/users/{user_id}/shared-data'
     routes, admins = crossuser.targets()

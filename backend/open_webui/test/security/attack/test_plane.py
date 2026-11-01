@@ -271,8 +271,21 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 531
+    assert len(plane.operations()) == 532
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
+
+
+@pytest.mark.parametrize('path', ['/api/v1/chats/{id}/share', '/api/v1/chats/shared/{id}/access'])
+def test_chat_share_access_is_driven_as_a_read_of_the_owned_chat(path):
+    route = f'GET {path}'
+    spec = {'paths': {path: {'get': seeds.SPEC['paths'][path]['get']}}}
+    client = fake_client()
+    assert plane._read_before_destroy(route)[0] == 0
+    assert route in seeds.ordinary_targets()
+    assert route not in seeds.DESTRUCTIVE
+    outcomes = plane.drive_every_route(client, {(path, 'id'): 'owned-chat'}, spec=spec)
+    client.request.assert_called_once_with('GET', path.replace('{id}', 'owned-chat'))
+    assert outcomes[route].entered
 
 
 @pytest.mark.parametrize('pass_name', ['seeding', 'drive'])

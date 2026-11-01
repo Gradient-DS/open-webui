@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 527 operations. Audit bodies across all
-# OpenAPI methods (531 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 528 operations. Audit bodies across all
+# OpenAPI methods (532 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,10 +33,20 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (527, 531), (
-        f'Expected 527 five-method operations / 531 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (528, 532), (
+        f'Expected 528 five-method operations / 532 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
+
+
+@pytest.mark.parametrize('path', ['/api/v1/chats/{id}/share', '/api/v1/chats/shared/{id}/access'])
+def test_chat_share_access_has_no_writable_fields(surface, path):
+    operations, fields, queries = surface
+    route = f'GET {path}'
+    assert 'requestBody' not in operations[route]
+    assert not fields.get(route)
+    assert not queries.get(route)
+    assert [(parameter['in'], parameter['name']) for parameter in operations[route]['parameters']] == [('path', 'id')]
 
 
 def test_derived_counts(surface):
