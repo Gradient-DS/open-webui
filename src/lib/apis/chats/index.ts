@@ -693,11 +693,17 @@ export const getChatListByTagName = async (token: string = '', tagName: string) 
 	}));
 };
 
-export const getChatById = async (token: string, id: string, before = '') => {
+export const getChatById = async (
+	token: string,
+	id: string,
+	before = '',
+	threadId = '',
+	includeVersions = false
+) => {
 	let error = null;
 
 	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before })}` : ''}`,
+		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(includeVersions ? { include_versions: 'true' } : {}) })}` : ''}`,
 		{
 			method: 'GET',
 			headers: {

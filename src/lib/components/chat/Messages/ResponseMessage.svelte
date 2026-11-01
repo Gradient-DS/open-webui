@@ -222,7 +222,7 @@
 	export let readOnly = false;
 	export let allowRegenerate = true;
 	// Keep the v2 entry point hidden until the in-chat regeneration design is settled.
-	const V2_REGENERATE_BUTTON_ENABLED = false;
+	const V2_REGENERATE_BUTTON_ENABLED = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	// [Gradient] Answers are read-only: an agent's thread keeps what it answered, so an edit here would diverge

@@ -748,7 +748,11 @@ async def mark_folder_chats_read_by_id(
         for item in items:
             org = item['organization'] or {}
             if org.get('folder_id') in folder_ids:
-                await service.organize(user.id, org.get('id', item['thread_id']), {'last_read_at': int(time.time())})
+                await service.organize(
+                    user.id,
+                    item.get('conversation_id') or org.get('id', item['thread_id']),
+                    {'last_read_at': int(time.time())},
+                )
                 updated_count += 1
     else:
         updated_count = await Chats.mark_chats_read_by_folder_ids(user.id, folder_ids, db=db)

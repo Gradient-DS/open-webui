@@ -212,7 +212,7 @@ async def test_index_search_forks_and_fork_creation(thread_http):
     assert (await client.fork('fictional-thread', at=4)).thread_id == 'fictional-child'
     assert dict(requests[0].url.params) == {'q': 'Fictional', 'cursor': 'opaque-index', 'limit': '1'}
     assert dict(requests[1].url.params) == {'at': '4', 'cursor': 'opaque-forks', 'limit': '1'}
-    assert json.loads(requests[2].content) == {'at': 4}
+    assert json.loads(requests[2].content) == {'at': 4, 'version': False}
 
 
 @pytest.mark.asyncio
@@ -736,3 +736,54 @@ async def test_metadata_refuses_old_status_and_invalid_response_without_repeatin
         await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
     assert error.value.status == 502
     assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+
+
+@pytest.mark.asyncio
+async def test_versions_proxy_and_version_fork_are_private_owner_authorized(thread_http, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from open_webui.soev.client import _shared_client
+    from open_webui.soev.thread_routes import create_thread_router
+    from open_webui.utils.auth import get_verified_user
+
+    requests, responses, client = thread_http
+    app = FastAPI()
+    app.include_router(create_thread_router(AsyncMock(return_value=[])), prefix='/api/v1/threads')
+    app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='owner')
+    monkeypatch.setattr(threads, 'build_client', lambda: client)
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    versions = {
+        'items': [
+            {
+                'thread_id': 'root',
+                'parent_thread': None,
+                'parent_position': None,
+                'created_at': '2026-11-01T00:00:00Z',
+                'updated_at': '2026-11-01T00:00:00Z',
+            }
+        ]
+    }
+    async with type(_shared_client())(
+        transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid'
+    ) as browser:
+        responses.append(httpx.Response(200, json=versions))
+        result = await browser.get('/api/v1/threads/root/versions')
+        assert result.json() == versions
+        assert result.headers['cache-control'] == 'private, no-store'
+        assert requests[-1].url.path == '/v1/threads/root/versions'
+        responses.append(httpx.Response(200, json={'thread_id': 'version'}))
+        result = await browser.post('/api/v1/threads/root/fork', json={'at': 1, 'version': True})
+        assert result.json() == {'thread_id': 'version'}
+        assert json.loads(requests[-1].content) == {'at': 1, 'version': True}
+        for invalid in ('true', 1, None):
+            result = await browser.post('/api/v1/threads/root/fork', json={'at': 1, 'version': invalid})
+            assert result.status_code == 422
+        for identifier in ('shared', 'missing'):
+            responses.append(httpx.Response(404))
+            result = await browser.get(f'/api/v1/threads/{identifier}/versions')
+            assert result.status_code == 404 and result.json() == {'state': 'unavailable'}
+        monkeypatch.setattr(threads, 'enabled', lambda: False)
+        count = len(requests)
+        assert (await browser.get('/api/v1/threads/root/versions')).status_code == 404
+        assert len(requests) == count

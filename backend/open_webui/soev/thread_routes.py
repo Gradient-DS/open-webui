@@ -24,6 +24,7 @@ def projection_response(result: threads.ProjectionResult) -> Response:
 class ForkForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
     at: int = Field(gt=0)
+    version: bool = Field(default=False, strict=True)
 
 
 class PrivateRoute(APIRoute):
@@ -48,7 +49,7 @@ class PrivateRoute(APIRoute):
 def create_thread_router(
     organizations: Callable[[str], Awaitable[list[Organization]]],
     *,
-    create_fork: Callable[[str, str, int], Awaitable[CreatedThread]] | None = None,
+    create_fork: Callable[[str, str, int, bool], Awaitable[CreatedThread]] | None = None,
 ) -> APIRouter:
     from open_webui.utils.auth import get_verified_user
 
@@ -83,11 +84,15 @@ def create_thread_router(
     ):
         return await threads.build_client().forks(thread_id, at=at, limit=limit, cursor=cursor)
 
+    @router.get('/{thread_id}/versions')
+    async def versions(thread_id: str, user=Depends(require_enabled)):
+        return await threads.build_client().versions(thread_id)
+
     @router.post('/{thread_id}/fork')
     async def fork(thread_id: str, form: ForkForm, user=Depends(require_enabled)):
         if create_fork is not None:
-            return await create_fork(user.id, thread_id, form.at)
-        return await threads.build_client().fork(thread_id, at=form.at)
+            return await create_fork(user.id, thread_id, form.at, form.version)
+        return await threads.build_client().fork(thread_id, at=form.at, version=form.version)
 
     @router.get('/{thread_id}')
     async def projection(

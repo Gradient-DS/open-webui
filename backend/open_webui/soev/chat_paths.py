@@ -78,11 +78,9 @@ class ChatPaths:
 
     async def authorized_pages(self, user_id: str, *, q: str = ''):
         records, page = await asyncio.gather(self.records(user_id), self.client.index(q=q, limit=200, cursor=''))
-        active = {record.thread_id for record in records}
-        inactive = {thread_id for record in records for thread_id in record.branch_thread_ids} - active
         cursor, seen = '', set()
         while True:
-            yield [item for item in threads.join_index(page, records)['items'] if item['thread_id'] not in inactive]
+            yield threads.join_index(page, records)['items']
             if page.next_cursor is None:
                 return
             if page.next_cursor in seen:
@@ -137,7 +135,8 @@ class ChatPaths:
             readonly = not item['owned'] or item.get('readonly', False)
             row = {
                 **item,
-                'id': item['thread_id'] if readonly else org.get('id', item['thread_id']),
+                'id': (item.get('conversation_id') if item['owned'] else None)
+                or (item['thread_id'] if readonly else org.get('id', item['thread_id'])),
                 'last_read_at': org.get('last_read_at'),
                 'readonly': readonly,
                 'pinned': org.get('pinned', False),
@@ -159,16 +158,17 @@ class ChatPaths:
         result = []
         for item in items:
             org = item['organization']
-            if item['thread_id'] not in members and (org or {}).get('folder_id') != folder_id:
+            key = item.get('conversation_id') or item['thread_id']
+            if key not in members and (org or {}).get('folder_id') != folder_id:
                 continue
             # Join only after the platform's grant + label filtering. Never
             # borrow another person's pin, archive or last-read state.
-            org = org or Organization(id=item['thread_id'], thread_id=item['thread_id']).model_dump()
+            org = org or Organization(id=key, thread_id=key).model_dump()
             result.append(
                 {
                     **item,
                     'organization': {**org, 'folder_id': folder_id},
-                    'readonly': members.get(item['thread_id'], user_id) != user_id,
+                    'readonly': members.get(key, user_id) != user_id,
                 }
             )
         return result
@@ -194,9 +194,19 @@ class ChatPaths:
             return (updated > (org.get('last_read_at') or 0), item['updated_at'], item['thread_id'])
         return (item['updated_at'], item['thread_id'])
 
-    async def projection(self, user_id: str, chat_id: str, **kwargs):
+    async def projection(self, user_id: str, chat_id: str, *, thread_id: str = '', current: bool = False, **kwargs):
         record = await self.record(user_id, chat_id)
-        return await self.client.projection(record.thread_id, **kwargs)
+        if current and not thread_id:
+            # The index resolves the current version without reading a second projection.
+            async for batch in self.authorized_pages(user_id):
+                match = next(
+                    (item for item in batch if (item.get('conversation_id') or item['thread_id']) == record.thread_id),
+                    None,
+                )
+                if match:
+                    thread_id = match['thread_id']
+                    break
+        return await self.client.projection(thread_id or record.thread_id, **kwargs)
 
     async def presentation(self, user_id: str, page: threads.ProjectionPage) -> threads.ProjectionPage:
         from open_webui.soev import acting, identity
@@ -264,15 +274,7 @@ class ChatPaths:
     async def fork(self, user_id: str, chat_id: str, at: int, *, clone: bool = False) -> Organization:
         record = await self.record(user_id, chat_id)
         child = await self.client.fork(record.thread_id, at=at)
-        if clone:
-            result = Organization(id=child.thread_id, thread_id=child.thread_id, folder_id=record.folder_id)
-        else:
-            result = record.model_copy(
-                update={
-                    'thread_id': child.thread_id,
-                    'branch_thread_ids': sorted(set(record.branch_thread_ids) | {record.thread_id, child.thread_id}),
-                }
-            )
+        result = Organization(id=child.thread_id, thread_id=child.thread_id, folder_id=record.folder_id)
         await self.organizations.put(user_id, result)
         invalidate()
         return result
@@ -333,12 +335,8 @@ class ChatPaths:
         return record
 
     async def delete(self, user_id: str, chat_id: str) -> None:
-        records = {record.id: record for record in await self.organizations.list(user_id)}
-        if chat_id not in records:
-            raise ThreadError(404, 'unavailable')
-        record = records[chat_id]
-        for thread_id in sorted(set(record.branch_thread_ids) | {record.thread_id}):
-            await self.client.delete(thread_id)
+        record = await self.record(user_id, chat_id)
+        await self.client.delete(record.thread_id)
         await self.organizations.remove(user_id, chat_id)
         invalidate()
 
@@ -354,6 +352,6 @@ class ChatPaths:
                 changes = {'archived': archived}
             else:
                 changes = {'last_read_at': int(time.time())}
-            await self.organize(user_id, org.get('id', item['thread_id']), changes)
+            await self.organize(user_id, item.get('conversation_id') or org.get('id', item['thread_id']), changes)
             count += 1
         return count

@@ -1,5 +1,6 @@
 """Select prepared handlers before any legacy body, dependency or content access."""
 
+import asyncio
 import json
 
 from fastapi import Depends, Request
@@ -115,14 +116,22 @@ async def chat_read(service, request, user, identifier, route):
             identifier,
             window=integer(request, 'limit', 20),
             before=request.query_params.get('before', ''),
+            thread_id=request.query_params.get('thread_id', ''),
+            current=True,
             etag=request.headers.get('If-None-Match'),
         )
         headers = {'ETag': result.etag} if result.etag else {}
-        page = None if result.not_modified else await service.presentation(user.id, result.page)
+        page = None
+        if not result.not_modified:
+            if boolean(request, 'include_versions', False) and result.page.preferences is not None:
+                presented, versions = await asyncio.gather(
+                    service.presentation(user.id, result.page), service.client.versions(result.page.thread_id)
+                )
+                page = {**presented.model_dump(), 'versions': [version.model_dump() for version in versions.items]}
+            else:
+                page = (await service.presentation(user.id, result.page)).model_dump()
         return (
-            Response(status_code=304, headers=headers)
-            if result.not_modified
-            else JSONResponse(page.model_dump(), headers=headers)
+            Response(status_code=304, headers=headers) if result.not_modified else JSONResponse(page, headers=headers)
         )
     if route == '/{id}/tags':
         projection = await service.projection(user.id, identifier, window=1)
@@ -165,7 +174,7 @@ async def chat_write(service, request, user, identifier, route):
         positions = [message.position for message in projection.page.messages if message.finished]
         if not positions:
             refused()
-        return (await service.fork(user.id, identifier, max(positions), clone=True)).model_dump()
+        return (await service.fork(user.id, projection.page.thread_id, max(positions), clone=True)).model_dump()
     if route in {'/{id}/pin', '/{id}/archive', '/{id}/unread', '/{id}/folder'}:
         return await organize(service, request, user, identifier, route)
     if route in {'/read', '/archive/all', '/unarchive/all'}:

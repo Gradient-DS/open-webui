@@ -9,6 +9,7 @@
 	import {
 		filterSidebar,
 		ThreadSidebar,
+		conversationId,
 		type SidebarFilter,
 		type SidebarSnapshot
 	} from '$lib/utils/threads';
@@ -83,7 +84,7 @@
 			<ThreadState state={snapshot.state} retry={() => controller?.search(query)} />
 		{:else}
 			<ul>
-				{#each visible as item (item.thread_id)}
+				{#each visible as item (conversationId(item))}
 					<li data-folder-id={item.organization?.folder_id}>
 						<button onclick={() => onselect(item)}>
 							{#if item.organization?.pinned}<span aria-label={$i18n.t('Pinned')}>★</span>{/if}

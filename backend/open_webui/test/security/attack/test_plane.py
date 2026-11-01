@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 532
+    assert len(plane.operations()) == 533
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -857,3 +857,16 @@ def test_soev_unconfigured_is_a_crash_in_drive_mode(monkeypatch):
     client.request.return_value = response(503, {'detail': {'code': 'soev_not_configured'}})
     outcome = plane._drive_response(client, 'GET /local', '/local', 'drive')
     assert outcome.crashed
+
+
+def test_conversation_versions_is_a_platform_owner_read(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    path = '/api/v1/threads/{thread_id}/versions'
+    route = f'GET {path}'
+    client = fake_client()
+    spec = {'paths': {path: {'get': seeds.SPEC['paths'][path]['get']}}}
+    assert route in seeds.ordinary_targets() and route not in seeds.DESTRUCTIVE
+    assert route in seeds.SOEV_BACKED
+    outcomes = plane.drive_every_route(client, {(path, 'thread_id'): 'owner-thread'}, spec=spec)
+    client.request.assert_called_once_with('GET', '/api/v1/threads/owner-thread/versions')
+    assert outcomes[route].entered

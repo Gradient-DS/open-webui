@@ -582,3 +582,23 @@ def test_seeded_task_list_distinguishes_owner_from_second_account_and_detects_le
     assert result.controls[route] == 200
     crossuser._check(result, route, owner, owner, (), admin_only=False, control=True)
     assert result.violations[0]['reason'] == 'second account received the same nonempty object as the owner'
+
+
+def test_conversation_versions_requires_an_owner_control_without_reader_allowances(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    path = '/api/v1/threads/{thread_id}/versions'
+    route = f'GET {path}'
+    routes, admins = crossuser.targets()
+    assert route in routes and route not in admins
+    assert crossuser._owner_key(path, seeds.SURFACE) == 'admin'
+    assert route in seeds.SOEV_BACKED
+    assert route not in crossuser._shared() and route not in crossuser.expected_refusals()
+    assert route in source_operations()
+    result = crossuser.Authorization(plane.Seeding())
+    owner = plane.Outcome(200, True, '{"items":[{"thread_id":"owner-version"}]}')
+    crossuser._check(
+        result, route, plane.Outcome(404, False, '{}'), owner, ['owner-version'], admin_only=False, control=True
+    )
+    assert result.controls[route] == 200 and not result.violations
+    crossuser._check(result, route, owner, owner, ['owner-version'], admin_only=False, control=True)
+    assert result.violations

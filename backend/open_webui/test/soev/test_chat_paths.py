@@ -71,10 +71,28 @@ def fake_api(request, calls, state, visible, feedback):
         return fake_index(request, state, visible)
     if path.endswith('/shares') or not state['allowed'] or state.get('reader'):
         return fake_reader(request, state) if state.get('reader') else fake_shares(request, state)
+    if path.endswith('/versions'):
+        return httpx.Response(
+            200,
+            json={
+                'items': state.get(
+                    'versions',
+                    [
+                        {
+                            'thread_id': 'fictional-thread',
+                            'parent_thread': None,
+                            'parent_position': None,
+                            'created_at': '2026-11-01T00:00:00Z',
+                            'updated_at': '2026-11-01T00:00:00Z',
+                        }
+                    ],
+                )
+            },
+        )
     if path.startswith('/v1/chat/threads'):
         return fake_runtime(request)
     if path.endswith('/fork'):
-        assert json.loads(request.content) == {'at': 2}
+        assert json.loads(request.content) == {'at': 2, 'version': False}
         state['forks'] = state.get('forks', 0) + 1
         return httpx.Response(200, json={'thread_id': 'fictional-child' if state['forks'] == 1 else 'fictional-clone'})
     if path.endswith('/feedback'):
@@ -354,7 +372,7 @@ async def test_projection_forks_clone_tags_and_usage(dark_api):
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
     assert response.json()['messages'][1]['position'] == 2
     assert response.headers['etag'] == 'fictional-etag'
-    assert [call.url.path for call in dark_api.calls] == ['/v1/threads/fictional-thread']
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads', '/v1/threads/fictional-thread']
     conditional = await dark_api.browser.get(
         '/api/v1/chats/fictional-chat', headers={'If-None-Match': 'fictional-etag'}
     )
@@ -761,20 +779,17 @@ async def test_per_thread_feedback_filters_all_authorized_records(dark_api):
 
 
 @pytest.mark.asyncio
-async def test_edit_forks_keep_chat_identity_and_clone_has_an_independent_lifecycle(dark_api):
+async def test_fork_to_new_chat_preserves_source_and_clone_lifecycle(dark_api):
     service = ChatPaths(dark_api.client, dark_api.records)
-    edited = await service.fork('fictional-fern', 'fictional-chat', 2)
-    assert edited.id == 'fictional-chat'
-    assert edited.thread_id == 'fictional-child'
-    assert edited.branch_thread_ids == ['fictional-child', 'fictional-thread']
-    assert 'branch_thread_ids' not in edited.model_dump()
+    forked = await service.fork('fictional-fern', 'fictional-chat', 2)
+    assert forked.id == forked.thread_id == 'fictional-child'
+    assert forked.branch_thread_ids == []
+    assert dark_api.records.records[0].thread_id == 'fictional-thread'
     dark_api.visible.append(index_item('fictional-child', 'fictional-thread', 2))
-    items = await service.authorized('fictional-fern')
-    assert [item['thread_id'] for item in items] == ['fictional-child']
+    assert len(await service.authorized('fictional-fern')) == 2
     cloned = await service.fork('fictional-fern', 'fictional-chat', 2, clone=True)
     assert cloned.id == 'fictional-clone'
-    assert cloned.branch_thread_ids == []
-    assert len(dark_api.records.records) == 2
+    assert len(dark_api.records.records) == 3
 
 
 @pytest.mark.asyncio
@@ -881,27 +896,20 @@ async def test_tool_approvals_use_platform_input_without_local_messages(dark_api
 
 @pytest.mark.asyncio
 async def test_owned_branch_delete_keeps_the_clone_independent(dark_api):
-    dark_api.records.records[0] = dark_api.records.records[0].model_copy(
-        update={
-            'thread_id': 'fictional-edit',
-            'branch_thread_ids': ['fictional-thread', 'fictional-edit'],
-        }
-    )
-    dark_api.records.records.append(Organization(id='fictional-clone', thread_id='fictional-cloned-thread'))
+    dark_api.records.records.append(Organization(id='fictional-clone', thread_id='fictional-clone'))
     response = await dark_api.browser.delete('/api/v1/chats/fictional-chat')
     assert response.status_code == 200
     assert [record.id for record in dark_api.records.records] == ['fictional-clone']
-    assert {call.url.path for call in dark_api.calls} == {
-        '/v1/chat/threads/fictional-thread',
-        '/v1/chat/threads/fictional-edit',
-    }
+    # Platform deletion of the root removes every version; OWUI issues one delete.
+    assert [call.url.path for call in dark_api.calls] == ['/v1/chat/threads/fictional-thread']
 
 
 @pytest.mark.asyncio
 async def test_standalone_thread_fork_gets_its_own_organization(dark_api):
     from open_webui.soev.thread_routes import create_thread_router
 
-    async def create_fork(user_id, thread_id, at):
+    async def create_fork(user_id, thread_id, at, version):
+        assert version is False
         organization = await ChatPaths(dark_api.client, dark_api.records).fork(user_id, thread_id, at, clone=True)
         return threads.CreatedThread(thread_id=organization.thread_id)
 
@@ -1438,3 +1446,105 @@ async def test_title_sort_still_reads_older_platform_pages(dark_api, monkeypatch
     assert response.status_code == 200
     assert response.json()[0]['id'] == 'oldest'
     assert index.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_conversation_index_organization_and_current_projection(dark_api):
+    root = dark_api.records.records[0].thread_id
+    dark_api.visible[:] = [{**index_item('fictional-child', root, 1), 'conversation_id': root, 'version_count': 3}]
+    service = ChatPaths(dark_api.client, dark_api.records)
+    rows = await service.listing('fictional-fern')
+    assert len(rows) == 1
+    assert rows[0]['id'] == root and rows[0]['thread_id'] == 'fictional-child'
+    assert rows[0]['folder_id'] == 'fictional-folder'
+    assert rows[0]['version_count'] == 3
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads']
+    dark_api.calls.clear()
+    current = await service.projection('fictional-fern', root, current=True)
+    assert current.page.thread_id == 'fictional-child'
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads', '/v1/threads/fictional-child']
+    dark_api.calls.clear()
+    selected = await service.projection('fictional-fern', root, thread_id=root)
+    assert selected.page.thread_id == root
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads/' + root]
+    dark_api.visible[0].update(owned=False, conversation_id=None, version_count=None)
+    rows = await service.listing('fictional-reader')
+    assert rows[0]['id'] == 'fictional-child' and rows[0]['readonly']
+    assert 'conversation_id' not in rows[0] and 'version_count' not in rows[0]
+
+
+@pytest.mark.asyncio
+async def test_version_fork_does_not_write_an_organization(dark_api, monkeypatch):
+    import importlib
+
+    main = importlib.import_module('open_webui.main')
+
+    created = threads.CreatedThread(thread_id='version')
+    fork = AsyncMock(return_value=created)
+    monkeypatch.setattr(threads, 'build_client', lambda: SimpleNamespace(fork=fork))
+    monkeypatch.setattr(main.app.state, 'thread_organizations', dark_api.records, raising=False)
+    assert await main.create_thread_fork('owner', 'root', 1, True) == created
+    fork.assert_awaited_once_with('root', at=1, version=True)
+    assert not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_conversation_mutations_keep_root_organization_when_current_version_changes(dark_api):
+    root = dark_api.records.records[0].thread_id
+    dark_api.visible[:] = [{**index_item('fictional-child', root, 1), 'conversation_id': root, 'version_count': 2}]
+    service = ChatPaths(dark_api.client, dark_api.records)
+    pinned = await service.organize('fictional-fern', 'fictional-chat', {'pinned': True})
+    assert pinned.thread_id == root and pinned.pinned
+    rows = await service.listing('fictional-fern', pinned=True)
+    assert len(rows) == 1 and rows[0]['id'] == root and rows[0]['pinned']
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 1}
+    await service.delete('fictional-fern', 'fictional-chat')
+    assert dark_api.calls[-1].url.path == '/v1/chat/threads/' + root
+    assert not dark_api.records.records
+
+
+@pytest.mark.asyncio
+async def test_delete_platform_conversation_without_local_organization(dark_api):
+    dark_api.records.records.clear()
+    await ChatPaths(dark_api.client, dark_api.records).delete('fictional-fern', 'fictional-thread')
+    assert [call.url.path for call in dark_api.calls] == ['/v1/chat/threads/fictional-thread']
+
+
+@pytest.mark.asyncio
+async def test_chat_open_bundles_versions_without_another_browser_or_projection_read(dark_api):
+    response = await dark_api.browser.get(
+        '/api/v1/chats/fictional-chat?thread_id=fictional-thread&include_versions=true'
+    )
+    assert response.status_code == 200
+    assert response.json()['thread_id'] == 'fictional-thread'
+    assert response.json()['versions'][0]['thread_id'] == 'fictional-thread'
+    assert [call.url.path for call in dark_api.calls] == [
+        '/v1/threads/fictional-thread',
+        '/v1/threads/fictional-thread/versions',
+    ]
+    dark_api.calls.clear()
+    await dark_api.browser.get('/api/v1/chats/fictional-chat?thread_id=fictional-thread')
+    assert [call.url.path for call in dark_api.calls] == ['/v1/threads/fictional-thread']
+
+
+@pytest.mark.asyncio
+async def test_reader_chat_open_never_requests_or_returns_versions(dark_api, monkeypatch):
+    projection = threads.ProjectionResult(
+        threads.ProjectionPage(
+            thread_id='fictional-thread',
+            generation='generation',
+            title='Shared',
+            preferences=None,
+            messages=[],
+            next_cursor=None,
+        ),
+        None,
+    )
+    monkeypatch.setattr(dark_api.client, 'projection', AsyncMock(return_value=projection))
+    versions = AsyncMock(side_effect=AssertionError('Reader version metadata must not be requested'))
+    monkeypatch.setattr(dark_api.client, 'versions', versions)
+    result = await dark_api.browser.get(
+        '/api/v1/chats/fictional-thread?thread_id=fictional-thread&include_versions=true'
+    )
+    assert result.status_code == 200 and 'versions' not in result.json()
+    versions.assert_not_called()

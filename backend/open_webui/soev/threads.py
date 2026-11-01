@@ -54,6 +54,8 @@ class ThreadMetadataResponse(WireModel):
 
 
 class IndexItem(WireModel):
+    conversation_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    version_count: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
     thread_id: str
     owned: bool
     title: str | None
@@ -76,6 +78,18 @@ class OwnerIndexItem(IndexItem):
 class OwnerIndexPage(WireModel):
     items: list[OwnerIndexItem] = Field(alias='data')
     next_cursor: str | None
+
+
+class ThreadVersion(WireModel):
+    thread_id: str
+    parent_thread: str | None
+    parent_position: int | None
+    created_at: str
+    updated_at: str
+
+
+class ThreadVersions(WireModel):
+    items: list[ThreadVersion]
 
 
 class CreatedThread(WireModel):
@@ -176,7 +190,7 @@ def join_index(page: IndexPage, records: list[Organization]) -> dict:
     by_thread = {record.thread_id: record for record in records}
     items = []
     for item in page.items:
-        record = by_thread.get(item.thread_id)
+        record = by_thread.get(item.conversation_id if item.owned and item.conversation_id else item.thread_id)
         items.append({**item.model_dump(), 'organization': record.model_dump() if record else None})
     return {'items': items, 'next_cursor': page.next_cursor}
 
@@ -379,14 +393,17 @@ class ThreadClient:
             IndexPage,
         )
 
-    async def fork(self, thread_id: str, *, at: int) -> CreatedThread:
+    async def versions(self, thread_id: str) -> ThreadVersions:
+        return self._parse(await self._request('GET', f'/v1/threads/{_identifier(thread_id)}/versions'), ThreadVersions)
+
+    async def fork(self, thread_id: str, *, at: int, version: bool = False) -> CreatedThread:
         if at <= 0:
             raise ThreadError(422, 'invalid_request')
         return self._parse(
             await self._request(
                 'POST',
                 f'/v1/threads/{_identifier(thread_id)}/fork',
-                body={'at': at},
+                body={'at': at, 'version': version},
             ),
             CreatedThread,
         )

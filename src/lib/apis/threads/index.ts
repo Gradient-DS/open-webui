@@ -8,6 +8,7 @@ export type MessageView = {
 };
 
 export type ProjectionPage = {
+	versions?: ThreadVersion[];
 	thread_id: string;
 	generation: string;
 	title: string | null;
@@ -17,7 +18,17 @@ export type ProjectionPage = {
 	next_cursor: string | null;
 };
 
+export type ThreadVersion = {
+	thread_id: string;
+	parent_thread: string | null;
+	parent_position: number | null;
+	created_at: string;
+	updated_at: string;
+};
+
 export type IndexItem = {
+	conversation_id?: string | null;
+	version_count?: number | null;
 	thread_id: string;
 	owned: boolean;
 	title: string | null;
@@ -82,7 +93,8 @@ export interface ThreadAPI {
 	authorize(body: AuthorizeThreads): Promise<CacheAuthorization>;
 	projection(threadId: string, before?: string, etag?: string): Promise<ProjectionResult>;
 	forks(threadId: string, cursor?: string): Promise<Page<IndexItem>>;
-	fork(threadId: string, at: number): Promise<{ thread_id: string }>;
+	versions(threadId: string): Promise<{ items: ThreadVersion[] }>;
+	fork(threadId: string, at: number, version?: boolean): Promise<{ thread_id: string }>;
 	index(q?: string, cursor?: string): Promise<Page<SidebarItem>>;
 }
 
@@ -137,11 +149,14 @@ export const threadAPI = (token: string, limit = 20): ThreadAPI => {
 			const query = new URLSearchParams({ cursor });
 			return (await request(`/${encodeURIComponent(threadId)}/forks?${query}`)).json();
 		},
-		async fork(threadId, at) {
+		async versions(threadId) {
+			return (await request(`/${encodeURIComponent(threadId)}/versions`)).json();
+		},
+		async fork(threadId, at, version = false) {
 			return (
 				await request(`/${encodeURIComponent(threadId)}/fork`, {
 					method: 'POST',
-					body: JSON.stringify({ at })
+					body: JSON.stringify({ at, version })
 				})
 			).json();
 		},

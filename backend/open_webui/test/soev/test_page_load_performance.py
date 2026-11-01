@@ -36,7 +36,7 @@ async def measure(label, calls, operation, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('endpoint', ['/?page=1', '/pinned', '/shared', '/fictional-chat'])
+@pytest.mark.parametrize('endpoint', ['/?page=1', '/pinned', '/shared', '/fictional-chat?thread_id=fictional-thread'])
 async def test_chat_page_load_minimum_calls(dark_api, identity_config, monkeypatch, endpoint):
     from open_webui.soev import client as transport
 

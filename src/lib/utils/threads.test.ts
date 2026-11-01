@@ -80,6 +80,7 @@ const api = (): ThreadAPI => ({
 		notModified: false
 	})),
 	forks: vi.fn(async () => ({ items: [fork()], next_cursor: null })),
+	versions: vi.fn(async () => ({ items: [] })),
 	fork: vi.fn(async () => ({ thread_id: 'fictional-fork' })),
 	index: vi.fn(async () => ({ items: [], next_cursor: null }))
 });
@@ -689,4 +690,68 @@ it('filters by the public index tags independently of ownership and title search
 		owned,
 		shared
 	]);
+});
+
+describe('conversation version lineage', () => {
+	const versions = [
+		{ thread_id: 'root', parent_thread: null, parent_position: null },
+		{ thread_id: 'v2', parent_thread: 'root', parent_position: 2 },
+		{ thread_id: 'v3', parent_thread: 'v2', parent_position: 2 },
+		{ thread_id: 'edit', parent_thread: 'v3', parent_position: 4 }
+	];
+	it.each(['root', 'v2', 'v3'])(
+		'shows all regenerations from %s and preserves earlier branch choices',
+		(id) => {
+			const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, id), versions);
+			const input = Object.values(history.messages).find((message) => message.positions[0] === 3)!;
+			expect(input.threadVersions).toEqual(
+				['root', 'v2', 'v3'].map((threadId) => ({ threadId, at: 2 }))
+			);
+		}
+	);
+	it('keeps earlier alternatives reachable from a later edit', () => {
+		const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, 'edit'), versions);
+		expect(
+			Object.values(history.messages).find((message) => message.positions[0] === 3)?.threadVersions
+		).toEqual([
+			{ threadId: 'root', at: 2 },
+			{ threadId: 'v2', at: 2 },
+			{ threadId: 'edit', at: 2 }
+		]);
+	});
+	it('does not reveal forks into another conversation or any reader arrows', () => {
+		const source = page([1, 2, 3, 4], null, 'root');
+		const owned = buildThreadHistory(source, [
+			{ thread_id: 'root', parent_thread: 'external', parent_position: 2 }
+		]);
+		expect(Object.values(owned.messages).every((message) => !message.threadVersions)).toBe(true);
+		const reader = buildThreadHistory({ ...source, preferences: null }, []);
+		expect(Object.values(reader.messages).every((message) => !message.threadVersions)).toBe(true);
+	});
+});
+
+it('keeps one sidebar row per conversation across changing current versions and search pages', async () => {
+	const backend = api();
+	const first = { ...sidebarItem('v1', true), conversation_id: 'root', version_count: 1 };
+	const latest = { ...first, thread_id: 'v2', version_count: 2 };
+	const reader = { ...sidebarItem('shared'), owned: false };
+	vi.mocked(backend.index)
+		.mockResolvedValueOnce({ items: [first, reader], next_cursor: 'next' })
+		.mockResolvedValueOnce({ items: [latest], next_cursor: null });
+	const sidebar = new ThreadSidebar(backend);
+	await sidebar.search('question');
+	await sidebar.more();
+	expect(sidebar.snapshot.items).toEqual([latest, reader]);
+	expect(filterSidebar(sidebar.snapshot.items, { pinned: true })).toEqual([latest]);
+	expect(backend.index).toHaveBeenCalledTimes(2);
+	expect(backend.projection).not.toHaveBeenCalled();
+});
+
+it('waits for the branch point to be paged in before showing its arrows', () => {
+	const versions = [
+		{ thread_id: 'root', parent_thread: null, parent_position: null },
+		{ thread_id: 'v2', parent_thread: 'root', parent_position: 2 }
+	];
+	const history = buildThreadHistory(page([25, 26], 'older', 'v2'), versions);
+	expect(Object.values(history.messages).every((message) => !message.threadVersions)).toBe(true);
 });

@@ -17935,6 +17935,11 @@
             "exclusiveMinimum": 0.0,
             "title": "At",
             "type": "integer"
+          },
+          "version": {
+            "default": false,
+            "title": "Version",
+            "type": "boolean"
           }
         },
         "required": [
@@ -38771,6 +38776,48 @@
           }
         ],
         "summary": "Forks"
+      }
+    },
+    "/api/v1/threads/{thread_id}/versions": {
+      "get": {
+        "operationId": "versions_api_v1_threads__thread_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Versions"
       }
     },
     "/api/v1/threads:authorize": {

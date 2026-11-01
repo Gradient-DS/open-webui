@@ -86,3 +86,17 @@ it('uses limit for projection reads and keeps current public metadata', async ()
 	expect(query.get('limit')).toBe('1');
 	expect(query.has('window')).toBe(false);
 });
+
+it('loads versions once and distinguishes same-conversation versions from forks to a new chat', async () => {
+	const fetcher = vi.fn(async () => new Response(JSON.stringify({ items: [], thread_id: 'new' })));
+	vi.stubGlobal('fetch', fetcher);
+	const api = threadAPI('session');
+	await api.versions('root');
+	await api.fork('viewed', 1, true);
+	await api.fork('viewed', 7);
+	const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+	expect(calls[0][0]).toBe('/api/v1/threads/root/versions');
+	expect(JSON.parse(String(calls[1][1].body))).toEqual({ at: 1, version: true });
+	expect(JSON.parse(String(calls[2][1].body))).toEqual({ at: 7, version: false });
+	expect(calls.every(([, init]) => init.cache === 'no-store')).toBe(true);
+});

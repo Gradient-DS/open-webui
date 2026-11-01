@@ -2,6 +2,7 @@ import { reasoningBlock } from './threadReasoning';
 import {
 	ThreadError,
 	type IndexItem,
+	type ThreadVersion,
 	type MessageView,
 	type ProjectionPage,
 	type ThreadAPI,
@@ -113,7 +114,10 @@ const assistantContent = (fields: Record<string, unknown>) => {
 	return { content: parts.join('\n\n'), sources, statusHistory: statuses };
 };
 
-export const buildThreadHistory = (page: ProjectionPage, forks: IndexItem[]): ThreadHistory => {
+export const buildThreadHistory = (
+	page: ProjectionPage,
+	forks: Pick<ThreadVersion, 'thread_id' | 'parent_thread' | 'parent_position'>[]
+): ThreadHistory => {
 	const history = emptyHistory();
 	const seen = new Set<number>();
 	const anchors = new Map<number, number>();
@@ -187,6 +191,70 @@ export const buildThreadHistory = (page: ProjectionPage, forks: IndexItem[]): Th
 			targets.push({ threadId: fork.thread_id, at });
 		}
 		history.versions[anchor] = targets;
+	}
+	// Follow the selected lineage so siblings remain reachable from every version.
+	const byId = new Map(forks.map((version) => [version.thread_id, version]));
+	const lineage = new Map<string, { cutoff: number; child?: string }>();
+	lineage.set(page.thread_id, { cutoff: Infinity });
+	let selected = byId.get(page.thread_id);
+	while (
+		selected?.parent_thread &&
+		byId.has(selected.parent_thread) &&
+		selected.parent_position !== null
+	) {
+		if (lineage.has(selected.parent_thread)) break;
+		lineage.set(selected.parent_thread, {
+			cutoff: selected.parent_position,
+			child: selected.thread_id
+		});
+		selected = byId.get(selected.parent_thread);
+	}
+	const branchRoot = (parent: string, at: number) => {
+		const seen = new Set<string>();
+		let node = byId.get(parent);
+		while (
+			node?.parent_thread &&
+			byId.has(node.parent_thread) &&
+			node.parent_position === at &&
+			!seen.has(parent)
+		) {
+			seen.add(parent);
+			parent = node.parent_thread;
+			node = byId.get(parent);
+		}
+		return parent;
+	};
+	const groups = new Map<string, typeof forks>();
+	for (const version of forks) {
+		if (
+			!version.parent_thread ||
+			!byId.has(version.parent_thread) ||
+			version.parent_position === null
+		)
+			continue;
+		const root = branchRoot(version.parent_thread, version.parent_position);
+		const path = lineage.get(root);
+		if (!path || version.parent_position > path.cutoff) continue;
+		const key = `${root}:${version.parent_position}`;
+		groups.set(key, [...(groups.get(key) ?? []), version]);
+	}
+	for (const versions of groups.values()) {
+		const at = versions[0].parent_position!;
+		const root = branchRoot(versions[0].parent_thread!, at);
+		const targets = [root, ...versions.map((version) => version.thread_id)];
+		const active = [...targets].reverse().find((id) => lineage.has(id))!;
+		const visible = Object.values(history.messages);
+		const branch = visible.find((message) => message.positions[0] > at);
+		if (!branch || branch.positions[0] !== at + 1) continue;
+		const choices = targets.map((threadId) => ({
+			threadId: threadId === active ? page.thread_id : threadId,
+			at
+		}));
+		branch.threadVersions = choices;
+		if (branch.role === 'user') {
+			const answer = history.messages[branch.childrenIds[0]];
+			if (answer) answer.threadVersions = choices;
+		}
 	}
 	return history;
 };
@@ -495,6 +563,9 @@ export type SidebarSnapshot = {
 	state: ThreadState | null;
 };
 
+export const conversationId = (item: IndexItem) =>
+	item.owned ? item.conversation_id || item.thread_id : item.thread_id;
+
 export class ThreadSidebar {
 	private epoch = 0;
 	private query = '';
@@ -531,9 +602,9 @@ export class ThreadSidebar {
 			if (page.next_cursor !== null && page.next_cursor === cursor)
 				throw new ThreadError('reconnect');
 			const items = new Map(
-				replace ? [] : this.snapshot.items.map((item) => [item.thread_id, item] as const)
+				replace ? [] : this.snapshot.items.map((item) => [conversationId(item), item] as const)
 			);
-			for (const item of page.items) items.set(item.thread_id, item);
+			for (const item of page.items) items.set(conversationId(item), item);
 			this.snapshot = {
 				items: [...items.values()],
 				cursor: page.next_cursor,
