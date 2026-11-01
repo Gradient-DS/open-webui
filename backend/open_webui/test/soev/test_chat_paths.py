@@ -67,6 +67,8 @@ def fake_api(request, calls, state, visible, feedback):
     path = request.url.path
     if path in {'/v1/threads/usage', '/v1/feedback', '/v1/feedback/summary'}:
         return fake_metrics(path, state, feedback)
+    if path == '/v1/chat/threads' and request.method == 'GET':
+        return fake_owner_index(request, state, visible)
     if path.endswith('/shares') or not state['allowed'] or state.get('reader'):
         return fake_reader(request, state) if state.get('reader') else fake_shares(request, state)
     if path.startswith('/v1/chat/threads'):
@@ -94,6 +96,25 @@ def fake_api(request, calls, state, visible, feedback):
     if path in {'/v1/threads/fictional-thread', '/v1/threads/fictional-child'}:
         return fake_thread_read(request, state, visible, path)
     return httpx.Response(501)
+
+
+def fake_owner_index(request, state, visible):
+    if not state['allowed']:
+        return httpx.Response(404)
+    items = [
+        {
+            'shared': bool(state.get('shares'))
+            and item['owned']
+            and state.get('owner', True)
+            and not state.get('reader')
+            and not state.get('fallback'),
+            **item,
+        }
+        for item in visible
+    ]
+    start = int(request.url.params.get('cursor') or 0)
+    end = start + min(int(request.url.params['limit']), state.get('index_page_size', 200))
+    return httpx.Response(200, json={'data': items[start:end], 'next_cursor': str(end) if end < len(items) else None})
 
 
 def fake_thread_read(request, state, visible, path):
@@ -1160,7 +1181,7 @@ async def test_readonly_folder_rows_do_not_stay_unread_after_reading(dark_api):
 @pytest.mark.asyncio
 async def test_unavailable_owned_share_does_not_block_listing_or_unshare_all(dark_api, monkeypatch):
     dark_api.records.records[0].branch_thread_ids = ['fictional-unavailable']
-    dark_api.visible.insert(0, index_item('fictional-unavailable'))
+    dark_api.visible.insert(0, {**index_item('fictional-unavailable'), 'shared': False})
     dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
     original = dark_api.client.shares
 
@@ -1180,7 +1201,7 @@ async def test_unavailable_owned_share_does_not_block_listing_or_unshare_all(dar
 
 @pytest.mark.asyncio
 async def test_share_listing_still_refuses_transient_platform_failures(dark_api, monkeypatch):
-    monkeypatch.setattr(dark_api.client, 'shares', AsyncMock(side_effect=ThreadError(503, 'reconnect')))
+    monkeypatch.setattr(dark_api.client, 'owner_index', AsyncMock(side_effect=ThreadError(503, 'reconnect')))
     response = await dark_api.browser.get('/api/v1/chats/shared')
     assert response.status_code == 503 and response.json() == {'state': 'reconnect'}
 
@@ -1225,7 +1246,7 @@ async def test_first_sidebar_page_does_not_exhaust_platform_index(dark_api, monk
 async def test_shared_listing_skips_index_when_no_owned_threads(dark_api, monkeypatch):
     dark_api.records.records = []
     index = AsyncMock(side_effect=AssertionError('No owned chats to inspect'))
-    monkeypatch.setattr(dark_api.client, 'index', index)
+    monkeypatch.setattr(dark_api.client, 'owner_index', index)
     response = await dark_api.browser.get('/api/v1/chats/shared')
     assert response.status_code == 200 and response.json() == []
     index.assert_not_awaited()
@@ -1233,14 +1254,98 @@ async def test_shared_listing_skips_index_when_no_owned_threads(dark_api, monkey
 
 @pytest.mark.asyncio
 async def test_shared_listing_stops_after_all_owned_threads_are_found(dark_api, monkeypatch):
-    from open_webui.soev.threads import IndexPage
+    from open_webui.soev.threads import OwnerIndexPage
 
     dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'reader'}, 'at': 2}]
-    index = AsyncMock(return_value=IndexPage(items=[index_item()], next_cursor='irrelevant-older'))
-    monkeypatch.setattr(dark_api.client, 'index', index)
+    index = AsyncMock(
+        return_value=OwnerIndexPage(data=[{**index_item(), 'shared': True}], next_cursor='irrelevant-older')
+    )
+    monkeypatch.setattr(dark_api.client, 'owner_index', index)
     response = await dark_api.browser.get('/api/v1/chats/shared')
     assert response.status_code == 200 and len(response.json()) == 1
     assert index.await_count == 1
+    assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('order', ['title', 'updated_at'])
+@pytest.mark.parametrize('direction', ['asc', 'desc'])
+@pytest.mark.parametrize('page_number', [1, 2, 3])
+async def test_shared_listing_preserves_shape_sort_filter_and_pagination_with_only_index_calls(
+    dark_api, order, direction, page_number
+):
+    items = [
+        {
+            **index_item(f'fictional-{i:03}'),
+            'title': f'Fictional Match {i % 7}' if i % 10 else 'Other',
+            'updated_at': f'2026-10-{i % 28 + 1:02}T10:00:00Z',
+            'shared': True,
+        }
+        for i in range(140)
+    ]
+    excluded = [
+        {**index_item('fictional-private'), 'shared': False},
+        {**index_item('fictional-reader', owned=False), 'shared': False},
+        {**index_item('fictional-stale-owner', owned=False), 'shared': True},
+        {**index_item('fictional-unmapped'), 'shared': True},
+    ]
+    dark_api.visible[:] = [*excluded, *items]
+    dark_api.state['index_page_size'] = 80
+    # Include inactive branches and a stale local mapping for a platform non-owner.
+    dark_api.records.records = [
+        Organization(
+            id='fictional-chat',
+            thread_id=items[0]['thread_id'],
+            branch_thread_ids=[item['thread_id'] for item in [*items[1:], *excluded[:3]]],
+        )
+    ]
+    response = await dark_api.browser.get(
+        f'/api/v1/chats/shared?query=mAtCh&order_by={order}&direction={direction}&page={page_number}'
+    )
+    assert response.status_code == 200, response.text
+    expected = [
+        {
+            **{key: value for key, value in item.items() if key != 'shared'},
+            'tags': [],
+            'id': item['thread_id'],
+            'share_id': item['thread_id'],
+        }
+        for item in items
+        if 'match' in item['title'].casefold()
+    ]
+    expected.sort(key=lambda item: (item[order], item['thread_id']), reverse=direction == 'desc')
+    assert response.json() == expected[(page_number - 1) * 60 : page_number * 60]
+    assert [(request.method, request.url.path) for request in dark_api.calls] == [('GET', '/v1/chat/threads')] * 2
+
+
+@pytest.mark.asyncio
+async def test_shared_listing_pages_index_and_deduplicates_without_share_reads(dark_api):
+    first = {**index_item(), 'shared': True}
+    private = {**index_item('fictional-private'), 'shared': False}
+    branch = {**index_item('fictional-branch'), 'shared': True, 'title': None}
+    dark_api.visible[:] = [first, private, first, branch]
+    dark_api.state['index_page_size'] = 2
+    dark_api.records.records[0].branch_thread_ids = [private['thread_id'], branch['thread_id']]
+    response = await dark_api.browser.get('/api/v1/chats/shared?order_by=title&direction=asc')
+    assert response.status_code == 200, response.text
+    assert [item['thread_id'] for item in response.json()] == [branch['thread_id'], first['thread_id']]
+    assert [request.url.path for request in dark_api.calls] == ['/v1/chat/threads'] * 2
+    assert [dict(request.url.params) for request in dark_api.calls] == [
+        {'limit': '200', 'cursor': ''},
+        {'limit': '200', 'cursor': '2'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_shared_listing_refuses_repeated_index_cursor(dark_api, monkeypatch):
+    from open_webui.soev.threads import OwnerIndexPage
+
+    index = AsyncMock(return_value=OwnerIndexPage(data=[], next_cursor='repeated'))
+    monkeypatch.setattr(dark_api.client, 'owner_index', index)
+    response = await dark_api.browser.get('/api/v1/chats/shared')
+    assert response.status_code == 502 and response.json() == {'state': 'reconnect'}
+    assert index.await_count == 2
+    assert not dark_api.calls
 
 
 @pytest.mark.asyncio

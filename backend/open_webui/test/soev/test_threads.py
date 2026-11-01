@@ -229,6 +229,47 @@ async def test_index_requires_boolean_ownership(thread_http, owned):
 
 
 @pytest.mark.asyncio
+async def test_owner_index_reads_shared_flags_with_requester_token(thread_http):
+    requests, responses, client = thread_http
+    responses.append(
+        httpx.Response(
+            200,
+            json={
+                'data': [
+                    {**index_item(), 'shared': True},
+                    {**index_item('fictional-reader', owned=False), 'shared': False},
+                ],
+                'next_cursor': 'opaque-next',
+            },
+        )
+    )
+    found = await client.owner_index(limit=2, cursor='opaque-index')
+    assert [item.shared for item in found.items] == [True, False]
+    assert found.next_cursor == 'opaque-next'
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == 'GET' and request.url.path == '/v1/chat/threads'
+    assert dict(request.url.params) == {'limit': '2', 'cursor': 'opaque-index'}
+    assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
+    assert request.headers['Authorization'] == 'Bearer fictional-product-key'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('shared', ['missing', None, 'true', 1])
+@pytest.mark.parametrize('owned', [True, False])
+async def test_owner_index_requires_boolean_shared_without_fallback(thread_http, shared, owned):
+    requests, responses, client = thread_http
+    item = index_item(owned=owned)
+    if shared != 'missing':
+        item['shared'] = shared
+    responses.append(httpx.Response(200, json={'data': [item], 'next_cursor': None}))
+    with pytest.raises(ThreadError, match='reconnect') as error:
+        await client.owner_index()
+    assert error.value.status == 502
+    assert [request.url.path for request in requests] == ['/v1/chat/threads']
+
+
+@pytest.mark.asyncio
 async def test_projection_uses_only_requester_login_token(thread_http):
     requests, responses, client = thread_http
     responses.extend([httpx.Response(200, json=page(1)) for _ in range(2)])

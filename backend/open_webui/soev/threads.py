@@ -68,6 +68,15 @@ class IndexPage(WireModel):
     next_cursor: str | None
 
 
+class OwnerIndexItem(IndexItem):
+    shared: bool
+
+
+class OwnerIndexPage(WireModel):
+    items: list[OwnerIndexItem] = Field(alias='data')
+    next_cursor: str | None
+
+
 class CreatedThread(WireModel):
     thread_id: str
 
@@ -332,6 +341,16 @@ class ThreadClient:
                 params={'q': q, 'limit': _page_size(limit), 'cursor': cursor},
             ),
             IndexPage,
+        )
+
+    async def owner_index(self, *, limit: int = 200, cursor: str = '') -> OwnerIndexPage:
+        return self._parse(
+            await self._request(
+                'GET',
+                '/v1/chat/threads',
+                params={'limit': _page_size(limit), 'cursor': cursor},
+            ),
+            OwnerIndexPage,
         )
 
     async def authorize(self, form: AuthorizeThreads) -> CacheAuthorization:

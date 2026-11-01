@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from fastapi import Request
@@ -148,25 +147,16 @@ async def owned_shared(service: ChatPaths, user_id: str) -> list[dict]:
     if not owned:
         return []
     pending = set(owned)
-    slots = asyncio.Semaphore(10)
-
-    async def shared(item):
-        async with slots:
-            try:
-                shares = await all_shares(service.client, item.thread_id)
-            except ThreadError as error:
-                if error.state == 'unavailable':
-                    return None
-                raise
-            if shares:
-                return {**item.model_dump(), 'id': item.thread_id, 'share_id': item.thread_id}
-        return None
 
     items, cursor, seen = [], '', set()
     while True:
-        page = await service.client.index(limit=200, cursor=cursor)
+        page = await service.client.owner_index(limit=200, cursor=cursor)
         batch = [item for item in page.items if item.thread_id in pending]
-        items.extend(item for item in await asyncio.gather(*(shared(item) for item in batch)) if item is not None)
+        items.extend(
+            {**item.model_dump(exclude={'shared'}), 'id': item.thread_id, 'share_id': item.thread_id}
+            for item in batch
+            if item.owned and item.shared
+        )
         pending.difference_update(item.thread_id for item in batch)
         if not pending or page.next_cursor is None:
             return items

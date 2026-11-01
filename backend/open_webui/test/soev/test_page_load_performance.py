@@ -59,7 +59,7 @@ async def test_chat_page_load_minimum_calls(dark_api, identity_config, monkeypat
     async with HTTP_CLIENT(transport=httpx.MockTransport(handle)) as upstream:
         monkeypatch.setattr(transport, '_shared_client', lambda: upstream)
         monkeypatch.setattr('open_webui.soev.threads._shared_client', lambda: upstream)
-        expected = 2 if endpoint == '/shared' else 1
+        expected = 1
         if endpoint == '/pinned':
             expected = 0
         await measure(
