@@ -16,6 +16,17 @@ main = importlib.import_module('open_webui.main')
 organization_store = test_thread_organizations.organization_store
 
 
+async def browser_stream(response):
+    parts = []
+    async for chunk in response.body_iterator:
+        parts.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        if 'data: [DONE]' in parts[-1]:
+            # The browser cancels its reader at [DONE], without another read.
+            await response.body_iterator.aclose()
+            break
+    return ''.join(parts)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('metadata_tasks', [False, True])
 @pytest.mark.parametrize('browser_create', [False, True])
@@ -78,9 +89,8 @@ async def test_full_v2_turn_streams_without_local_content(
             'parent_id': None if index == 0 else 'fictional-assistant-0',
             'chat_id': chat_id,
             'session_id': 'fictional-session',
+            'background_tasks': {'title_generation': metadata_tasks, 'tags_generation': metadata_tasks},
         }
-        if metadata_tasks:
-            form['background_tasks'] = {'title_generation': True, 'tags_generation': True}
         if index == 0 and browser_create:
             from open_webui.soev.chat_paths import ChatPaths
             from open_webui.soev.chat_routes import chat_write
@@ -125,7 +135,7 @@ async def test_full_v2_turn_streams_without_local_content(
         response = await main.chat_completion(request, form, user)
         assert isinstance(response, StreamingResponse), response
         assert response.headers['cache-control'] == 'private, no-store'
-        raw = ''.join([chunk.decode() if isinstance(chunk, bytes) else chunk async for chunk in response.body_iterator])
+        raw = await browser_stream(response)
         assert '[DONE]' in raw
         chunks = [
             json.loads(line[6:]) for line in raw.splitlines() if line.startswith('data: ') and line != 'data: [DONE]'
