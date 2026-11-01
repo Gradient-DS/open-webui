@@ -702,11 +702,11 @@ backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent: one of another provider (Outlook mail) where the platform offers it, since soev-api keeps one connection per owner and provider. A later pass gets the same pending connection."
+description = "Starting consent suspends an enabled connection. Use the ordinary caller's pending connection, separate from the admin's consented OneDrive and Outlook fixtures: soev-api keeps one connection per owner and provider. A later pass gets the same pending connection."
 seeded_by = "seed_cloud_authorize_connection"
 depends_on = []
 fresh = false
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -721,12 +721,25 @@ actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
+key = "cloud_mail_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Mailbox settings require an owned Outlook connection, shared-mailbox consent and a mail live grant. Keep the OneDrive fixture for document grants and schedules. The private provider fixture completes consent with Mail.Read.Shared; the real owner API creates the grant."
+seeded_by = "seed_cloud_connection"
+provider = "outlook_mail"
+family = "mail"
+depends_on = []
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
 key = "cloud_mailbox_address"
 name = "address"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}"
-description = "A fictional shared mailbox address for the soev-api proxy; the sealed stack has no soev-api."
+description = "Save gedeeld@example.test through the owner API and the private provider's signed mailbox probe, so list and delete operate on an existing mailbox. Re-add it on every pass after earlier removals."
 seeded_by = "seed_cloud_mailbox_address"
-depends_on = ["cloud_connection"]
+depends_on = ["cloud_mail_connection"]
 fresh = false
 actor = "admin"
 
@@ -857,6 +870,12 @@ backed_by = "soev-solutions"
 route = "POST /api/v1/files/onedrive/attach"
 description = "Inspect and ingest the fixed provider document using the owner's real live grant."
 json = { grant_id = "{cloud_grant}", drive_id = "ci-picker-drive", item_id = "ci-document", name = "ci-document.txt", web_url = "https://ci.example.invalid/document", size = 59 }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Use the saved shared fixture's valid address; the schema's attack-control placeholder is not an email address."
+json = { address = "{cloud_mailbox_address}" }
 
 [[field]]
 backed_by = "soev-solutions"

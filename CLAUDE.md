@@ -79,6 +79,18 @@ To develop this fork against the soev platform, run it from your checkout (comma
 - Backend: type hints on signatures, Black (88 chars), PyLint.
 - **i18n: all new user-facing text needs Dutch (nl-NL) translations** — add to both `src/lib/i18n/locales/en-US/translation.json` and `nl-NL/translation.json`. Keys alphabetically sorted; empty string in en-US means "use the key itself". Parse new strings: `npm run i18n:parse`.
 
+## Security inventories: every route, in the same PR
+
+A new or changed backend route ships with its security classification in the same PR, or CI fails:
+`security/openapi.json`, `security/attack-surface.toml` (seeds, controls), the plane count in
+`backend/open_webui/test/security/attack/test_plane.py`, cross-user refusals (`test_crossuser.py`),
+`test_seeds.py`, `test_soev_mode.py`, `test_writable_fields.py` and `security/route-coverage.toml` for the
+live sweep. A route that needs data (a connection, chat, mailbox, knowledge base) also needs a seed the
+soev-solutions full-stack sweep (`scripts/ci/owui_fullstack/`) can create, so its owner positive control
+really succeeds against a live stack. Waive only what cannot be driven, with a reason from observed
+behaviour. Never exempt a route or loosen an assertion to make a count match. Use commit 4ae928f5e
+(`GET /api/v1/chats/{id}/share`) as the worked example.
+
 ## Key files
 
 - `backend/open_webui/main.py` — FastAPI app initialization, middleware stack

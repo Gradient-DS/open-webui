@@ -109,6 +109,20 @@ def test_schedule_control_keeps_the_declared_provider_scope():
     assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
 
 
+def test_mailbox_control_uses_the_saved_address_and_the_matching_owner(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    ctx = seeds.SeedContext(None, None, seeds.SURFACE, values={'cloud_mailbox_address': 'gedeeld@example.test'})
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(ctx, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    assert request['json'] == {'address': 'gedeeld@example.test'}
+    paths = [route.split(' ', 1)[1], route.split(' ', 1)[1] + '/{address}']
+    assert all(crossuser._owner_key(path, seeds.SURFACE) == 'admin' for path in paths)
+    assert crossuser._owner_key('/api/v1/cloud-sync/connections/{connection_id}/authorize', seeds.SURFACE) == 'user'
+    assert not set(crossuser.expected_refusals()) & {'GET ' + paths[0], route, 'DELETE ' + paths[1]}
+
+
 def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     import io
