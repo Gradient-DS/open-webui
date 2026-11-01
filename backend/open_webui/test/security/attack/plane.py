@@ -627,6 +627,8 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
                         body['json'] = _hold_declared(None, (), declared['json'])[0]
                     if declared.get('params'):
                         body['params'] = declared['params']
+                    if declared.get('headers'):
+                        body['headers'] = declared['headers']
                     if 'data' in declared:
                         body['data'] = declared['data']
                     # Multipart: the derivation models JSON bodies only, so nothing else sends one.

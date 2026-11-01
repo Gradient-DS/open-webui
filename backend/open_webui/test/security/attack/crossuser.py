@@ -343,6 +343,8 @@ def _benign(route, parameters, spec):
         request['json'] = plane._hold_declared(request.get('json'), (), declared['json'])[0]
     if declared.get('params'):
         request['params'] = {**request.get('params', {}), **declared['params']}
+    if declared.get('headers'):
+        request['headers'] = {**request.get('headers', {}), **declared['headers']}
     if 'data' in declared:
         request['data'] = declared['data']
     return request

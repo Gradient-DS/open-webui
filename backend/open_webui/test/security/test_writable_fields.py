@@ -55,6 +55,7 @@ def test_conversation_read_has_no_client_selected_user_or_timestamp(surface):
     assert 'requestBody' not in operations[route]
     assert not fields.get(route) and not queries.get(route)
     assert [(p['in'], p['name']) for p in operations[route]['parameters']] == [('path', 'thread_id')]
+    assert operations[route]['security'] == [{'HTTPBearer': []}]
 
 
 def test_derived_counts(surface):

@@ -1702,6 +1702,8 @@ async def test_read_refusal_does_not_persist_and_read_endpoint_is_v2_only(dark_a
     dark_api.state['allowed'] = False
     response = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')
     assert response.status_code == 404 and response.json() == {'state': 'unavailable'}
+    missing = await dark_api.browser.post('/api/v1/threads/fictional-missing/read')
+    assert (response.status_code, response.json()) == (missing.status_code, missing.json())
     assert not dark_api.records.reads
     monkeypatch.setattr(threads, 'enabled', lambda: False)
     response = await dark_api.browser.post('/api/v1/threads/fictional-thread/read')

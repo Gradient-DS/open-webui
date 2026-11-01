@@ -668,7 +668,9 @@ def resolve_fields(ctx, *, entries=None):
             ctx.request(
                 method, _fill_field(path, ctx, path=True), actor=ctx.admin, json=_fill_field(step.get('body', {}), ctx)
             )
-        resolved = {kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form') if kind in entry}
+        resolved = {
+            kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form', 'headers') if kind in entry
+        }
         if 'body_base64' in entry:
             resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:

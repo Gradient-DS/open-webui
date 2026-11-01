@@ -1090,7 +1090,9 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         route = entry['route']
         assert route in operations, route
         assert entry['description'].strip(), route
-        assert entry.keys() & {'json', 'params', 'files', 'form'}, route
+        assert entry.keys() & {'json', 'params', 'files', 'form', 'headers'}, route
+        for name, value in entry.get('headers', {}).items():
+            assert name == 'Content-Type' and value == 'application/json', route
         for name in entry.get('json', {}):
             # A string leaf, or a field the body skeleton builds or nests under (a required bool, a config).
             skeleton = skeletons.get(route, {})
@@ -1113,6 +1115,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
             *_strings(entry.get('setup', [])),
         ]
         values += [*_strings(entry.get('form', {})), *_strings(entry.get('files', []))]
+        values += [*_strings(entry.get('headers', {}))]
         referenced = {key for value in values for key in re.findall(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', value)} - {'token'}
         assert referenced <= seeded, f'{route}: {sorted(referenced - seeded)}'
 
@@ -1144,11 +1147,12 @@ def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alo
     assert fields['form'] == {'idx': 'p1'}
 
 
-def test_conversation_versions_reuses_the_owner_thread_fixture(monkeypatch):
+@pytest.mark.parametrize('suffix,method', [('versions', 'GET'), ('read', 'POST')])
+def test_conversation_routes_reuse_the_owner_thread_fixture(monkeypatch, suffix, method):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
-    path = '/api/v1/threads/{thread_id}/versions'
+    path = '/api/v1/threads/{thread_id}/' + suffix
     parameter = seeds.parameter_for(path, 'thread_id')
-    assert parameter['key'] == 'platform_thread_versions'
+    assert parameter['key'] == 'platform_thread_' + suffix
     assert parameter['same_as'] == 'meeting'
     assert parameter['backed_by'] == 'soev-solutions'
-    assert f'GET {path}' in seeds.ordinary_targets()
+    assert f'{method} {path}' in seeds.ordinary_targets()

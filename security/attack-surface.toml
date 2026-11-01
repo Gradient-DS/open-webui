@@ -1279,3 +1279,17 @@ name = "thread_id"
 prefix = "/api/v1/threads/{thread_id}/versions"
 description = "Owner-only conversation versions read; readers receive the same 404 as a missing thread. Requires ENABLE_V2_THREADS and uses the admin-owned meeting thread."
 same_as = "meeting"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread_read"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}/read"
+description = "Marks the authenticated caller's conversation watermark using server time after authorizing the current projection. Shared readers update only their own state; an unrelated caller receives the same 404 as a missing chat. Requires ENABLE_V2_THREADS and reuses the admin-owned meeting thread. No request body or writable fields."
+same_as = "meeting"
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/threads/{thread_id}/read"
+description = "require_header_mutation requires a JSON content type even for this bodyless write. AttackClient supplies each caller's own bearer; no client-selected user or timestamp is sent."
+headers = { "Content-Type" = "application/json" }
