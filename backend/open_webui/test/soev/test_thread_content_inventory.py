@@ -152,7 +152,7 @@ def test_v2_has_no_unguarded_local_content_writer():
 
 
 def test_organization_repository_has_only_organizational_columns():
-    from open_webui.soev.thread_organizations import branches, chat, legacy_shares
+    from open_webui.soev.thread_organizations import branches, chat, legacy_shares, reads
 
     assert set(chat.c.keys()) == {
         'id',
@@ -167,6 +167,7 @@ def test_organization_repository_has_only_organizational_columns():
     }
     assert set(branches.c.keys()) == {'chat_id', 'thread_id'}
     assert set(legacy_shares.c.keys()) == {'id', 'chat_id', 'user_id'}
+    assert set(reads.c.keys()) == {'user_id', 'conversation_id', 'last_read_at'}
 
 
 def test_no_unreviewed_raw_sql_content_access():

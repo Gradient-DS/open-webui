@@ -693,11 +693,17 @@ export const getChatListByTagName = async (token: string = '', tagName: string) 
 	}));
 };
 
-export const getChatById = async (token: string, id: string, before = '') => {
+export const getChatById = async (
+	token: string,
+	id: string,
+	before = '',
+	threadId = '',
+	current = false
+) => {
 	let error = null;
 
 	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before })}` : ''}`,
+		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(current ? { current: 'true' } : {}) })}` : ''}`,
 		{
 			method: 'GET',
 			headers: {
@@ -834,6 +840,19 @@ export const toggleChatPinnedStatusById = async (token: string, id: string) => {
 	}
 
 	return res;
+};
+
+export const markChatReadById = async (token: string, id: string) => {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/threads/${encodeURIComponent(id)}/read`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	});
+	if (!response.ok) throw getErrorDetail(await response.json());
+	return response.json() as Promise<{ chat_id: string; last_read_at: number }>;
 };
 
 export const markChatUnreadById = async (token: string, id: string) => {

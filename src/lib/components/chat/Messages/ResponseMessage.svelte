@@ -222,7 +222,7 @@
 	export let readOnly = false;
 	export let allowRegenerate = true;
 	// Keep the v2 entry point hidden until the in-chat regeneration design is settled.
-	const V2_REGENERATE_BUTTON_ENABLED = false;
+	const V2_REGENERATE_BUTTON_ENABLED = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	// [Gradient] Answers are read-only: an agent's thread keeps what it answered, so an edit here would diverge
@@ -1030,6 +1030,7 @@
 	};
 
 	const deleteMessageHandler = async () => {
+		if ($config?.features?.enable_v2_threads) return;
 		deleteMessage(message.id);
 	};
 
@@ -2158,7 +2159,7 @@
 									{/if}
 
 									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete_message ?? true)}
-										{#if siblings.length > 1}
+										{#if !$config?.features?.enable_v2_threads && siblings.length > 1}
 											<Tooltip content={$i18n.t('Delete')} placement="bottom">
 												<button
 													type="button"

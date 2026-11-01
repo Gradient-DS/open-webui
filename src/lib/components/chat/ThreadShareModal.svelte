@@ -45,7 +45,7 @@
 
 	onMount(async () => {
 		try {
-			const page: ProjectionPage = await getChatById(localStorage.token, chatId);
+			const page: ProjectionPage = await getChatById(localStorage.token, chatId, '', chatId);
 			threadId = page.thread_id;
 			at = Math.max(0, ...page.messages.filter((m) => m.finished).map((m) => m.position));
 			shares = (await api.list(chatId)).items;

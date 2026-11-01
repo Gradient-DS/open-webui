@@ -96,6 +96,7 @@ const setup = (storage = new MemoryStorage(), context = 'fictional-door') => {
 		authorize: vi.fn(async (body) => grant(body)),
 		projection: vi.fn(async () => ({ page: page(), etag: '"fictional-etag"', notModified: false })),
 		forks: vi.fn(async () => ({ items: [], next_cursor: null })),
+		versions: vi.fn(async () => ({ items: [] })),
 		fork: vi.fn(),
 		index: vi.fn()
 	};

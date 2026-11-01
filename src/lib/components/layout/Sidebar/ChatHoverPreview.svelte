@@ -50,7 +50,7 @@
 	};
 
 	const loadChatPreview = async (id: string) => {
-		if (!id || loading || requestedChatId === id) return;
+		if (!id || requestedChatId === id) return;
 
 		const token = ++loadToken;
 		requestedChatId = id;
@@ -60,7 +60,7 @@
 		history = null;
 		selectedModels = [''];
 
-		const chat = await getChatById(localStorage.token, id).catch(() => null);
+		const chat = await getChatById(localStorage.token, id, '', '', true).catch(() => null);
 		if (token !== loadToken) return;
 
 		if ($config?.features?.enable_v2_threads && chat) {
@@ -83,6 +83,19 @@
 		loading = false;
 	};
 
+	const resetChatPreview = () => {
+		loadToken += 1;
+		requestedChatId = '';
+		loading = false;
+		previewReady = false;
+		history = null;
+		error = '';
+	};
+
+	$: if (!openPreview) {
+		resetChatPreview();
+	}
+
 	$: if (openPreview && chatId && requestedChatId !== chatId) {
 		loadChatPreview(chatId);
 	}
@@ -91,12 +104,10 @@
 		scrollPreviewToBottom();
 	}
 
-	onDestroy(() => {
-		loadToken += 1;
-	});
+	onDestroy(resetChatPreview);
 </script>
 
-{#if openPreview}
+{#if openPreview && (loading || error || (previewReady && history?.currentId))}
 	<LinkPreview.Portal>
 		<LinkPreview.Content
 			class="z-[9999] hidden max-h-[min(17.5rem,calc(100vh-1.5rem))] w-[20rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl bg-white shadow-[0_16px_40px_-28px_rgba(0,0,0,0.55)] ring-1 ring-black/5 transition md:block dark:bg-gray-850 dark:text-white dark:ring-white/10"
@@ -128,7 +139,7 @@
 					>
 						{error}
 					</div>
-				{:else if previewReady}
+				{:else if previewReady && history?.currentId}
 					<Messages
 						className="flex w-full pt-2 pb-0 [&_.message-listitem]:!mb-1 [&_.message-listitem]:!max-w-none [&_.message-listitem]:!px-3 [&_.pb-18]:!pb-1.5 [&_.markdown-prose]:!text-xs [&_.markdown-prose]:!leading-snug [&_.whitespace-pre-wrap]:!text-xs [&_.whitespace-pre-wrap]:!leading-snug [&_.text-\[0\.9375rem\]]:!text-xs [&_.text-sm]:!text-xs [&_.tool-call-body_pre]:!text-[0.6875rem] [&_.rounded-3xl]:!rounded-2xl [&_.chat-user_.rounded-3xl]:!bg-gray-50 dark:[&_.chat-user_.rounded-3xl]:!bg-gray-800 [&_.px-4]:!px-3 [&_.py-3]:!py-2 [&_.py-1\.5]:!py-1 [&_button]:!pointer-events-none"
 						chatId={`chat-hover-preview-${chatId}`}

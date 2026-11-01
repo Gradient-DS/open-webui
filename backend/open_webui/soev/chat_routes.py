@@ -115,6 +115,8 @@ async def chat_read(service, request, user, identifier, route):
             identifier,
             window=integer(request, 'limit', 20),
             before=request.query_params.get('before', ''),
+            thread_id=request.query_params.get('thread_id', ''),
+            current=boolean(request, 'current', not bool(request.query_params.get('thread_id'))),
             etag=request.headers.get('If-None-Match'),
         )
         headers = {'ETag': result.etag} if result.etag else {}
@@ -165,7 +167,7 @@ async def chat_write(service, request, user, identifier, route):
         positions = [message.position for message in projection.page.messages if message.finished]
         if not positions:
             refused()
-        return (await service.fork(user.id, identifier, max(positions), clone=True)).model_dump()
+        return (await service.fork(user.id, projection.page.thread_id, max(positions), clone=True)).model_dump()
     if route in {'/{id}/pin', '/{id}/archive', '/{id}/unread', '/{id}/folder'}:
         return await organize(service, request, user, identifier, route)
     if route in {'/read', '/archive/all', '/unarchive/all'}:

@@ -1292,6 +1292,7 @@ async def get_chat_by_id(
     request: Request,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
+    current: bool = False,
 ):
     chat = await Chats.get_chat_by_id_for_user(
         id,

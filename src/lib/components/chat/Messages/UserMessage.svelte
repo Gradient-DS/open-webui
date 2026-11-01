@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { tick, getContext, onMount } from 'svelte';
 
-	import { models, settings } from '$lib/stores';
+	import { config, models, settings } from '$lib/stores';
 	import { user as _user } from '$lib/stores';
 	import {
 		copyToClipboard as _copyToClipboard,
@@ -226,6 +226,7 @@
 										</div>
 										<div class=" absolute -top-1 -right-1">
 											<button
+												hidden={$config?.features?.enable_v2_threads}
 												aria-label={$i18n.t('Remove file')}
 												class=" bg-white text-black border border-white rounded-full {($settings?.highContrastMode ??
 												false)
@@ -258,7 +259,7 @@
 										type={file.type}
 										size={file?.size}
 										loading={file.status === 'uploading'}
-										dismissible={true}
+										dismissible={!$config?.features?.enable_v2_threads}
 										edit={true}
 										on:dismiss={async () => {
 											editedFiles.splice(fileIdx, 1);
@@ -309,6 +310,7 @@
 					<div class=" mt-2 -mx-1 flex justify-between text-sm font-normal">
 						<div>
 							<button
+								hidden={$config?.features?.enable_v2_threads}
 								id="save-edit-message-button"
 								class="px-2.5 py-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl"
 								on:click={() => {

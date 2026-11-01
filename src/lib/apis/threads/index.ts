@@ -17,12 +17,26 @@ export type ProjectionPage = {
 	next_cursor: string | null;
 };
 
+export type VersionKind = 'regenerate' | 'edit';
+
+export type ThreadVersion = {
+	version_kind: VersionKind | null;
+	thread_id: string;
+	parent_thread: string | null;
+	parent_position: number | null;
+	created_at: string;
+	updated_at: string;
+};
+
 export type IndexItem = {
+	conversation_id?: string | null;
+	version_count?: number | null;
 	thread_id: string;
 	owned: boolean;
 	title: string | null;
 	tags: string[];
 	updated_at: string;
+	answered_at?: string | null;
 	parent_thread: string | null;
 	parent_position: number | null;
 };
@@ -36,7 +50,10 @@ export type Organization = {
 	last_read_at: number | null;
 };
 
-export type SidebarItem = IndexItem & { organization: Organization | null };
+export type SidebarItem = IndexItem & {
+	organization: Organization | null;
+	last_read_at?: number | null;
+};
 export type Page<T> = { items: T[]; next_cursor: string | null };
 export type ThreadState =
 	| 'reconnect'
@@ -80,9 +97,20 @@ export type CacheAuthorization = {
 
 export interface ThreadAPI {
 	authorize(body: AuthorizeThreads): Promise<CacheAuthorization>;
-	projection(threadId: string, before?: string, etag?: string): Promise<ProjectionResult>;
+	projection(
+		threadId: string,
+		before?: string,
+		etag?: string,
+		current?: boolean
+	): Promise<ProjectionResult>;
 	forks(threadId: string, cursor?: string): Promise<Page<IndexItem>>;
-	fork(threadId: string, at: number): Promise<{ thread_id: string }>;
+	versions(threadId: string): Promise<{ items: ThreadVersion[] }>;
+	fork(
+		threadId: string,
+		at: number,
+		version?: boolean,
+		kind?: VersionKind
+	): Promise<{ thread_id: string }>;
 	index(q?: string, cursor?: string): Promise<Page<SidebarItem>>;
 }
 
@@ -121,8 +149,12 @@ export const threadAPI = (token: string, limit = 20): ThreadAPI => {
 		async authorize(body) {
 			return (await request(':authorize', { method: 'POST', body: JSON.stringify(body) })).json();
 		},
-		async projection(threadId, before = '', etag) {
-			const query = new URLSearchParams({ limit: String(limit), before });
+		async projection(threadId, before = '', etag, current = false) {
+			const query = new URLSearchParams({
+				limit: String(limit),
+				before,
+				...(current ? { current: 'true' } : {})
+			});
 			const response = await request(`/${encodeURIComponent(threadId)}?${query}`, {
 				headers: etag ? { 'If-None-Match': etag } : {}
 			});
@@ -137,11 +169,14 @@ export const threadAPI = (token: string, limit = 20): ThreadAPI => {
 			const query = new URLSearchParams({ cursor });
 			return (await request(`/${encodeURIComponent(threadId)}/forks?${query}`)).json();
 		},
-		async fork(threadId, at) {
+		async versions(threadId) {
+			return (await request(`/${encodeURIComponent(threadId)}/versions`)).json();
+		},
+		async fork(threadId, at, version = false, kind) {
 			return (
 				await request(`/${encodeURIComponent(threadId)}/fork`, {
 					method: 'POST',
-					body: JSON.stringify({ at })
+					body: JSON.stringify({ at, version, ...(kind ? { kind } : {}) })
 				})
 			).json();
 		},

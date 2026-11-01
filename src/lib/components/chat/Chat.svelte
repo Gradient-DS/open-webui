@@ -88,7 +88,7 @@
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isLLM } from '$lib/utils/assistants';
-	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
+	import { refreshChatList, refreshFolderChatLists, markConversationRead } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -128,14 +128,10 @@
 	import { generateThreadCompletion } from '$lib/apis/threadCompletion';
 	import { updateThreadReasoning, retainReasoningTiming } from '$lib/utils/threadReasoning';
 	import { threadAPI } from '$lib/apis/threads';
-	import {
-		queueThreadRegeneration,
-		takeThreadRegeneration,
-		threadRegenerationInput
-	} from '$lib/utils/threadRegeneration';
+	import { threadEditInput, threadRegenerationInput } from '$lib/utils/threadRegeneration';
 	import { canRegenerateResponse } from '$lib/utils/features';
 	import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
-	import type { ProjectionPage } from '$lib/apis/threads';
+	import type { ProjectionPage, ThreadVersion, VersionKind } from '$lib/apis/threads';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
 		getAndUpdateUserLocation,
@@ -553,6 +549,9 @@
 
 	let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
 	let threadPage: ProjectionPage | null = null;
+	let threadVersions: ThreadVersion[] = [];
+	let threadVersionLoad = 0;
+	let switchingThread = false;
 	let regeneratingThread = false;
 	let tags = [];
 
@@ -670,7 +669,7 @@
 
 				const res = await resolveChatMessageToolCall(
 					localStorage.token,
-					$chatId,
+					threadPage?.thread_id ?? $chatId,
 					message.id,
 					callId,
 					'approve'
@@ -745,7 +744,7 @@
 
 		const res = await resolveChatMessageToolCall(
 			localStorage.token,
-			$chatId,
+			threadPage?.thread_id ?? $chatId,
 			messageId,
 			callId,
 			'answer',
@@ -767,7 +766,7 @@
 
 		const res = await resolveChatMessageToolCall(
 			localStorage.token,
-			$chatId,
+			threadPage?.thread_id ?? $chatId,
 			messageId,
 			callId,
 			'reject'
@@ -1001,7 +1000,7 @@
 		prefetchLiveGrants();
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
-		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
 			noteChatDebug('marking outgoing chat read', { outgoingChatId: $chatId });
 			updateLastReadAt($chatId);
 		}
@@ -1053,9 +1052,6 @@
 				await setDefaults();
 			}
 
-			const regeneration = takeThreadRegeneration(chatIdProp);
-			if (regeneration) await replayThreadInput(regeneration);
-
 			messageInput?.focus({ preventScroll: true });
 		} else if (!embedded) {
 			await goto('/');
@@ -1074,7 +1070,7 @@
 		clearTimeout(saveControlsTimer);
 		await saveControls();
 
-		if ($chatId && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && !$temporaryChatEnabled) {
 			updateLastReadAt($chatId);
 		}
 
@@ -1082,6 +1078,8 @@
 		loadedChatIdProp = '';
 		chat = null;
 		threadPage = null;
+		threadVersions = [];
+		threadVersionLoad++;
 		tags = [];
 		taskIds = null;
 		chatTasks = [];
@@ -1405,6 +1403,10 @@
 	};
 
 	const updateLastReadAt = (id) => {
+		if ($config?.features?.enable_v2_threads) {
+			void markConversationRead(localStorage.token, id).catch(console.error);
+			return;
+		}
 		$socket?.emit('events:chat', {
 			chat_id: id,
 			data: { type: 'last_read_at' }
@@ -1998,7 +2000,7 @@
 			try {
 				clearTimeout(saveControlsTimer);
 				saveControls();
-				if (chatIdProp && !$temporaryChatEnabled) {
+				if (!$config?.features?.enable_v2_threads && chatIdProp && !$temporaryChatEnabled) {
 					updateLastReadAt(chatIdProp);
 				}
 				pageSubscribe();
@@ -2409,12 +2411,14 @@
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
 		threadPage = null;
+		threadVersions = [];
+		threadVersionLoad++;
 		acceptedDataWarnings = new Set();
 		resetWebSearchConfirmation();
 
 		// Mark the outgoing chat as read before resetting; in-place created chats
 		// keep chatIdProp undefined, so navigateHandler never marks them read.
-		if ($chatId && !$temporaryChatEnabled) {
+		if (!$config?.features?.enable_v2_threads && $chatId && !$temporaryChatEnabled) {
 			updateLastReadAt($chatId);
 		}
 
@@ -2667,10 +2671,30 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	const loadThreadProjection = async (id: string, before = ''): Promise<ProjectionPage> =>
-		extendProjectionToTurn(await getChatById(localStorage.token, id, before), (cursor) =>
-			getChatById(localStorage.token, id, cursor)
+	const loadThreadProjection = async (
+		id: string,
+		before = '',
+		version = '',
+		current = false
+	): Promise<ProjectionPage> => {
+		const page = await getChatById(localStorage.token, id, before, version, current);
+		return extendProjectionToTurn(page, (cursor) =>
+			getChatById(localStorage.token, id, cursor, page.thread_id)
 		);
+	};
+
+	const loadThreadVersions = async (conversation: string, page: ProjectionPage) => {
+		const load = ++threadVersionLoad;
+		try {
+			const { items } = await threadAPI(localStorage.token).versions(page.thread_id);
+			if (load !== threadVersionLoad || $chatId !== conversation || !threadPage) return;
+			threadVersions = items;
+			if (!generationController && !generating && !regeneratingThread)
+				await replaceThreadProjection(threadPage);
+		} catch (error) {
+			if (load === threadVersionLoad && $chatId === conversation) toast.error(`${error}`);
+		}
+	};
 
 	const captureThreadAnchor = (projected: ReturnType<typeof buildThreadHistory>) => {
 		const container = messagesContainerElement;
@@ -2693,7 +2717,7 @@
 	};
 
 	const replaceThreadProjection = async (page: ProjectionPage) => {
-		const projected = buildThreadHistory(page, []);
+		const projected = buildThreadHistory(page, threadVersions);
 		const previous = createMessagesList(history, history.currentId);
 		const next = createMessagesList(projected, projected.currentId);
 		for (let index = 1; index <= Math.min(previous.length, next.length); index++) {
@@ -2717,7 +2741,8 @@
 		for (let frame = 0; frame < 3; frame++) {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 			await tick();
-			if ($chatId !== page.thread_id || generationController || history !== projected) return;
+			if (threadPage?.thread_id !== page.thread_id || generationController || history !== projected)
+				return;
 			if (!container || container !== messagesContainerElement) return;
 			// Leave a reader's scroll alone if they move during the settling frames.
 			if (restoredTop !== null && Math.abs(container.scrollTop - restoredTop) >= 2) return;
@@ -2747,11 +2772,12 @@
 				return;
 			}
 			try {
-				let page = await loadThreadProjection(id);
-				if ($chatId !== id || generationController) return;
+				const viewed = threadPage?.thread_id;
+				let page = await loadThreadProjection(id, '', viewed ?? '', !viewed);
+				if ($chatId !== id || generationController || threadPage?.thread_id !== viewed) return;
 				// Keep older turns the reader has already loaded in this generation.
 				if (
-					threadPage?.thread_id === id &&
+					threadPage?.thread_id === page.thread_id &&
 					threadPage.generation === page.generation &&
 					(threadPage.messages[0]?.position ?? Infinity) < (page.messages[0]?.position ?? Infinity)
 				) {
@@ -2764,6 +2790,7 @@
 				tags = page.tags.map((name) => ({ name }));
 				const last = history.currentId ? history.messages[history.currentId] : null;
 				if (!last || last.role !== 'assistant' || !last.done) refreshThreadProjection(id);
+				else if (!last.error && !$temporaryChatEnabled) updateLastReadAt(id);
 			} catch (error) {
 				toast.error($i18n.t(`${error}`));
 			}
@@ -2773,6 +2800,7 @@
 	const loadChat = async () => {
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
+		if ($config?.features?.enable_v2_threads) threadVersionLoad++;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
@@ -2786,7 +2814,7 @@
 
 		const loadedChat = await (
 			$config?.features?.enable_v2_threads
-				? loadThreadProjection(targetId)
+				? loadThreadProjection(targetId, '', '', true)
 				: getChatById(localStorage.token, targetId)
 		).catch(() => null);
 		if (isStaleLoad()) return 'aborted';
@@ -2795,10 +2823,14 @@
 			return 'not_found';
 		}
 		if ($config?.features?.enable_v2_threads) {
+			const owned = loadedChat.preferences !== null;
+			threadVersions = [];
+			if (isStaleLoad()) return 'aborted';
 			threadPage = loadedChat;
-			const projected = buildThreadHistory(threadPage!, []);
+			const projected = buildThreadHistory(threadPage!, threadVersions);
 			history = projected;
-			chat = { id: targetId, title: threadPage!.title };
+			chat = { id: targetId, title: threadPage!.title, readonly: !owned };
+			if (owned) void loadThreadVersions(targetId, threadPage!);
 			const preferences = threadPage!.preferences as { features?: Record<string, unknown> } | null;
 			savedThreadFeatures = preferences?.features
 				? { id: targetId, features: preferences.features }
@@ -2983,7 +3015,7 @@
 		if (!current?.next_cursor || loadingOlderThread) return;
 		loadingOlderThread = true;
 		try {
-			const older = await loadThreadProjection(id, current.next_cursor);
+			const older = await loadThreadProjection(id, current.next_cursor, current.thread_id);
 			if ($chatId !== id || threadPage !== current) return;
 			threadPage = mergeProjection(current, older);
 			await replaceThreadProjection(threadPage!);
@@ -3431,7 +3463,7 @@
 		history = history;
 	};
 
-	const chatCompletionEventHandler = async (data, message, chatId) => {
+	const chatCompletionEventHandler = async (data, message, conversationId: string) => {
 		followStreamingResponse(message.id);
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
 		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
@@ -3502,6 +3534,9 @@
 
 		if (done) {
 			message.done = true;
+			if ($config?.features?.enable_v2_threads && $chatId === conversationId && !$temporaryChatEnabled && !message.error) {
+				updateLastReadAt(conversationId);
+			}
 			const visibleContent =
 				getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
 
@@ -3540,14 +3575,14 @@
 			// (outlet filters, chat save, title gen, follow-ups, tags)
 			// without blocking the user from sending new messages.
 			chatCompletedHandler(
-				chatId,
+				conversationId,
 				message.model,
 				message.id,
 				createMessagesList(history, message.id)
 			);
 
 			// Process next queued request if any
-			await processNextInQueue(chatId);
+			await processNextInQueue(conversationId);
 		}
 
 		await tick();
@@ -3756,7 +3791,11 @@
 					target = Math.max(0, ...page.messages.filter((m) => m.finished).map((m) => m.position));
 				}
 			}
-			const result = await forkChatById(localStorage.token, $chatId, target);
+			const result = await forkChatById(
+				localStorage.token,
+				$config?.features?.enable_v2_threads ? (threadPage?.thread_id ?? $chatId) : $chatId,
+				target
+			);
 
 			if (result?.id) {
 				if (!embedded) {
@@ -4502,7 +4541,7 @@
 				...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}), // [Gradient]
 
 				session_id: $socket?.id,
-				chat_id: _chatId || undefined,
+				chat_id: (v2 ? threadPage?.thread_id : null) || _chatId || undefined,
 				folder_id: $selectedFolder?.id ?? undefined,
 
 				id: responseMessageId,
@@ -4580,7 +4619,7 @@
 				// Only update if the user hasn't navigated to a different chat
 				// while the request was in flight (prevents overwriting $chatId
 				// and causing spurious toast notifications / state duplication).
-				if (res.chat_id && $chatId !== res.chat_id && $chatId === _chatId) {
+				if (!v2 && res.chat_id && $chatId !== res.chat_id && $chatId === _chatId) {
 					chatRequestQueues.update((q) => {
 						if (!q[_chatId]?.length) return q;
 
@@ -4671,7 +4710,10 @@
 
 		if (hasTaskIds || hasPendingAssistantResponse) {
 			if ($chatId) {
-				await stopTasksByChatId(localStorage.token, $chatId).catch((error) => {
+				await stopTasksByChatId(
+					localStorage.token,
+					$config?.features?.enable_v2_threads ? (threadPage?.thread_id ?? $chatId) : $chatId
+				).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
@@ -4762,11 +4804,93 @@
 			files: input.files,
 			models: [input.model],
 			regenerate_from: input.regenerate_from,
+			edit_from: input.edit_from,
 			timestamp: Math.floor(Date.now() / 1000)
 		};
 		if (parentId) history.messages[parentId].childrenIds.push(id);
 		history.currentId = id;
 		await sendMessage(history, id, { modelId: input.model });
+	};
+
+	const switchThreadVersion = async (id: string) => {
+		if (
+			readOnly ||
+			generating ||
+			generationController ||
+			regeneratingThread ||
+			switchingThread ||
+			taskIds?.length
+		)
+			return;
+		if (!threadVersions.some((version) => version.thread_id === id) || threadPage?.thread_id === id)
+			return;
+		const conversation = $chatId;
+		switchingThread = true;
+		clearTimeout(threadRefreshTimer);
+		try {
+			const page = await loadThreadProjection(conversation, '', id);
+			if ($chatId !== conversation) return;
+			threadPage = page;
+			history = buildThreadHistory(page, threadVersions);
+		} catch (error) {
+			toast.error(`${error}`);
+		} finally {
+			switchingThread = false;
+		}
+	};
+
+	const createThreadVersion = async (
+		page: ProjectionPage,
+		at: number,
+		input: import('$lib/utils/threadRegeneration').ThreadRegeneration,
+		kind: VersionKind
+	) => {
+		const conversation = $chatId;
+		const api = threadAPI(localStorage.token);
+		const fork = await api.fork(page.thread_id, at, true, kind);
+		if ($chatId !== conversation) return;
+		// The fork copied this prefix verbatim; no projection read is needed before sending.
+		threadVersionLoad++;
+		threadVersions = (await api.versions(fork.thread_id)).items;
+		if ($chatId !== conversation) return;
+		threadPage = {
+			...page,
+			thread_id: fork.thread_id,
+			next_cursor: null,
+			messages: page.messages.filter((view) => view.position <= at)
+		};
+		history = buildThreadHistory(threadPage, threadVersions);
+		await replayThreadInput(input);
+		void refreshChatList(localStorage.token).catch(console.error);
+	};
+
+	const editThreadMessage = async (messageId: string, content: string) => {
+		if (
+			readOnly ||
+			generating ||
+			generationController ||
+			regeneratingThread ||
+			switchingThread ||
+			taskIds?.length
+		)
+			return;
+		const message = history.messages[messageId];
+		if (!threadPage || message?.role !== 'user' || !message.position) return;
+		regeneratingThread = true;
+		try {
+			const { at, input } = threadEditInput(
+				threadPage,
+				message.position,
+				content,
+				selectedModels[0],
+				composerFeatures(currentComposerPreferences())
+			);
+			await createThreadVersion(threadPage, at, input, 'edit');
+		} catch (error) {
+			toast.error(`${error}`);
+		} finally {
+			regeneratingThread = false;
+		}
 	};
 
 	const regenerateResponse = async (message, suggestionPrompt = null) => {
@@ -4784,7 +4908,7 @@
 			regeneratingThread = true;
 			const sourceId = $chatId;
 			try {
-				const page = await loadThreadProjection(sourceId);
+				const page = await loadThreadProjection(sourceId, '', threadPage?.thread_id);
 				if ($chatId !== sourceId) return;
 				const last = page.messages.at(-1);
 				if (message.position && message.position !== last?.position)
@@ -4794,16 +4918,7 @@
 					message.model,
 					composerFeatures(currentComposerPreferences())
 				);
-				const fork = await threadAPI(localStorage.token).fork(page.thread_id, at);
-				if ($chatId !== sourceId) return;
-				queueThreadRegeneration(fork.thread_id, input);
-				try {
-					await goto(`/c/${fork.thread_id}`);
-				} catch (error) {
-					takeThreadRegeneration(fork.thread_id);
-					throw error;
-				}
-				void refreshChatList(localStorage.token).catch(console.error);
+				await createThreadVersion(page, at, input, 'regenerate');
 			} catch (error) {
 				toast.error(`${error}`);
 			} finally {
@@ -5358,6 +5473,7 @@
 						</div>
 					{:else}
 						<Navbar
+							shareThreadId={threadPage?.thread_id ?? ''}
 							bind:this={navbarElement}
 							{readOnly}
 							chat={{
@@ -5461,7 +5577,11 @@
 											{submitMessage}
 											{continueResponse}
 											{regenerateResponse}
+											{switchThreadVersion}
+											{editThreadMessage}
 											allowRegenerate={!(
+												readOnly ||
+												switchingThread ||
 												generating ||
 												generationController ||
 												regeneratingThread ||

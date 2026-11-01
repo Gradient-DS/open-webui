@@ -17930,16 +17930,66 @@
       },
       "open_webui__soev__thread_routes__ForkForm": {
         "additionalProperties": false,
+        "else": {
+          "not": {
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "version": {
+              "const": true
+            }
+          },
+          "required": [
+            "version"
+          ]
+        },
         "properties": {
           "at": {
             "exclusiveMinimum": 0.0,
             "title": "At",
             "type": "integer"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "regenerate",
+                  "edit"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "version": {
+            "default": false,
+            "title": "Version",
+            "type": "boolean"
           }
         },
         "required": [
           "at"
         ],
+        "then": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "regenerate",
+                "edit"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
         "title": "ForkForm",
         "type": "object"
       }
@@ -23599,6 +23649,16 @@
             "schema": {
               "title": "Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
             }
           }
         ],
@@ -38596,6 +38656,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "if-none-match",
             "required": false,
@@ -38771,6 +38841,90 @@
           }
         ],
         "summary": "Forks"
+      }
+    },
+    "/api/v1/threads/{thread_id}/read": {
+      "post": {
+        "operationId": "mark_read_api_v1_threads__thread_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Read"
+      }
+    },
+    "/api/v1/threads/{thread_id}/versions": {
+      "get": {
+        "operationId": "versions_api_v1_threads__thread_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Versions"
       }
     },
     "/api/v1/threads:authorize": {

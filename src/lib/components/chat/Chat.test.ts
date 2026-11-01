@@ -6,7 +6,7 @@ import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$li
 import type { ProjectionPage } from '$lib/apis/threads';
 import { retainReasoningTiming, updateThreadReasoning } from '$lib/utils/threadReasoning';
 import { canRegenerateResponse } from '$lib/utils/features';
-import { threadRegenerationInput } from '$lib/utils/threadRegeneration';
+import { threadEditInput, threadRegenerationInput } from '$lib/utils/threadRegeneration';
 
 // Exercise the component's callbacks without mounting its editor/media dependencies.
 const component = readFileSync('src/lib/components/chat/Chat.svelte', 'utf8');
@@ -17,10 +17,18 @@ const script = ts.createSourceFile(
 	ts.ScriptTarget.Latest
 );
 function callback(name: string, state: Record<string, any>) {
+	state.threadVersionLoad ??= 0;
+	state.loadThreadVersions ??= vi.fn().mockResolvedValue(undefined);
+	state.threadVersions ??= [];
+	state.threadPage ??= { thread_id: 'thread' };
+	state.threadAPI ??= () => ({ versions: vi.fn().mockResolvedValue({ items: [] }) });
+	state.switchingThread ??= false;
 	state.$config ??= { features: {} };
 	state.updateThreadReasoning ??= updateThreadReasoning;
 	state.retainReasoningTiming ??= retainReasoningTiming;
 	state.createMessagesList ??= (history: any) => Object.values(history.messages);
+	state.updateLastReadAt ??= vi.fn();
+	state.$temporaryChatEnabled ??= false;
 
 	let expression: ts.Node | undefined;
 	const visit = (node: ts.Node) => {
@@ -40,6 +48,66 @@ function callback(name: string, state: Record<string, any>) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+it.each([true, false])('persists reads over HTTP only for v2=%s', async (v2) => {
+	const state = {
+		$config: { features: { enable_v2_threads: v2 } },
+		localStorage: { token: 'token' },
+		markConversationRead: vi.fn().mockResolvedValue({ chat_id: 'conversation', last_read_at: 1 }),
+		$socket: { emit: vi.fn() }
+	};
+	callback('updateLastReadAt', state)('conversation');
+	if (v2) {
+		expect(state.markConversationRead).toHaveBeenCalledExactlyOnceWith('token', 'conversation');
+		expect(state.$socket.emit).not.toHaveBeenCalled();
+	} else {
+		expect(state.markConversationRead).not.toHaveBeenCalled();
+		expect(state.$socket.emit).toHaveBeenCalledWith('events:chat', {
+			chat_id: 'conversation',
+			data: { type: 'last_read_at' }
+		});
+	}
+});
+
+it.each([true, false])(
+	'marks a completed answer read only when its conversation is open=%s',
+	async (open) => {
+		const message = { id: 'answer', content: 'Answer', model: 'model', done: false };
+		const state = {
+			$config: { features: { enable_v2_threads: true } },
+			$chatId: open ? 'conversation' : 'other',
+			$temporaryChatEnabled: false,
+			$settings: {},
+			$showCallOverlay: false,
+			history: { currentId: 'answer', messages: { answer: message } },
+			followStreamingResponse: vi.fn(),
+			updateThreadReasoning: vi.fn(),
+			getOutputText: () => '',
+			removeAllDetails: (content: string) => content,
+			dispatchCallOverlayAudio: vi.fn(),
+			eventTarget: { dispatchEvent: vi.fn() },
+			CustomEvent: class {
+				constructor(
+					public name: string,
+					public options: unknown
+				) {}
+			},
+			turnAnswered: () => true,
+			taskIds: null,
+			tick: vi.fn(),
+			scheduleResponseScrollToBottom: vi.fn(),
+			chatCompletedHandler: vi.fn(),
+			processNextInQueue: vi.fn(),
+			updateLastReadAt: vi.fn()
+		};
+		const handler = callback('chatCompletionEventHandler', state);
+		await handler({ content: 'Answer' }, message, 'conversation');
+		expect(state.updateLastReadAt).not.toHaveBeenCalled();
+		await handler({ done: true }, message, 'conversation');
+		expect(state.updateLastReadAt).toHaveBeenCalledTimes(open ? 1 : 0);
+		if (open) expect(state.updateLastReadAt).toHaveBeenCalledWith('conversation');
+	}
+);
 
 it('applies v2 tag events and refreshes global tags without blocking or replacing the chat', async () => {
 	const chat = { id: 'thread' };
@@ -233,8 +301,8 @@ it('uses whole turns when loading older messages and hides the button at the fir
 	await callback('loadOlderThread', state)();
 	expect(state.toast.error).not.toHaveBeenCalled();
 	expect(state.getChatById.mock.calls).toEqual([
-		['token', 'thread', 'before-25'],
-		['token', 'thread', 'before-21']
+		['token', 'thread', 'before-25', 'thread', false],
+		['token', 'thread', 'before-21', 'thread']
 	]);
 	expect(state.threadPage.messages).toHaveLength(26);
 	expect(state.threadPage.messages[0].content.role).toBe('user');
@@ -247,41 +315,43 @@ it('uses whole turns when loading older messages and hides the button at the fir
 	).toBe(true);
 });
 
+const chatOpenState = (): Record<string, any> => ({
+	$chatId: 'thread',
+	chatIdProp: 'thread',
+	chatId: { set: vi.fn() },
+	$config: { features: { enable_v2_threads: true } },
+	$temporaryChatEnabled: false,
+	noteChatDebug: vi.fn(),
+	localStorage: { token: 'token' },
+	extendProjectionToTurn,
+	getChatById: vi
+		.fn()
+		.mockResolvedValueOnce(projection([21, 22], 'before-21'))
+		.mockResolvedValueOnce(
+			projection(
+				Array.from({ length: 20 }, (_, i) => i + 1),
+				null
+			)
+		),
+	threadPage: null,
+	buildThreadHistory,
+	history: {},
+	chat: null,
+	savedThreadFeatures: null,
+	restoreComposerPreferences: vi.fn(),
+	composerFromFeatures: vi.fn(),
+	composerPreferences: vi.fn(),
+	$settings: {},
+	lastSavedFeatures: '',
+	currentComposerPreferences: vi.fn(() => ({})),
+	tags: [],
+	chatTitle: { set: vi.fn() },
+	selectedModels: [],
+	normalizeSelectedModels: (m: any) => m
+});
+
 it('loads the initial v2 chat through whole-turn paging', async () => {
-	const state: Record<string, any> = {
-		$chatId: 'thread',
-		chatIdProp: 'thread',
-		chatId: { set: vi.fn() },
-		$config: { features: { enable_v2_threads: true } },
-		$temporaryChatEnabled: false,
-		noteChatDebug: vi.fn(),
-		localStorage: { token: 'token' },
-		extendProjectionToTurn,
-		getChatById: vi
-			.fn()
-			.mockResolvedValueOnce(projection([21, 22], 'before-21'))
-			.mockResolvedValueOnce(
-				projection(
-					Array.from({ length: 20 }, (_, i) => i + 1),
-					null
-				)
-			),
-		threadPage: null,
-		buildThreadHistory,
-		history: {},
-		chat: null,
-		savedThreadFeatures: null,
-		restoreComposerPreferences: vi.fn(),
-		composerFromFeatures: vi.fn(),
-		composerPreferences: vi.fn(),
-		$settings: {},
-		lastSavedFeatures: '',
-		currentComposerPreferences: vi.fn(() => ({})),
-		tags: [],
-		chatTitle: { set: vi.fn() },
-		selectedModels: [],
-		normalizeSelectedModels: (m: any) => m
-	};
+	const state = chatOpenState();
 	state.loadThreadProjection = callback('loadThreadProjection', state);
 	expect(await callback('loadChat', state)()).toBe('loaded');
 	expect(state.getChatById).toHaveBeenCalledTimes(2);
@@ -485,7 +555,7 @@ it.each([false, true])(
 );
 
 it.each([2, 21])(
-	'forks before input position %s and queues the same input for navigation',
+	'forks before input position %s and resends the same input in place',
 	async (position) => {
 		const files = [{ id: 'file', type: 'file', name: 'Evidence.pdf' }];
 		const features = { web_search: true, live_documents: 'required', document_writer: true };
@@ -511,30 +581,33 @@ it.each([2, 21])(
 			loadThreadProjection: vi.fn().mockResolvedValue(page),
 			currentComposerPreferences: () => features,
 			composerFeatures: (value: any) => value,
-			threadAPI: () => ({ fork }),
+			threadAPI: () => ({ fork, versions: vi.fn().mockResolvedValue({ items: [] }) }),
+			buildThreadHistory,
+			replayThreadInput: vi.fn(),
 			localStorage: { token: 'token' },
-			queueThreadRegeneration: vi.fn(),
-			takeThreadRegeneration: vi.fn(),
 			goto: vi.fn(),
 			refreshChatList: vi.fn().mockResolvedValue(null),
 			toast: { error: vi.fn() }
 		};
+		state.createThreadVersion = callback('createThreadVersion', state);
 		await callback(
 			'regenerateResponse',
 			state
 		)({ id: 'answer', done: true, model: 'original-model' });
 		expect(state.toast.error).not.toHaveBeenCalled();
-		expect(fork).toHaveBeenCalledExactlyOnceWith('thread', position - 1);
-		expect(state.queueThreadRegeneration).toHaveBeenCalledExactlyOnceWith('fork', {
+		expect(fork).toHaveBeenCalledExactlyOnceWith('thread', position - 1, true, 'regenerate');
+		expect(state.replayThreadInput).toHaveBeenCalledExactlyOnceWith({
 			content: 'Same question',
 			files,
 			model: 'original-model',
 			features,
 			regenerate_from: { thread_id: 'thread', position }
 		});
-		expect(state.goto).toHaveBeenCalledExactlyOnceWith('/c/fork');
+		expect(state.goto).not.toHaveBeenCalled();
+		expect(state.$chatId).toBe('chat-alias');
+		expect(state.threadPage.thread_id).toBe('fork');
 		expect(state.regeneratingThread).toBe(false);
-		const replay = state.queueThreadRegeneration.mock.calls[0][1];
+		const replay = state.replayThreadInput.mock.calls[0][0];
 		Object.assign(state, {
 			history: { currentId: null, messages: {} },
 			restoreComposerPreferences: vi.fn(),
@@ -617,54 +690,183 @@ it('routes reasoning chunks through the chat handler and replaces live content e
 	expect(answer.content).toContain('Answer');
 });
 
-it('waits for the fork to load before consuming and replaying its input', async () => {
-	let loaded!: () => void;
-	const loading = new Promise<void>((resolve) => {
-		loaded = resolve;
-	});
-	const input = {
-		content: 'Question',
-		model: 'model',
-		features: {},
-		regenerate_from: { thread_id: 'source', position: 2 }
-	};
+it('switches versions in place with one projection load and no version-list refresh', async () => {
+	const page = projection([1, 2], null);
+	page.thread_id = 'older';
 	const state: Record<string, any> = {
-		chatIdProp: 'fork',
-		$chatId: 'source',
-		$temporaryChatEnabled: false,
-		prefetchLiveGrants: vi.fn(),
-		noteChatDebug: vi.fn(),
-		updateLastReadAt: vi.fn(),
-		saveControlsTimer: undefined,
-		saveControls: vi.fn(),
-		chatSaveQueue: Promise.resolve(),
-		loading: false,
-		prompt: '',
-		messageInput: { setText: vi.fn(), focus: vi.fn() },
-		files: [],
-		composerInitialized: true,
-		acceptedDataWarnings: new Set(),
-		sessionStorage: { getItem: () => null },
-		loadChat: async () => {
-			await loading;
-			state.$chatId = 'fork';
-			return 'loaded';
-		},
-		tick: vi.fn(),
-		window: { setTimeout: vi.fn() },
-		scrollToBottom: vi.fn(),
-		history: { currentId: null, messages: {} },
-		processNextInQueue: vi.fn(),
-		restoreChatInput: vi.fn().mockResolvedValue(true),
-		takeThreadRegeneration: vi.fn().mockReturnValue(input),
-		replayThreadInput: vi.fn()
+		$chatId: 'root',
+		readOnly: false,
+		generating: false,
+		generationController: null,
+		regeneratingThread: false,
+		switchingThread: false,
+		taskIds: null,
+		threadPage: { ...page, thread_id: 'current' },
+		threadVersions: [{ thread_id: 'older' }, { thread_id: 'current' }],
+		loadThreadProjection: vi.fn().mockResolvedValue(page),
+		buildThreadHistory,
+		history: {},
+		threadRefreshTimer: undefined,
+		toast: { error: vi.fn() }
 	};
-	const navigation = callback('navigateHandler', state)();
-	await Promise.resolve();
-	expect(state.takeThreadRegeneration).not.toHaveBeenCalled();
-	loaded();
-	await navigation;
-	expect(state.takeThreadRegeneration).toHaveBeenCalledExactlyOnceWith('fork');
-	expect(state.replayThreadInput).toHaveBeenCalledExactlyOnceWith(input);
-	expect(state.loading).toBe(false);
+	await callback('switchThreadVersion', state)('older');
+	expect(state.loadThreadProjection).toHaveBeenCalledExactlyOnceWith('root', '', 'older');
+	expect(state.threadPage.thread_id).toBe('older');
+	expect(state.$chatId).toBe('root');
+	expect(state.switchingThread).toBe(false);
+});
+
+it.each(['readOnly', 'generating', 'regeneratingThread', 'switchingThread'])(
+	'refuses edit/switch while %s',
+	async (blocked) => {
+		const state: Record<string, any> = {
+			readOnly: false,
+			generating: false,
+			generationController: null,
+			regeneratingThread: false,
+			switchingThread: false,
+			taskIds: null,
+			loadThreadProjection: vi.fn(),
+			createThreadVersion: vi.fn(),
+			[blocked]: true
+		};
+		await callback('switchThreadVersion', state)('older');
+		await callback('editThreadMessage', state)('user', 'Edited');
+		expect(state.loadThreadProjection).not.toHaveBeenCalled();
+		expect(state.createThreadVersion).not.toHaveBeenCalled();
+	}
+);
+
+it('edits a user input by forking before it and replaying edited text with original settings', async () => {
+	const page = projection([2, 3, 4, 5], null);
+	page.messages[0].content = {
+		role: 'user',
+		text: 'Before',
+		files: [{ id: 'file' }],
+		features: { web_search: true }
+	};
+	page.messages[1].content = { role: 'assistant', text: 'Answer', model: 'original-model' };
+	const state: Record<string, any> = {
+		$chatId: 'root',
+		readOnly: false,
+		generating: false,
+		generationController: null,
+		regeneratingThread: false,
+		switchingThread: false,
+		taskIds: null,
+		threadPage: page,
+		history: { messages: { user: { role: 'user', position: 2 } } },
+		selectedModels: ['other-model'],
+		threadEditInput,
+		currentComposerPreferences: () => ({}),
+		composerFeatures: (value: any) => value,
+		threadAPI: () => ({
+			fork: vi.fn().mockResolvedValue({ thread_id: 'edited' }),
+			versions: vi.fn().mockResolvedValue({ items: [] })
+		}),
+		localStorage: { token: 'token' },
+		buildThreadHistory,
+		replayThreadInput: vi.fn(),
+		refreshChatList: vi.fn().mockResolvedValue(null),
+		toast: { error: vi.fn() }
+	};
+	const fork = vi.fn().mockResolvedValue({ thread_id: 'edited' });
+	state.threadAPI = () => ({ fork, versions: vi.fn().mockResolvedValue({ items: [] }) });
+	state.createThreadVersion = callback('createThreadVersion', state);
+	await callback('editThreadMessage', state)('user', 'After');
+	expect(state.toast.error).not.toHaveBeenCalled();
+	expect(fork).toHaveBeenCalledExactlyOnceWith('thread', 1, true, 'edit');
+	expect(state.replayThreadInput).toHaveBeenCalledExactlyOnceWith({
+		content: 'After',
+		files: [{ id: 'file' }],
+		model: 'original-model',
+		features: { web_search: true },
+		edit_from: { thread_id: 'thread', position: 2 }
+	});
+	expect(state.$chatId).toBe('root');
+	expect(state.threadPage.thread_id).toBe('edited');
+});
+
+it('opens with one current projection request and paints while the version list is pending', async () => {
+	const state = chatOpenState();
+	const page = { ...projection([1, 2], null), thread_id: 'latest' };
+	let resolveVersions!: (value: { items: unknown[] }) => void;
+	const versions = vi.fn(
+		() =>
+			new Promise<{ items: unknown[] }>((resolve) => {
+				resolveVersions = resolve;
+			})
+	);
+	Object.assign(state, {
+		getChatById: vi.fn().mockResolvedValue(page),
+		threadAPI: () => ({ versions }),
+		generationController: null,
+		generating: false,
+		regeneratingThread: false,
+		replaceThreadProjection: vi.fn(),
+		toast: { error: vi.fn() }
+	});
+	state.loadThreadProjection = callback('loadThreadProjection', state);
+	state.loadThreadVersions = callback('loadThreadVersions', state);
+	expect(await callback('loadChat', state)()).toBe('loaded');
+	expect(state.getChatById).toHaveBeenCalledExactlyOnceWith('token', 'thread', '', '', true);
+	expect(state.threadPage.thread_id).toBe('latest');
+	expect(Object.values(state.history.messages)).toHaveLength(2);
+	expect(versions).toHaveBeenCalledExactlyOnceWith('latest');
+	expect(state.replaceThreadProjection).not.toHaveBeenCalled();
+	const items = [
+		{ thread_id: 'latest', parent_thread: null, parent_position: null, version_kind: null }
+	];
+	resolveVersions({ items });
+	await vi.waitFor(() =>
+		expect(state.replaceThreadProjection).toHaveBeenCalledExactlyOnceWith(page)
+	);
+	expect(state.threadVersions).toEqual(items);
+});
+
+it('pins older transport pages to the resolved version instead of resolving current again', async () => {
+	const state = chatOpenState();
+	const latest = { ...projection([21, 22], 'older'), thread_id: 'latest' };
+	const older = { ...projection([1, 2], null), thread_id: 'latest' };
+	state.getChatById = vi.fn().mockResolvedValueOnce(latest).mockResolvedValueOnce(older);
+	await callback('loadThreadProjection', state)('thread', '', '', true);
+	expect(state.getChatById.mock.calls).toEqual([
+		['token', 'thread', '', '', true],
+		['token', 'thread', 'older', 'latest']
+	]);
+});
+
+it('does not fetch versions for reader projections', async () => {
+	const state = chatOpenState();
+	state.getChatById = vi.fn().mockResolvedValue({ ...projection([1, 2], null), preferences: null });
+	state.loadThreadProjection = callback('loadThreadProjection', state);
+	state.loadThreadVersions = vi.fn();
+	expect(await callback('loadChat', state)()).toBe('loaded');
+	expect(state.chat.readonly).toBe(true);
+	expect(state.loadThreadVersions).not.toHaveBeenCalled();
+});
+
+it('ignores a delayed version list after navigation', async () => {
+	let resolveVersions!: (value: { items: unknown[] }) => void;
+	const state: Record<string, any> = {
+		$chatId: 'thread',
+		threadVersionLoad: 0,
+		threadPage: projection([1, 2], null),
+		threadVersions: [],
+		localStorage: { token: 'token' },
+		threadAPI: () => ({
+			versions: () =>
+				new Promise((resolve) => {
+					resolveVersions = resolve;
+				})
+		}),
+		replaceThreadProjection: vi.fn(),
+		toast: { error: vi.fn() }
+	};
+	const pending = callback('loadThreadVersions', state)('thread', state.threadPage);
+	state.$chatId = 'another';
+	resolveVersions({ items: [{ thread_id: 'stale' }] });
+	await pending;
+	expect(state.threadVersions).toEqual([]);
+	expect(state.replaceThreadProjection).not.toHaveBeenCalled();
 });

@@ -5,17 +5,8 @@ export type ThreadRegeneration = {
 	files?: unknown;
 	model: string;
 	features: Record<string, unknown>;
-	regenerate_from: { thread_id: string; position: number };
-};
-
-// Navigation can remount Chat; consume the replay only after its fork has loaded.
-const pending = new Map<string, ThreadRegeneration>();
-export const queueThreadRegeneration = (id: string, input: ThreadRegeneration) =>
-	pending.set(id, input);
-export const takeThreadRegeneration = (id: string) => {
-	const input = pending.get(id);
-	pending.delete(id);
-	return input;
+	regenerate_from?: { thread_id: string; position: number };
+	edit_from?: { thread_id: string; position: number };
 };
 
 export const threadRegenerationInput = (
@@ -31,6 +22,7 @@ export const threadRegenerationInput = (
 		text?: string;
 		content?: string;
 		files?: unknown;
+		features?: Record<string, unknown>;
 	};
 	if (!user || user.position <= 1 || !views.at(-1)?.finished)
 		throw new Error('Reload this chat to continue');
@@ -40,8 +32,45 @@ export const threadRegenerationInput = (
 			content: fields.content ?? fields.text ?? '',
 			files: fields.files,
 			model: answerModel,
-			features: structuredClone(features),
+			features: structuredClone(fields.features ?? features),
 			regenerate_from: { thread_id: page.thread_id, position: user.position }
+		}
+	};
+};
+
+export const threadEditInput = (
+	page: ProjectionPage,
+	position: number,
+	content: string,
+	model: string,
+	features: Record<string, unknown>
+): { at: number; input: ThreadRegeneration } => {
+	const user = page.messages.find((view) => view.position === position);
+	const fields = user?.content as {
+		role?: string;
+		files?: unknown;
+		model?: string;
+		features?: Record<string, unknown>;
+	};
+	if (
+		!user ||
+		position <= 1 ||
+		fields.role !== 'user' ||
+		!content.trim() ||
+		page.messages.some((view) => !view.finished)
+	)
+		throw new Error('Reload this chat to continue');
+	const answer = page.messages.find(
+		(view) => view.position > position && (view.content as { role?: string })?.role === 'assistant'
+	);
+	return {
+		at: position - 1,
+		input: {
+			content,
+			files: fields.files,
+			model: fields.model ?? (answer?.content as { model?: string })?.model ?? model,
+			features: structuredClone(fields.features ?? features),
+			edit_from: { thread_id: page.thread_id, position }
 		}
 	};
 };

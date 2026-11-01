@@ -11,7 +11,9 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
-	import { chatId, mobile, selectedFolder, showSidebar, user } from '$lib/stores';
+	import { chatId, config, mobile, selectedFolder, showSidebar, user } from '$lib/stores';
+	import { answerTimestamp, isChatUnread } from '$lib/utils/chatReadState';
+	import { chatReadAt } from '$lib/stores/chatList';
 
 	import {
 		deleteFolderById,
@@ -85,12 +87,11 @@
 			compactDisplay: 'short'
 		}).format(count);
 
-	const isUnreadChat = (chat) =>
-		!(chat.active ?? false) &&
-		(chat.last_read_at == null ||
-			(typeof chat.updated_at === 'number' &&
-				typeof chat.last_read_at === 'number' &&
-				chat.updated_at > chat.last_read_at));
+	const isUnreadChat = (chat) => isChatUnread(
+		{ ...chat, last_read_at: Math.max(chat.last_read_at ?? 0, $chatReadAt[chat.id] ?? 0) || null },
+		Boolean($config?.features?.enable_v2_threads),
+		$chatId
+	);
 
 	const sortFolderChats = (items) =>
 		[...items].sort(
@@ -151,7 +152,7 @@
 			chats = sortFolderChats(
 				chats.map((chat) =>
 					!chat.user_id || chat.user_id === $user?.id
-						? { ...chat, last_read_at: chat.updated_at }
+						? { ...chat, last_read_at: $config?.features?.enable_v2_threads ? answerTimestamp(chat.answered_at) : chat.updated_at }
 						: chat
 				)
 			);
@@ -400,7 +401,7 @@
 					chats = sortFolderChats(
 						chats.map((chat) =>
 							!chat.user_id || chat.user_id === $user?.id
-								? { ...chat, last_read_at: chat.updated_at }
+								? { ...chat, last_read_at: $config?.features?.enable_v2_threads ? answerTimestamp(chat.answered_at) : chat.updated_at }
 								: chat
 						)
 					);
@@ -895,7 +896,7 @@
 		<div slot="content" class="w-full">
 			{#if (folders[folderId]?.childrenIds ?? []).length > 0 || chats !== null || hasMoreChats || chatsLoading}
 				<div
-					class="ml-3 pl-1 mt-[0.0625rem] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
+					class="ml-3 pl-1 mt-[0.0625rem] flex min-w-0 flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
 				>
 					{#if folders[folderId]?.childrenIds}
 						{@const children = folders[folderId]?.childrenIds
@@ -954,12 +955,12 @@
 							title={chat.title}
 							createdAt={chat.created_at}
 							updatedAt={chat.updated_at}
+							answeredAt={chat.answered_at ?? null}
 							lastReadAt={chat.last_read_at}
 							active={chat.active ?? false}
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
 							readonly={chat.readonly ?? chat.user_id !== $user?.id}
-							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {
 								dispatch('change', e.detail);

@@ -1200,11 +1200,14 @@ async def thread_organizations(user_id: str) -> list[soev_threads.Organization]:
     return await app.state.thread_organizations.list(user_id)
 
 
-async def create_thread_fork(user_id: str, thread_id: str, at: int) -> soev_threads.CreatedThread:
-    created = await soev_threads.build_client().fork(thread_id, at=at)
-    await app.state.thread_organizations.put(
-        user_id, soev_threads.Organization(id=created.thread_id, thread_id=created.thread_id)
-    )
+async def create_thread_fork(
+    user_id: str, thread_id: str, at: int, version: bool = False, kind: soev_threads.VersionKind | None = None
+) -> soev_threads.CreatedThread:
+    created = await soev_threads.build_client().fork(thread_id, at=at, version=version, kind=kind)
+    if not version:
+        await app.state.thread_organizations.put(
+            user_id, soev_threads.Organization(id=created.thread_id, thread_id=created.thread_id)
+        )
     return created
 
 
@@ -2207,17 +2210,16 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     else:
         if soev_threads.enabled():
             records = await request.app.state.thread_organizations.list(user.id)
-            if not any(record.id == chat_id for record in records):
-                raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
-            chat = None
-        else:
-            chat = await Chats.get_chat_by_id(chat_id)
-        if not soev_threads.enabled() and (chat is None or chat.user_id != user.id):
+            record = next((record for record in records if record.id == chat_id), None)
+            # Platform cancellation enforces ownership for a viewed version too.
+            try:
+                await soev_threads.build_client().cancel(record.thread_id if record else chat_id)
+            except soev_threads.ThreadError as error:
+                raise HTTPException(status_code=error.status, detail=error.state) from None
+            return {'status': True}
+        chat = await Chats.get_chat_by_id(chat_id)
+        if chat is None or chat.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if soev_threads.enabled():
-        record = next(record for record in records if record.id == chat_id)
-        await soev_threads.build_client().cancel(record.thread_id)
-        return {'status': True}
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 
     if not soev_threads.enabled() and not socket_id and str(result.get('message', '')).startswith('No tasks found'):

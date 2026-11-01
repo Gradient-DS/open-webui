@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from open_webui.soev import acting
 from open_webui.soev.client import _shared_client
 
+VersionKind = Literal['regenerate', 'edit']
+
 ThreadState = Literal['reconnect', 'unavailable', 'sign_in', 'invalid_request', 'share_refused', 'legacy_share']
 
 
@@ -54,11 +56,14 @@ class ThreadMetadataResponse(WireModel):
 
 
 class IndexItem(WireModel):
+    conversation_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    version_count: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
     thread_id: str
     owned: bool
     title: str | None
     tags: list[str] = Field(default_factory=list)
     updated_at: str
+    answered_at: str | None = None
     parent_thread: str | None
     parent_position: int | None
     shared: bool
@@ -69,13 +74,17 @@ class IndexPage(WireModel):
     next_cursor: str | None
 
 
-class OwnerIndexItem(IndexItem):
-    shared: bool
+class ThreadVersion(WireModel):
+    version_kind: VersionKind | None
+    thread_id: str
+    parent_thread: str | None
+    parent_position: int | None
+    created_at: str
+    updated_at: str
 
 
-class OwnerIndexPage(WireModel):
-    items: list[OwnerIndexItem] = Field(alias='data')
-    next_cursor: str | None
+class ThreadVersions(WireModel):
+    items: list[ThreadVersion]
 
 
 class CreatedThread(WireModel):
@@ -168,16 +177,23 @@ class Organization(WireModel):
     folder_id: str | None = None
     pinned: bool = False
     archived: bool = False
-    last_read_at: int | None = None
+    last_read_at: float | None = None
     branch_thread_ids: list[str] = Field(default_factory=list, exclude=True)
 
 
-def join_index(page: IndexPage, records: list[Organization]) -> dict:
+def join_index(page: IndexPage, records: list[Organization], reads: dict[str, float] | None = None) -> dict:
     by_thread = {record.thread_id: record for record in records}
     items = []
     for item in page.items:
-        record = by_thread.get(item.thread_id)
-        items.append({**item.model_dump(), 'organization': record.model_dump() if record else None})
+        record = by_thread.get(item.conversation_id if item.owned and item.conversation_id else item.thread_id)
+        key = item.conversation_id if item.owned and item.conversation_id else item.thread_id
+        items.append(
+            {
+                **item.model_dump(),
+                'organization': record.model_dump() if record else None,
+                'last_read_at': (reads or {}).get(key, record.last_read_at if record else None),
+            }
+        )
     return {'items': items, 'next_cursor': page.next_cursor}
 
 
@@ -285,17 +301,18 @@ class ThreadClient:
         window: int = 20,
         before: str = '',
         etag: str | None = None,
+        current: bool = False,
     ) -> ProjectionResult:
         response = await self._request(
             'GET',
             f'/v1/threads/{_identifier(thread_id)}',
-            params={'limit': _page_size(window), 'before': before},
+            params={'limit': _page_size(window), 'before': before, **({'current': 'true'} if current else {})},
             etag=etag,
         )
         if response.status_code == 304:
             return ProjectionResult(None, response.headers.get('ETag', etag), True)
         page = self._parse(response, ProjectionPage)
-        if page.thread_id != thread_id:
+        if not current and page.thread_id != thread_id:
             raise ThreadError(502, 'reconnect')
         return ProjectionResult(page, response.headers.get('ETag'))
 
@@ -344,16 +361,6 @@ class ThreadClient:
             IndexPage,
         )
 
-    async def owner_index(self, *, limit: int = 200, cursor: str = '') -> OwnerIndexPage:
-        return self._parse(
-            await self._request(
-                'GET',
-                '/v1/chat/threads',
-                params={'limit': _page_size(limit), 'cursor': cursor},
-            ),
-            OwnerIndexPage,
-        )
-
     async def authorize(self, form: AuthorizeThreads) -> CacheAuthorization:
         return self._parse(
             await self._request('POST', '/v1/threads:authorize', body=form.model_dump()),
@@ -379,14 +386,19 @@ class ThreadClient:
             IndexPage,
         )
 
-    async def fork(self, thread_id: str, *, at: int) -> CreatedThread:
-        if at <= 0:
+    async def versions(self, thread_id: str) -> ThreadVersions:
+        return self._parse(await self._request('GET', f'/v1/threads/{_identifier(thread_id)}/versions'), ThreadVersions)
+
+    async def fork(
+        self, thread_id: str, *, at: int, version: bool = False, kind: VersionKind | None = None
+    ) -> CreatedThread:
+        if at <= 0 or (version and kind not in {'regenerate', 'edit'}) or (not version and kind is not None):
             raise ThreadError(422, 'invalid_request')
         return self._parse(
             await self._request(
                 'POST',
                 f'/v1/threads/{_identifier(thread_id)}/fork',
-                body={'at': at},
+                body={'at': at, 'version': version, **({'kind': kind} if kind is not None else {})},
             ),
             CreatedThread,
         )

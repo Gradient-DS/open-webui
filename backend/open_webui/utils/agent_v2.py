@@ -1545,11 +1545,9 @@ class AgentTurn:
                 raise threads.ThreadError(503, 'reconnect')
             records = await self.organizations.list(self.metadata['user_id'])
             record = next((r for r in records if r.id == self.metadata.get('chat_id')), None)
-            if record is None:
-                if not self.metadata.get('new_thread'):
-                    raise threads.ThreadError(404, 'unavailable')
+            if record is None and self.metadata.get('new_thread'):
                 return
-            self.thread_id = record.thread_id
+            self.thread_id = record.thread_id if record else threads._identifier(self.metadata.get('chat_id', ''))
             if self.metadata.get('follow_thread'):
                 self.position = 0
                 return
@@ -2188,11 +2186,16 @@ async def _opened(chunks: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]]
     return early
 
 
-async def _regenerated_input(turn: AgentTurn, source: dict, model: str | None) -> dict:
+async def _regenerated_input(
+    turn: AgentTurn, source: dict, model: str | None, *, edited_text: str | None = None
+) -> dict:
     user = await Users.get_user_by_id(turn.metadata['user_id'])
-    if user is None or not (
-        user.role == 'admin'
-        or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
+    if user is None or (
+        edited_text is None
+        and not (
+            user.role == 'admin'
+            or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
+        )
     ):
         raise threads.ThreadError(403, 'unavailable')
     if (
@@ -2219,6 +2222,10 @@ async def _regenerated_input(turn: AgentTurn, source: dict, model: str | None) -
     # Read the prepared input under the acting user's authority; never accept attachment references
     # or tool settings supplied as a purported saved input by the browser.
     value = dict(event['payload']['payload'])
+    if edited_text is not None:
+        if not edited_text.strip():
+            raise threads.ThreadError(422, 'invalid_request')
+        value['text'] = edited_text
     tools = dict(value.get('tools') or {})
     if not await _web_search_allowed(user.id):
         tools.update(web_search='off', fetch='off')
@@ -2241,6 +2248,11 @@ async def _sent(
         if not isinstance(source, dict):
             raise threads.ThreadError(422, 'invalid_request')
         return turn.run(await _regenerated_input(turn, source, model), agent)
+    edited = (metadata.get('user_message') or {}).get('edit_from')
+    if threads.enabled() and edited is not None:
+        if not isinstance(edited, dict):
+            raise threads.ThreadError(422, 'invalid_request')
+        return turn.run(await _regenerated_input(turn, edited, model, edited_text=text), agent)
     entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
     if len(entries) > TEXTS:
         message = (

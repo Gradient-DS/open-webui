@@ -47,6 +47,7 @@ def index_item(identifier='fictional-thread', parent=None, at=None, *, owned=Tru
         'owned': owned,
         'title': 'Fictional title',
         'updated_at': '2026-10-25T10:00:00Z',
+        'answered_at': '2026-10-25T10:00:00Z',
         'parent_thread': parent,
         'parent_position': at,
         'shared': False,
@@ -212,7 +213,7 @@ async def test_index_search_forks_and_fork_creation(thread_http):
     assert (await client.fork('fictional-thread', at=4)).thread_id == 'fictional-child'
     assert dict(requests[0].url.params) == {'q': 'Fictional', 'cursor': 'opaque-index', 'limit': '1'}
     assert dict(requests[1].url.params) == {'at': '4', 'cursor': 'opaque-forks', 'limit': '1'}
-    assert json.loads(requests[2].content) == {'at': 4}
+    assert json.loads(requests[2].content) == {'at': 4, 'version': False}
 
 
 @pytest.mark.asyncio
@@ -230,16 +231,13 @@ async def test_index_requires_boolean_ownership(thread_http, owned):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'method,key,path', [('index', 'items', '/v1/threads'), ('owner_index', 'data', '/v1/chat/threads')]
-)
-async def test_indexes_read_shared_flags_with_requester_token(thread_http, method, key, path):
+async def test_indexes_read_shared_flags_with_requester_token(thread_http):
     requests, responses, client = thread_http
     responses.append(
         httpx.Response(
             200,
             json={
-                key: [
+                'items': [
                     {**index_item(), 'shared': True},
                     index_item('fictional-private'),
                     {**index_item('fictional-reader', owned=False), 'shared': False},
@@ -248,16 +246,16 @@ async def test_indexes_read_shared_flags_with_requester_token(thread_http, metho
             },
         )
     )
-    found = await getattr(client, method)(limit=3, cursor='opaque-index')
+    found = await client.index(limit=3, cursor='opaque-index')
     assert [item.shared for item in found.items] == [True, False, False]
     assert found.next_cursor == 'opaque-next'
     assert len(requests) == 1
     request = requests[0]
-    assert request.method == 'GET' and request.url.path == path
+    assert request.method == 'GET' and request.url.path == '/v1/threads'
     assert dict(request.url.params) == {
         'limit': '3',
         'cursor': 'opaque-index',
-        **({'q': ''} if method == 'index' else {}),
+        'q': '',
     }
     assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
@@ -266,21 +264,18 @@ async def test_indexes_read_shared_flags_with_requester_token(thread_http, metho
 @pytest.mark.asyncio
 @pytest.mark.parametrize('shared', ['missing', None, 'true', 1])
 @pytest.mark.parametrize('owned', [True, False])
-@pytest.mark.parametrize(
-    'method,key,path', [('index', 'items', '/v1/threads'), ('owner_index', 'data', '/v1/chat/threads')]
-)
-async def test_indexes_require_boolean_shared_without_fallback(thread_http, shared, owned, method, key, path):
+async def test_indexes_require_boolean_shared_without_fallback(thread_http, shared, owned):
     requests, responses, client = thread_http
     item = index_item(owned=owned)
     if shared == 'missing':
         del item['shared']
     else:
         item['shared'] = shared
-    responses.append(httpx.Response(200, json={key: [item], 'next_cursor': None}))
+    responses.append(httpx.Response(200, json={'items': [item], 'next_cursor': None}))
     with pytest.raises(ThreadError, match='reconnect') as error:
-        await getattr(client, method)()
+        await client.index()
     assert error.value.status == 502
-    assert [request.url.path for request in requests] == [path]
+    assert [request.url.path for request in requests] == ['/v1/threads']
 
 
 @pytest.mark.asyncio
@@ -736,3 +731,121 @@ async def test_metadata_refuses_old_status_and_invalid_response_without_repeatin
         await client.update_metadata('fictional-thread', lambda page: {'title': 'Fictional Cedar'})
     assert error.value.status == 502
     assert [request.method for request in requests] == ['GET', 'PATCH', 'GET']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['regenerate', 'edit'])
+async def test_versions_proxy_and_version_fork_are_private_owner_authorized(thread_http, monkeypatch, kind):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from open_webui.soev.client import _shared_client
+    from open_webui.soev.thread_routes import create_thread_router
+    from open_webui.utils.auth import get_verified_user
+
+    requests, responses, client = thread_http
+    app = FastAPI()
+    app.include_router(create_thread_router(AsyncMock(return_value=[])), prefix='/api/v1/threads')
+    app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='owner')
+    monkeypatch.setattr(threads, 'build_client', lambda: client)
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    versions = {
+        'items': [
+            {
+                'thread_id': 'root',
+                'parent_thread': None,
+                'parent_position': None,
+                'version_kind': None,
+                'created_at': '2026-11-01T00:00:00Z',
+                'updated_at': '2026-11-01T00:00:00Z',
+            }
+        ]
+    }
+    versions['items'].append(
+        {
+            **versions['items'][0],
+            'thread_id': 'child',
+            'parent_thread': 'root',
+            'parent_position': 1,
+            'version_kind': kind,
+        }
+    )
+    async with type(_shared_client())(
+        transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid'
+    ) as browser:
+        responses.append(httpx.Response(200, json=versions))
+        result = await browser.get('/api/v1/threads/root/versions')
+        assert result.json() == versions
+        assert result.headers['cache-control'] == 'private, no-store'
+        assert requests[-1].url.path == '/v1/threads/root/versions'
+        responses.append(httpx.Response(200, json={**page(1), 'thread_id': 'latest'}))
+        current = await browser.get('/api/v1/threads/root?current=true')
+        assert current.json()['thread_id'] == 'latest'
+        assert requests[-1].url.params['current'] == 'true'
+        responses.append(httpx.Response(200, json={'thread_id': 'version'}))
+        result = await browser.post('/api/v1/threads/root/fork', json={'at': 1, 'version': True, 'kind': kind})
+        assert result.json() == {'thread_id': 'version'}
+        assert json.loads(requests[-1].content) == {'at': 1, 'version': True, 'kind': kind}
+        for invalid in ('true', 1, None):
+            result = await browser.post('/api/v1/threads/root/fork', json={'at': 1, 'version': invalid})
+            assert result.status_code == 422
+        for identifier in ('shared', 'missing'):
+            responses.append(httpx.Response(404))
+            result = await browser.get(f'/api/v1/threads/{identifier}/versions')
+            assert result.status_code == 404 and result.json() == {'state': 'unavailable'}
+        monkeypatch.setattr(threads, 'enabled', lambda: False)
+        count = len(requests)
+        assert (await browser.get('/api/v1/threads/root/versions')).status_code == 404
+        assert len(requests) == count
+
+
+@pytest.mark.asyncio
+async def test_current_projection_resolves_in_one_request_and_exact_reads_still_check_identity(thread_http):
+    requests, responses, client = thread_http
+    current = {**page(1, 2), 'thread_id': 'current-version'}
+    responses.append(httpx.Response(200, json=current))
+    result = await client.projection('root', current=True)
+    assert result.page.thread_id == 'current-version'
+    assert len(requests) == 1
+    assert requests[0].url.path == '/v1/threads/root'
+    assert dict(requests[0].url.params) == {'limit': '20', 'before': '', 'current': 'true'}
+    responses.append(httpx.Response(200, json=current))
+    with pytest.raises(ThreadError):
+        await client.projection('root')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['regenerate', 'edit'])
+async def test_version_fork_forwards_kind(thread_http, kind):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(200, json={'thread_id': 'child'}))
+    assert (await client.fork('source', at=1, version=True, kind=kind)).thread_id == 'child'
+    assert json.loads(requests[0].content) == {'at': 1, 'version': True, 'kind': kind}
+
+
+@pytest.mark.parametrize(
+    'body',
+    [
+        {'at': 1, 'version': True},
+        {'at': 1, 'version': True, 'kind': None},
+        {'at': 1, 'version': True, 'kind': 'unknown'},
+        {'at': 1, 'version': False, 'kind': 'edit'},
+        {'at': 1, 'kind': None},
+    ],
+)
+def test_version_fork_validates_reason(body):
+    from open_webui.soev.thread_routes import ForkForm
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ForkForm.model_validate(body)
+
+
+@pytest.mark.asyncio
+async def test_current_lookup_preserves_reader_projection(thread_http):
+    requests, responses, client = thread_http
+    shared = {**page(1, 2), 'preferences': None}
+    responses.append(httpx.Response(200, json=shared))
+    result = await client.projection('fictional-thread', current=True)
+    assert result.page.model_dump(include=set(shared)) == shared
+    assert len(requests) == 1 and requests[0].url.params['current'] == 'true'
