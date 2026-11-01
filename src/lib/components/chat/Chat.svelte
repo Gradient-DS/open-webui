@@ -126,6 +126,14 @@
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/chat';
 	import { generateThreadCompletion } from '$lib/apis/threadCompletion';
+	import { updateThreadReasoning, retainReasoningTiming } from '$lib/utils/threadReasoning';
+	import { threadAPI } from '$lib/apis/threads';
+	import {
+		queueThreadRegeneration,
+		takeThreadRegeneration,
+		threadRegenerationInput
+	} from '$lib/utils/threadRegeneration';
+	import { canRegenerateResponse } from '$lib/utils/features';
 	import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
 	import type { ProjectionPage } from '$lib/apis/threads';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
@@ -545,6 +553,7 @@
 
 	let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
 	let threadPage: ProjectionPage | null = null;
+	let regeneratingThread = false;
 	let tags = [];
 
 	// Read-only when viewing someone else's chat (e.g. via shared folder access)
@@ -1043,6 +1052,9 @@
 			if (!(await restoreChatInput(storageChatInput))) {
 				await setDefaults();
 			}
+
+			const regeneration = takeThreadRegeneration(chatIdProp);
+			if (regeneration) await replayThreadInput(regeneration);
 
 			messageInput?.focus({ preventScroll: true });
 		} else if (!embedded) {
@@ -2682,6 +2694,18 @@
 
 	const replaceThreadProjection = async (page: ProjectionPage) => {
 		const projected = buildThreadHistory(page, []);
+		const previous = createMessagesList(history, history.currentId);
+		const next = createMessagesList(projected, projected.currentId);
+		for (let index = 1; index <= Math.min(previous.length, next.length); index++) {
+			const old = previous.at(-index);
+			const message = next.at(-index);
+			if (
+				old.role === 'assistant' &&
+				message.role === 'assistant' &&
+				typeof message.content === 'string'
+			)
+				message.content = retainReasoningTiming(message.content, old.content ?? '');
+		}
 		if (equal(history, projected)) return;
 		const container = messagesContainerElement;
 		const wasAutoScroll = autoScroll;
@@ -3412,6 +3436,7 @@
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
 		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
 		const answeredModel = data.answered_model;
+		if ($config?.features?.enable_v2_threads) updateThreadReasoning(message, data);
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -4534,6 +4559,7 @@
 			return null;
 		});
 
+		if (v2) updateThreadReasoning(responseMessage, { done: true });
 		if (generationController === controller) {
 			generationController = null;
 			generating = false;
@@ -4720,7 +4746,71 @@
 		await sendMessage(history, userMessageId);
 	};
 
+	const replayThreadInput = async (
+		input: import('$lib/utils/threadRegeneration').ThreadRegeneration
+	) => {
+		restoreComposerPreferences(composerFromFeatures(input.features));
+		selectedModels = [input.model];
+		const id = uuidv4();
+		const parentId = history.currentId;
+		history.messages[id] = {
+			id,
+			parentId,
+			childrenIds: [],
+			role: 'user',
+			content: input.content,
+			files: input.files,
+			models: [input.model],
+			regenerate_from: input.regenerate_from,
+			timestamp: Math.floor(Date.now() / 1000)
+		};
+		if (parentId) history.messages[parentId].childrenIds.push(id);
+		history.currentId = id;
+		await sendMessage(history, id, { modelId: input.model });
+	};
+
 	const regenerateResponse = async (message, suggestionPrompt = null) => {
+		if ($config?.features?.enable_v2_threads) {
+			if (
+				!canRegenerateResponse(
+					$config,
+					$user,
+					message.id === history.currentId,
+					message.done,
+					!(readOnly || generating || generationController || regeneratingThread || taskIds?.length)
+				)
+			)
+				return;
+			regeneratingThread = true;
+			const sourceId = $chatId;
+			try {
+				const page = await loadThreadProjection(sourceId);
+				if ($chatId !== sourceId) return;
+				const last = page.messages.at(-1);
+				if (message.position && message.position !== last?.position)
+					throw new Error($i18n.t('Reload this chat to continue'));
+				const { at, input } = threadRegenerationInput(
+					page,
+					message.model,
+					composerFeatures(currentComposerPreferences())
+				);
+				const fork = await threadAPI(localStorage.token).fork(page.thread_id, at);
+				if ($chatId !== sourceId) return;
+				queueThreadRegeneration(fork.thread_id, input);
+				try {
+					await goto(`/c/${fork.thread_id}`);
+				} catch (error) {
+					takeThreadRegeneration(fork.thread_id);
+					throw error;
+				}
+				void refreshChatList(localStorage.token).catch(console.error);
+			} catch (error) {
+				toast.error(`${error}`);
+			} finally {
+				regeneratingThread = false;
+			}
+			return;
+		}
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 
@@ -5371,6 +5461,12 @@
 											{submitMessage}
 											{continueResponse}
 											{regenerateResponse}
+											allowRegenerate={!(
+												generating ||
+												generationController ||
+												regeneratingThread ||
+												taskIds?.length
+											)}
 											{mergeResponses}
 											{chatActionHandler}
 											{addMessages}

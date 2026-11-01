@@ -112,13 +112,16 @@ async def test_not_modified_page_needs_no_presentation_read(dark_api, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_plain_assistant_page_needs_no_events_read(dark_api, monkeypatch):
+async def test_plain_turn_with_user_without_model_needs_no_events_read(dark_api, monkeypatch):
     from open_webui.soev import identity
     from open_webui.soev.threads import ProjectionPage
     from open_webui.test.soev.test_threads import page
 
     projected = ProjectionPage.model_validate(page(5))
     projected.messages[0].content = {'role': 'assistant', 'text': 'Hello', 'model': MODEL}
+    projected.messages.insert(
+        0, threads.MessageView(position=4, content={'role': 'user', 'text': 'Question'}, finished=True, version=None)
+    )
     monkeypatch.setattr(
         dark_api.client, 'projection', AsyncMock(return_value=threads.ProjectionResult(projected, 'etag'))
     )
@@ -126,7 +129,8 @@ async def test_plain_assistant_page_needs_no_events_read(dark_api, monkeypatch):
     monkeypatch.setattr(identity, 'build_client', lambda: runtime)
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
     assert response.status_code == 200
-    assert response.json()['messages'][0]['content']['model'] == MODEL
+    assert response.json()['messages'][0]['content'] == {'role': 'user', 'text': 'Question'}
+    assert response.json()['messages'][1]['content']['model'] == MODEL
     runtime.chat_events.assert_not_awaited()
 
 

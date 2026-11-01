@@ -1,3 +1,4 @@
+import { reasoningBlock } from './threadReasoning';
 import {
 	ThreadError,
 	type IndexItem,
@@ -59,14 +60,7 @@ const toolDescriptions: Record<string, string> = {
 const assistantContent = (fields: Record<string, unknown>) => {
 	const parts: string[] = [];
 	if (typeof fields.reasoning === 'string' && fields.reasoning.trim()) {
-		const reasoning = fields.reasoning
-			.trim()
-			.split('\n')
-			.map((line) => (line.startsWith('>') ? line : `> ${line}`))
-			.join('\n');
-		parts.push(
-			`<details type="reasoning" done="true" duration="0">\n<summary>Thought for 0 seconds</summary>\n${escapeHtml(reasoning)}\n</details>`
-		);
+		parts.push(reasoningBlock(fields.reasoning, true, 0));
 	}
 	const text = Array.from(fields.content as string);
 	let at = 0;

@@ -43,7 +43,11 @@
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
-	import { canContinueResponse, isFeatureEnabled } from '$lib/utils/features';
+	import {
+		canContinueResponse,
+		canRegenerateResponse,
+		isFeatureEnabled
+	} from '$lib/utils/features';
 	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
@@ -216,6 +220,9 @@
 
 	export let isLastMessage = true;
 	export let readOnly = false;
+	export let allowRegenerate = true;
+	// Keep the v2 entry point hidden until the in-chat regeneration design is settled.
+	const V2_REGENERATE_BUTTON_ENABLED = false;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	// [Gradient] Answers are read-only: an agent's thread keeps what it answered, so an edit here would diverge
@@ -1976,8 +1983,8 @@
 										</Tooltip>
 									{/if}
 
-									{#if !$config?.features?.enable_v2_threads && ($user?.role === 'admin' || ($user?.permissions?.chat?.regenerate_response ?? true))}
-										{#if $settings?.regenerateMenu ?? true}
+									{#if (!$config?.features?.enable_v2_threads || V2_REGENERATE_BUTTON_ENABLED) && canRegenerateResponse($config, $user, isLastMessage, message.done, allowRegenerate)}
+										{#if !$config?.features?.enable_v2_threads && ($settings?.regenerateMenu ?? true)}
 											<button
 												type="button"
 												class="hidden regenerate-response-button"

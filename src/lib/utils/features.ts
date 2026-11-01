@@ -239,3 +239,15 @@ export function canContinueResponse(
 	if ($config?.features?.feature_agent_api_enabled) return false;
 	return $user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true);
 }
+
+export function canRegenerateResponse(
+	$config: { features?: { enable_v2_threads?: boolean } } | undefined,
+	$user: { role?: string; permissions?: { chat?: { regenerate_response?: boolean } } } | undefined,
+	isLastMessage: boolean,
+	done: boolean,
+	idle = true
+): boolean {
+	if (!($user?.role === 'admin' || ($user?.permissions?.chat?.regenerate_response ?? true)))
+		return false;
+	return !$config?.features?.enable_v2_threads || (isLastMessage && done && idle);
+}

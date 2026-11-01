@@ -4,6 +4,9 @@ import equal from 'fast-deep-equal';
 import { afterEach, expect, it, vi } from 'vitest';
 import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
 import type { ProjectionPage } from '$lib/apis/threads';
+import { retainReasoningTiming, updateThreadReasoning } from '$lib/utils/threadReasoning';
+import { canRegenerateResponse } from '$lib/utils/features';
+import { threadRegenerationInput } from '$lib/utils/threadRegeneration';
 
 // Exercise the component's callbacks without mounting its editor/media dependencies.
 const component = readFileSync('src/lib/components/chat/Chat.svelte', 'utf8');
@@ -14,6 +17,11 @@ const script = ts.createSourceFile(
 	ts.ScriptTarget.Latest
 );
 function callback(name: string, state: Record<string, any>) {
+	state.$config ??= { features: {} };
+	state.updateThreadReasoning ??= updateThreadReasoning;
+	state.retainReasoningTiming ??= retainReasoningTiming;
+	state.createMessagesList ??= (history: any) => Object.values(history.messages);
+
 	let expression: ts.Node | undefined;
 	const visit = (node: ts.Node) => {
 		if (
@@ -475,3 +483,188 @@ it.each([false, true])(
 		expect(container.scrollTop).toBe(move ? 400 : 1500);
 	}
 );
+
+it.each([2, 21])(
+	'forks before input position %s and queues the same input for navigation',
+	async (position) => {
+		const files = [{ id: 'file', type: 'file', name: 'Evidence.pdf' }];
+		const features = { web_search: true, live_documents: 'required', document_writer: true };
+		const page = projection([position, position + 1], null);
+		page.messages[0].content = {
+			role: 'user',
+			text: 'Same question',
+			files
+		};
+		const fork = vi.fn().mockResolvedValue({ thread_id: 'fork' });
+		const state: Record<string, any> = {
+			$config: { features: { enable_v2_threads: true } },
+			$user: { role: 'user', permissions: { chat: { regenerate_response: true } } },
+			$chatId: 'chat-alias',
+			history: { currentId: 'answer' },
+			readOnly: false,
+			generating: false,
+			generationController: null,
+			regeneratingThread: false,
+			taskIds: null,
+			canRegenerateResponse,
+			threadRegenerationInput,
+			loadThreadProjection: vi.fn().mockResolvedValue(page),
+			currentComposerPreferences: () => features,
+			composerFeatures: (value: any) => value,
+			threadAPI: () => ({ fork }),
+			localStorage: { token: 'token' },
+			queueThreadRegeneration: vi.fn(),
+			takeThreadRegeneration: vi.fn(),
+			goto: vi.fn(),
+			refreshChatList: vi.fn().mockResolvedValue(null),
+			toast: { error: vi.fn() }
+		};
+		await callback(
+			'regenerateResponse',
+			state
+		)({ id: 'answer', done: true, model: 'original-model' });
+		expect(state.toast.error).not.toHaveBeenCalled();
+		expect(fork).toHaveBeenCalledExactlyOnceWith('thread', position - 1);
+		expect(state.queueThreadRegeneration).toHaveBeenCalledExactlyOnceWith('fork', {
+			content: 'Same question',
+			files,
+			model: 'original-model',
+			features,
+			regenerate_from: { thread_id: 'thread', position }
+		});
+		expect(state.goto).toHaveBeenCalledExactlyOnceWith('/c/fork');
+		expect(state.regeneratingThread).toBe(false);
+		const replay = state.queueThreadRegeneration.mock.calls[0][1];
+		Object.assign(state, {
+			history: { currentId: null, messages: {} },
+			restoreComposerPreferences: vi.fn(),
+			composerFromFeatures: (value: any) => value,
+			selectedModels: [],
+			uuidv4: () => 'new-input',
+			sendMessage: vi.fn()
+		});
+		await callback('replayThreadInput', state)(replay);
+		expect(state.restoreComposerPreferences).toHaveBeenCalledExactlyOnceWith(features);
+		expect(state.selectedModels).toEqual(['original-model']);
+		expect(state.history.messages['new-input']).toMatchObject({
+			content: 'Same question',
+			files,
+			models: ['original-model'],
+			regenerate_from: replay.regenerate_from
+		});
+		expect(state.sendMessage).toHaveBeenCalledExactlyOnceWith(state.history, 'new-input', {
+			modelId: 'original-model'
+		});
+	}
+);
+
+it.each([
+	{ generating: true },
+	{ generationController: {} },
+	{ regeneratingThread: true },
+	{ taskIds: ['task'] },
+	{ readOnly: true },
+	{ $user: { permissions: { chat: { regenerate_response: false } } } },
+	{ history: { currentId: 'newer-answer' } }
+])('does not fork when regeneration is unavailable: %j', async (override) => {
+	const state = {
+		$config: { features: { enable_v2_threads: true } },
+		$user: {},
+		readOnly: false,
+		generating: false,
+		generationController: null,
+		regeneratingThread: false,
+		taskIds: null,
+		history: { currentId: 'answer' },
+		canRegenerateResponse,
+		loadThreadProjection: vi.fn(),
+		...override
+	};
+	await callback('regenerateResponse', state)({ id: 'answer', done: true });
+	expect(state.loadThreadProjection).not.toHaveBeenCalled();
+});
+
+it('routes reasoning chunks through the chat handler and replaces live content exactly once', async () => {
+	const message = { id: 'live-answer', role: 'assistant', content: '', done: false };
+	const state: Record<string, any> = {
+		$config: { features: { enable_v2_threads: true } },
+		$settings: {},
+		history: { currentId: message.id, messages: { [message.id]: message } },
+		followStreamingResponse: vi.fn(),
+		dispatchCallOverlayAudio: vi.fn(),
+		navigator: {},
+		tick: vi.fn(),
+		scheduleResponseScrollToBottom: vi.fn(),
+		buildThreadHistory,
+		equal,
+		messagesContainerElement: null,
+		autoScroll: true,
+		$chatId: 'thread',
+		generationController: null,
+		requestAnimationFrame: (fn: () => void) => fn()
+	};
+	const handler = callback('chatCompletionEventHandler', state);
+	await handler({ choices: [{ delta: { reasoning_content: 'Live thought' } }] }, message, 'thread');
+	expect(message.content).toContain('done="false"');
+	await handler({ choices: [{ delta: { content: 'Answer' } }] }, message, 'thread');
+	expect(message.content).toContain('done="true"');
+	const page = projection([2, 3], null);
+	page.messages[0].content = { role: 'user', text: 'Question' };
+	page.messages[1].content = { role: 'assistant', text: 'Answer', reasoning: 'Live thought' };
+	await callback('replaceThreadProjection', state)(page);
+	const answer = state.history.messages[state.history.currentId];
+	expect(answer.content.match(/type="reasoning"/g)).toHaveLength(1);
+	expect(answer.content).toContain('Answer');
+});
+
+it('waits for the fork to load before consuming and replaying its input', async () => {
+	let loaded!: () => void;
+	const loading = new Promise<void>((resolve) => {
+		loaded = resolve;
+	});
+	const input = {
+		content: 'Question',
+		model: 'model',
+		features: {},
+		regenerate_from: { thread_id: 'source', position: 2 }
+	};
+	const state: Record<string, any> = {
+		chatIdProp: 'fork',
+		$chatId: 'source',
+		$temporaryChatEnabled: false,
+		prefetchLiveGrants: vi.fn(),
+		noteChatDebug: vi.fn(),
+		updateLastReadAt: vi.fn(),
+		saveControlsTimer: undefined,
+		saveControls: vi.fn(),
+		chatSaveQueue: Promise.resolve(),
+		loading: false,
+		prompt: '',
+		messageInput: { setText: vi.fn(), focus: vi.fn() },
+		files: [],
+		composerInitialized: true,
+		acceptedDataWarnings: new Set(),
+		sessionStorage: { getItem: () => null },
+		loadChat: async () => {
+			await loading;
+			state.$chatId = 'fork';
+			return 'loaded';
+		},
+		tick: vi.fn(),
+		window: { setTimeout: vi.fn() },
+		scrollToBottom: vi.fn(),
+		history: { currentId: null, messages: {} },
+		processNextInQueue: vi.fn(),
+		restoreChatInput: vi.fn().mockResolvedValue(true),
+		takeThreadRegeneration: vi.fn().mockReturnValue(input),
+		replayThreadInput: vi.fn()
+	};
+	const navigation = callback('navigateHandler', state)();
+	await Promise.resolve();
+	expect(state.takeThreadRegeneration).not.toHaveBeenCalled();
+	loaded();
+	await navigation;
+	expect(state.takeThreadRegeneration).toHaveBeenCalledExactlyOnceWith('fork');
+	expect(state.replayThreadInput).toHaveBeenCalledExactlyOnceWith(input);
+	expect(state.loading).toBe(false);
+});

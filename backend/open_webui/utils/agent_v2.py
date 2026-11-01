@@ -2188,10 +2188,59 @@ async def _opened(chunks: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]]
     return early
 
 
+async def _regenerated_input(turn: AgentTurn, source: dict, model: str | None) -> dict:
+    user = await Users.get_user_by_id(turn.metadata['user_id'])
+    if user is None or not (
+        user.role == 'admin'
+        or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
+    ):
+        raise threads.ThreadError(403, 'unavailable')
+    if (
+        set(source) != {'thread_id', 'position'}
+        or not isinstance(source['thread_id'], str)
+        or type(source['position']) is not int
+        or source['position'] <= 1
+    ):
+        raise threads.ThreadError(422, 'invalid_request')
+    position = source['position']
+    events = await turn.client.chat_events(
+        source['thread_id'], as_user=turn.as_user, after=position - 1, through=position
+    )
+    event = next(
+        (
+            event
+            for event in events
+            if event['position'] == position and event['type'] == 'input' and event.get('stream') == 'root'
+        ),
+        None,
+    )
+    if event is None or not isinstance(event['payload'].get('payload'), dict):
+        raise threads.ThreadError(422, 'invalid_request')
+    # Read the prepared input under the acting user's authority; never accept attachment references
+    # or tool settings supplied as a purported saved input by the browser.
+    value = dict(event['payload']['payload'])
+    tools = dict(value.get('tools') or {})
+    if not await _web_search_allowed(user.id):
+        tools.update(web_search='off', fetch='off')
+    if not await _live_documents_allowed():
+        tools.update(search_live_documents='off', list_live_folder='off', attach_live_document='off')
+    if not await _live_mail_allowed():
+        tools.update(search_mail='off', read_mail='off')
+    value['tools'] = tools
+    if not await _documents_allowed(user.id):
+        value['documents'] = 'off'
+    return {'input': value, **({'model': model} if model else {})}
+
+
 async def _sent(
     turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
 ) -> AsyncIterator[dict[str, Any]] | dict:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
+    source = (metadata.get('user_message') or {}).get('regenerate_from')
+    if threads.enabled() and source is not None:
+        if not isinstance(source, dict):
+            raise threads.ThreadError(422, 'invalid_request')
+        return turn.run(await _regenerated_input(turn, source, model), agent)
     entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
     if len(entries) > TEXTS:
         message = (

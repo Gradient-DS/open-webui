@@ -43,6 +43,7 @@
 	export let forkHandler: Function | null = null;
 	export let triggerScroll;
 	export let readOnly = false;
+	export let allowRegenerate = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	export let editCodeBlock = true;
@@ -107,6 +108,7 @@
 				{allowDelete}
 				{continueResponse}
 				{regenerateResponse}
+				{allowRegenerate}
 				{addMessages}
 				{onToolCallResolved}
 				{forkHandler}

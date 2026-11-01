@@ -44,6 +44,7 @@
 	export let forkHandler: Function | null = null;
 
 	export let readOnly = false;
+	export let allowRegenerate = true;
 	export let allowDelete = true;
 	export let compactPreview = false;
 	export let editCodeBlock = true;
@@ -565,6 +566,7 @@
 								{saveMessage}
 								{submitMessage}
 								{regenerateResponse}
+								{allowRegenerate}
 								{continueResponse}
 								{mergeResponses}
 								{addMessages}

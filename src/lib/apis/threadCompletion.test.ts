@@ -156,3 +156,35 @@ it('does not create a thread after preparation is cancelled', async () => {
 	).rejects.toMatchObject({ name: 'AbortError' });
 	expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it('delivers reasoning chunks and tool boundaries in order before completion', async () => {
+	const deltas = [
+		{ reasoning_content: 'First thought' },
+		{ content: '<details type="tool_calls">Search</details>' },
+		{ reasoning_content: 'Second thought' },
+		{ content: 'Answer' }
+	];
+	const chunks = deltas.map((delta) => ({ choices: [{ delta }] }));
+	vi.stubGlobal(
+		'fetch',
+		vi
+			.fn()
+			.mockResolvedValue(
+				new Response(
+					chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+					{ headers: { 'Content-Type': 'text/event-stream' } }
+				)
+			)
+	);
+	const chunk = vi.fn();
+	await generateThreadCompletion(
+		'token',
+		{ chat_id: 'thread' },
+		{
+			created: vi.fn(),
+			chunk,
+			signal: new AbortController().signal
+		}
+	);
+	expect(chunk.mock.calls.map(([data]) => data)).toEqual([...chunks, { done: true }]);
+});
