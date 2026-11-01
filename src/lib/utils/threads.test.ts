@@ -693,36 +693,108 @@ it('filters by the public index tags independently of ownership and title search
 });
 
 describe('conversation version lineage', () => {
-	const versions = [
-		{ thread_id: 'root', parent_thread: null, parent_position: null },
-		{ thread_id: 'v2', parent_thread: 'root', parent_position: 2 },
-		{ thread_id: 'v3', parent_thread: 'v2', parent_position: 2 },
-		{ thread_id: 'edit', parent_thread: 'v3', parent_position: 4 }
-	];
+	const root = {
+		thread_id: 'root',
+		parent_thread: null,
+		parent_position: null,
+		version_kind: null
+	};
+	const version = (id: string, parent: string, kind: 'edit' | 'regenerate', at = 2) => ({
+		thread_id: id,
+		parent_thread: parent,
+		parent_position: at,
+		version_kind: kind
+	});
+	const choices = (ids: string[], at = 2) => ids.map((threadId) => ({ threadId, at }));
+	const branch = (id: string, versions: Parameters<typeof buildThreadHistory>[1], position = 3) => {
+		const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, id), versions);
+		const input = Object.values(history.messages).find(
+			(message) => message.positions[0] === position
+		)!;
+		return {
+			input: input.threadVersions,
+			answer: history.messages[input.childrenIds[0]]?.threadVersions
+		};
+	};
 	it.each(['root', 'v2', 'v3'])(
-		'shows all regenerations from %s and preserves earlier branch choices',
+		'puts regenerate-only arrows under answers when viewing %s',
 		(id) => {
-			const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, id), versions);
-			const input = Object.values(history.messages).find((message) => message.positions[0] === 3)!;
-			expect(input.threadVersions).toEqual(
-				['root', 'v2', 'v3'].map((threadId) => ({ threadId, at: 2 }))
-			);
+			const versions = [
+				root,
+				version('v2', 'root', 'regenerate'),
+				version('v3', 'v2', 'regenerate')
+			];
+			expect(branch(id, versions)).toEqual({
+				input: undefined,
+				answer: choices(['root', 'v2', 'v3'])
+			});
 		}
 	);
-	it('keeps earlier alternatives reachable from a later edit', () => {
-		const history = buildThreadHistory(page([1, 2, 3, 4, 5, 6], null, 'edit'), versions);
-		expect(
-			Object.values(history.messages).find((message) => message.positions[0] === 3)?.threadVersions
-		).toEqual([
-			{ threadId: 'root', at: 2 },
-			{ threadId: 'v2', at: 2 },
-			{ threadId: 'edit', at: 2 }
-		]);
+	it.each(['root', 'edit1', 'edit2'])(
+		'puts edit-only arrows under user messages when viewing %s',
+		(id) => {
+			const versions = [root, version('edit1', 'root', 'edit'), version('edit2', 'edit1', 'edit')];
+			expect(branch(id, versions)).toEqual({
+				input: choices(['root', 'edit1', 'edit2']),
+				answer: undefined
+			});
+		}
+	);
+	it('keeps regenerations of an edit beneath that edited user message', () => {
+		const versions = [
+			root,
+			version('edit', 'root', 'edit'),
+			version('regen', 'edit', 'regenerate')
+		];
+		expect(branch('root', versions)).toEqual({
+			input: choices(['root', 'edit']),
+			answer: undefined
+		});
+		expect(branch('edit', versions)).toEqual({
+			input: choices(['root', 'edit']),
+			answer: choices(['edit', 'regen'])
+		});
+		expect(branch('regen', versions)).toEqual({
+			input: choices(['root', 'regen']),
+			answer: choices(['edit', 'regen'])
+		});
+	});
+	it('keeps the original answer group separate from edits and their regenerations', () => {
+		const versions = [
+			root,
+			version('original-regen', 'root', 'regenerate'),
+			version('edit', 'original-regen', 'edit'),
+			version('edit-regen', 'edit', 'regenerate')
+		];
+		expect(branch('original-regen', versions)).toEqual({
+			input: choices(['original-regen', 'edit']),
+			answer: choices(['root', 'original-regen'])
+		});
+		expect(branch('edit-regen', versions)).toEqual({
+			input: choices(['root', 'edit-regen']),
+			answer: choices(['edit', 'edit-regen'])
+		});
+	});
+	it('retains earlier answer alternatives under a later edited turn', () => {
+		const versions = [
+			root,
+			version('v2', 'root', 'regenerate'),
+			version('v3', 'v2', 'regenerate'),
+			version('edit', 'v3', 'edit', 4)
+		];
+		expect(branch('edit', versions)).toEqual({
+			input: undefined,
+			answer: choices(['root', 'v2', 'edit'])
+		});
+		expect(branch('edit', versions, 5)).toEqual({
+			input: choices(['v3', 'edit'], 4),
+			answer: undefined
+		});
 	});
 	it('does not reveal forks into another conversation or any reader arrows', () => {
 		const source = page([1, 2, 3, 4], null, 'root');
 		const owned = buildThreadHistory(source, [
-			{ thread_id: 'root', parent_thread: 'external', parent_position: 2 }
+			{ ...root, parent_thread: 'external', parent_position: 2 }
 		]);
 		expect(Object.values(owned.messages).every((message) => !message.threadVersions)).toBe(true);
 		const reader = buildThreadHistory({ ...source, preferences: null }, []);

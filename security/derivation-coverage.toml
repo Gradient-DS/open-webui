@@ -1,6 +1,6 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
 # Phase 4b audited all 27 previously labelled untyped JSON write bodies.
-# 21 blind body operations remain: 16 JSON writes, 1 JSON read, 4 multipart.
+# 20 blind body operations remain: 15 JSON writes, 1 JSON read, 4 multipart.
 # The writes include typed boolean/integer-only bodies, author-defined
 # valve bodies, an arbitrary config-import blob, and typed maps whose
 # dynamic keys the derivation deliberately does not traverse.
@@ -89,7 +89,3 @@ reason = "MeetingInput.input is a typed dynamic JsonValue map. The string-field 
 [[waived]]
 id = "POST /api/v1/meetings/{meeting_id}/inputs"
 reason = "MeetingInput.input is the same typed dynamic JsonValue map used to start a meeting. Its keys belong to the meeting agent; the fixed-field derivation cannot enumerate them. Revisit when the corpus supports map-key seeding against the agent schema."
-
-[[waived]]
-id = "POST /api/v1/threads/{thread_id}/fork"
-reason = "soev/thread_routes.py ForkForm accepts only the positive integer event position at; there are no writable string fields."

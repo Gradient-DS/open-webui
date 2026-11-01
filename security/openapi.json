@@ -17930,11 +17930,43 @@
       },
       "open_webui__soev__thread_routes__ForkForm": {
         "additionalProperties": false,
+        "else": {
+          "not": {
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "version": {
+              "const": true
+            }
+          },
+          "required": [
+            "version"
+          ]
+        },
         "properties": {
           "at": {
             "exclusiveMinimum": 0.0,
             "title": "At",
             "type": "integer"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "regenerate",
+                  "edit"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           },
           "version": {
             "default": false,
@@ -17945,6 +17977,19 @@
         "required": [
           "at"
         ],
+        "then": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "regenerate",
+                "edit"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
         "title": "ForkForm",
         "type": "object"
       }
@@ -23604,6 +23649,16 @@
             "schema": {
               "title": "Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
             }
           }
         ],
@@ -38598,6 +38653,16 @@
               "default": "",
               "title": "Before",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Current",
+              "type": "boolean"
             }
           },
           {

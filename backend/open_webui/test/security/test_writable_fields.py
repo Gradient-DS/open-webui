@@ -54,9 +54,9 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        194,
-        2151,
-    ), f'Expected 194 routes / 2151 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        195,
+        2152,
+    ), f'Expected 195 routes / 2152 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     # image_prompt refuses platform mode before consuming either field.
     for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
@@ -95,13 +95,13 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 21 and media == {'application/json': 17, 'multipart/form-data': 4}, (
-        'Expected 21 blind body operations (17 JSON: 16 write + 1 read; 4 multipart); '
+    assert len(blind) == 20 and media == {'application/json': 16, 'multipart/form-data': 4}, (
+        'Expected 20 blind body operations (16 JSON: 15 write + 1 read; 4 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == {'GET /ollama/api/ps'}, (
-        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 16 JSON write bodies; '
+        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 15 JSON write bodies; '
         f'measured read bodies: {sorted(read_bodies)}.'
     )
 
@@ -120,7 +120,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        'Expected exact waivers for 21 blind operations (16 JSON write + 1 JSON read + 4 multipart); '
+        'Expected exact waivers for 20 blind operations (15 JSON write + 1 JSON read + 4 multipart); '
         f'measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')
@@ -144,3 +144,17 @@ def test_conversation_versions_is_a_bodyless_owner_read(surface):
         'title': 'Version',
         'default': False,
     }
+
+
+def test_current_projection_parameter_and_fork_reason_are_classified(surface):
+    operations, fields, queries = surface
+    for route in ('GET /api/v1/threads/{thread_id}', 'GET /api/v1/chats/{id}'):
+        parameter = next(p for p in operations[route]['parameters'] if p['name'] == 'current')
+        assert parameter['in'] == 'query'
+        assert parameter['schema']['type'] == 'boolean' and parameter['schema']['default'] is False
+        assert 'current' not in queries.get(route, [])
+    assert fields['POST /api/v1/threads/{thread_id}/fork'] == ['kind']
+    spec = json.loads((REPO / 'security/openapi.json').read_text())
+    schema = spec['components']['schemas']['open_webui__soev__thread_routes__ForkForm']
+    assert schema['then'] == {'required': ['kind'], 'properties': {'kind': {'enum': ['regenerate', 'edit']}}}
+    assert schema['else'] == {'not': {'required': ['kind']}}

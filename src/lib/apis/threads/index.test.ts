@@ -92,11 +92,26 @@ it('loads versions once and distinguishes same-conversation versions from forks 
 	vi.stubGlobal('fetch', fetcher);
 	const api = threadAPI('session');
 	await api.versions('root');
-	await api.fork('viewed', 1, true);
+	await api.fork('viewed', 1, true, 'regenerate');
 	await api.fork('viewed', 7);
 	const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
 	expect(calls[0][0]).toBe('/api/v1/threads/root/versions');
-	expect(JSON.parse(String(calls[1][1].body))).toEqual({ at: 1, version: true });
+	expect(JSON.parse(String(calls[1][1].body))).toEqual({
+		at: 1,
+		version: true,
+		kind: 'regenerate'
+	});
 	expect(JSON.parse(String(calls[2][1].body))).toEqual({ at: 7, version: false });
 	expect(calls.every(([, init]) => init.cache === 'no-store')).toBe(true);
+});
+
+it('requests the current projection in a single call', async () => {
+	const fetcher = vi.fn(
+		async (_url: string) => new Response(JSON.stringify({ thread_id: 'current-version' }))
+	);
+	vi.stubGlobal('fetch', fetcher);
+	const result = await threadAPI('token').projection('root', '', undefined, true);
+	expect(fetcher).toHaveBeenCalledTimes(1);
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/threads/root?limit=20&before=&current=true');
+	expect(result.page?.thread_id).toBe('current-version');
 });

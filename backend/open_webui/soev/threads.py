@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from open_webui.soev import acting
 from open_webui.soev.client import _shared_client
 
+VersionKind = Literal['regenerate', 'edit']
+
 ThreadState = Literal['reconnect', 'unavailable', 'sign_in', 'invalid_request', 'share_refused', 'legacy_share']
 
 
@@ -81,6 +83,7 @@ class OwnerIndexPage(WireModel):
 
 
 class ThreadVersion(WireModel):
+    version_kind: VersionKind | None
     thread_id: str
     parent_thread: str | None
     parent_position: int | None
@@ -299,17 +302,18 @@ class ThreadClient:
         window: int = 20,
         before: str = '',
         etag: str | None = None,
+        current: bool = False,
     ) -> ProjectionResult:
         response = await self._request(
             'GET',
             f'/v1/threads/{_identifier(thread_id)}',
-            params={'limit': _page_size(window), 'before': before},
+            params={'limit': _page_size(window), 'before': before, **({'current': 'true'} if current else {})},
             etag=etag,
         )
         if response.status_code == 304:
             return ProjectionResult(None, response.headers.get('ETag', etag), True)
         page = self._parse(response, ProjectionPage)
-        if page.thread_id != thread_id:
+        if not current and page.thread_id != thread_id:
             raise ThreadError(502, 'reconnect')
         return ProjectionResult(page, response.headers.get('ETag'))
 
@@ -396,14 +400,16 @@ class ThreadClient:
     async def versions(self, thread_id: str) -> ThreadVersions:
         return self._parse(await self._request('GET', f'/v1/threads/{_identifier(thread_id)}/versions'), ThreadVersions)
 
-    async def fork(self, thread_id: str, *, at: int, version: bool = False) -> CreatedThread:
-        if at <= 0:
+    async def fork(
+        self, thread_id: str, *, at: int, version: bool = False, kind: VersionKind | None = None
+    ) -> CreatedThread:
+        if at <= 0 or (version and kind not in {'regenerate', 'edit'}) or (not version and kind is not None):
             raise ThreadError(422, 'invalid_request')
         return self._parse(
             await self._request(
                 'POST',
                 f'/v1/threads/{_identifier(thread_id)}/fork',
-                body={'at': at, 'version': version},
+                body={'at': at, 'version': version, **({'kind': kind} if kind is not None else {})},
             ),
             CreatedThread,
         )

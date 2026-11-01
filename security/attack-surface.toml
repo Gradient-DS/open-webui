@@ -1140,7 +1140,7 @@ backed_by = "soev-solutions"
 key = "platform_thread"
 name = "thread_id"
 prefix = "/api/v1/threads/{thread_id}"
-description = "soev/thread_routes.py reads and forks soev-api threads; reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
+description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
 same_as = "meeting"
 
 # The v2 router dependency refuses these before loading or looking up any function.

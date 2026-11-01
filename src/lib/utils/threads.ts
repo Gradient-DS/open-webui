@@ -116,7 +116,8 @@ const assistantContent = (fields: Record<string, unknown>) => {
 
 export const buildThreadHistory = (
 	page: ProjectionPage,
-	forks: Pick<ThreadVersion, 'thread_id' | 'parent_thread' | 'parent_position'>[]
+	forks: (Pick<ThreadVersion, 'thread_id' | 'parent_thread' | 'parent_position'> &
+		Partial<Pick<ThreadVersion, 'version_kind'>>)[]
 ): ThreadHistory => {
 	const history = emptyHistory();
 	const seen = new Set<number>();
@@ -246,15 +247,40 @@ export const buildThreadHistory = (
 		const visible = Object.values(history.messages);
 		const branch = visible.find((message) => message.positions[0] > at);
 		if (!branch || branch.positions[0] !== at + 1) continue;
-		const choices = targets.map((threadId) => ({
+		if (branch.role !== 'user') continue;
+		const userRoot = (threadId: string) => {
+			const seen = new Set<string>();
+			let node = byId.get(threadId);
+			while (
+				node?.parent_thread &&
+				node.parent_position === at &&
+				node.version_kind === 'regenerate' &&
+				!seen.has(threadId)
+			) {
+				seen.add(threadId);
+				threadId = node.parent_thread;
+				node = byId.get(threadId);
+			}
+			return threadId;
+		};
+		const users = new Map<string, string[]>();
+		for (const threadId of targets) {
+			const user = userRoot(threadId);
+			users.set(user, [...(users.get(user) ?? []), threadId]);
+		}
+		const activeUser = userRoot(active);
+		const choice = (threadId: string): VersionTarget => ({
 			threadId: threadId === active ? page.thread_id : threadId,
 			at
-		}));
-		branch.threadVersions = choices;
-		if (branch.role === 'user') {
-			const answer = history.messages[branch.childrenIds[0]];
-			if (answer) answer.threadVersions = choices;
+		});
+		if (users.size > 1) {
+			branch.threadVersions = [...users.keys()].map((threadId) =>
+				choice(threadId === activeUser ? active : threadId)
+			);
 		}
+		const answers = users.get(activeUser) ?? [];
+		const answer = history.messages[branch.childrenIds[0]];
+		if (answer && answers.length > 1) answer.threadVersions = answers.map(choice);
 	}
 	return history;
 };

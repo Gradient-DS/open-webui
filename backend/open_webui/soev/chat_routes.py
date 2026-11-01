@@ -1,6 +1,5 @@
 """Select prepared handlers before any legacy body, dependency or content access."""
 
-import asyncio
 import json
 
 from fastapi import Depends, Request
@@ -117,21 +116,15 @@ async def chat_read(service, request, user, identifier, route):
             window=integer(request, 'limit', 20),
             before=request.query_params.get('before', ''),
             thread_id=request.query_params.get('thread_id', ''),
-            current=True,
+            current=boolean(request, 'current', not bool(request.query_params.get('thread_id'))),
             etag=request.headers.get('If-None-Match'),
         )
         headers = {'ETag': result.etag} if result.etag else {}
-        page = None
-        if not result.not_modified:
-            if boolean(request, 'include_versions', False) and result.page.preferences is not None:
-                presented, versions = await asyncio.gather(
-                    service.presentation(user.id, result.page), service.client.versions(result.page.thread_id)
-                )
-                page = {**presented.model_dump(), 'versions': [version.model_dump() for version in versions.items]}
-            else:
-                page = (await service.presentation(user.id, result.page)).model_dump()
+        page = None if result.not_modified else await service.presentation(user.id, result.page)
         return (
-            Response(status_code=304, headers=headers) if result.not_modified else JSONResponse(page, headers=headers)
+            Response(status_code=304, headers=headers)
+            if result.not_modified
+            else JSONResponse(page.model_dump(), headers=headers)
         )
     if route == '/{id}/tags':
         projection = await service.projection(user.id, identifier, window=1)

@@ -698,12 +698,12 @@ export const getChatById = async (
 	id: string,
 	before = '',
 	threadId = '',
-	includeVersions = false
+	current = false
 ) => {
 	let error = null;
 
 	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(includeVersions ? { include_versions: 'true' } : {}) })}` : ''}`,
+		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(current ? { current: 'true' } : {}) })}` : ''}`,
 		{
 			method: 'GET',
 			headers: {

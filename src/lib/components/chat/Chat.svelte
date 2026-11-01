@@ -88,12 +88,7 @@
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isLLM } from '$lib/utils/assistants';
-	import {
-		chats,
-		pinnedChats,
-		refreshChatList,
-		refreshFolderChatLists
-	} from '$lib/stores/chatList';
+	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -136,7 +131,7 @@
 	import { threadEditInput, threadRegenerationInput } from '$lib/utils/threadRegeneration';
 	import { canRegenerateResponse } from '$lib/utils/features';
 	import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
-	import type { ProjectionPage, ThreadVersion } from '$lib/apis/threads';
+	import type { ProjectionPage, ThreadVersion, VersionKind } from '$lib/apis/threads';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
 		getAndUpdateUserLocation,
@@ -555,6 +550,7 @@
 	let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
 	let threadPage: ProjectionPage | null = null;
 	let threadVersions: ThreadVersion[] = [];
+	let threadVersionLoad = 0;
 	let switchingThread = false;
 	let regeneratingThread = false;
 	let tags = [];
@@ -1083,6 +1079,7 @@
 		chat = null;
 		threadPage = null;
 		threadVersions = [];
+		threadVersionLoad++;
 		tags = [];
 		taskIds = null;
 		chatTasks = [];
@@ -2411,6 +2408,7 @@
 		chat = null;
 		threadPage = null;
 		threadVersions = [];
+		threadVersionLoad++;
 		acceptedDataWarnings = new Set();
 		resetWebSearchConfirmation();
 
@@ -2669,21 +2667,30 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	const currentThreadId = (id: string): string => {
-		const row = [...($chats ?? []), ...$pinnedChats].find((row) => row.id === id);
-		return typeof row?.thread_id === 'string' ? row.thread_id : '';
-	};
-
 	const loadThreadProjection = async (
 		id: string,
 		before = '',
 		version = '',
-		includeVersions = false
-	): Promise<ProjectionPage> =>
-		extendProjectionToTurn(
-			await getChatById(localStorage.token, id, before, version, includeVersions),
-			(cursor) => getChatById(localStorage.token, id, cursor, version)
+		current = false
+	): Promise<ProjectionPage> => {
+		const page = await getChatById(localStorage.token, id, before, version, current);
+		return extendProjectionToTurn(page, (cursor) =>
+			getChatById(localStorage.token, id, cursor, page.thread_id)
 		);
+	};
+
+	const loadThreadVersions = async (conversation: string, page: ProjectionPage) => {
+		const load = ++threadVersionLoad;
+		try {
+			const { items } = await threadAPI(localStorage.token).versions(page.thread_id);
+			if (load !== threadVersionLoad || $chatId !== conversation || !threadPage) return;
+			threadVersions = items;
+			if (!generationController && !generating && !regeneratingThread)
+				await replaceThreadProjection(threadPage);
+		} catch (error) {
+			if (load === threadVersionLoad && $chatId === conversation) toast.error(`${error}`);
+		}
+	};
 
 	const captureThreadAnchor = (projected: ReturnType<typeof buildThreadHistory>) => {
 		const container = messagesContainerElement;
@@ -2762,7 +2769,7 @@
 			}
 			try {
 				const viewed = threadPage?.thread_id;
-				let page = await loadThreadProjection(id, '', viewed);
+				let page = await loadThreadProjection(id, '', viewed ?? '', !viewed);
 				if ($chatId !== id || generationController || threadPage?.thread_id !== viewed) return;
 				// Keep older turns the reader has already loaded in this generation.
 				if (
@@ -2788,6 +2795,7 @@
 	const loadChat = async () => {
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
+		if ($config?.features?.enable_v2_threads) threadVersionLoad++;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
@@ -2801,7 +2809,7 @@
 
 		const loadedChat = await (
 			$config?.features?.enable_v2_threads
-				? loadThreadProjection(targetId, '', currentThreadId(targetId), true)
+				? loadThreadProjection(targetId, '', '', true)
 				: getChatById(localStorage.token, targetId)
 		).catch(() => null);
 		if (isStaleLoad()) return 'aborted';
@@ -2811,12 +2819,13 @@
 		}
 		if ($config?.features?.enable_v2_threads) {
 			const owned = loadedChat.preferences !== null;
-			threadVersions = owned ? (loadedChat.versions ?? []) : [];
+			threadVersions = [];
 			if (isStaleLoad()) return 'aborted';
 			threadPage = loadedChat;
 			const projected = buildThreadHistory(threadPage!, threadVersions);
 			history = projected;
 			chat = { id: targetId, title: threadPage!.title, readonly: !owned };
+			if (owned) void loadThreadVersions(targetId, threadPage!);
 			const preferences = threadPage!.preferences as { features?: Record<string, unknown> } | null;
 			savedThreadFeatures = preferences?.features
 				? { id: targetId, features: preferences.features }
@@ -4825,13 +4834,15 @@
 	const createThreadVersion = async (
 		page: ProjectionPage,
 		at: number,
-		input: import('$lib/utils/threadRegeneration').ThreadRegeneration
+		input: import('$lib/utils/threadRegeneration').ThreadRegeneration,
+		kind: VersionKind
 	) => {
 		const conversation = $chatId;
 		const api = threadAPI(localStorage.token);
-		const fork = await api.fork(page.thread_id, at, true);
+		const fork = await api.fork(page.thread_id, at, true, kind);
 		if ($chatId !== conversation) return;
 		// The fork copied this prefix verbatim; no projection read is needed before sending.
+		threadVersionLoad++;
 		threadVersions = (await api.versions(fork.thread_id)).items;
 		if ($chatId !== conversation) return;
 		threadPage = {
@@ -4866,7 +4877,7 @@
 				selectedModels[0],
 				composerFeatures(currentComposerPreferences())
 			);
-			await createThreadVersion(threadPage, at, input);
+			await createThreadVersion(threadPage, at, input, 'edit');
 		} catch (error) {
 			toast.error(`${error}`);
 		} finally {
@@ -4899,7 +4910,7 @@
 					message.model,
 					composerFeatures(currentComposerPreferences())
 				);
-				await createThreadVersion(page, at, input);
+				await createThreadVersion(page, at, input, 'regenerate');
 			} catch (error) {
 				toast.error(`${error}`);
 			} finally {

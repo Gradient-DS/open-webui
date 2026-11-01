@@ -1201,9 +1201,9 @@ async def thread_organizations(user_id: str) -> list[soev_threads.Organization]:
 
 
 async def create_thread_fork(
-    user_id: str, thread_id: str, at: int, version: bool = False
+    user_id: str, thread_id: str, at: int, version: bool = False, kind: soev_threads.VersionKind | None = None
 ) -> soev_threads.CreatedThread:
-    created = await soev_threads.build_client().fork(thread_id, at=at, version=version)
+    created = await soev_threads.build_client().fork(thread_id, at=at, version=version, kind=kind)
     if not version:
         await app.state.thread_organizations.put(
             user_id, soev_threads.Organization(id=created.thread_id, thread_id=created.thread_id)

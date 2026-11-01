@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.responses import JSONResponse, Response
 
 from open_webui.soev import threads
@@ -22,9 +22,25 @@ def projection_response(result: threads.ProjectionResult) -> Response:
 
 
 class ForkForm(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            'if': {'properties': {'version': {'const': True}}, 'required': ['version']},
+            'then': {'required': ['kind'], 'properties': {'kind': {'enum': ['regenerate', 'edit']}}},
+            'else': {'not': {'required': ['kind']}},
+        },
+    )
     at: int = Field(gt=0)
     version: bool = Field(default=False, strict=True)
+    kind: threads.VersionKind | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode='after')
+    def version_reason(self):
+        if self.version and self.kind is None:
+            raise ValueError('version forks require kind')
+        if not self.version and 'kind' in self.model_fields_set:
+            raise ValueError('kind requires a version fork')
+        return self
 
 
 class PrivateRoute(APIRoute):
@@ -49,7 +65,7 @@ class PrivateRoute(APIRoute):
 def create_thread_router(
     organizations: Callable[[str], Awaitable[list[Organization]]],
     *,
-    create_fork: Callable[[str, str, int, bool], Awaitable[CreatedThread]] | None = None,
+    create_fork: Callable[[str, str, int, bool, threads.VersionKind | None], Awaitable[CreatedThread]] | None = None,
 ) -> APIRouter:
     from open_webui.utils.auth import get_verified_user
 
@@ -91,14 +107,15 @@ def create_thread_router(
     @router.post('/{thread_id}/fork')
     async def fork(thread_id: str, form: ForkForm, user=Depends(require_enabled)):
         if create_fork is not None:
-            return await create_fork(user.id, thread_id, form.at, form.version)
-        return await threads.build_client().fork(thread_id, at=form.at, version=form.version)
+            return await create_fork(user.id, thread_id, form.at, form.version, form.kind)
+        return await threads.build_client().fork(thread_id, at=form.at, version=form.version, kind=form.kind)
 
     @router.get('/{thread_id}')
     async def projection(
         thread_id: str,
         limit: int = Query(20, ge=1, le=200),
         before: str = '',
+        current: bool = False,
         if_none_match: str | None = Header(None),
         user=Depends(require_enabled),
     ):
@@ -107,6 +124,7 @@ def create_thread_router(
             window=limit,
             before=before,
             etag=if_none_match,
+            current=current,
         )
         return projection_response(result)
 

@@ -125,3 +125,28 @@ it('keeps search available in v2 while refusing unsupported bulk export', async 
 		config.set(previous);
 	}
 });
+
+it('opens the current version through one chats projection request', async () => {
+	const { config } = await import('$lib/stores');
+	const { getChatById } = await import('./index');
+	const { get } = await import('svelte/store');
+	const previous = get(config);
+	const fetcher = vi.fn(
+		async (_url: string) =>
+			new Response(JSON.stringify({ thread_id: 'current-version', messages: [] }))
+	);
+	vi.stubGlobal('fetch', fetcher);
+	try {
+		config.set({ features: { enable_v2_threads: true } } as NonNullable<
+			Parameters<typeof config.set>[0]
+		>);
+		const page = await getChatById('token', 'conversation', '', '', true);
+		expect(page.thread_id).toBe('current-version');
+		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(fetcher.mock.calls[0][0]).toBe(
+			'/api/v1/chats/conversation?limit=20&before=&current=true'
+		);
+	} finally {
+		config.set(previous);
+	}
+});

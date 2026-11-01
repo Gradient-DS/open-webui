@@ -196,17 +196,7 @@ class ChatPaths:
 
     async def projection(self, user_id: str, chat_id: str, *, thread_id: str = '', current: bool = False, **kwargs):
         record = await self.record(user_id, chat_id)
-        if current and not thread_id:
-            # The index resolves the current version without reading a second projection.
-            async for batch in self.authorized_pages(user_id):
-                match = next(
-                    (item for item in batch if (item.get('conversation_id') or item['thread_id']) == record.thread_id),
-                    None,
-                )
-                if match:
-                    thread_id = match['thread_id']
-                    break
-        return await self.client.projection(thread_id or record.thread_id, **kwargs)
+        return await self.client.projection(thread_id or record.thread_id, current=current and not thread_id, **kwargs)
 
     async def presentation(self, user_id: str, page: threads.ProjectionPage) -> threads.ProjectionPage:
         from open_webui.soev import acting, identity
