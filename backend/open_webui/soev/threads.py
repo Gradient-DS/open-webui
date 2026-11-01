@@ -61,6 +61,7 @@ class IndexItem(WireModel):
     updated_at: str
     parent_thread: str | None
     parent_position: int | None
+    shared: bool
 
 
 class IndexPage(WireModel):

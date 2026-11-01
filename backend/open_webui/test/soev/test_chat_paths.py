@@ -67,14 +67,12 @@ def fake_api(request, calls, state, visible, feedback):
     path = request.url.path
     if path in {'/v1/threads/usage', '/v1/feedback', '/v1/feedback/summary'}:
         return fake_metrics(path, state, feedback)
-    if path == '/v1/chat/threads' and request.method == 'GET':
-        return fake_owner_index(request, state, visible)
+    if path in {'/v1/chat/threads', '/v1/threads'} and request.method == 'GET':
+        return fake_index(request, state, visible)
     if path.endswith('/shares') or not state['allowed'] or state.get('reader'):
         return fake_reader(request, state) if state.get('reader') else fake_shares(request, state)
     if path.startswith('/v1/chat/threads'):
         return fake_runtime(request)
-    if path == '/v1/threads':
-        return httpx.Response(200, json={'items': visible, 'next_cursor': None})
     if path.endswith('/fork'):
         assert json.loads(request.content) == {'at': 2}
         state['forks'] = state.get('forks', 0) + 1
@@ -98,23 +96,35 @@ def fake_api(request, calls, state, visible, feedback):
     return httpx.Response(501)
 
 
-def fake_owner_index(request, state, visible):
-    if not state['allowed']:
-        return httpx.Response(404)
-    items = [
+def shared_items(state, visible):
+    shares = dict(state.get('shares_by_thread', {}))
+    if 'shares' in state:
+        shares['fictional-thread'] = state['shares']
+    return [
         {
-            'shared': bool(state.get('shares'))
-            and item['owned']
-            and state.get('owner', True)
-            and not state.get('reader')
-            and not state.get('fallback'),
             **item,
+            'shared': (
+                bool(shares[item['thread_id']])
+                and item['owned']
+                and state.get('owner', True)
+                and not state.get('reader')
+                and not state.get('fallback')
+                if item['thread_id'] in shares
+                else item['shared']
+            ),
         }
         for item in visible
     ]
+
+
+def fake_index(request, state, visible):
+    if not state['allowed']:
+        return httpx.Response(404)
+    items = shared_items(state, visible)
     start = int(request.url.params.get('cursor') or 0)
     end = start + min(int(request.url.params['limit']), state.get('index_page_size', 200))
-    return httpx.Response(200, json={'data': items[start:end], 'next_cursor': str(end) if end < len(items) else None})
+    key = 'data' if request.url.path == '/v1/chat/threads' else 'items'
+    return httpx.Response(200, json={key: items[start:end], 'next_cursor': str(end) if end < len(items) else None})
 
 
 def fake_thread_read(request, state, visible, path):
@@ -172,7 +182,12 @@ def fake_reader(request, state):
 def fake_shares(request, state):
     import json
 
-    shares = state.setdefault('shares', [])
+    thread_id = request.url.path.split('/')[-2]
+    shares = (
+        state.setdefault('shares', [])
+        if thread_id == 'fictional-thread'
+        else state.setdefault('shares_by_thread', {}).setdefault(thread_id, [])
+    )
     if not state['allowed'] or not state.get('owner', True) or state.get('fallback', False):
         return httpx.Response(404, json={'code': 'not_found'})
     if request.method == 'GET':
@@ -900,6 +915,22 @@ async def test_standalone_thread_fork_gets_its_own_organization(dark_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['index', 'owner_index'])
+@pytest.mark.parametrize('owned', [True, False])
+async def test_thread_indexes_report_only_callers_own_shared_threads(dark_api, method, owned):
+    dark_api.visible[0]['owned'] = owned
+    dark_api.visible.append(index_item('fictional-private'))
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    found = await getattr(dark_api.client, method)()
+    assert [(item.owned, item.shared) for item in found.items] == [(owned, owned), (True, False)]
+    assert len(dark_api.calls) == 1
+    dark_api.state['shares'].clear()
+    found = await getattr(dark_api.client, method)()
+    assert [item.shared for item in found.items] == [False, False]
+    assert [r.url.path for r in dark_api.calls] == ['/v1/threads' if method == 'index' else '/v1/chat/threads'] * 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('kind', ['person', 'group', 'folder'])
 async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     form = {'audience': {'kind': kind, 'id': 'fictional-audience'}, 'at': 2}
@@ -911,11 +942,18 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     listed = await dark_api.browser.get(base + '/shared/fictional-chat/access')
     assert listed.json() == {'items': [form], 'next_cursor': None}
     assert (await dark_api.browser.get(base + '/fictional-chat/share')).json() == listed.json()
+    start = len(dark_api.calls)
     own = await dark_api.browser.get(base + '/shared')
+    assert own.status_code == 200
     assert own.json()[0]['share_id'] == 'fictional-thread'
+    assert [(r.method, r.url.path) for r in dark_api.calls[start:]] == [('GET', '/v1/chat/threads')]
     removed = await dark_api.browser.delete(base + '/fictional-chat/share')
     assert removed.status_code == 200
     assert (await dark_api.browser.get(base + '/shared/fictional-chat/access')).json()['items'] == []
+    start = len(dark_api.calls)
+    own = await dark_api.browser.get(base + '/shared')
+    assert own.status_code == 200 and own.json() == []
+    assert [(r.method, r.url.path) for r in dark_api.calls[start:]] == [('GET', '/v1/chat/threads')]
     assert not dark_api.records.writes
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login' for r in dark_api.calls)
 
@@ -1110,9 +1148,22 @@ async def test_unshare_all_covers_previously_shared_inactive_branches(dark_api):
     dark_api.records.records[0].branch_thread_ids = ['fictional-thread', 'fictional-older']
     dark_api.visible.append(index_item('fictional-older'))
     dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    dark_api.state['shares_by_thread'] = {
+        'fictional-older': [{'audience': {'kind': 'group', 'id': 'fictional-group'}, 'at': 1}]
+    }
     result = await dark_api.browser.delete('/api/v1/chats/share/all')
     assert result.status_code == 200 and result.json() is True
     assert '/v1/threads/fictional-older/shares' in [r.url.path for r in dark_api.calls]
+    assert [(r.method, r.url.path) for r in dark_api.calls] == [
+        ('GET', '/v1/chat/threads'),
+        ('GET', '/v1/threads/fictional-thread/shares'),
+        ('DELETE', '/v1/threads/fictional-thread/shares'),
+        ('GET', '/v1/threads/fictional-older/shares'),
+        ('DELETE', '/v1/threads/fictional-older/shares'),
+    ]
+    assert not dark_api.state['shares']
+    assert not dark_api.state['shares_by_thread']['fictional-older']
+    assert not dark_api.records.writes
 
 
 @pytest.mark.asyncio
@@ -1194,6 +1245,7 @@ async def test_unavailable_owned_share_does_not_block_listing_or_unshare_all(dar
     listed = await dark_api.browser.get('/api/v1/chats/shared')
     assert listed.status_code == 200
     assert [item['thread_id'] for item in listed.json()] == ['fictional-thread']
+    assert [r.url.path for r in dark_api.calls] == ['/v1/chat/threads']
     deleted = await dark_api.browser.delete('/api/v1/chats/share/all')
     assert deleted.status_code == 200 and deleted.json() is True
     assert not dark_api.state['shares']
