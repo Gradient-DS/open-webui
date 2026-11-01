@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from open_webui.test.soev.fake_api import person_ref
 
 SERVICE = 'owui:service:webui'
 FILE_BYTES = b'file content'
@@ -67,15 +68,15 @@ def test_collection_replays_and_read_write_decisions(api):
     """Collection creation is replayable, while unreadable rows stay 404 and read does not imply write."""
     fake, client = api
     body, collection = seed(client)
-    assert collection['created_by'] == 'owui:user:alice'
-    assert collection['principals'] == [SERVICE, 'owui:user:alice']
-    assert collection['writers'] == ['owui:user:alice']
+    assert collection['created_by'] == person_ref('alice')
+    assert collection['principals'] == [SERVICE, person_ref('alice')]
+    assert collection['writers'] == [person_ref('alice')]
     assert send(client, 'POST', '/v1/collections', body, user='owui:user:alice').status_code == 200
     assert send(client, 'GET', '/v1/collections/kb').json()['caller_may_write'] is None
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:alice').json()['caller_may_write'] is True
     seed(client, 'other', 'owui:user:bob')
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').status_code == 404
-    fake.collections['kb']['principals'].append('owui:user:bob')
+    fake.collections['kb']['principals'].append(person_ref('bob'))
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').json()['caller_may_write'] is False
     refused = send(client, 'PATCH', '/v1/collections/kb', {'name': 'bad'}, user='owui:user:bob')
     assert refused.status_code == 403
@@ -99,7 +100,7 @@ def test_access_and_delete_jobs_advance_only_when_requested(api):
             client,
             'PUT',
             '/v1/collections/kb/access',
-            {'visibility': 'public', 'principals': [SERVICE, 'owui:user:alice'], 'writers': ['owui:user:alice']},
+            {'visibility': 'public', 'principals': [SERVICE, person_ref('alice')], 'writers': [person_ref('alice')]},
             operation=operation,
         )
         for _ in range(2)

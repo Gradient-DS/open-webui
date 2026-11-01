@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import Depends
 from open_webui.soev import jobs
+from open_webui.test.soev.fake_api import person_ref
 from open_webui.test.soev.test_jobs import env  # noqa: F401
 from open_webui.test.soev.test_keycloak_token import token_app  # noqa: F401
 
@@ -17,11 +18,18 @@ from open_webui.test.soev.test_keycloak_token import token_app  # noqa: F401
 @pytest.mark.parametrize('terminal', ['SUCCEEDED', 'COMPLETED_WITH_ERRORS'])
 async def test_owner_browser_settles_job_and_emits_status(token_app, env, monkeypatch, route, terminal):  # noqa: F811
     from open_webui.internal.db import get_async_session
+    from open_webui.models.users import User
     from open_webui.routers import files, knowledge
     from open_webui.soev import pending_sync
     from open_webui.soev.knowledge_store import SoevKnowledgeTable
 
     ctx = token_app
+    ctx.user.person_id = person_ref(ctx.user.id)
+    async with env.files.get_async_db_context() as db:
+        connection = await db.connection()
+        await connection.run_sync(User.__table__.create)
+        db.add(User(**ctx.user.model_dump()))
+        await db.commit()
     ctx.app.include_router(files.router, prefix='/api/v1/files')
     ctx.app.include_router(knowledge.router, prefix='/api/v1/knowledge')
 
@@ -46,8 +54,8 @@ async def test_owner_browser_settles_job_and_emits_status(token_app, env, monkey
                 'key': 'browser-kb',
                 'name': 'Browser files',
                 'visibility': 'restricted',
-                'principals': ['owui:user:fern'],
-                'writers': ['owui:user:fern'],
+                'principals': [person_ref('fern')],
+                'writers': [person_ref('fern')],
             },
             as_user='owui:user:fern',
             idempotency_key='collection:browser-kb',

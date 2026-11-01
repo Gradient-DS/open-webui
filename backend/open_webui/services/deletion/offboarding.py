@@ -19,6 +19,7 @@ from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.policy_jobs import refuse_offboarding
+from open_webui.soev.principal_refs import is_canonical_person_ref
 
 
 class OffboardingOptions(BaseModel):
@@ -58,10 +59,12 @@ async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
-    ref = identity.external_ref(user)
-    as_user = ref if user.role in {'user', 'admin'} else None
+    ref = user.person_id
+    as_user = identity.external_ref(user) if user.role in {'user', 'admin'} else None
     collections = []
     if configured():
+        if not is_canonical_person_ref(ref):
+            raise SoevApiError(422, 'invalid_field', 'User has no platform person binding')
         client = identity.build_client()
         if as_user is None:
             client = client.as_service()
@@ -101,12 +104,12 @@ async def _offboard(
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
-    await _validate_target(user_id, options, db=db)
+    transfer_owner = await _validate_target(user_id, options, db=db)
     as_user = identity.external_ref(user) if user.role in {'user', 'admin'} else None
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
-    await apply_collections(owned, options=options, archive=archive, as_user=as_user)
+    await apply_collections(owned, options=options, archive=archive, as_user=as_user, transfer_owner=transfer_owner)
     await delete_external_user_data(user_id, options=options, db=db)
     try:
         count = await finalize_local(user_id, options=options, archive=archive, db=db)
@@ -117,12 +120,18 @@ async def _offboard(
         raise
 
 
-async def _validate_target(user_id: str, options: OffboardingOptions, *, db: AsyncSession) -> None:
+async def _validate_target(user_id: str, options: OffboardingOptions, *, db: AsyncSession) -> str | None:
     if options.mode != 'transfer':
         return
     target = await Users.get_user_by_id(options.transfer_to, db=db)
-    if target is None or target.id == user_id or target.role not in {'user', 'admin'}:
+    if (
+        target is None
+        or target.id == user_id
+        or target.role not in {'user', 'admin'}
+        or (configured() and not is_canonical_person_ref(target.person_id))
+    ):
         raise SoevApiError(422, 'invalid_field', 'Invalid transfer target', constraint='offboarding:target')
+    return target.person_id
 
 
 def _confirm_deletion(owned: Inventory, options: OffboardingOptions, language: str) -> None:
@@ -143,7 +152,12 @@ def _confirm_deletion(owned: Inventory, options: OffboardingOptions, language: s
 
 
 async def apply_collections(
-    owned: Inventory, *, options: OffboardingOptions, archive: UserArchive | None, as_user: str | None
+    owned: Inventory,
+    *,
+    options: OffboardingOptions,
+    archive: UserArchive | None,
+    as_user: str | None,
+    transfer_owner: str | None,
 ) -> None:
     """Delete cloud collections in every mode; move only local collection ownership."""
     if not configured():
@@ -159,7 +173,7 @@ async def apply_collections(
         if options.mode == 'delete' or row['source_kind'] != 'local' or (options.mode == 'transfer' and personal):
             await client.send('DELETE', path, None, as_user=as_user, idempotency_key=f'offboard-delete:{row["key"]}')
             continue
-        body = {'owner': f'owui:user:{options.transfer_to}'}
+        body = {'owner': transfer_owner}
         if options.mode == 'archive':
             body = {'owner': ARCHIVE_OWNER, 'readers': [archive_group_ref()]}
             if archive.expires_at is not None:
