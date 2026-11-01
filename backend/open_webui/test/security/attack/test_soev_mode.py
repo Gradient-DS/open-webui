@@ -54,6 +54,7 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'cloud_connection',
         'cloud_authorize_connection',
         'cloud_family',
+        'cloud_mailbox_address',
         'cloud_knowledge',
         'cloud_schedule',
         'retry_schedule',
