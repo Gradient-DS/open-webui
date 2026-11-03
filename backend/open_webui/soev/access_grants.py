@@ -37,7 +37,7 @@ class SoevAccessGrantsTable(AccessGrantsTable):
             requested = set(resource_ids)
             return {
                 row['key']
-                for row in await self._store._collections(as_service=True)
+                for row in await self._store._collections()
                 if row['key'] in requested and principals.intersection(row.get(field, []))
             }
         return await self._store.accessible_collection_ids(user_id, resource_ids, permission)

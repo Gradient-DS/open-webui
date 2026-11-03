@@ -75,6 +75,43 @@ def test_route_scoping_distinguishes_resources():
         seeds.parameter_for('/api/v1/files/{id}suffix', 'id')
 
 
+def test_required_drive_routes_have_seeded_targets_and_authorization_coverage(monkeypatch):
+    from .authorization_inventory import platform_operations
+    from .crossuser import targets
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    required = set(seeds.SURFACE['required_drive_routes'])
+    assert required <= set(seeds.ordinary_targets())
+    crossuser, _ = targets()
+    image_prompt = 'POST /api/v1/tasks/image_prompt/completions'
+    assert required - {image_prompt} <= set(crossuser)
+    assert 'GET /api/v1/cloud-sync/policy' in platform_operations()
+    refusal = next(entry for entry in seeds.SURFACE['control'] if entry['route'] == image_prompt)
+    assert refusal['all_actors'] and refusal['status'] == 404
+
+
+@pytest.mark.parametrize('route', seeds.SURFACE['required_drive_routes'])
+def test_required_owner_controls_reject_unentered_or_wrong_refusal_evidence(monkeypatch, route):
+    from . import plane
+    from .crossuser import expected_refusals
+    from .test_live_plane import test_live_drive_has_owner_controls_for_previously_unentered_routes as check
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    refusals = expected_refusals()
+    outcomes = {
+        target: plane.Outcome(
+            refusals[target]['status'] if target in refusals else 200,
+            target not in refusals,
+            json.dumps(refusals[target]['json']) if target in refusals else '{}',
+        )
+        for target in seeds.SURFACE['required_drive_routes']
+    }
+    check(outcomes)
+    outcomes[route] = plane.Outcome(404, False, '{"detail":"Fictional missing target"}')
+    with pytest.raises(AssertionError):
+        check(outcomes)
+
+
 @pytest.mark.parametrize('entry', [p for p in seeds.SURFACE['parameter'] if 'seeded_by' in p], ids=lambda p: p['key'])
 def test_every_seeded_by_names_a_callable_and_declares_dependencies(entry):
     assert callable(seeds._SEEDERS[entry['seeded_by']])
@@ -287,19 +324,26 @@ def test_starting_consent_cannot_suspend_the_connection_used_by_positive_control
     assert 'cloud_grant' in live['provides']
 
 
-@pytest.mark.parametrize(
-    ('providers', 'provider'), [(['onedrive', 'outlook_mail'], 'outlook_mail'), (['onedrive'], 'onedrive')]
-)
-def test_the_authorize_control_takes_another_provider_where_one_is_offered(providers, provider):
-    """Outlook mail keeps the control off the consented OneDrive connection; without it, OneDrive as before."""
+def test_the_authorize_control_takes_a_separate_provider():
+    """Outlook mail keeps the control off the consented OneDrive connection."""
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
     admin.request.side_effect = [
-        response(200, {'providers_enabled': providers}),
+        response(200, {'providers_enabled': ['onedrive', 'outlook_mail']}),
         response(201, {'connection_id': 'pending', 'authorize_url': 'http://soev-api:8020/oauth/start/attempt'}),
     ]
     assert seeds.seed_cloud_authorize_connection(ctx, {'key': 'cloud_authorize_connection'}) == 'pending'
-    admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections', json={'provider': provider})
+    admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections', json={'provider': 'outlook_mail'})
+    client.request.assert_not_called()
+
+
+def test_authorize_control_never_reuses_the_consented_onedrive_connection():
+    client, admin = Mock(), Mock()
+    ctx = seeds.SeedContext(client, admin, {'destructive': []})
+    admin.request.return_value = response(200, {'providers_enabled': ['onedrive']})
+    with pytest.raises(RuntimeError, match='separate Outlook'):
+        seeds.seed_cloud_authorize_connection(ctx, {'key': 'cloud_authorize_connection'})
+    admin.request.assert_called_once_with('GET', '/api/v1/cloud-sync/policy')
     client.request.assert_not_called()
 
 

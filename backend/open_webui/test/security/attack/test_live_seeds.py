@@ -129,6 +129,38 @@ def test_live_task_still_exists_after_the_rest_of_seeding(live_seeds):
     assert task_id in result.json()['tasks']
 
 
+def test_live_image_prompt_refusal_has_a_supported_owner_task_control(live_seeds):
+    from . import crossuser, plane
+
+    identities, resolved = live_seeds
+    positive = 'POST /api/v1/tasks/title/completions'
+    response = identities.admin.request(
+        'POST',
+        positive.split(' ', 1)[1],
+        json={
+            'model': resolved['/api/v1/analytics/models/{model_id}/overview', 'model_id'],
+            'chat_id': resolved['/api/v1/chats/{id}', 'id'],
+            'messages': [{'role': 'user', 'content': 'Fictional title control'}],
+        },
+    )
+    try:
+        assert response.status_code == 200, response.text
+        assert response.json()['choices'][0]['message']['content']
+    finally:
+        response.close()
+    route = 'POST /api/v1/tasks/image_prompt/completions'
+    declaration = crossuser.expected_refusals().get(route)
+    if declaration is not None:
+        for role in ('admin', 'user', 'intruder'):
+            response = getattr(identities, role).request(
+                'POST', route.split(' ', 1)[1], **crossuser._benign(route, resolved, seeds.SPEC)
+            )
+            try:
+                plane.record_design_refusal(route, role, response)
+            finally:
+                response.close()
+
+
 def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_seeds):
     identities, resolved = live_seeds
     share_id = resolved['/api/v1/chats/{id}/clone/shared', 'id']

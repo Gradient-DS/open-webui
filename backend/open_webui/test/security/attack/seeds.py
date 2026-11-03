@@ -675,7 +675,9 @@ def seed_cloud_authorize_connection(ctx, parameter):
     # connection that is not the consented OneDrive fixture. With one connection per owner
     # and provider that takes another provider; Outlook mail where the platform offers it.
     policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.admin)
-    provider = 'outlook_mail' if 'outlook_mail' in policy.get('providers_enabled', []) else 'onedrive'
+    if 'outlook_mail' not in policy.get('providers_enabled', []):
+        raise RuntimeError('Authorize control requires a separate Outlook mail connection')
+    provider = 'outlook_mail'
     created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
     return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 

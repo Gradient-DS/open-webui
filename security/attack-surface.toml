@@ -32,6 +32,20 @@
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
 
+# Required owner controls for sweep12's previously unentered operations.
+# The image-prompt operation has an exact all-actor refusal below; its supported
+# title-task control uses the same seeded chat, model and authenticated owner.
+required_drive_routes = [
+  "GET /api/v1/cloud-sync/policy",
+  "GET /api/v1/configs/data-retention",
+  "GET /api/v1/groups/id/{id}/preview",
+  "POST /api/v1/cloud-sync/connections/{connection_id}/authorize",
+  "POST /api/v1/knowledge/{id}/file/move",
+  "POST /api/v1/knowledge/{id}/file/remove",
+  "POST /api/v1/knowledge/{id}/file/update",
+  "POST /api/v1/tasks/image_prompt/completions",
+]
+
 # GET /api/v1/evaluations/feedbacks/list and /api/v1/evaluations/leaderboard
 # retain routers/evaluations.py's get_admin_user gate in prepared mode.
 # chat_routes.evaluation applies it before platform reads; platform own-record
@@ -645,7 +659,7 @@ backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent: one of another provider (Outlook mail) where the platform offers it, since soev-api keeps one connection per owner and provider. A later pass gets the same pending connection."
+description = "Starting consent suspends an enabled connection. Read policy with the admin's policy:read door, then seed a separate pending Outlook mail connection so this control cannot revoke OneDrive live-grant and schedule fixtures. soev-api keeps one connection per owner and provider; later passes reuse the pending connection."
 seeded_by = "seed_cloud_authorize_connection"
 depends_on = []
 fresh = false
@@ -1731,6 +1745,11 @@ status = 404
 detail = "Not Found"
 json = { "detail" = "Not Found" }
 reason = "tasks.generate_image_prompt explicitly refuses under v2; image prompt generation is not a soev.task/1 operation."
+
+[[field]]
+route = "POST /api/v1/tasks/title/completions"
+description = "Supported typed task positive control for the image-prompt refusal, using the seeded owner's completed thread and catalog model."
+v2 = { json = { model = "{model}", chat_id = "{chat}", messages = [{ role = "user", content = "Fictional title control" }] } }
 
 [[field]]
 route = "POST /api/v1/evaluations/feedback"

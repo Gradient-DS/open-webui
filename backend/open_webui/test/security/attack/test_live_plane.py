@@ -61,6 +61,20 @@ def test_live_drive_has_its_own_5xx_assertion(live_drive):
     assert not crashes, f'Drive found server errors:\n{plane.drive_report(live_drive)}'
 
 
+def test_live_drive_has_owner_controls_for_previously_unentered_routes(live_drive):
+    from .crossuser import expected_refusals, refused_as_expected
+
+    refusals = expected_refusals()
+    for route in seeds.SURFACE['required_drive_routes']:
+        if seeds.route_waived(route):
+            continue
+        outcome = live_drive[route]
+        if route in refusals:
+            assert refused_as_expected(refusals[route], outcome.status, outcome.body), (route, outcome)
+        else:
+            assert 200 <= outcome.status < 300 and outcome.entered, (route, outcome)
+
+
 def test_live_drive_reports_its_own_reach(live_drive, record_property):
     tally = plane._PASSES['drive']
     assert live_drive.keys() | tally.skipped.keys() == set(plane.operations())
