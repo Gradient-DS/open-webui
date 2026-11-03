@@ -166,6 +166,7 @@ def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):
     route = 'POST /api/v1/meetings/audio'
     entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
     context = seeds.SeedContext(None, None, seeds.SURFACE, token='audio')
+    context.values['meeting'] = 'fictional-meeting'
     parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
     request = crossuser._benign(route, parameters, seeds.SPEC)
     with wave.open(io.BytesIO(request['data']), 'rb') as audio:

@@ -11,6 +11,13 @@ from .client import (
     entered_the_handler,
     login,
 )
+from .seeds import runtime_soev_backed
+
+
+def new_chat_body(title):
+    if runtime_soev_backed() == 'drive':
+        return {'agent': 'soev_react', 'input': {'text': title}}
+    return {'chat': {'title': title}}
 
 
 def test_an_unauthenticated_client_is_refused():
@@ -38,9 +45,15 @@ def test_signup_mints_admin_and_distinct_ordinary_identities(identities):
 
 
 def test_an_authenticated_client_can_write(identities):
-    result = identities.user.request('POST', '/api/v1/chats/new', json={'chat': {'title': 'client-selftest'}})
+    result = identities.user.request('POST', '/api/v1/chats/new', json=new_chat_body('client-selftest'))
     assert result.status_code == 200, result.text
-    assert result.json()['user_id'] == identities.user.identity['id']
+    if runtime_soev_backed() == 'drive':
+        own = identities.user.request('GET', f'/api/v1/chats/{result.json()["id"]}')
+        assert own.status_code == 200, own.text
+        foreign = identities.intruder.request('GET', f'/api/v1/chats/{result.json()["id"]}')
+        assert foreign.status_code == 404, foreign.text
+    else:
+        assert result.json()['user_id'] == identities.user.identity['id']
     assert entered_the_handler(result)
     deleted = identities.user.request('DELETE', f'/api/v1/chats/{result.json()["id"]}')
     assert deleted.status_code == 200, deleted.text
@@ -171,7 +184,7 @@ def test_live_repair_preserves_ids_after_throttle_password_change_and_signout(id
     repaired = ensure_identities()
     try:
         assert [c.identity['id'] for c in repaired.clients] == ids
-        result = repaired.user.request('POST', '/api/v1/chats/new', json={'chat': {'title': 'repair-selftest'}})
+        result = repaired.user.request('POST', '/api/v1/chats/new', json=new_chat_body('repair-selftest'))
         assert result.status_code == 200, result.text
         deleted = repaired.user.request('DELETE', f'/api/v1/chats/{result.json()["id"]}')
         assert deleted.status_code == 200, deleted.text

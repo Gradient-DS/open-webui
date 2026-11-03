@@ -1,6 +1,7 @@
 """Live sealed-stack checks; run only by runtime-security.yml."""
 
 import pytest
+
 from . import model_path
 from .pass_support import crash_details, fresh_surface
 
@@ -27,6 +28,11 @@ def test_live_model_controls_produce_output(live_model_paths):
     # wrong or weak every other assertion in the module passes vacuously, so report
     # per probe what was required and what arrived rather than dumping the records.
     def _why(item):
+        from .crossuser import expected_refusals, refused_as_expected
+
+        declaration = expected_refusals().get(item['route'])
+        if declaration:
+            return None if refused_as_expected(declaration, item['status'], item.get('body', '')) else 'wrong refusal'
         if item['status'] is None:
             return 'no response (request never completed)'
         if not 200 <= item['status'] < 300:

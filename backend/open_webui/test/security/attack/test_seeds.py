@@ -745,6 +745,11 @@ def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch, mode):
             {'task_ids': []},
         ]
     )
+    if mode == 'drive':
+        assert seeds.seed_task(ctx, {'key': 'task'}) == 'attack_task_probe_fixture'
+        assert ctx.request.call_count == 3
+        ctx.admin.request.assert_not_called()
+        return
     with pytest.raises(RuntimeError, match='Task completed'):
         seeds.seed_task(ctx, {'key': 'task'})
     ctx.admin.request.assert_called_once_with('POST', '/api/tasks/stop/expired-task')
@@ -766,7 +771,12 @@ def test_task_seeder_observes_a_live_task_without_installing_a_function(monkeypa
             *[{'task_ids': ['live-task']}] * 3,
         ]
     )
-    assert seeds.seed_task(ctx, {'key': 'task'}) == 'live-task'
+    task = seeds.seed_task(ctx, {'key': 'task'})
+    if mode == 'drive':
+        assert task == 'attack_task_probe_fixture'
+        assert ctx.request.call_count == 3
+        return
+    assert task == 'live-task'
     model = ctx.request.call_args_list[0]
     assert model.args == ('POST', '/api/v1/models/create')
     assert model.kwargs['json']['base_model_id'] == 'stub-model'
@@ -789,10 +799,103 @@ def stop_seed_task(admin, resolved):
     if task_id is None:
         return
     result = admin.request('POST', f'/api/tasks/stop/{task_id}')
-    assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
+    if seeds.runtime_soev_backed() == 'drive':
+        from .crossuser import expected_refusals, refused_as_expected
+
+        assert refused_as_expected(
+            expected_refusals()['POST /api/tasks/stop/{task_id}'], result.status_code, result.text
+        )
+    else:
+        assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
 
 
 PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+
+
+def test_v2_chat_seeds_committed_messages_and_shares_to_a_known_group(monkeypatch):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fictional')
+    ctx.values.update(folder='fictional-folder', model='fictional-model', group='fictional-group')
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'fictional-thread'},
+            {'choices': [{'message': {'content': 'Fictional answer.'}}]},
+            {'messages': [{'position': 7, 'finished': True}]},
+            {},
+        ]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'chat_fork')
+    assert seeds.seed_chat(ctx, parameter) == 'fictional-thread'
+    assert ctx.values['chat_fork_position'] == '7'
+    create, turn, projection, folder = ctx.request.call_args_list
+    assert create.kwargs['json'] == {'agent': 'soev_react', 'input': {'text': 'A fictional regression conversation.'}}
+    assert turn.kwargs['json']['follow_thread'] is True
+    assert turn.kwargs['json']['chat_id'] == 'fictional-thread'
+    assert folder.kwargs['json'] == {'folder_id': 'fictional-folder'}
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    ctx.values.update(chat='fictional-thread', chat_message='7')
+    ctx.request = Mock(return_value={'share_id': 'fictional-thread'})
+    assert seeds.seed_chat_share(ctx, {'key': 'share'}) == 'fictional-thread'
+    assert ctx.request.call_args.kwargs['json'] == {
+        'audience': {'kind': 'group', 'id': 'platform:group:fictional-group'},
+        'at': 7,
+    }
+    entries = [
+        entry
+        for entry in seeds.SURFACE['field']
+        if entry['route']
+        in {
+            'POST /api/v1/chats/new',
+            'POST /api/v1/chats/{id}/fork',
+            'POST /api/v1/chats/{id}/share',
+        }
+    ]
+    resolved = seeds.Resolved(fields=seeds.resolve_fields(ctx, entries=entries))
+    assert crossuser._benign('POST /api/v1/chats/new', resolved, seeds.SPEC)['json'] == {
+        'agent': 'soev_react',
+        'input': {'text': 'Fictional conversation.'},
+    }
+    assert resolved.fields['POST /api/v1/chats/{id}/fork']['json'] == {'at': 7}
+    assert resolved.fields['POST /api/v1/chats/{id}/share']['json']['at'] == 7
+
+
+@pytest.mark.parametrize('readable', [False, True])
+def test_v2_feedback_seed_requires_committed_owner_readback(readable):
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fictional')
+    ctx.values.update(chat='fictional-thread', chat_message='7')
+    ctx.admin.request.return_value = response(204, None)
+    ctx.admin.request.return_value._content_consumed = True
+    ctx.request = Mock(
+        return_value={
+            'items': [
+                {
+                    'thread_id': 'fictional-thread',
+                    'rating': 1,
+                    'comment': 'Fictional feedback fictional',
+                }
+            ]
+            if readable
+            else []
+        }
+    )
+    if readable:
+        assert seeds.seed_feedback(ctx, {'key': 'feedback'}) == 'attack_feedback_probe_fictional'
+    else:
+        with pytest.raises(RuntimeError, match='could not be read back'):
+            seeds.seed_feedback(ctx, {'key': 'feedback'})
+    ctx.admin.request.assert_called_once_with(
+        'POST',
+        '/api/v1/evaluations/feedback',
+        json={
+            'thread_id': 'fictional-thread',
+            'position': 7,
+            'rating': 1,
+            'comment': 'Fictional feedback fictional',
+            'comment_authored': True,
+        },
+    )
 
 
 @pytest.mark.parametrize('role', ['admin', 'user'])
@@ -1090,7 +1193,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         route = entry['route']
         assert route in operations, route
         assert entry['description'].strip(), route
-        assert entry.keys() & {'json', 'params', 'files', 'form', 'headers'}, route
+        assert (entry.keys() | entry.get('v2', {}).keys()) & {'json', 'params', 'files', 'form', 'headers'}, route
         for name, value in entry.get('headers', {}).items():
             assert name == 'Content-Type' and value == 'application/json', route
         for name in entry.get('json', {}):
@@ -1110,6 +1213,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         for step in entry.get('setup', []):
             assert re.sub(r'\{[^}]+\}', '{}', step['via']) in templates, step['via']
         values = [
+            *_strings(entry.get('v2', {})),
             *_strings(entry.get('json', {})),
             *_strings(entry.get('params', {})),
             *_strings(entry.get('setup', [])),

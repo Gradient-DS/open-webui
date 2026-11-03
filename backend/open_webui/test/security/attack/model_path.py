@@ -28,7 +28,7 @@ from openapi_surface import writable_string_fields
 
 from . import plane
 from .pass_support import pass_run
-from .seeds import SPEC
+from .seeds import SPEC, runtime_soev_backed
 
 CHUNK_TIMEOUT = 5.0
 WALL_TIMEOUT = 60.0
@@ -167,6 +167,7 @@ def _drive(admin, route, body, result, *, probe, chunk_timeout, wall_timeout):
                 arm()
                 response._content = bytes(chunks)
                 response._content_consumed = True
+                item['body'] = response.text[:2000]
                 _body_result(response, item)
         except (StreamDeadline, requests.RequestException) as error:
             item['errors'].append(f'{type(error).__name__}: {error}')
@@ -193,7 +194,7 @@ def _base(model):
         'stream': True,
         'messages': [{'role': 'user', 'content': 'Complete the local regression control.'}],
         'prompt': 'Complete the local regression control.',
-        'responses': ['Local control response.'],
+        'responses': ['Local control response.', 'Another fictional response.'],
         'type': 'web_search',
     }
 
@@ -207,7 +208,7 @@ def payload_bodies(route, fields, model, payloads, full):
         body = _base(model)
         body['messages'][0]['content'] = batch['messages[].content']
         body['prompt'] = batch['messages[].content']
-        body['responses'] = [batch['messages[].content']]
+        body['responses'] = [batch['messages[].content'], 'Another fictional response.']
         yield 'content', body
     for batch in plane._payload_batches(route, fields, payloads, full=full):
         yield 'all-fields', {**_base(model), **plane._body_for(fields, batch), 'stream': True}
@@ -229,5 +230,7 @@ def drive_model_paths(
         result = ModelRun(tally)
         for route in routes:
             for probe, body in payload_bodies(route, fields.get(route, []), model, payloads, full):
+                if runtime_soev_backed() == 'drive':
+                    body.setdefault('chat_id', parameters['/api/v1/chats/{id}', 'id'])
                 _drive(admin, route, body, result, probe=probe, chunk_timeout=chunk_timeout, wall_timeout=wall_timeout)
     return result

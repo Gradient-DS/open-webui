@@ -72,7 +72,13 @@ def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
         for pair, value in first.items():
             p = seeds.parameter_for(*pair)
             if 'same_as' not in p and p.get('fresh', True):
-                assert second[pair] != value, f'{p["key"]} reused a previous pass fixture'
+                if seeds.runtime_soev_backed() == 'drive' and p['key'] == 'chat_message':
+                    # Positions are scoped to a thread; position 7 in a new
+                    # thread is a different message, never a reused fixture.
+                    parent = (pair[0], 'id')
+                    assert (second[parent], second[pair]) != (first[parent], value)
+                else:
+                    assert second[pair] != value, f'{p["key"]} reused a previous pass fixture'
     finally:
         stop_seed_task(identities.admin, second)
 
@@ -101,12 +107,23 @@ def test_live_chat_history_message_is_in_its_parent(live_seeds):
     chat_id, message_id = resolved[template, 'id'], resolved[template, 'message_id']
     result = identities.admin.request('GET', f'/api/v1/chats/{chat_id}')
     assert result.status_code == 200
-    assert result.json()['chat']['history']['messages'][message_id]['id'] == message_id
+    if seeds.runtime_soev_backed() == 'drive':
+        assert any(
+            str(message['position']) == message_id and message['finished'] for message in result.json()['messages']
+        )
+    else:
+        assert result.json()['chat']['history']['messages'][message_id]['id'] == message_id
 
 
 def test_live_task_still_exists_after_the_rest_of_seeding(live_seeds):
     identities, resolved = live_seeds
     task_id = resolved['/api/tasks/stop/{task_id}', 'task_id']
+    if seeds.runtime_soev_backed() == 'drive':
+        from . import plane
+
+        result = identities.admin.request('POST', f'/api/tasks/stop/{task_id}')
+        plane.record_design_refusal('POST /api/tasks/stop/{task_id}', 'admin', result)
+        return
     result = identities.admin.request('GET', '/api/tasks')
     assert result.status_code == 200
     assert task_id in result.json()['tasks']
@@ -116,14 +133,20 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
     identities, resolved = live_seeds
     share_id = resolved['/api/v1/chats/{id}/clone/shared', 'id']
     assert share_id == resolved['/api/v1/chats/share/{share_id}', 'share_id']
-    assert share_id != resolved['/api/v1/chats/{id}', 'id']
-    result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared')
+    if seeds.runtime_soev_backed() == 'drive':
+        assert share_id == resolved['/api/v1/chats/{id}', 'id']
+        stranger = identities.intruder.request('POST', f'/api/v1/chats/{share_id}/clone/shared', json={})
+        assert stranger.status_code == 404, stranger.text
+    else:
+        assert share_id != resolved['/api/v1/chats/{id}', 'id']
+    result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared', json={})
     assert result.status_code == 200
     assert result.json()['id'] not in (share_id, resolved['/api/v1/chats/{id}', 'id'])
 
 
-@pytest.mark.parametrize('role', ['admin', 'user'])
+@pytest.mark.parametrize('role', ['admin', 'user', 'intruder'])
 def test_live_v2_function_routes_refuse_every_operation(live_seeds, role):
+    from . import plane
     from .benign_requests import benign_request
     from .crossuser import expected_refusals, refused_as_expected
 
@@ -132,11 +155,12 @@ def test_live_v2_function_routes_refuse_every_operation(live_seeds, role):
     identities, resolved = live_seeds
     for route, declaration in expected_refusals().items():
         method, template = route.split(' ', 1)
-        if not template.startswith('/api/v1/functions/'):
+        if not template.startswith('/api/v1/functions/') and not declaration.get('all_actors'):
             continue
         target = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe=''), template)
         response = getattr(identities, role).request(method, target, **benign_request(route, resolved))
         try:
             assert refused_as_expected(declaration, response.status_code, response.text), (route, response.text)
+            plane.record_design_refusal(route, role, response)
         finally:
             response.close()

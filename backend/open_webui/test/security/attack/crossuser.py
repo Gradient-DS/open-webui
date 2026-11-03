@@ -125,7 +125,14 @@ def expected_refusals(surface=None):
 
 
 def refused_as_expected(declaration, status, body):
-    return bool(declaration) and status == declaration['status'] and declaration['detail'] in body
+    if not declaration or status != declaration['status'] or declaration['detail'] not in body:
+        return False
+    if 'json' in declaration:
+        try:
+            return json.loads(body) == declaration['json']
+        except ValueError:
+            return False
+    return True
 
 
 def _nothing_happened(answer):
@@ -296,6 +303,12 @@ def _same_object(stranger, owner):
     )
 
 
+def _administrator_refused(route, answer):
+    return answer.status in {401, 403} or refused_as_expected(
+        expected_refusals().get(route), answer.status, answer.body
+    )
+
+
 def _check(result, route, stranger, owner, markers, *, admin_only, control, resource_ids=(), subject_scoped=False):
     reasons = []
     if stranger.timed_out or (owner is not None and owner.timed_out):
@@ -305,7 +318,7 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         return
     if any(marker in stranger.body for marker in markers):
         reasons.append(('owner-marker', 'seeded owner marker in second-account response (including refusals)'))
-    if admin_only and stranger.status not in {401, 403}:
+    if admin_only and not _administrator_refused(route, stranger):
         reasons.append(('admin', f'administrator operation was not refused: HTTP {stranger.status}'))
     if 200 <= stranger.status < 300:
         disclosed = set(_object_ids(_json_or_text(stranger.body))) & set(resource_ids)
@@ -340,7 +353,12 @@ def _benign(route, parameters, spec):
     request = benign_request(route, parameters, spec)
     declared = plane._declared(parameters, route)
     if declared.get('json'):
-        request['json'] = plane._hold_declared(request.get('json'), (), declared['json'])[0]
+        variant = next((entry.get('v2', {}) for entry in seeds.SURFACE.get('field', []) if entry['route'] == route), {})
+        request['json'] = (
+            deepcopy(declared['json'])
+            if seeds.runtime_soev_backed() == 'drive' and 'json' in variant
+            else plane._hold_declared(request.get('json'), (), declared['json'])[0]
+        )
     if declared.get('params'):
         request['params'] = {**request.get('params', {}), **declared['params']}
     if declared.get('headers'):

@@ -32,6 +32,25 @@
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
 
+[[parameter]]
+key = "user_preview"
+name = "user_id"
+prefix = "/api/v1/users/{user_id}/preview"
+description = "Preview the authenticated admin's own resource inventory. Platform resource reads require that person's live login; an admin role never impersonates the disposable account target. Stranger/admin-gate assertions remain on this route."
+seeded_by = "seed_admin_user"
+depends_on = []
+actor = "admin"
+fresh = false
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/analytics/models/{model_id}/overview"
+status = 409
+detail = "unavailable"
+json = { state = "unavailable" }
+reason = "The prepared platform provides tenant usage, not the retired local per-model feedback/chat joins. Refuse before local content access."
+
 # Configuration a tenant admin can switch on at runtime but the stack cannot set
 # from its environment. Applied after configuration recovery and before any
 # pass snapshots, so every restore keeps it. Chart values only seed
@@ -98,9 +117,10 @@ actor = "admin"
 
 [[parameter]]
 key = "chat"
+v2_seeded_by = "seed_chat"
 name = "id"
 prefix = "/api/v1/chats/{id}"
-description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve, under a user message: resuming reads the assistant message's parentId and answered 409 without one. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve, under a user message: resuming reads the assistant message's parentId and answered 409 without one. Use the admin folder owner; create_new_chat validates folder ownership even for admins. Drive mode reserves a soev_react thread and completes a real turn before assigning the folder; no fabricated history is sent."
 via = "POST /api/v1/chats/new"
 body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "user_{token}" = { "id" = "user_{token}", "role" = "user", "content" = "Attack fixture question.", "childrenIds" = ["message_{token}"] }, "message_{token}" = { "id" = "message_{token}", "parentId" = "user_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [], "output" = [{ "type" = "function_call", "call_id" = "call_{token}", "name" = "attack_tool", "status" = "pending" }] } } } } }
 extract = "id"
@@ -109,9 +129,11 @@ actor = "admin"
 
 [[parameter]]
 key = "chat_fork"
+v2_seeded_by = "seed_chat"
+provides = ["chat_fork_position"]
 name = "id"
 prefix = "/api/v1/chats/{id}/fork"
-description = "routers/chats.py refuses to fork a chat whose last response is still running (409); the chat fixture's tool call is pending on purpose, so fork gets its own finished chat."
+description = "routers/chats.py refuses to fork a chat whose last response is still running (409); the chat fixture's tool call is pending on purpose, so fork gets its own finished chat. Drive mode creates a separate committed platform turn and publishes its actual fork position."
 via = "POST /api/v1/chats/new"
 body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-fork-{token}", "models" = ["{model}"], "history" = { "currentId" = "fork_{token}", "messages" = { "fork_{token}" = { "id" = "fork_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fork message.", "done" = true, "childrenIds" = [] } } } } }
 extract = "id"
@@ -120,9 +142,10 @@ actor = "admin"
 
 [[parameter]]
 key = "chat_message"
+v2_seeded_by = "seed_chat_message"
 name = "message_id"
 prefix = "/api/v1/chats/{id}/messages/{message_id}"
-description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; Read as the admin chat owner."
+description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; Read as the admin chat owner. Drive mode reads the committed message position; its identity is (thread id, position)."
 via = "GET /api/v1/chats/{chat}"
 extract = "chat.history.currentId"
 depends_on = ["chat"]
@@ -130,19 +153,20 @@ actor = "admin"
 
 [[parameter]]
 key = "share"
+v2_seeded_by = "seed_chat_share"
 name = "share_id"
 prefix = "/api/v1/chats/share/{share_id}"
-description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot and returns the original chat with share_id. chat.share binds admins too; docker-compose.ci.yaml turns it on. The handler still requires the chat to belong to this same actor."
+description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot and returns the original chat with share_id. chat.share binds admins too; docker-compose.ci.yaml turns it on. The handler still requires the chat to belong to this same actor. Drive mode uses the mirrored control group, an explicit committed position, and the thread id returned as share_id."
 via = "POST /api/v1/chats/{chat}/share"
 extract = "share_id"
-depends_on = ["chat"]
+depends_on = ["chat", "chat_message", "folder", "group"]
 actor = "admin"
 
 [[parameter]]
 key = "shared_clone"
 name = "id"
 prefix = "/api/v1/chats/{id}/clone/shared"
-description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_by_share_id(id), unlike other /chats/{id} operations. Use the share snapshot id; a chat id never bypasses share authorization."
+description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_by_share_id(id), unlike other /chats/{id} operations. Use the share snapshot id; a chat id never bypasses share authorization. Under prepared threads the live share id equals its source thread id; the stranger still must be refused and the clone must be new."
 same_as = "share"
 
 [[parameter]]
@@ -311,6 +335,7 @@ actor = "admin"
 
 [[parameter]]
 key = "automation"
+v2_refused_value = "attack_automation_{token}"
 name = "id"
 prefix = "/api/v1/automations/{id}"
 description = "routers/automations.py:create_new_automation validates rrule. Inactive fixture avoids scheduled background runs while later routes are seeded. Admin avoids features.automations and cumulative count/minimum-interval limits; namespace enables automations.enable."
@@ -322,9 +347,11 @@ actor = "admin"
 
 [[parameter]]
 key = "group"
+v2_seeded_by = "seed_group"
+fresh = false
 name = "id"
 prefix = "/api/v1/groups/id/{id}"
-description = "routers/groups.py:create_new_group returns GroupResponse.id."
+description = "routers/groups.py:create_new_group returns GroupResponse.id. Drive mode reads the existing platform mirror; identity and membership writes are console-only."
 via = "POST /api/v1/groups/create"
 body = { "name" = "attack-{token}", "description" = "Attack group" }
 extract = "id"
@@ -424,20 +451,22 @@ depends_on = ["namespace"]
 
 [[parameter]]
 key = "feedback"
+v2_seeded_by = "seed_feedback"
 name = "id"
 prefix = "/api/v1/evaluations/feedback/{id}"
-description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate."
+description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate. Drive mode commits a platform rating and verifies its owner readback. The individual legacy feedback id is an explicit refusal probe."
 via = "POST /api/v1/evaluations/feedback"
 body = { "type" = "rating", "data" = { "rating" = 1, "model_id" = "{model}" }, "meta" = { "chat_id" = "{chat}" } }
 extract = "id"
-depends_on = ["chat", "model"]
+depends_on = ["chat", "model", "chat_message"]
 actor = "admin"
 
 [[parameter]]
 key = "archive"
+v2_refused_value = "attack_archive_{token}"
 name = "archive_id"
 prefix = "/api/v1/archives/{archive_id}"
-description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after the admin snapshots their own data. Archival does not delete its target user."
+description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after the admin snapshots their own data. Archival does not delete its target user. Prepared threads deliberately have no legacy snapshot/export contract; v2_refused_value drives that explicit boundary."
 via = "POST /api/v1/archives/user/{archive_user}"
 body = { "reason" = "Attack archive {token}" }
 extract = "archive_id"
@@ -550,7 +579,7 @@ unseedable = "main.py:oauth_client_authorize requires a registered OAuth client.
 key = "task"
 name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
-description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh assistant inherits the readable catalog fixture with public read access and no function/filter. Its streaming user message carries the CI stub's owui_attack_task_hold marker. The stub holds only that response with empty heartbeat chunks for at most one hour, until cancellation disconnects it. Seed late, cancel after the pass, and re-seed each pass."
+description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh assistant inherits the readable catalog fixture with public read access and no function/filter. Its streaming user message carries the CI stub's owui_attack_task_hold marker. The stub holds only that response with empty heartbeat chunks for at most one hour, until cancellation disconnects it. Seed late, cancel after the pass, and re-seed each pass. Prepared threads run on their HTTP stream and do not register Redis task ids. Drive mode still creates and verifies the readable assistant, then probes the retired id dispatcher for exact 409 unavailable."
 seeded_by = "seed_task"
 depends_on = ["model", "chat", "prompt_history", "terminal_path"]
 
@@ -782,6 +811,7 @@ json = { collection_name = "file-{file}", file_id = "{file}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/meetings/audio"
+v2 = { params = { name = "attack-{token}.wav", thread_id = "{meeting}" } }
 description = "A valid mono 16-bit PCM WAV with one silent frame at 16 kHz exercises the platform's owner-scoped audio upload."
 params = { name = "attack-{token}.wav" }
 body_base64 = "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA=="
@@ -813,6 +843,7 @@ json = { "calendar_id" = "{calendar}" }
 
 [[field]]
 route = "POST /api/v1/chats/new"
+v2 = { json = { agent = "soev_react", input = { text = "Fictional conversation." } } }
 description = "routers/chats.py:create_new_chat answers 404 when folder_id is not a folder the caller can write."
 json = { "folder_id" = "{folder}" }
 
@@ -1140,7 +1171,7 @@ backed_by = "soev-solutions"
 key = "platform_thread"
 name = "thread_id"
 prefix = "/api/v1/threads/{thread_id}"
-description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the admin-owned meeting thread. Private drive runs require ENABLE_V2_THREADS; the sealed stack leaves it off."
+description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the admin-owned meeting thread. Private drive runs enable ENABLE_V2_THREADS in the sealed stack."
 same_as = "meeting"
 
 # The v2 router dependency refuses these before loading or looking up any function.
@@ -1293,3 +1324,402 @@ backed_by = "soev-solutions"
 route = "POST /api/v1/threads/{thread_id}/read"
 description = "require_header_mutation requires a JSON content type even for this bodyless write. AttackClient supplies each caller's own bearer; no client-selected user or timestamp is sent."
 headers = { "Content-Type" = "application/json" }
+
+[[field]]
+route = "POST /api/v1/chats/{id}/fork"
+description = "Fork at a committed platform message position."
+v2 = { json = { at = "{chat_fork_position}" }, json_integer_fields = ["at"] }
+
+[[field]]
+route = "POST /api/v1/chats/{id}/share"
+description = "Bound the live share to the existing mirrored control group; unrelated actors have no membership."
+v2 = { json = { audience = { kind = "group", id = "platform:group:{group}" }, at = "{chat_message}" }, json_integer_fields = ["at"] }
+
+[[field]]
+route = "POST /api/v1/chats/{id}/clone/shared"
+description = "Prepared thread mutation requires JSON and the authenticated bearer."
+v2 = { headers = { "Content-Type" = "application/json" } }
+
+[[field]]
+route = "DELETE /api/v1/chats/{id}/share"
+description = "Prepared thread mutation requires JSON and the authenticated bearer."
+v2 = { headers = { "Content-Type" = "application/json" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/archives/{archive_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/automations/{id}/delete"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/chats/{id}/messages/{message_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/evaluations/feedback/{id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/evaluations/feedbacks"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/evaluations/feedbacks/all"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/groups/id/{id}/delete"
+status = 403
+detail = "platform_groups_read_only"
+json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
+reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/users/{user_id}"
+status = 403
+detail = "offboarding:console"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "offboarding:console", "detail" = "Offboarding happens in the soev console" } }
+reason = "policy_jobs.py: the console owns offboarding, including inventories. No administrator exception."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/archives/{archive_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/archives/{archive_id}/export"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/automations/list"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/automations/{id}"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/automations/{id}/runs"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/chats/all"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/chats/all/archived"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/evaluations/feedback/{id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/evaluations/feedbacks/all/export"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/evaluations/feedbacks/all/ids"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/evaluations/feedbacks/models"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/evaluations/leaderboard/{model_id}/history"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/notes/{id}/chat"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/notes/{id}/chats"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/users/{user_id}/shared-data"
+status = 403
+detail = "offboarding:console"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "offboarding:console", "detail" = "Offboarding happens in the soev console" } }
+reason = "policy_jobs.py: the console owns offboarding, including inventories. No administrator exception."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "PATCH /api/v1/archives/{archive_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/tasks/stop/{task_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/archives/user/{user_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/automations/create"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/automations/{id}/run"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/automations/{id}/toggle"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/automations/{id}/update"
+status = 403
+detail = "automations:unavailable"
+json = { "detail" = { "code" = "policy_forbids", "constraint" = "automations:unavailable", "detail" = "Automations are not available yet" } }
+reason = "policy_jobs.py: automation execution requires a live owner request; the scheduler is inert under v2. All routes refuse before legacy row access."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/import"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/{id}/compact"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/{id}/messages/{message_id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/{id}/messages/{message_id}/event"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/evaluations/feedback/{id}"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/groups/create"
+status = 403
+detail = "platform_groups_read_only"
+json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
+reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/groups/id/{id}/update"
+status = 403
+detail = "platform_groups_read_only"
+json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
+reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/groups/id/{id}/users/add"
+status = 403
+detail = "platform_groups_read_only"
+json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
+reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/groups/id/{id}/users/remove"
+status = 403
+detail = "platform_groups_read_only"
+json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
+reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/notes/{id}/chat"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tasks/image_prompt/completions"
+status = 404
+detail = "Not Found"
+json = { "detail" = "Not Found" }
+reason = "tasks.generate_image_prompt explicitly refuses under v2; image prompt generation is not a soev.task/1 operation."
+
+[[field]]
+route = "POST /api/v1/evaluations/feedback"
+description = "Rate a committed platform message without accepting caller-chosen model or agent metadata."
+v2 = { json = { thread_id = "{chat}", position = "{chat_message}", rating = 1 }, json_integer_fields = ["position"] }
+
+[[field]]
+route = "POST /api/v1/chats/{id}"
+description = "Prepared metadata writes accept title/tags/features, not the legacy history dictionary."
+v2 = { json = { title = "Fictional conversation {token}" } }
