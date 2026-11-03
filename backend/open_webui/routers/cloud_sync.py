@@ -61,7 +61,7 @@ async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
             default_cadence_minutes=None,
         )
     try:
-        policy = await identity.build_client().as_service().get('/v1/sync-policy')
+        policy = await identity.build_client().get('/v1/sync-policy', as_user=identity.external_ref(user))
     except SoevApiError as error:
         detail = {'code': error.code, 'detail': error.detail}
         if error.constraint is not None:
