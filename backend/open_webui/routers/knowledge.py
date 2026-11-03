@@ -950,7 +950,7 @@ async def add_file_to_knowledge_by_id(
             directory_id=form_data.directory_id,
             db=db,
         )
-    except SoevNotConfigured:
+    except (HTTPException, SoevNotConfigured):
         raise
     except Exception as e:
         log.debug(e)
