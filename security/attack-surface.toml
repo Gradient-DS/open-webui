@@ -46,10 +46,9 @@ required_drive_routes = [
   "POST /api/v1/tasks/image_prompt/completions",
 ]
 
-# GET /api/v1/evaluations/feedbacks/list and /api/v1/evaluations/leaderboard
-# retain routers/evaluations.py's get_admin_user gate in prepared mode.
-# chat_routes.evaluation applies it before platform reads; platform own-record
-# filtering does not grant an OWUI non-admin access to these admin operations.
+# Prepared DarkChatRoute handlers preserve the legacy dependency tree's admin
+# gate in every domain. Admin-only content refusals below describe admitted
+# admins; non-admins receive get_admin_user's 401 sign_in before dispatch.
 
 [[parameter]]
 key = "user_preview"
@@ -1428,12 +1427,11 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 
 [[control]]
 runtime_soev_backed = "drive"
-all_actors = true
 route = "DELETE /api/v1/evaluations/feedbacks/all"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1527,39 +1525,35 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 
 [[control]]
 runtime_soev_backed = "drive"
-all_actors = true
 route = "GET /api/v1/evaluations/feedbacks/all/export"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
-all_actors = true
 route = "GET /api/v1/evaluations/feedbacks/all/ids"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
-all_actors = true
 route = "GET /api/v1/evaluations/feedbacks/models"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
-all_actors = true
 route = "GET /api/v1/evaluations/leaderboard/{model_id}/history"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
+reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
