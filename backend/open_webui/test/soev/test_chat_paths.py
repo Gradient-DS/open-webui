@@ -904,33 +904,6 @@ async def test_missing_empty_and_temporary_create_contracts_do_not_write(dark_ap
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'action,fields,expected',
-    [
-        ('approve', {}, {'approve': True}),
-        ('reject', {}, {'approve': False}),
-        (
-            'answer',
-            {'answers': {'fictional-choice': 'fictional-value'}},
-            {'answers': {'fictional-choice': 'fictional-value'}, 'timed_out': False},
-        ),
-    ],
-)
-async def test_tool_approvals_use_platform_input_without_local_messages(dark_api, action, fields, expected):
-    import json
-
-    from open_webui.soev.thread_approvals import resolve
-    from open_webui.utils.tool_approval import ResolveToolCallForm
-
-    form = ResolveToolCallForm(call_id='root:7', action=action, **fields)
-    result = await resolve(dark_api.records, 'fictional-chat', form, 'fictional-fern')
-    assert result == {'status': True, 'chat_id': 'fictional-chat'}
-    assert dark_api.calls[-1].url.path == '/v1/chat/threads/fictional-thread/inputs'
-    assert json.loads(dark_api.calls[-1].content) == {'answering': 'root:7', 'input': expected}
-    assert not dark_api.records.writes
-
-
-@pytest.mark.asyncio
 async def test_owned_branch_delete_keeps_the_clone_independent(dark_api):
     dark_api.records.records.append(Organization(id='fictional-clone', thread_id='fictional-clone'))
     response = await dark_api.browser.delete('/api/v1/chats/fictional-chat')

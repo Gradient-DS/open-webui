@@ -444,13 +444,6 @@ class ThreadClient:
         if response.status_code != 204:
             raise ThreadError(502, 'reconnect')
 
-    async def answer(self, thread_id: str, *, answering: str, input: JsonValue) -> None:
-        await self._request(
-            'POST',
-            f'/v1/chat/threads/{_identifier(thread_id)}/inputs',
-            body={'input': input, 'answering': answering},
-        )
-
     async def cancel(self, thread_id: str) -> None:
         await self._request('POST', f'/v1/chat/threads/{_identifier(thread_id)}/cancel', body={})
 

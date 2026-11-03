@@ -849,8 +849,17 @@ json = { "folder_id" = "{folder}" }
 
 [[field]]
 route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
-description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool call not found' unless call_id names a function_call in the message output; the chat fixture seeds one, pending. Reject, because approve and answer need a real tool or an ask_user call."
+description = "Legacy mode resolves the seeded pending function_call by call_id. Platform tool approvals are retired: drive this same request for every actor and assert the exact unavailable refusal."
 json = { "call_id" = "call_{token}", "action" = "reject" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "Tool approvals are retired by product decision (2026-11-03); no approval-producing platform tools exist. Refuse before thread or platform access for every authenticated actor, including owner and admin."
 
 [[field]]
 backed_by = "soev-solutions"

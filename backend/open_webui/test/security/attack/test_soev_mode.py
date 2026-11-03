@@ -325,3 +325,26 @@ def test_v2_action_probe_reaches_the_existing_missing_action_refusal(monkeypatch
     assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
     ownership.assert_awaited_once_with('fictional-chat', user)
     lookup.assert_awaited_once_with('fictional-action')
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_retired_approval_is_an_exact_all_actor_control_and_never_waived(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'POST /api/v1/chats/{id}/messages/{message_id}/resolve'
+    assert route in plane.operations()
+    assert route not in coverage.waivers()
+    assert not seeds.route_waived(route)
+    field = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
+    assert field['json'] == {'call_id': 'call_{token}', 'action': 'reject'}
+    declaration = crossuser.expected_refusals().get(route)
+    if mode == 'waive':
+        assert declaration is None
+        return
+    assert declaration['all_actors'] is True
+    assert declaration['status'] == 409
+    assert declaration['json'] == {'state': 'unavailable'}
+    assert crossuser.refused_as_expected(declaration, 409, '{"state":"unavailable"}')
+    for status, body in [(200, '{}'), (404, '{"state":"unavailable"}'), (409, '{"state":"other"}')]:
+        assert not crossuser.refused_as_expected(declaration, status, body)
