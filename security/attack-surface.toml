@@ -32,6 +32,11 @@
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
 
+# GET /api/v1/evaluations/feedbacks/list and /api/v1/evaluations/leaderboard
+# retain routers/evaluations.py's get_admin_user gate in prepared mode.
+# chat_routes.evaluation applies it before platform reads; platform own-record
+# filtering does not grant an OWUI non-admin access to these admin operations.
+
 [[parameter]]
 key = "user_preview"
 name = "user_id"

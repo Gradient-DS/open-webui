@@ -713,7 +713,7 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/user')
     assert len(listed.json()['items']) == 1
     dark_api.state['admin'] = True
-    # The fake's admin claim simulates the platform token, independent of OWUI role.
+    dark_api.app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern', role='admin')
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert len(listed.json()['items']) == 2
     assert set(listed.json()['items'][1]) == {'thread_id', 'rating', 'model', 'agent', 'time', 'comment'}
@@ -722,6 +722,20 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
     dark_api.state['status'] = 403
     denied = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert denied.status_code == 404 and 'secret' not in denied.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', ['feedbacks/list', 'leaderboard'])
+@pytest.mark.parametrize('role', ['user', 'pending'])
+@pytest.mark.parametrize('platform_admin', [False, True])
+async def test_evaluation_admin_routes_refuse_nonadmins_before_platform_access(dark_api, route, role, platform_admin):
+    dark_api.state['admin'] = platform_admin
+    dark_api.app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-lark', role=role)
+    response = await dark_api.browser.get(f'/api/v1/evaluations/{route}')
+    assert response.status_code == 401
+    assert response.json() == {'state': 'sign_in'}
+    assert response.headers['cache-control'] == 'private, no-store'
+    assert dark_api.calls == []
 
 
 @pytest.mark.asyncio

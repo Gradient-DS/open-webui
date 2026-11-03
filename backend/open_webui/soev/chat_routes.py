@@ -228,6 +228,10 @@ async def organize(service, request, user, identifier, route):
 
 
 async def evaluation(request: Request, user, route: str):
+    if route in {'/leaderboard', '/feedbacks/list'}:
+        from open_webui.utils.auth import get_admin_user
+
+        get_admin_user(user)
     client = threads.build_client()
     if request.method == 'POST' and route == '/feedback':
         form = FeedbackForm.model_validate(await body(request))
