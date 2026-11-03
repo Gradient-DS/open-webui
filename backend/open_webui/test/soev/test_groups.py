@@ -406,11 +406,12 @@ async def test_group_identity_update_refuses_every_actor_before_target_access(gr
 
 
 @pytest.mark.asyncio
-async def test_group_product_setting_update_still_requires_admin(group_db, monkeypatch):
+@pytest.mark.parametrize('actor', ['lark', 'elm'])
+async def test_group_product_setting_update_still_requires_admin(group_db, monkeypatch, actor):
     from open_webui.constants import ERROR_MESSAGES
     from open_webui.routers import groups
 
-    app = group_router_app(group_db, SimpleNamespace(id='lark', role='user'))
+    app = group_router_app(group_db, SimpleNamespace(id=actor, role='user'))
     publish = AsyncMock()
     monkeypatch.setattr(groups, 'publish_event', publish)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:

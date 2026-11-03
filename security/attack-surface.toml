@@ -1691,14 +1691,10 @@ detail = "platform_groups_read_only"
 json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
 reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
+[[field]]
 route = "POST /api/v1/groups/id/{id}/update"
-status = 403
-detail = "platform_groups_read_only"
-json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
-reason = "group_policy.py: the schema-derived request includes console-owned identity or membership fields. Refuse those even when mixed with product settings. Admin-only permissions/data updates and group reads remain supported."
+description = "Admin positive control for product settings only. routers/groups.py:require_group_update protects console identity/membership; get_admin_user deliberately returns 401 ACCESS_PROHIBITED for user/intruder settings writes."
+json = { permissions = { chat = { file_upload = false } }, data = { config = { share = false } } }
 
 [[control]]
 runtime_soev_backed = "drive"
