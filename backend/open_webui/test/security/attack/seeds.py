@@ -17,7 +17,7 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import requests
 
@@ -244,13 +244,22 @@ class SeedContext:
         body = json_body(response)
         if body is None:
             raise RuntimeError(f'Seeding {method} {path} returned no JSON')
-        # Local processing is synchronous; a soev-backed deployment returns a job
-        # instead, and the next fixture step must not race that ingestion.
-        if method == 'POST' and path == '/api/v1/retrieval/process/file' and body.get('job_id'):
-            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
-        elif method == 'POST' and re.fullmatch(r'/api/v1/knowledge/[^/]+/file/add', path):
-            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
+        self.wait_for_ingestion(method, path, body, kwargs.get('json'), actor=actor)
         return body
+
+    def wait_for_ingestion(self, method, path, body, payload, *, actor=None):
+        if method != 'POST':
+            return
+        # Local processing is synchronous; platform mutations must settle before
+        # another request reuses their file, including each corpus mutation.
+        if path == '/api/v1/retrieval/process/file' and isinstance(body, dict) and body.get('job_id'):
+            self.wait_for_file(payload['file_id'], actor=actor)
+        elif re.fullmatch(r'/api/v1/knowledge/[^/]+/file/(add|update)', path):
+            self.wait_for_file(payload['file_id'], actor=actor)
+        elif runtime_soev_backed() == 'drive' and (
+            match := re.fullmatch(r'/api/v1/files/([^/]+)/data/content/update', path)
+        ):
+            self.wait_for_file(unquote(match[1]), actor=actor)
 
     def wait_for_file(self, file_id, *, actor=None, timeout=120):
         deadline = time.monotonic() + timeout

@@ -271,6 +271,10 @@ def _request(admin, actor, route, target, tally, kwargs):
             # needs the complete original body, and an admin configuration guard
             # even when the actor is an ordinary user.
             entered = plane.record(route, response.status_code, response, pass_name='crossuser')
+            if 200 <= response.status_code < 300:
+                seeds.SeedContext(client, admin, seeds.SURFACE).wait_for_ingestion(
+                    route.split(' ', 1)[0], target, seeds.json_body(response), kwargs.get('json')
+                )
             return plane.Outcome(response.status_code, entered, response.text)
         finally:
             response.close()
