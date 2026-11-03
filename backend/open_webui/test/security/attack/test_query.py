@@ -25,7 +25,8 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (48, 97)
+    assert (len(targets), sum(map(len, targets.values()))) == (48, 98)
+    assert targets['POST /api/v1/meetings/audio'] == ['name', 'thread_id']
     assert targets['GET /api/v1/models/model/sharing'] == ['id']
     assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
     assert targets['GET /api/v1/threads'] == ['cursor', 'q']

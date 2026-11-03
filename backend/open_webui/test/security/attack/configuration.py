@@ -14,6 +14,7 @@ import requests
 from hostile_corpus import FETCH_URLS, REFLECTION_PROBE, fetch_payloads
 
 from .client import json_body
+from .diagnostics import timed
 
 EXPORT = '/api/v1/configs/export'
 IMPORT = '/api/v1/configs/import'
@@ -48,7 +49,8 @@ _verified = None
 
 def _request(admin, method, path, **kwargs):
     kwargs.setdefault('timeout', CONFIG_TIMEOUT_SECONDS)
-    response = admin.request(method, path, **kwargs)
+    with timed(f'configuration HTTP {method} {path}'):
+        response = admin.request(method, path, **kwargs)
     try:
         body = json_body(response)
         if not 200 <= response.status_code < 300 or not isinstance(body, dict):

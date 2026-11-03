@@ -91,7 +91,13 @@ def test_meeting_resource_operations_bind_the_actual_caller_and_preserve_refusal
     if method == 'GET':
         platform.replies.append(httpx.Response(200, json={'status': {'state': 'waiting'}, 'events': []}))
     elif method == 'POST':
-        platform.replies.append(httpx.Response(200, headers={'X-Soev-Thread-Id': 'thr-owned'}, content=b''))
+        platform.replies.append(
+            httpx.Response(
+                200,
+                headers={'X-Soev-Thread-Id': 'thr-owned', 'Content-Type': 'text/event-stream'},
+                content=b'event: status\ndata: {"state":"waiting"}\n\n',
+            )
+        )
     else:
         platform.replies.append(httpx.Response(204))
     response = platform.browser.request(
@@ -130,3 +136,29 @@ def test_picker_grant_and_idempotency_key_cannot_select_another_users_collection
         assert request.headers['x-soev-user-token'] == f'fictional-login:owui:user:{actor}'
         assert request.headers['idempotency-key'] == f'picker:{actor}:{key}'
         assert json.loads(request.content)['collection_key'] == f'attachments-{actor}'
+
+
+@pytest.mark.parametrize('actor,status', [('intruder', 404), ('owner', 201)])
+def test_meeting_audio_thread_never_selects_the_owners_identity(platform, actor, status):
+    platform.replies.append(
+        httpx.Response(
+            status,
+            json={'id': 'fictional-audio'}
+            if status == 201
+            else {
+                'code': 'not_found',
+                'detail': 'No such thread',
+            },
+        )
+    )
+    response = platform.browser.post(
+        '/api/v1/meetings/audio',
+        params={'name': 'fictional.wav', 'thread_id': 'thr-owned'},
+        headers={'X-Test-User': actor, 'X-Acting-User-Id': 'owner'},
+        content=b'fictional audio',
+    )
+    assert response.status_code == status
+    sent = platform.sent[-1]
+    assert sent.url.path == '/v1/audio'
+    assert sent.url.params['thread_id'] == 'thr-owned'
+    assert sent.headers['x-soev-user-token'] == f'fictional-login:owui:user:{actor}'

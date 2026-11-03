@@ -320,11 +320,10 @@ async def test_default_signup_assignment_does_not_write_platform_members(group_d
     assert await Groups.get_group_user_ids_by_id('13b95f20-57d8-48c6-9a13-042bcf78d021', db=group_db) == ['fern']
 
 
-@pytest.mark.asyncio
-async def test_admin_group_reads_and_product_setting_update_remain_available(group_db):
+def group_router_app(group_db, actor):
     from open_webui.internal.db import get_async_session
     from open_webui.routers import groups
-    from open_webui.utils.auth import get_admin_user, get_verified_user
+    from open_webui.utils.auth import get_current_user
 
     app = FastAPI()
     app.include_router(groups.router, prefix='/groups')
@@ -333,8 +332,15 @@ async def test_admin_group_reads_and_product_setting_update_remain_available(gro
         yield group_db
 
     app.dependency_overrides[get_async_session] = session
-    for dependency in (get_admin_user, get_verified_user):
-        app.dependency_overrides[dependency] = lambda: SimpleNamespace(id='fern', role='admin')
+    app.dependency_overrides[get_current_user] = lambda: actor
+    return app
+
+
+@pytest.mark.asyncio
+async def test_admin_group_reads_and_product_setting_update_remain_available(group_db):
+    from open_webui.routers import groups
+
+    app = group_router_app(group_db, SimpleNamespace(id='fern', role='admin'))
     # Event publishing needs application configuration; isolate that side effect.
     from unittest.mock import patch
 
@@ -356,6 +362,69 @@ async def test_admin_group_reads_and_product_setting_update_remain_available(gro
             assert updated.status_code == 200, updated.text
             assert updated.json()['name'] == 'Old'
             assert updated.json()['permissions'] == {'chat': {'file_upload': False}}
+            assert updated.json()['data'] == {'config': {'share': False}}
+            assert await Groups.get_group_user_ids_by_id(row()['id'], db=group_db) == ['fern']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('actor,role', [('fern', 'admin'), ('lark', 'user'), ('elm', 'user')])
+@pytest.mark.parametrize(
+    'body',
+    [
+        {'name': 'Changed'},
+        {'description': 'Changed'},
+        {'user_ids': ['lark']},
+        {'name': None},
+        {'description': None},
+        {'user_ids': None},
+        {'name': 'Changed', 'permissions': {'chat': {'file_upload': False}}, 'data': {'config': {'share': False}}},
+    ],
+)
+async def test_group_identity_update_refuses_every_actor_before_target_access(group_db, monkeypatch, actor, role, body):
+    from open_webui.routers import groups
+
+    app = group_router_app(group_db, SimpleNamespace(id=actor, role=role))
+    publish = AsyncMock()
+    monkeypatch.setattr(groups, 'publish_event', publish)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
+        for target in (row()['id'], 'missing'):
+            response = await client.post(f'/groups/id/{target}/update', json=body)
+            assert response.status_code == 403, response.text
+            assert response.json() == {
+                'detail': {
+                    'code': 'platform_groups_read_only',
+                    'detail': 'Groups are managed in the platform console.',
+                }
+            }
+    unchanged = await Groups.get_group_by_id(row()['id'], db=group_db)
+    assert unchanged.name == 'Old'
+    assert unchanged.description == ''
+    assert unchanged.permissions == {'workspace': {'knowledge': True}}
+    assert unchanged.data == {'config': {'share': 'members'}}
+    assert await Groups.get_group_user_ids_by_id(row()['id'], db=group_db) == ['fern']
+    publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('actor', ['lark', 'elm'])
+async def test_group_product_setting_update_still_requires_admin(group_db, monkeypatch, actor):
+    from open_webui.constants import ERROR_MESSAGES
+    from open_webui.routers import groups
+
+    app = group_router_app(group_db, SimpleNamespace(id=actor, role='user'))
+    publish = AsyncMock()
+    monkeypatch.setattr(groups, 'publish_event', publish)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
+        response = await client.post(
+            f'/groups/id/{row()["id"]}/update',
+            json={'permissions': {'chat': {'file_upload': False}}, 'data': {'config': {'share': False}}},
+        )
+    assert response.status_code == 401
+    assert response.json() == {'detail': ERROR_MESSAGES.ACCESS_PROHIBITED}
+    unchanged = await Groups.get_group_by_id(row()['id'], db=group_db)
+    assert unchanged.permissions == {'workspace': {'knowledge': True}}
+    assert unchanged.data == {'config': {'share': 'members'}}
+    publish.assert_not_awaited()
 
 
 @pytest.mark.asyncio

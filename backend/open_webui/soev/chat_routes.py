@@ -3,6 +3,7 @@
 import json
 
 from fastapi import Depends, Request
+from fastapi.dependencies.utils import get_flat_dependant
 from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -274,9 +275,15 @@ class DarkChatRoute(APIRoute):
         legacy = super().get_route_handler()
         if not self.applies():
             return legacy
-        from open_webui.utils.auth import get_verified_user
+        from open_webui.utils.auth import get_admin_user, get_verified_user
 
-        async def replacement(request: Request, user=Depends(get_verified_user)):
+        authentication = (
+            get_admin_user
+            if any(dependency.call is get_admin_user for dependency in get_flat_dependant(self.dependant).dependencies)
+            else get_verified_user
+        )
+
+        async def replacement(request: Request, user=Depends(authentication)):
             handler = {'chats': chat, 'evaluations': evaluation}.get(self.domain)
             if handler is None:
                 refused()

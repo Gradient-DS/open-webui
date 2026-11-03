@@ -45,6 +45,7 @@ from starsessions import (
 )
 from starsessions.stores.redis import RedisStore
 
+from open_webui.soev.thread_approvals import require_legacy_approval
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.config import (
@@ -2069,7 +2070,7 @@ generate_chat_completions = chat_completion
 generate_chat_completion = chat_completion
 
 
-@app.post('/api/v1/chats/{id}/messages/{message_id}/resolve')
+@app.post('/api/v1/chats/{id}/messages/{message_id}/resolve', dependencies=[Depends(require_legacy_approval)])
 async def resolve_chat_message_tool_call(
     request: Request,
     id: str,
@@ -2078,10 +2079,6 @@ async def resolve_chat_message_tool_call(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if soev_threads.enabled():
-        from open_webui.soev.thread_approvals import resolve
-
-        return await resolve(request.app.state.thread_organizations, id, form_data, user.id)
     resolution = await resolve_tool_call_output(id, message_id, form_data, user, db=db)
     payload = await build_tool_approval_resume_payload(id, message_id, chat=resolution['chat'])
     result = await chat_completion(request, payload, user)
@@ -2159,7 +2156,11 @@ async def chat_action(
         )
 
 
-@app.post('/api/tasks/stop/{task_id}')
+async def require_legacy_task_dispatch(user=Depends(get_verified_user)) -> None:
+    refuse_local_content()
+
+
+@app.post('/api/tasks/stop/{task_id}', dependencies=[Depends(require_legacy_task_dispatch)])
 async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
     try:
         result = await stop_task(request.app.state.redis, task_id)

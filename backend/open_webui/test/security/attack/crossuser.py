@@ -125,7 +125,14 @@ def expected_refusals(surface=None):
 
 
 def refused_as_expected(declaration, status, body):
-    return bool(declaration) and status == declaration['status'] and declaration['detail'] in body
+    if not declaration or status != declaration['status'] or declaration['detail'] not in body:
+        return False
+    if 'json' in declaration:
+        try:
+            return json.loads(body) == declaration['json']
+        except ValueError:
+            return False
+    return True
 
 
 def _nothing_happened(answer):
@@ -240,6 +247,8 @@ def _disposable_user(admin: AttackClient, email: str) -> AttackClient:
 
 
 def _request(admin, actor, route, target, tally, kwargs):
+    from .diagnostics import timed
+
     guard = (
         plane.preserve_configuration(
             admin,
@@ -255,13 +264,17 @@ def _request(admin, actor, route, target, tally, kwargs):
     invalidates_identity = route in seeds.DESTRUCTIVE and route.split(' ', 1)[1].startswith(
         ('/api/v1/auths/', '/api/v1/users/')
     )
-    with guard, _actor(admin, actor, invalidates_identity) as client:
+    with timed(f'crossuser {route}'), guard, _actor(admin, actor, invalidates_identity) as client:
         response = client.request(route.split(' ', 1)[0], target, **deepcopy(kwargs))
         try:
             # The shared driver's Outcome truncates diagnostics; authorization
             # needs the complete original body, and an admin configuration guard
             # even when the actor is an ordinary user.
             entered = plane.record(route, response.status_code, response, pass_name='crossuser')
+            if 200 <= response.status_code < 300:
+                seeds.SeedContext(client, admin, seeds.SURFACE).wait_for_ingestion(
+                    route.split(' ', 1)[0], target, seeds.json_body(response), kwargs.get('json')
+                )
             return plane.Outcome(response.status_code, entered, response.text)
         finally:
             response.close()
@@ -296,6 +309,12 @@ def _same_object(stranger, owner):
     )
 
 
+def _administrator_refused(route, answer):
+    return answer.status in {401, 403} or refused_as_expected(
+        expected_refusals().get(route), answer.status, answer.body
+    )
+
+
 def _check(result, route, stranger, owner, markers, *, admin_only, control, resource_ids=(), subject_scoped=False):
     reasons = []
     if stranger.timed_out or (owner is not None and owner.timed_out):
@@ -305,7 +324,7 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         return
     if any(marker in stranger.body for marker in markers):
         reasons.append(('owner-marker', 'seeded owner marker in second-account response (including refusals)'))
-    if admin_only and stranger.status not in {401, 403}:
+    if admin_only and not _administrator_refused(route, stranger):
         reasons.append(('admin', f'administrator operation was not refused: HTTP {stranger.status}'))
     if 200 <= stranger.status < 300:
         disclosed = set(_object_ids(_json_or_text(stranger.body))) & set(resource_ids)
@@ -340,7 +359,12 @@ def _benign(route, parameters, spec):
     request = benign_request(route, parameters, spec)
     declared = plane._declared(parameters, route)
     if declared.get('json'):
-        request['json'] = plane._hold_declared(request.get('json'), (), declared['json'])[0]
+        variant = next((entry.get('v2', {}) for entry in seeds.SURFACE.get('field', []) if entry['route'] == route), {})
+        request['json'] = (
+            deepcopy(declared['json'])
+            if seeds.runtime_soev_backed() == 'drive' and 'json' in variant
+            else plane._hold_declared(request.get('json'), (), declared['json'])[0]
+        )
     if declared.get('params'):
         request['params'] = {**request.get('params', {}), **declared['params']}
     if declared.get('headers'):
@@ -367,10 +391,16 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     with own_fixtures(identities, spec=spec) as (parameters, markers, surface, owners):
         with pass_run('crossuser', routes, identities.admin) as tally:
             result = Authorization(tally, shared=_shared())
-            # Delete children before parents within the shared removal group.
+            # File cleanup detaches KB documents, so its KB must still be available.
+            # Path depth alone cannot express that cross-resource dependency.
             ordered = sorted(
                 routes,
-                key=lambda r: (plane._read_before_destroy(r)[0], -r.count('/') if r.startswith('DELETE ') else 0, r),
+                key=lambda r: (
+                    plane._read_before_destroy(r)[0],
+                    r == 'DELETE /api/v1/knowledge/{id}/delete',
+                    -r.count('/') if r.startswith('DELETE ') else 0,
+                    r,
+                ),
             )
             for route in ordered:
                 target = plane._target(route, parameters, tally)

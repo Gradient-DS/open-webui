@@ -166,6 +166,7 @@ def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):
     route = 'POST /api/v1/meetings/audio'
     entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
     context = seeds.SeedContext(None, None, seeds.SURFACE, token='audio')
+    context.values['meeting'] = 'fictional-meeting'
     parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
     request = crossuser._benign(route, parameters, seeds.SPEC)
     with wave.open(io.BytesIO(request['data']), 'rb') as audio:
@@ -263,6 +264,109 @@ def test_second_account_first_reads_writes_child_deletes_then_parent_and_destruc
     assert [flag for _, flag in actors][-2:] == [True, True]
     assert not result.violations
     assert result.tally.config_restore_verified
+
+
+def test_file_owner_can_delete_before_its_knowledge_parent_disappears(offline, monkeypatch):
+    from .test_live_crossuser import test_live_crossuser_owner_controls_are_positive as check_controls
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    spec = {
+        'paths': {
+            '/api/v1/knowledge/{id}/dirs/{dir_id}/delete': {'delete': {}},
+            '/api/v1/knowledge/{id}/delete': {'delete': {}},
+            '/api/v1/files/{id}': {'delete': {}},
+        }
+    }
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    parent_available = True
+
+    def owner(method, path, **kwargs):
+        nonlocal parent_available
+        order.append(('admin', method, path, kwargs))
+        if path == '/api/v1/files/owned' and not parent_available:
+            return reply(404, {'detail': {'code': 'upstream_error'}})
+        if path == '/api/v1/knowledge/owned/delete':
+            parent_available = False
+        return reply(200, {'ok': True})
+
+    identities.admin.request.side_effect = owner
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=[])
+    assert [path for actor, _, path, _ in order if actor == 'admin'] == [
+        '/api/v1/knowledge/owned/dirs/{dir_id}/delete',
+        '/api/v1/files/owned',
+        '/api/v1/knowledge/owned/delete',
+    ]
+    assert not parent_available and not result.violations
+    check_controls(result)
+    assert all(status == 200 for status in result.controls.values())
+
+
+@pytest.mark.parametrize('terminal', ['completed', 'failed'])
+def test_content_mutation_settles_before_the_next_owner_file_add(offline, monkeypatch, terminal):
+    from .test_live_crossuser import test_live_crossuser_owner_controls_are_positive as check_controls
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    spec = {
+        'paths': {
+            '/api/v1/files/{id}/data/content/update': {'post': {}},
+            '/api/v1/knowledge/{id}/file/add': {'post': {}},
+        }
+    }
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    pending = False
+    statuses = iter(
+        [
+            {'status': 'processing', 'soev_job': {'job_id': 'job'}},
+            {'status': 'completed', 'soev_job': {'job_id': 'job'}},
+            {'status': terminal, 'soev_job': None, 'error': 'publication refused'},
+        ]
+    )
+
+    def owner(method, path, **kwargs):
+        nonlocal pending
+        order.append(('admin', method, path, kwargs))
+        if path.endswith('/data/content/update'):
+            pending = True
+            return reply(200, {'content': 'updated'})
+        if method == 'GET' and path == '/api/v1/files/owned':
+            meta = next(statuses) if pending else {'status': 'completed', 'soev_job': None}
+            if meta['soev_job'] is None:
+                pending = False
+            return reply(200, {'meta': meta})
+        assert not pending, 'owner add raced unfinished file processing'
+        return reply(200, {'files': [{'id': 'owned'}]})
+
+    identities.admin.request.side_effect = owner
+    monkeypatch.setattr(crossuser, '_requests', lambda *args: iter([(True, {'json': {'file_id': 'owned'}})]))
+    if terminal == 'failed':
+        with pytest.raises(RuntimeError, match='publication refused'):
+            crossuser.drive_crossuser(identities, spec=spec, payloads=[])
+        assert not any(path.endswith('/file/add') for _, _, path, _ in order)
+    else:
+        result = crossuser.drive_crossuser(identities, spec=spec, payloads=[])
+        check_controls(result)
+        assert not result.violations
+        assert all(status == 200 for status in result.controls.values())
+        owner_paths = [path for actor, _, path, _ in order if actor == 'admin']
+        assert owner_paths[:5] == [
+            '/api/v1/files/owned/data/content/update',
+            *['/api/v1/files/owned'] * 3,
+            '/api/v1/knowledge/owned/file/add',
+        ]
+
+
+def test_folder_owner_control_supplies_the_owned_folder(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/chats/{id}/folder'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE)
+    context.values['folder'] = 'fictional-folder'
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    assert crossuser._benign(route, parameters, seeds.SPEC)['json'] == {'folder_id': 'fictional-folder'}
+    assert route not in crossuser.expected_refusals()
+    assert seeds.parameter_for('/api/v1/folders/{id}', 'id')['actor'] == 'admin'
+    assert crossuser._owner_key('/api/v1/chats/{id}', seeds.SURFACE) == 'admin'
 
 
 @pytest.mark.parametrize('full', [False, True])

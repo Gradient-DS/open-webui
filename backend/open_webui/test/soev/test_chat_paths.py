@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from open_webui.soev import acting, threads
 from open_webui.soev.chat_paths import ChatPaths
 from open_webui.soev.threads import Organization, ThreadError
 from open_webui.test.soev.test_threads import index_item, page
-from open_webui.utils.auth import get_verified_user
+from open_webui.utils.auth import get_current_user, get_verified_user
 
 
 class FictionalOrganizations:
@@ -53,6 +53,76 @@ class FictionalOrganizations:
 
     async def remove(self, user_id, chat_id):
         self.records = [r for r in self.records if r.id != chat_id]
+
+
+def dependency_calls(dependant):
+    return {dependant.call} | {call for child in dependant.dependencies for call in dependency_calls(child)}
+
+
+@pytest.fixture
+def captured_replacements(monkeypatch):
+    from fastapi.routing import APIRoute
+    from open_webui.soev import chat_routes
+
+    replacements = []
+
+    def capture(*args, **kwargs):
+        route = APIRoute(*args, **kwargs)
+        replacements.append(route)
+        return route
+
+    monkeypatch.setattr(chat_routes, 'APIRoute', capture)
+    return replacements
+
+
+def test_every_replaced_route_preserves_its_legacy_authentication(captured_replacements, record_property):
+    from open_webui.main import app
+    from open_webui.soev.chat_routes import DarkChatRoute
+    from open_webui.utils.auth import get_admin_user
+
+    routes = [route for route in app.routes if isinstance(route, DarkChatRoute) and route.applies()]
+    assert routes
+    for route in routes:
+        captured_replacements.clear()
+        route.get_route_handler()
+        [replacement] = captured_replacements
+        expected = get_admin_user if get_admin_user in dependency_calls(route.dependant) else get_verified_user
+        assert [dependency.call for dependency in replacement.dependant.dependencies] == [expected], (
+            route.methods,
+            route.path,
+        )
+    record_property('checked_replacement_routes', len(routes))
+    record_property(
+        'admin_replacement_routes',
+        sorted(
+            f'{method} {route.path}'
+            for route in routes
+            for method in route.methods
+            if get_admin_user in dependency_calls(route.dependant)
+        ),
+    )
+
+
+@pytest.mark.parametrize('route_type', ['DarkChatRoute', 'EvaluationRoute', 'ExportRoute', 'NoteChatRoute'])
+@pytest.mark.parametrize('admin_only', [False, True])
+def test_replacement_checks_nested_authentication_for_every_domain(captured_replacements, route_type, admin_only):
+    from open_webui.soev import chat_routes
+    from open_webui.utils.auth import get_admin_user
+
+    authentication = get_admin_user if admin_only else get_verified_user
+
+    def nested(user=Depends(authentication)):
+        return user
+
+    async def get_note_chat_by_id(user=Depends(nested)):
+        raise AssertionError('Fictional legacy endpoint must stay dark')
+
+    route = getattr(chat_routes, route_type)('/fictional/{id}/chat', get_note_chat_by_id, methods=['GET'])
+    assert route.applies()
+    captured_replacements.clear()
+    route.get_route_handler()
+    [replacement] = captured_replacements
+    assert [dependency.call for dependency in replacement.dependant.dependencies] == [authentication]
 
 
 @pytest.mark.asyncio
@@ -326,7 +396,9 @@ async def dark_api(monkeypatch):
         (tasks.router, 'tasks'),
     ]:
         api.include_router(router, prefix='/api/v1/' + prefix)
-    api.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern', role='user')
+    user = SimpleNamespace(id='fictional-fern', role='user')
+    for dependency in (get_current_user, get_verified_user):
+        api.dependency_overrides[dependency] = lambda: user
     legacy = AsyncMock(return_value=[])
     monkeypatch.setattr(chats.Chats, 'get_chat_title_id_list_by_user_id', legacy)
     monkeypatch.setattr(chats, 'can_share_chats', AsyncMock(return_value=True))
@@ -369,6 +441,7 @@ async def dark_api(monkeypatch):
                 records=records,
                 legacy=legacy,
                 app=api,
+                user=user,
             )
     acting._token_resolver.reset(resolver)
     acting._requester_ref.reset(requester)
@@ -396,6 +469,15 @@ async def dark_api(monkeypatch):
     ],
 )
 async def test_refused_paths_never_read_or_write_local_content(dark_api, method, path):
+    from open_webui.utils.auth import get_admin_user
+
+    route = next(
+        route
+        for route in dark_api.app.routes
+        if method in getattr(route, 'methods', ()) and route.path_regex.fullmatch('/api/v1' + path)
+    )
+    if get_admin_user in dependency_calls(route.dependant):
+        dark_api.user.role = 'admin'
     response = await dark_api.browser.request(method, '/api/v1' + path, json={'snapshot': 'Fictional content'})
     assert response.status_code == 409, response.text
     assert response.json() == {'state': 'unavailable'}
@@ -713,7 +795,7 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/user')
     assert len(listed.json()['items']) == 1
     dark_api.state['admin'] = True
-    # The fake's admin claim simulates the platform token, independent of OWUI role.
+    dark_api.user.role = 'admin'
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert len(listed.json()['items']) == 2
     assert set(listed.json()['items'][1]) == {'thread_id', 'rating', 'model', 'agent', 'time', 'comment'}
@@ -722,6 +804,81 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
     dark_api.state['status'] = 403
     denied = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert denied.status_code == 404 and 'secret' not in denied.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', ['feedbacks/list', 'leaderboard'])
+@pytest.mark.parametrize('role', ['user', 'pending'])
+@pytest.mark.parametrize('platform_admin', [False, True])
+async def test_evaluation_admin_routes_refuse_nonadmins_before_platform_access(dark_api, route, role, platform_admin):
+    dark_api.state['admin'] = platform_admin
+    dark_api.user.id, dark_api.user.role = 'fictional-lark', role
+    response = await dark_api.browser.get(f'/api/v1/evaluations/{route}')
+    assert response.status_code == 401
+    assert response.json() == {'state': 'sign_in'}
+    assert response.headers['cache-control'] == 'private, no-store'
+    assert dark_api.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'pending'])
+async def test_every_replaced_admin_route_refuses_nonadmins_before_dispatch(dark_api, role):
+    import re
+
+    from open_webui.soev.chat_routes import DarkChatRoute
+    from open_webui.utils.auth import get_admin_user
+
+    dark_api.user.role = role
+    dark_api.state['admin'] = True
+    routes = [
+        route
+        for route in dark_api.app.routes
+        if isinstance(route, DarkChatRoute) and route.applies() and get_admin_user in dependency_calls(route.dependant)
+    ]
+    assert routes
+    for route in routes:
+        target = re.sub(r'\{[^}]+\}', 'fictional-target', route.path)
+        for method in route.methods:
+            response = await dark_api.browser.request(method, target)
+            assert response.status_code == 401, (method, route.path, response.text)
+            assert response.json() == {'state': 'sign_in'}
+            assert response.headers['cache-control'] == 'private, no-store'
+    assert dark_api.calls == []
+    assert dark_api.records.writes == []
+
+
+@pytest.mark.asyncio
+async def test_replaced_admin_content_refusals_keep_their_exact_inventory_contract(dark_api):
+    import re
+    import tomllib
+    from pathlib import Path
+
+    from open_webui.soev.chat_routes import DarkChatRoute
+    from open_webui.utils.auth import get_admin_user
+
+    surface = tomllib.loads((Path(__file__).resolve().parents[4] / 'security/attack-surface.toml').read_text())
+    controls = {entry['route']: entry for entry in surface['control']}
+    dark_api.user.role = 'admin'
+    checked = []
+    for route in dark_api.app.routes:
+        if not isinstance(route, DarkChatRoute) or not route.applies():
+            continue
+        if get_admin_user not in dependency_calls(route.dependant):
+            continue
+        template = re.sub(r':[^}]+(?=})', '', route.path)
+        for method in route.methods:
+            declaration = controls.get(f'{method} {template}')
+            if declaration is None:
+                continue
+            assert not declaration.get('all_actors'), template
+            response = await dark_api.browser.request(method, re.sub(r'\{[^}]+\}', 'fictional-target', route.path))
+            assert response.status_code == declaration['status'] == 409
+            assert response.json() == declaration['json'] == {'state': 'unavailable'}
+            assert response.headers['cache-control'] == 'private, no-store'
+            checked.append(f'{method} {template}')
+    assert checked
+    assert dark_api.calls == []
+    assert dark_api.records.writes == []
 
 
 @pytest.mark.asyncio
@@ -901,33 +1058,6 @@ async def test_missing_empty_and_temporary_create_contracts_do_not_write(dark_ap
         response = await dark_api.browser.post('/api/v1/chats/new', json=payload)
         assert response.status_code == status, response.text
     assert not dark_api.calls and not dark_api.records.writes
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'action,fields,expected',
-    [
-        ('approve', {}, {'approve': True}),
-        ('reject', {}, {'approve': False}),
-        (
-            'answer',
-            {'answers': {'fictional-choice': 'fictional-value'}},
-            {'answers': {'fictional-choice': 'fictional-value'}, 'timed_out': False},
-        ),
-    ],
-)
-async def test_tool_approvals_use_platform_input_without_local_messages(dark_api, action, fields, expected):
-    import json
-
-    from open_webui.soev.thread_approvals import resolve
-    from open_webui.utils.tool_approval import ResolveToolCallForm
-
-    form = ResolveToolCallForm(call_id='root:7', action=action, **fields)
-    result = await resolve(dark_api.records, 'fictional-chat', form, 'fictional-fern')
-    assert result == {'status': True, 'chat_id': 'fictional-chat'}
-    assert dark_api.calls[-1].url.path == '/v1/chat/threads/fictional-thread/inputs'
-    assert json.loads(dark_api.calls[-1].content) == {'answering': 'root:7', 'input': expected}
-    assert not dark_api.records.writes
 
 
 @pytest.mark.asyncio
@@ -1145,7 +1275,8 @@ async def test_share_mutations_refuse_csrf_before_platform_access(
 
 @pytest.mark.asyncio
 async def test_share_mutation_validates_explicit_bearer_without_cookie_fallback(dark_api):
-    dark_api.app.dependency_overrides.pop(get_verified_user)
+    for dependency in (get_current_user, get_verified_user):
+        dark_api.app.dependency_overrides.pop(dependency)
     dark_api.browser.cookies.set('token', 'fictional-cookie-session')
     response = await dark_api.browser.post(
         '/api/v1/chats/fictional-chat/share',
@@ -1762,3 +1893,31 @@ async def test_reader_chat_open_never_requests_or_returns_versions(dark_api, mon
     result = await dark_api.browser.get('/api/v1/chats/fictional-thread?current=true')
     assert result.status_code == 200 and 'versions' not in result.json()
     versions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sweep_folder_control_succeeds_and_still_refuses_revoked_access(dark_api, monkeypatch):
+    from open_webui.models.folders import Folders
+    from open_webui.test.security.attack import crossuser, seeds
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/chats/{id}/folder'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE)
+    context.values['folder'] = 'fictional-folder'
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    lookup = AsyncMock(return_value=SimpleNamespace(id='fictional-folder', user_id=dark_api.user.id))
+    monkeypatch.setattr(Folders, 'get_folder_by_id_and_user_id', lookup)
+    path = '/api/v1/chats/fictional-chat/folder'
+    invalid = await dark_api.browser.post(path, json={})
+    assert invalid.status_code == 422
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    owned = await dark_api.browser.post(path, **request)
+    assert owned.status_code == 200, owned.text
+    assert owned.json()['folder_id'] == 'fictional-folder'
+    lookup.assert_awaited_once_with('fictional-folder', dark_api.user.id)
+    writes = list(dark_api.records.writes)
+    dark_api.state['allowed'] = False
+    revoked = await dark_api.browser.post(path, **request)
+    assert revoked.status_code == 404, revoked.text
+    assert dark_api.records.writes == writes

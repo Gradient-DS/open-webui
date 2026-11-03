@@ -72,15 +72,22 @@ def _thread(meeting_id: str, suffix: str = '') -> str:
 
 
 async def _submit(soev: Caller, path: str, body: dict, *, thread_id: str | None = None) -> str:
-    """Hand one input to the agent and return once it is accepted; the turn runs on without us."""
+    """Keep the request alive until its turn settles; disconnecting interrupts it."""
     stream = soev.client.chat_stream(path, body, as_user=soev.ref, thread_id=thread_id)
+    accepted = None
     try:
-        frame = await anext(stream)
+        async for frame in stream:
+            if frame.event == 'connection':
+                accepted = frame.data['thread_id']
+            elif frame.event == 'error':
+                raise HTTPException(502, detail={'code': 'upstream_error', 'detail': 'Meeting turn failed'})
     except SoevApiError as error:
         raise _http_error(error) from None
     finally:
         await stream.aclose()
-    return frame.data['thread_id']
+    if accepted is None:
+        raise HTTPException(502, detail={'code': 'upstream_error', 'detail': 'Meeting turn was not accepted'})
+    return accepted
 
 
 @router.get('/agents')
@@ -118,7 +125,12 @@ async def start_meeting(body: MeetingInput, soev: Soev):
 
 
 @router.post('/audio', status_code=201)
-async def upload_audio(request: Request, soev: Soev, name: Annotated[str, Query(min_length=1, max_length=255)]):
+async def upload_audio(
+    request: Request,
+    soev: Soev,
+    name: Annotated[str, Query(min_length=1, max_length=255)],
+    thread_id: Annotated[str, Query(min_length=1, max_length=256)],
+):
     declared = request.headers.get('content-length')
     if declared is not None and declared.isdigit() and int(declared) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail='Audio exceeds 64 MiB')
@@ -130,7 +142,9 @@ async def upload_audio(request: Request, soev: Soev, name: Annotated[str, Query(
     if not body:
         raise HTTPException(status_code=400, detail='No audio received')
     try:
-        return await soev.client.post_bytes('/v1/audio', bytes(body), as_user=soev.ref, params={'name': name})
+        return await soev.client.post_bytes(
+            '/v1/audio', bytes(body), as_user=soev.ref, params={'name': name, 'thread_id': thread_id}
+        )
     except SoevApiError as error:
         raise _http_error(error) from None
 

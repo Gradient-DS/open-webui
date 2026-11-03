@@ -7,10 +7,41 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from open_webui.routers import knowledge
 from open_webui.test.apps.webui.routers.test_knowledge_synced_guard import api as knowledge_api_fixture
 
 api = knowledge_api_fixture
+
+
+@pytest.mark.parametrize(
+    'status_code,detail,headers',
+    [
+        (409, 'file is being processed', None),
+        (403, {'code': 'scope_insufficient', 'detail': 'Writer membership required'}, None),
+        (503, {'code': 'service_unavailable'}, {'Retry-After': '7'}),
+    ],
+)
+def test_file_add_preserves_processing_http_errors(api, monkeypatch, status_code, detail, headers):
+    api.kb.type = 'local'
+    monkeypatch.setattr(
+        knowledge.Files,
+        'get_file_by_id',
+        AsyncMock(return_value=SimpleNamespace(id='file', user_id='owner', data={'content': 'Processed text'})),
+    )
+    monkeypatch.setattr(
+        knowledge,
+        'process_file',
+        AsyncMock(side_effect=HTTPException(status_code, detail, headers)),
+    )
+    add = AsyncMock()
+    monkeypatch.setattr(knowledge.Knowledges, 'add_file_to_knowledge_by_id', add)
+    response = api.browser.post('/knowledge/kb/file/add', json={'file_id': 'file'})
+    assert response.status_code == status_code
+    assert response.json() == {'detail': detail}
+    if headers:
+        assert response.headers['Retry-After'] == '7'
+    add.assert_not_awaited()
 
 
 @pytest.mark.parametrize('route', ['', '/search', '/kb'])

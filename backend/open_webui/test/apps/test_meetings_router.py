@@ -179,9 +179,43 @@ def test_audio_is_forwarded_with_its_name(monkeypatch):
     """Audio bytes pass through to soev-api's audio store."""
     fake = FakeSoev()
     client = _client(monkeypatch, fake)
-    response = client.post('/api/v1/meetings/audio', params={'name': 'chunk-1.webm'}, content=b'\x1a\x45\xdf\xa3' * 10)
+    response = client.post(
+        '/api/v1/meetings/audio',
+        params={'name': 'chunk-1.webm', 'thread_id': 'thr-1'},
+        content=b'\x1a\x45\xdf\xa3' * 10,
+    )
     assert response.status_code == 201, response.text
-    assert fake.calls == [('POST_BYTES', '/v1/audio', 'owui:user:u1', {'name': 'chunk-1.webm'}, 40)]
+    assert fake.calls == [
+        ('POST_BYTES', '/v1/audio', 'owui:user:u1', {'name': 'chunk-1.webm', 'thread_id': 'thr-1'}, 40)
+    ]
+
+
+def test_audio_requires_its_owning_thread_before_upload(monkeypatch):
+    fake = FakeSoev()
+    response = _client(monkeypatch, fake).post(
+        '/api/v1/meetings/audio', params={'name': 'fictional.wav'}, content=b'audio'
+    )
+    assert response.status_code == 422
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_nonstreaming_submit_keeps_the_turn_alive_until_it_settles():
+    from open_webui.routers.meetings import Caller, _submit
+
+    progress = []
+
+    async def events(*args, **kwargs):
+        try:
+            yield ChatEvent('connection', {'thread_id': 'fictional-meeting'})
+            progress.append('committed')
+            yield ChatEvent('status', {'state': 'waiting'})
+        finally:
+            progress.append('closed')
+
+    caller = Caller(SimpleNamespace(chat_stream=events), 'owui:user:fictional-fern')
+    assert await _submit(caller, '/v1/chat/threads', {'agent': 'meeting', 'input': {}}) == 'fictional-meeting'
+    assert progress == ['committed', 'closed']
 
 
 @pytest.mark.parametrize('declared', [True, False])
@@ -194,7 +228,7 @@ def test_audio_over_64_mib_is_refused(monkeypatch, declared):
     client = _client(monkeypatch, fake)
     body = b'x' * 17
     content = body if declared else iter([body[:8], body[8:]])
-    response = client.post('/api/v1/meetings/audio', params={'name': 'a.webm'}, content=content)
+    response = client.post('/api/v1/meetings/audio', params={'name': 'a.webm', 'thread_id': 'thr-1'}, content=content)
     assert response.status_code == 413
     assert fake.calls == []
 

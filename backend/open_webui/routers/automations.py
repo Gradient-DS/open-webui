@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(refuse_automations)])
 
 PAGE_ITEM_COUNT = 30
 

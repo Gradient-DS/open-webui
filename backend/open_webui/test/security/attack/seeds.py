@@ -17,13 +17,14 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import requests
 
 from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
+from .diagnostics import timed
 from .identities import create_oidc_identity
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -180,7 +181,7 @@ def _validate_entries(entries, by_key):
             raise ValueError(f'{p["key"]}: depends_on must be a list')
         if 'provides' in p:
             provided = p['provides']
-            if 'seeded_by' not in p:
+            if not {'seeded_by', 'v2_seeded_by'} & p.keys():
                 raise ValueError(f'{p["key"]}: only a seeder can provide further values')
             if not isinstance(provided, list) or not all(
                 isinstance(name, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) for name in provided
@@ -243,13 +244,22 @@ class SeedContext:
         body = json_body(response)
         if body is None:
             raise RuntimeError(f'Seeding {method} {path} returned no JSON')
-        # Local processing is synchronous; a soev-backed deployment returns a job
-        # instead, and the next fixture step must not race that ingestion.
-        if method == 'POST' and path == '/api/v1/retrieval/process/file' and body.get('job_id'):
-            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
-        elif method == 'POST' and re.fullmatch(r'/api/v1/knowledge/[^/]+/file/add', path):
-            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
+        self.wait_for_ingestion(method, path, body, kwargs.get('json'), actor=actor)
         return body
+
+    def wait_for_ingestion(self, method, path, body, payload, *, actor=None):
+        if method != 'POST':
+            return
+        # Local processing is synchronous; platform mutations must settle before
+        # another request reuses their file, including each corpus mutation.
+        if path == '/api/v1/retrieval/process/file' and isinstance(body, dict) and body.get('job_id'):
+            self.wait_for_file(payload['file_id'], actor=actor)
+        elif re.fullmatch(r'/api/v1/knowledge/[^/]+/file/(add|update)', path):
+            self.wait_for_file(payload['file_id'], actor=actor)
+        elif runtime_soev_backed() == 'drive' and (
+            match := re.fullmatch(r'/api/v1/files/([^/]+)/data/content/update', path)
+        ):
+            self.wait_for_file(unquote(match[1]), actor=actor)
 
     def wait_for_file(self, file_id, *, actor=None, timeout=120):
         deadline = time.monotonic() + timeout
@@ -394,6 +404,94 @@ def seed_model(ctx, parameter):
     return model_id
 
 
+def seed_chat(ctx, parameter):
+    if runtime_soev_backed() != 'drive':
+        return _seed_endpoint(ctx, parameter)
+    created = ctx.request(
+        'POST',
+        '/api/v1/chats/new',
+        actor=ctx.admin,
+        json={'agent': 'soev_react', 'input': {'text': 'A fictional regression conversation.'}},
+    )
+    chat_id = _extract(created, 'id', name=parameter['key'], via='POST /api/v1/chats/new')
+    ctx.request(
+        'POST',
+        '/api/chat/completions',
+        actor=ctx.admin,
+        json={
+            'model': ctx.values['model'],
+            'chat_id': chat_id,
+            'follow_thread': True,
+            'stream': False,
+            'messages': [{'role': 'user', 'content': 'A fictional regression conversation.'}],
+        },
+    )
+    page = ctx.request('GET', f'/api/v1/chats/{chat_id}', actor=ctx.admin)
+    finished = [message for message in page.get('messages', []) if message.get('finished')]
+    if not finished:
+        raise RuntimeError('Chat turn produced no committed messages')
+    for name in parameter.get('provides', []):
+        ctx.provide(parameter, name, str(max(message['position'] for message in finished)))
+    ctx.request('POST', f'/api/v1/chats/{chat_id}/folder', actor=ctx.admin, json={'folder_id': ctx.values['folder']})
+    return chat_id
+
+
+def seed_chat_message(ctx, parameter):
+    page = ctx.request('GET', f'/api/v1/chats/{ctx.values["chat"]}', actor=ctx.admin)
+    if runtime_soev_backed() != 'drive':
+        return _extract(page, 'chat.history.currentId', name=parameter['key'], via='GET chat')
+    return str(max(message['position'] for message in page['messages'] if message['finished']))
+
+
+def seed_chat_share(ctx, parameter):
+    kwargs = {}
+    if runtime_soev_backed() == 'drive':
+        # The mirrored control group has no stranger members. A folder audience
+        # is not yet supported by the platform's naming authority.
+        kwargs['json'] = {
+            'audience': {'kind': 'group', 'id': 'platform:group:' + ctx.values['group']},
+            'at': int(ctx.values['chat_message']),
+        }
+    shared = ctx.request('POST', f'/api/v1/chats/{ctx.values["chat"]}/share', actor=ctx.admin, **kwargs)
+    return _extract(shared, 'share_id', name=parameter['key'], via='POST chat/share')
+
+
+def seed_group(ctx, parameter):
+    if runtime_soev_backed() != 'drive':
+        return _seed_endpoint(ctx, parameter)
+    groups = ctx.request('GET', '/api/v1/groups/', actor=ctx.admin)
+    return _extract(groups, '0.id', name=parameter['key'], via='GET groups/')
+
+
+def seed_feedback(ctx, parameter):
+    comment = f'Fictional feedback {ctx.token}'
+    response = ctx.admin.request(
+        'POST',
+        '/api/v1/evaluations/feedback',
+        json={
+            'thread_id': ctx.values['chat'],
+            'position': int(ctx.values['chat_message']),
+            'rating': 1,
+            'comment': comment,
+            'comment_authored': True,
+        },
+    )
+    try:
+        if response.status_code != 204:
+            raise RuntimeError(f'Platform feedback was not committed: HTTP {response.status_code}')
+    finally:
+        response.close()
+    page = ctx.request('GET', f'/api/v1/evaluations/feedback/conversation/{ctx.values["chat"]}', actor=ctx.admin)
+    if not any(
+        item.get('thread_id') == ctx.values['chat'] and item.get('comment') == comment and item.get('rating') == 1
+        for item in page.get('items', [])
+    ):
+        raise RuntimeError('Platform feedback could not be read back by its owner')
+    # Individual legacy feedback rows have no platform id: their routes are
+    # explicit refusal probes, while creation and conversation reads stay positive.
+    return f'attack_feedback_probe_{ctx.token}'
+
+
 def _create_active_function(ctx, parameter, function_id):
     # FunctionForm has no is_active: a function is created off and /toggle turns
     # it on. The toggle is an ordinary route the passes drive against the shared
@@ -475,6 +573,11 @@ def seed_task(ctx, parameter):
     registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
     if not any(model.get('id') == model_id for model in registry.get('data', [])):
         raise RuntimeError('Task model did not appear in the model registry')
+    if runtime_soev_backed() == 'drive':
+        # Prepared turns live on their HTTP stream; the legacy Redis task-id
+        # dispatcher is not used. Keep a readable assistant and drive its retired
+        # stop route with an explicit probe, pinned by the refusal inventory.
+        return f'attack_task_probe_{ctx.token}'
     # For a normal persisted chat, main.py only needs a nonempty session_id
     # to select background mode; it does not require a connected Socket.IO peer.
     chat_id = ctx.values['chat']
@@ -554,13 +657,23 @@ def seed_cloud_connection(ctx, parameter):
         # state is seeded; the application must admit the owner and create its grant.
         with requests.Session() as session:
             session.trust_env = False
-            response = session.post(
-                os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
-                headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
-                json={'connection_id': connection},
-                timeout=30,
-            )
-            response.raise_for_status()
+            try:
+                response = session.post(
+                    os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+                    headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+                    json={'connection_id': connection, 'authorize_url': created['authorize_url']},
+                    timeout=30,
+                )
+            except requests.RequestException as error:
+                raise RuntimeError('Consent fixture request failed') from error
+            if response.status_code != 200:
+                raise RuntimeError(f'Consent fixture refused the operation: HTTP {response.status_code}')
+            try:
+                accepted = response.json()
+            except ValueError:
+                raise RuntimeError('Consent fixture returned invalid JSON') from None
+            if not isinstance(accepted, dict) or accepted.get('id') != connection:
+                raise RuntimeError('Consent fixture did not acknowledge this connection')
     grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
     ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
@@ -571,7 +684,9 @@ def seed_cloud_authorize_connection(ctx, parameter):
     # connection that is not the consented OneDrive fixture. With one connection per owner
     # and provider that takes another provider; Outlook mail where the platform offers it.
     policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.admin)
-    provider = 'outlook_mail' if 'outlook_mail' in policy.get('providers_enabled', []) else 'onedrive'
+    if 'outlook_mail' not in policy.get('providers_enabled', []):
+        raise RuntimeError('Authorize control requires a separate Outlook mail connection')
+    provider = 'outlook_mail'
     created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
     return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
@@ -587,6 +702,11 @@ _SEEDERS = {
         seed_terminal,
         seed_export,
         seed_model,
+        seed_chat,
+        seed_chat_message,
+        seed_chat_share,
+        seed_group,
+        seed_feedback,
         seed_task,
         seed_active_function,
         seed_totp_user,
@@ -661,6 +781,8 @@ def resolve_fields(ctx, *, entries=None):
     """Fill every [[field]] from seeded values, making its setup requests first, in order."""
     fields = {}
     for entry in ctx.surface.get('field', []) if entries is None else entries:
+        if runtime_soev_backed() == 'drive':
+            entry = {**entry, **entry.get('v2', {})}
         if backed_seed_waived(entry) or route_waived(entry['route']):
             continue
         for step in entry.get('setup', []):
@@ -671,6 +793,8 @@ def resolve_fields(ctx, *, entries=None):
         resolved = {
             kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form', 'headers') if kind in entry
         }
+        for name in entry.get('json_integer_fields', []):
+            resolved['json'][name] = int(resolved['json'][name])
         if 'body_base64' in entry:
             resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:
@@ -683,6 +807,23 @@ def resolve_fields(ctx, *, entries=None):
             ]
         fields[entry['route']] = resolved
     return fields
+
+
+def _seed_parameter(ctx, p):
+    if runtime_soev_backed() == 'drive' and 'v2_refused_value' in p:
+        return ctx.fill(p['v2_refused_value'], p)
+    if runtime_soev_backed() == 'drive' and 'v2_seeded_by' in p:
+        value = _SEEDERS[p['v2_seeded_by']](ctx, p)
+    elif 'same_as' in p:
+        return ctx.values[p['same_as']]
+    elif 'seeded_by' in p:
+        value = _SEEDERS[p['seeded_by']](ctx, p)
+    else:
+        return _seed_endpoint(ctx, p)
+    missing = [name for name in p.get('provides', []) if name not in ctx.values]
+    if missing:
+        raise RuntimeError(f'{p["key"]}: seeder did not provide {missing}')
+    return value
 
 
 def resolve_parameters(
@@ -705,17 +846,8 @@ def resolve_parameters(
             failures[key] = f'Failed dependencies: {dependencies}'
             continue
         try:
-            if runtime_soev_backed() == 'drive' and 'v2_refused_value' in p:
-                value = ctx.fill(p['v2_refused_value'], p)
-            elif 'same_as' in p:
-                value = ctx.values[p['same_as']]
-            elif 'seeded_by' in p:
-                value = _SEEDERS[p['seeded_by']](ctx, p)
-                missing = [name for name in p.get('provides', []) if name not in ctx.values]
-                if missing:
-                    raise RuntimeError(f'{key}: seeder did not provide {missing}')
-            else:
-                value = _seed_endpoint(ctx, p)
+            with timed(f'seed parameter {key}', announce=True):
+                value = _seed_parameter(ctx, p)
             ctx.values[key] = _extract(
                 {'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias'))
             )
@@ -723,6 +855,7 @@ def resolve_parameters(
             if not collect_failures or isinstance(error, AuthenticationError):
                 raise
             failures[key] = str(error)
+            print(f'Sweep seed failed: {key}: {error}', flush=True)
     resolved = {}
     for path in spec['paths']:
         for name in re.findall(r'\{([^}]+)\}', path):
@@ -735,10 +868,12 @@ def resolve_parameters(
     fields = {}
     for entry in surface.get('field', []):
         try:
-            fields.update(resolve_fields(ctx, entries=[entry]))
+            with timed(f'seed fields {entry["route"]}', announce=bool(entry.get('setup'))):
+                fields.update(resolve_fields(ctx, entries=[entry]))
         except RuntimeError as error:
             if not collect_failures or isinstance(error, AuthenticationError):
                 raise
             failures[entry['route']] = str(error)
             blocked[entry['route']] = str(error)
+            print(f'Sweep seed failed: {entry["route"]}: {error}', flush=True)
     return Resolved(resolved, fields=fields, failures=failures, blocked=blocked)

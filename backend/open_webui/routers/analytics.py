@@ -10,7 +10,8 @@ from open_webui.models.chats import Chats
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
-from open_webui.utils.auth import get_admin_user
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,10 @@ log = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+
+async def require_local_analytics(user=Depends(get_verified_user)) -> None:
+    refuse_local_content()
 
 
 ####################
@@ -251,7 +256,11 @@ class ModelOverviewResponse(BaseModel):
     tags: list[TagEntry]
 
 
-@router.get('/models/{model_id:path}/overview', response_model=ModelOverviewResponse)
+@router.get(
+    '/models/{model_id:path}/overview',
+    response_model=ModelOverviewResponse,
+    dependencies=[Depends(require_local_analytics)],
+)
 async def get_model_overview(
     model_id: str,
     days: int = Query(30, description='Number of days of history (0 for all)'),

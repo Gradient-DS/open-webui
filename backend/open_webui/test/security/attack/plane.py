@@ -112,11 +112,22 @@ class Seeding:
 
 
 _PASSES: dict[str, Seeding] = {}
+_DESIGN_REFUSALS: dict[str, dict[str, dict]] = {}
 # Identifies the run that wrote the artefact. The coverage gate runs in the
 # same invocation as the plane, so anything carrying a different id is a
 # leftover from another run -- and measuring one run's coverage against
 # another run's evidence is the quietest way for a gate to be wrong.
 RUN_ID = uuid4().hex
+
+
+def record_design_refusal(route, role, response):
+    from .crossuser import expected_refusals, refused_as_expected
+
+    declaration = expected_refusals().get(route)
+    assert role in {'admin', 'user', 'intruder'}
+    assert refused_as_expected(declaration, response.status_code, response.text), (route, role, response.text)
+    _DESIGN_REFUSALS.setdefault(route, {})[role] = {'status': response.status_code, 'body': response.text}
+    flush_hits()
 
 
 def _count(histogram, route, status):
@@ -251,6 +262,7 @@ def flush_hits():
         'run_id': RUN_ID,
         'hits': sorted(set().union(*(tally.entered.keys() for tally in _PASSES.values()))),
         'passes': passes,
+        'refused_by_design': _DESIGN_REFUSALS,
     }
     temporary = path.with_name(f'{path.name}.{uuid4().hex}.tmp')
     try:
@@ -432,6 +444,8 @@ def _throwaway(admin):
 
 
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
+    from .diagnostics import timed
+
     tally = _PASSES.setdefault(pass_name, Seeding())
     guard = (
         preserve_configuration(
@@ -443,7 +457,7 @@ def _drive_one(client, route_id, filled, pass_name, **kwargs):
         if route_id.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
         else nullcontext()
     )
-    with guard:
+    with timed(f'{pass_name} {route_id}'), guard:
         return _drive_response(client, route_id, filled, pass_name, **kwargs)
 
 

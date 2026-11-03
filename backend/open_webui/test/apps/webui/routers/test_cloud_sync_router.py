@@ -286,7 +286,8 @@ def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
             result = api.browser.post(path + '/' + operation)
             assert result.status_code == (201 if runs else 204)
             assert result.content == (b'{"job_id":"job-1"}' if runs else b'')
-            assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
+            wire_action = 'retry-failed' if operation == 'retry_failed' else operation
+            assert api.requests[-1].url.path == '/v1/schedules/s/' + wire_action
     assert result.status_code < 300 or operation == 'foreign'
     api.link.assert_not_awaited()
     assert api.refs == ['owui:user:alice'] * len(api.requests)
@@ -602,7 +603,7 @@ def test_skipped_items_require_readable_knowledge(api):
     assert len(api.requests) == 1
 
 
-def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypatch) -> None:
+def test_policy_preserves_the_requesters_platform_login(api, monkeypatch) -> None:
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     policy = {
         'providers_enabled': ['onedrive', 'confluence'],
@@ -619,7 +620,8 @@ def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypat
     assert (request.method, request.url.path) == ('GET', '/v1/sync-policy')
     assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
     assert 'X-Soev-' + 'Subject' not in request.headers
-    assert api.refs == []
+    assert request.headers['X-Soev-User-Token'] == 'fictional-alice-token'
+    assert api.refs == ['owui:user:alice']
     api.link.assert_not_awaited()
 
 
@@ -720,7 +722,7 @@ def test_policy_preserves_upstream_forbidden_code(api, monkeypatch) -> None:
     assert result.status_code == 403
     assert result.json() == {'detail': {'code': 'forbidden', 'detail': 'Policy denied'}}
     api.link.assert_not_awaited()
-    assert api.refs == []
+    assert api.refs == ['owui:user:alice']
 
 
 def test_policy_requires_a_verified_user(api) -> None:

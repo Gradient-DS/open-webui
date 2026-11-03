@@ -71,7 +71,18 @@ def evidence():
 def assert_every_route_is_driven_or_waived():
     hits = evidence()
     assert hits is not None, 'The live coverage gate requires this run’s route-hit artefact'
-    uncovered = operations() - set(hits['hits']) - waivers().keys()
+    from .attack.crossuser import expected_refusals, refused_as_expected
+
+    declarations = expected_refusals()
+    refused = {
+        route
+        for route, actors in hits.get('refused_by_design', {}).items()
+        if set(actors) == {'admin', 'user', 'intruder'}
+        and all(
+            refused_as_expected(declarations.get(route), answer['status'], answer['body']) for answer in actors.values()
+        )
+    }
+    uncovered = operations() - set(hits['hits']) - refused - waivers().keys()
     detail = '\n'.join(f'  {route}' for route in sorted(uncovered))
     assert not uncovered, (
         f'{len(uncovered)} route(s) no security test drives, and no waiver explains:\n{detail}\n'
@@ -82,6 +93,30 @@ def assert_every_route_is_driven_or_waived():
 def test_every_waiver_carries_a_reason():
     empty = sorted(route for route, reason in waivers().items() if not reason.strip())
     assert not empty, f'waivers with no reason: {empty}'
+
+
+def test_design_refusal_requires_exact_evidence_from_all_three_actors(monkeypatch):
+    from .attack import crossuser
+
+    route = 'POST /fictional-retired-operation'
+    declaration = {'status': 409, 'detail': 'unavailable', 'json': {'state': 'unavailable'}}
+    monkeypatch.setattr(crossuser, 'expected_refusals', lambda: {route: declaration})
+    monkeypatch.setattr(__import__(__name__, fromlist=['operations']), 'operations', lambda: {route})
+    monkeypatch.setattr(__import__(__name__, fromlist=['waivers']), 'waivers', lambda: {})
+    actors = {'admin': {'status': 409, 'body': '{"state":"unavailable"}'}}
+    monkeypatch.setattr(
+        __import__(__name__, fromlist=['evidence']),
+        'evidence',
+        lambda: {'hits': [], 'refused_by_design': {route: actors}},
+    )
+    with pytest.raises(AssertionError, match='fictional-retired'):
+        assert_every_route_is_driven_or_waived()
+    actors['user'] = actors['admin'].copy()
+    actors['intruder'] = {'status': 409, 'body': '{"state":"some other refusal"}'}
+    with pytest.raises(AssertionError, match='fictional-retired'):
+        assert_every_route_is_driven_or_waived()
+    actors['intruder'] = actors['admin'].copy()
+    assert_every_route_is_driven_or_waived()
 
 
 def test_no_waiver_names_a_route_that_no_longer_exists():

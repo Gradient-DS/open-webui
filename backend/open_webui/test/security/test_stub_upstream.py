@@ -46,6 +46,23 @@ def get_json(stub, path, **kwargs):
     return json.loads(body)
 
 
+@pytest.mark.parametrize('task', ['title', 'tags', 'follow_ups', 'queries', 'autocomplete', 'emoji', 'moa'])
+def test_task_agent_schema_prompts_produce_valid_json(stub, task):
+    from open_webui.soev.task_turns import OUTPUTS
+
+    expected = OUTPUTS[task]
+    payload = {
+        'model': 'fictional-task-model',
+        'messages': [
+            {'role': 'system', 'content': 'Return this schema: ' + json.dumps(expected.model_json_schema())},
+            {'role': 'user', 'content': 'A fictional task.'},
+        ],
+    }
+    answer = get_json(stub, '/v1/chat/completions', payload=payload)
+    result = expected.model_validate_json(answer['choices'][0]['message']['content'])
+    assert result.model_dump()
+
+
 @pytest.mark.parametrize('stream', [True, 1, 'yes'])
 def test_openai_stream_has_nonempty_deltas_finish_and_done(stub, stream):
     content_type, body = request(

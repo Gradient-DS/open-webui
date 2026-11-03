@@ -33238,6 +33238,17 @@
               "title": "Name",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Thread Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {

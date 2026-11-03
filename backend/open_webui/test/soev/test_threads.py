@@ -306,6 +306,7 @@ async def test_projection_uses_only_requester_login_token(thread_http):
         (401, 'sign_in'),
         (403, 'unavailable'),
         (404, 'unavailable'),
+        (409, 'unavailable'),
         (422, 'invalid_request'),
         (503, 'reconnect'),
         (302, 'reconnect'),
@@ -318,7 +319,17 @@ async def test_refusals_never_return_upstream_details(thread_http, status, state
         await client.projection('fictional-thread')
     assert caught.value.state == state
     assert str(caught.value) == state
-    assert caught.value.status == (404 if status == 403 else status if status in {401, 404, 422} else 503)
+    assert caught.value.status == (404 if status == 403 else status if status in {401, 404, 409, 422} else 503)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_conflict_preserves_the_deliberate_refusal(thread_http):
+    requests, responses, client = thread_http
+    responses.append(httpx.Response(409, json={'code': 'thread_active', 'detail': 'Fictional private state'}))
+    with pytest.raises(ThreadError) as error:
+        await client.cancel('fictional-thread')
+    assert error.value.status == 409 and error.value.state == 'unavailable'
+    assert requests[0].url.path == '/v1/chat/threads/fictional-thread/cancel'
 
 
 @pytest.mark.asyncio

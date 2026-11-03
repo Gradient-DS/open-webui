@@ -164,8 +164,9 @@ async def test_batch_access_lists_once_and_intersects_requested_ids(env, permiss
 @pytest.mark.asyncio
 @pytest.mark.parametrize('permission,expected', [('read', {'kb', 'read-only'}), ('write', {'kb', 'write-only'})])
 @pytest.mark.parametrize('user_id', ['', None])
-async def test_group_scoped_access_matches_collection_principals(env, permission, expected, user_id):
-    """Group previews match explicit principals without inheriting the request user's audience."""
+@pytest.mark.parametrize('requester', ['owner', 'outsider'])
+async def test_group_scoped_access_matches_collection_principals(env, permission, expected, user_id, requester):
+    """Preview explicit group grants only within the requester's visible catalog."""
     base = env.api.collections['kb']
     for key, readers, writers in (
         ('read-only', ['platform:group:readers'], []),
@@ -178,14 +179,14 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
         env.api.collections[key] = {
             **base,
             'key': key,
-            'principals': [SERVICE, *readers],
+            'principals': [SERVICE, person_ref('owner'), *readers],
             'writers': writers,
             'visibility': 'public' if key == 'public' else 'restricted',
         }
     await env.store.delete_knowledge_by_id('deleted')
     env.api.requests.clear()
     acting = importlib.import_module('open_webui.soev.acting')
-    token = acting._requester_ref.set('owui:user:outsider')
+    token = acting._requester_ref.set(f'owui:user:{requester}')
     try:
         result = await env.table.get_accessible_resource_ids(
             user_id,
@@ -194,12 +195,13 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
             permission,
             {'readers', 'writers'},
         )
-        assert result == expected
+        assert result == (expected if requester == 'owner' else set())
         assert await env.table.get_accessible_resource_ids(user_id, 'knowledge', ['kb'], permission, set()) == set()
     finally:
         acting._requester_ref.reset(token)
     assert env.api.requests
     assert all(request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
+    assert all(subject(request) == f'owui:user:{requester}' for request in env.api.requests)
 
 
 @pytest.mark.asyncio

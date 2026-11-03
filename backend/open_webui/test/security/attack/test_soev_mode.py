@@ -294,13 +294,16 @@ def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_rout
     assert observed <= coverage.waivers().keys()
 
 
-def test_v2_action_probe_reaches_the_existing_missing_action_refusal(monkeypatch):
+@pytest.mark.parametrize('actor', ['admin', 'user', 'intruder'])
+def test_v2_action_refuses_every_actor_before_local_dispatch(monkeypatch, actor):
     from importlib import import_module
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
     from fastapi.testclient import TestClient
+    from open_webui.soev import threads
     from open_webui.utils import actions
     from open_webui.utils.auth import get_verified_user
 
@@ -308,20 +311,75 @@ def test_v2_action_probe_reaches_the_existing_missing_action_refusal(monkeypatch
 
     main = import_module('open_webui.main')
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
     monkeypatch.setattr(actions, 'ENABLE_PLUGINS', True)
     lookup = AsyncMock(return_value=None)
     ownership = AsyncMock()
     monkeypatch.setattr(actions.Functions, 'get_function_by_id', lookup)
     monkeypatch.setattr(main, 'verify_chat_ownership', ownership)
     app = FastAPI()
+    app.add_exception_handler(
+        threads.ThreadError,
+        lambda request, error: JSONResponse(status_code=error.status, content={'state': error.state}),
+    )
     app.add_api_route('/api/chat/actions/{action_id}', main.chat_action, methods=['POST'])
-    user = SimpleNamespace(id='fictional-owner', role='admin')
+    user = SimpleNamespace(id=f'fictional-{actor}', role='admin' if actor == 'admin' else 'user')
     app.dependency_overrides[get_verified_user] = lambda: user
     with TestClient(app) as client:
         response = client.post(
             '/api/chat/actions/fictional-action', json={'chat_id': 'fictional-chat', 'model': 'fictional-model'}
         )
     declaration = crossuser.expected_refusals()['POST /api/chat/actions/{action_id}']
+    assert declaration['all_actors'] and declaration['json'] == {'state': 'unavailable'}
     assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
-    ownership.assert_awaited_once_with('fictional-chat', user)
-    lookup.assert_awaited_once_with('fictional-action')
+    ownership.assert_not_awaited()
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('actor', ['admin', 'user', 'intruder'])
+async def test_v2_legacy_share_access_update_refuses_every_logged_in_actor(monkeypatch, actor):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from open_webui.soev import acting, thread_sharing, threads
+    from starlette.requests import Request
+
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    token = AsyncMock(return_value='fictional-login')
+    monkeypatch.setattr(acting, 'user_token', token)
+    request = Request({'type': 'http', 'method': 'POST', 'path': '/api/v1/chats/shared/fictional-chat/access/update'})
+    with pytest.raises(threads.ThreadError) as error:
+        await thread_sharing.dispatch(
+            None, request, SimpleNamespace(id=f'fictional-{actor}'), '/shared/{id}/access/update'
+        )
+    declaration = crossuser.expected_refusals()['POST /api/v1/chats/shared/{id}/access/update']
+    assert declaration['all_actors'] and declaration['json'] == {'state': 'unavailable'}
+    assert crossuser.refused_as_expected(declaration, error.value.status, json.dumps({'state': error.value.state}))
+    token.assert_awaited_once()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_retired_approval_is_an_exact_all_actor_control_and_never_waived(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'POST /api/v1/chats/{id}/messages/{message_id}/resolve'
+    assert route in plane.operations()
+    assert route not in coverage.waivers()
+    assert not seeds.route_waived(route)
+    field = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
+    assert field['json'] == {'call_id': 'call_{token}', 'action': 'reject'}
+    declaration = crossuser.expected_refusals().get(route)
+    if mode == 'waive':
+        assert declaration is None
+        return
+    assert declaration['all_actors'] is True
+    assert declaration['status'] == 409
+    assert declaration['json'] == {'state': 'unavailable'}
+    assert crossuser.refused_as_expected(declaration, 409, '{"state":"unavailable"}')
+    for status, body in [(200, '{}'), (404, '{"state":"unavailable"}'), (409, '{"state":"other"}')]:
+        assert not crossuser.refused_as_expected(declaration, status, body)

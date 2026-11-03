@@ -1,17 +1,10 @@
-"""Forward approvals as platform inputs without rebuilding local message output."""
+"""Tool approvals are retired on the platform until approval tools return."""
 
-from open_webui.soev import threads
-from open_webui.soev.chat_paths import ChatPaths, Organizations
-from open_webui.utils.tool_approval import ResolveToolCallForm
+from fastapi import Depends
+
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.utils.auth import get_verified_user
 
 
-async def resolve(organizations: Organizations, chat_id: str, form: ResolveToolCallForm, user_id: str) -> dict:
-    client = threads.build_client()
-    record = await ChatPaths(client, organizations).record(user_id, chat_id)
-    await client.projection(record.thread_id, window=1)
-    if form.action == 'answer':
-        payload = {'answers': form.answers or {}, 'timed_out': form.timed_out}
-    else:
-        payload = {'approve': form.action == 'approve'}
-    await client.answer(record.thread_id, answering=form.call_id, input=payload)
-    return {'status': True, 'chat_id': chat_id}
+async def require_legacy_approval(user=Depends(get_verified_user)) -> None:
+    refuse_local_content()

@@ -282,8 +282,14 @@ class ThreadClient:
         status = response.status_code
         if status == 412:
             raise ThreadError(412, 'reconnect')
-        if status in {401, 403, 404, 422}:
-            mapped = {401: 'sign_in', 403: 'unavailable', 404: 'unavailable', 422: 'invalid_request'}
+        if status in {401, 403, 404, 409, 422}:
+            mapped = {
+                401: 'sign_in',
+                403: 'unavailable',
+                404: 'unavailable',
+                409: 'unavailable',
+                422: 'invalid_request',
+            }
             raise ThreadError(404 if status == 403 else status, mapped[status])
         raise ThreadError(503, 'reconnect')
 
@@ -443,13 +449,6 @@ class ThreadClient:
         response = await self._request('DELETE', f'/v1/chat/threads/{_identifier(thread_id)}')
         if response.status_code != 204:
             raise ThreadError(502, 'reconnect')
-
-    async def answer(self, thread_id: str, *, answering: str, input: JsonValue) -> None:
-        await self._request(
-            'POST',
-            f'/v1/chat/threads/{_identifier(thread_id)}/inputs',
-            body={'input': input, 'answering': answering},
-        )
 
     async def cancel(self, thread_id: str) -> None:
         await self._request('POST', f'/v1/chat/threads/{_identifier(thread_id)}/cancel', body={})

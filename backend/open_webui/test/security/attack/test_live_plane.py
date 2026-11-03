@@ -3,12 +3,7 @@
 import pytest
 
 from . import plane, seeds
-
-
-def _stop_task(admin, parameters):
-    path = '/api/tasks/stop/{task_id}'
-    result = admin.request('POST', plane._fill(path, parameters))
-    assert result.status_code == 200, f'Seed task cleanup: HTTP {result.status_code}'
+from .test_seeds import stop_seed_task
 
 
 @pytest.fixture(scope='module')
@@ -25,7 +20,7 @@ def live_seeding():
     finally:
         try:
             if parameters is not None:
-                _stop_task(identities.admin, parameters)
+                stop_seed_task(identities.admin, parameters)
         finally:
             identities.close()
 
@@ -42,7 +37,7 @@ def live_drive(live_seeding):
     finally:
         try:
             if parameters is not None:
-                _stop_task(identities.admin, parameters)
+                stop_seed_task(identities.admin, parameters)
         finally:
             identities.close()
 
@@ -64,6 +59,20 @@ def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
 def test_live_drive_has_its_own_5xx_assertion(live_drive):
     crashes = {route: outcome for route, outcome in live_drive.items() if outcome.crashed}
     assert not crashes, f'Drive found server errors:\n{plane.drive_report(live_drive)}'
+
+
+def test_live_drive_has_owner_controls_for_previously_unentered_routes(live_drive):
+    from .crossuser import expected_refusals, refused_as_expected
+
+    refusals = expected_refusals()
+    for route in seeds.SURFACE['required_drive_routes']:
+        if seeds.route_waived(route):
+            continue
+        outcome = live_drive[route]
+        if route in refusals:
+            assert refused_as_expected(refusals[route], outcome.status, outcome.body), (route, outcome)
+        else:
+            assert 200 <= outcome.status < 300 and outcome.entered, (route, outcome)
 
 
 def test_live_drive_reports_its_own_reach(live_drive, record_property):
