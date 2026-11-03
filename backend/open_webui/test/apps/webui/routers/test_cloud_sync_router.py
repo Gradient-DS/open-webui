@@ -286,7 +286,8 @@ def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
             result = api.browser.post(path + '/' + operation)
             assert result.status_code == (201 if runs else 204)
             assert result.content == (b'{"job_id":"job-1"}' if runs else b'')
-            assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
+            wire_action = 'retry-failed' if operation == 'retry_failed' else operation
+            assert api.requests[-1].url.path == '/v1/schedules/s/' + wire_action
     assert result.status_code < 300 or operation == 'foreign'
     api.link.assert_not_awaited()
     assert api.refs == ['owui:user:alice'] * len(api.requests)

@@ -197,7 +197,7 @@ async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_s
     dependencies=[Depends(require_soev)],
 )
 async def retry_failed_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
-    return await sync.schedule_action(knowledge_id, schedule_id, 'retry_failed')
+    return await sync.schedule_action(knowledge_id, schedule_id, 'retry-failed')
 
 
 @router.post(
