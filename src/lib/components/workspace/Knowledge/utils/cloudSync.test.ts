@@ -106,6 +106,41 @@ it('offers reconnect for a provider without a frontend adapter', () => {
 	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
 });
 
+it.each(['onedrive', 'google_drive', 'confluence'])(
+	'does not suggest reconnect for an unavailable source on an enabled %s connection',
+	(source_kind) => {
+		const connection: Connection = { id: 'c', source_kind, lifecycle: 'enabled' };
+		const unavailable = {
+			...scheduleFixture('unavailable', 'content'),
+			source_kind,
+			connection,
+			lifecycle: 'suspended',
+			last_error: 'access_revoked'
+		};
+		expect(reconnectConnections([unavailable], null)).toEqual([]);
+		expect(reconnectConnections([], { ...connection, last_error: 'access_revoked' })).toEqual([]);
+	}
+);
+
+it.each(['reauth_required', 'refresh_rejected', 'access_revoked', null])(
+	'offers reconnect for suspended:reauth with connection error %s',
+	(last_error) => {
+		const connection: Connection = {
+			id: 'c',
+			source_kind: 'onedrive',
+			lifecycle: 'suspended:reauth',
+			last_error
+		};
+		const unavailable = {
+			...scheduleFixture('unavailable', 'content'),
+			connection,
+			last_error: 'access_revoked'
+		};
+		expect(reconnectConnections([unavailable], null)).toEqual([connection]);
+		expect(reconnectConnections([], connection)).toEqual([connection]);
+	}
+);
+
 // The payload below is a verbatim soev-api StoredRun, not an invented shape:
 // counts are nested, and `secret_days` rides in counts as an expiry warning.
 it('reads counters out of the nested counts map and leaves secret_days out', () => {
