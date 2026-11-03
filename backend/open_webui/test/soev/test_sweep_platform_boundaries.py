@@ -54,7 +54,8 @@ def test_prepared_refusal_precedes_body_and_content_access(monkeypatch, role, mo
         )
 
     with TestClient(app) as client:
-        response = client.request(method, path, json={})
+        body = {'name': 'Fictional renamed group'} if module is groups and path.endswith('/update') else {}
+        response = client.request(method, path, json=body)
     assert response.status_code == (409 if module in (archives, analytics) else 403), response.text
     actual = response.json().get('detail', response.json())
     assert expected.items() <= actual.items()

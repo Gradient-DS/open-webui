@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.constants import ERROR_MESSAGES
@@ -33,6 +32,12 @@ async def require_group_write(user=Depends(get_verified_user)) -> None:
     refuse_group_write()
 
 
+async def require_group_update(form_data: GroupUpdateForm, user=Depends(get_verified_user)) -> GroupUpdateForm:
+    if {'name', 'description', 'user_ids'} & form_data.model_fields_set:
+        refuse_group_write()
+    return form_data
+
+
 async def _visible_group(id: str, user: UserModel, db: AsyncSession) -> GroupModel:
     if user.role != 'admin':
         visible_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
@@ -51,7 +56,7 @@ async def _visible_group(id: str, user: UserModel, db: AsyncSession) -> GroupMod
 
 @router.get('/', response_model=list[GroupResponse])
 async def get_groups(
-    share: Optional[bool] = None,
+    share: bool | None = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -73,7 +78,7 @@ async def get_groups(
 ############################
 
 
-@router.post('/create', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
+@router.post('/create', response_model=GroupResponse | None, dependencies=[Depends(require_group_write)])
 async def create_new_group(
     request: Request,
     form_data: GroupForm,
@@ -88,7 +93,7 @@ async def create_new_group(
 ############################
 
 
-@router.get('/id/{id}', response_model=Optional[GroupResponse])
+@router.get('/id/{id}', response_model=GroupResponse | None)
 async def get_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     group = await _visible_group(id, user, db)
     return GroupResponse(
@@ -97,7 +102,7 @@ async def get_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSessio
     )
 
 
-@router.get('/id/{id}/info', response_model=Optional[GroupInfoResponse])
+@router.get('/id/{id}/info', response_model=GroupInfoResponse | None)
 async def get_group_info_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     group = await _visible_group(id, user, db)
     return GroupInfoResponse(
@@ -116,7 +121,7 @@ class GroupExportResponse(GroupResponse):
     pass
 
 
-@router.get('/id/{id}/export', response_model=Optional[GroupExportResponse])
+@router.get('/id/{id}/export', response_model=GroupExportResponse | None)
 async def export_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     group = await _visible_group(id, user, db)
     return GroupExportResponse(
@@ -150,11 +155,11 @@ async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSes
 ############################
 
 
-@router.post('/id/{id}/update', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
+@router.post('/id/{id}/update', response_model=GroupResponse | None)
 async def update_group_by_id(
     request: Request,
     id: str,
-    form_data: GroupUpdateForm,
+    form_data: GroupUpdateForm = Depends(require_group_update),
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -192,7 +197,7 @@ async def update_group_by_id(
 ############################
 
 
-@router.post('/id/{id}/users/add', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
+@router.post('/id/{id}/users/add', response_model=GroupResponse | None, dependencies=[Depends(require_group_write)])
 async def add_user_to_group(
     request: Request,
     id: str,
@@ -203,9 +208,7 @@ async def add_user_to_group(
     refuse_group_write()
 
 
-@router.post(
-    '/id/{id}/users/remove', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)]
-)
+@router.post('/id/{id}/users/remove', response_model=GroupResponse | None, dependencies=[Depends(require_group_write)])
 async def remove_users_from_group(
     request: Request,
     id: str,
