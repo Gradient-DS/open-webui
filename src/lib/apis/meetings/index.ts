@@ -64,12 +64,16 @@ export const sendMeetingInput = (token: string, id: string, input: MeetingInput)
 export const deleteMeeting = (token: string, id: string) =>
 	request<void>(token, `/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-export const uploadMeetingAudio = (token: string, audio: Blob, name: string) =>
-	request<Record<string, unknown>>(token, `/audio?name=${encodeURIComponent(name)}`, {
-		method: 'POST',
-		body: audio,
-		headers: { 'Content-Type': audio.type || 'application/octet-stream' }
-	});
+export const uploadMeetingAudio = (token: string, audio: Blob, name: string, threadId: string) =>
+	request<Record<string, unknown>>(
+		token,
+		`/audio?name=${encodeURIComponent(name)}&thread_id=${encodeURIComponent(threadId)}`,
+		{
+			method: 'POST',
+			body: audio,
+			headers: { 'Content-Type': audio.type || 'application/octet-stream' }
+		}
+	);
 
 /** Sends an input and calls `onFrame` for each SSE frame of the turn it runs (contract C6). */
 export const streamMeetingInput = async (

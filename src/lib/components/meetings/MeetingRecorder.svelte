@@ -89,7 +89,7 @@
 		});
 
 	const upload = async (blob: Blob, name: string): Promise<AudioRef> =>
-		(await uploadMeetingAudio(localStorage.token, blob, name)) as AudioRef;
+		(await uploadMeetingAudio(localStorage.token, blob, name, meetingId)) as AudioRef;
 
 	const sendChunk = (blob: Blob, seq: number) =>
 		queue.push(async () => {
