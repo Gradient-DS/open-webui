@@ -85,7 +85,7 @@ dependencies = [
     "python-pptx==1.0.2",
     "msoffcrypto-tool==6.0.0",
     "python-magic==0.4.27", # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
-    "nltk==3.10.3", # security: CVE-2026-54293 (path traversal) + PYSEC-2026-3582..3741 (ReDoS/DoS)
+    "nltk==3.10.4", # security: GHSA-j456-xh4h-cpf2 fixed in 3.10.4; CVE-2026-54293 (path traversal) + PYSEC-2026-3582..3741 (ReDoS/DoS)
     "Markdown==3.10.2",
     "beautifulsoup4==4.14.3",
     "lxml==6.1.1",
@@ -220,6 +220,11 @@ constraint-dependencies = [
 ]
 
 [tool.uv.exclude-newer-package]
+# Security-fix exemption (2026-10-31): nltk 3.10.4 (published 2026-10-21) is the
+# first release fixing GHSA-j456-xh4h-cpf2 — see the pin comment in
+# [project.dependencies]. Remove this exemption once 3.10.4 ages past the 14-day
+# window on 2026-11-04.
+nltk = false
 # Security-fix exemption (2026-08-04): cryptography 50.0.0 (published
 # 2026-07-31) is the only release fixing CVE-2026-69247/69248/69249 — see the
 # pin comment in [project.dependencies]. Remove this exemption once 50.0.0 ages
