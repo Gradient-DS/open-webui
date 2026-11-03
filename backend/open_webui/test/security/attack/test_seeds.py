@@ -844,14 +844,45 @@ def stop_seed_task(admin, resolved):
     if task_id is None:
         return
     result = admin.request('POST', f'/api/tasks/stop/{task_id}')
-    if seeds.runtime_soev_backed() == 'drive':
-        from .crossuser import expected_refusals, refused_as_expected
+    try:
+        if seeds.runtime_soev_backed() == 'drive':
+            from .crossuser import expected_refusals, refused_as_expected
 
-        assert refused_as_expected(
-            expected_refusals()['POST /api/tasks/stop/{task_id}'], result.status_code, result.text
-        )
+            assert refused_as_expected(
+                expected_refusals()['POST /api/tasks/stop/{task_id}'], result.status_code, result.text
+            )
+        else:
+            assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize(
+    'mode,status,body,accepted',
+    [
+        ('waive', 200, {}, True),
+        ('waive', 409, {'state': 'unavailable'}, False),
+        ('drive', 409, {'state': 'unavailable'}, True),
+        ('drive', 200, {}, False),
+        ('drive', 409, {'state': 'other'}, False),
+        ('drive', 404, {'state': 'unavailable'}, False),
+    ],
+)
+def test_seed_task_cleanup_requires_the_exact_runtime_contract(monkeypatch, mode, status, body, accepted):
+    from . import test_live_plane
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    result = response(status, body)
+    result.close = Mock()
+    admin = Mock(request=Mock(return_value=result))
+    parameters = {('/api/tasks/stop/{task_id}', 'task_id'): 'fictional-task'}
+    if accepted:
+        test_live_plane.stop_seed_task(admin, parameters)
     else:
-        assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
+        with pytest.raises(AssertionError):
+            test_live_plane.stop_seed_task(admin, parameters)
+    admin.request.assert_called_once_with('POST', '/api/tasks/stop/fictional-task')
+    result.close.assert_called_once()
 
 
 PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}

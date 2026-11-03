@@ -3,12 +3,7 @@
 import pytest
 
 from . import plane, seeds
-
-
-def _stop_task(admin, parameters):
-    path = '/api/tasks/stop/{task_id}'
-    result = admin.request('POST', plane._fill(path, parameters))
-    assert result.status_code == 200, f'Seed task cleanup: HTTP {result.status_code}'
+from .test_seeds import stop_seed_task
 
 
 @pytest.fixture(scope='module')
@@ -25,7 +20,7 @@ def live_seeding():
     finally:
         try:
             if parameters is not None:
-                _stop_task(identities.admin, parameters)
+                stop_seed_task(identities.admin, parameters)
         finally:
             identities.close()
 
@@ -42,7 +37,7 @@ def live_drive(live_seeding):
     finally:
         try:
             if parameters is not None:
-                _stop_task(identities.admin, parameters)
+                stop_seed_task(identities.admin, parameters)
         finally:
             identities.close()
 
