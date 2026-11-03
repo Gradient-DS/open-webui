@@ -182,16 +182,22 @@ def test_synchronous_file_processing_does_not_poll():
     assert client.request.call_count == 1
 
 
-@pytest.mark.parametrize('consent_status', [200, 403])
+@pytest.mark.parametrize('consent_status', [200, 400, 403])
 def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, consent_status):
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
     admin.request.side_effect = [
-        response(201, {'connection_id': 'connection', 'authorize_url': 'http://soev-api:8020/oauth/start/attempt'}),
+        response(
+            201,
+            {
+                'connection_id': 'connection',
+                'authorize_url': 'http://soev-provider-fixture:8040/ci/consent/11111111-1111-4111-8111-111111111111',
+            },
+        ),
         response(200, {'id': 'grant'}),
     ]
     session = Mock()
-    session.post.return_value = response(consent_status, {})
+    session.post.return_value = response(consent_status, {'id': 'connection'})
     manager = Mock()
     manager.__enter__ = Mock(return_value=session)
     manager.__exit__ = Mock(return_value=False)
@@ -199,8 +205,8 @@ def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, c
     monkeypatch.setenv('CI_PLATFORM_FIXTURE_URL', 'http://fixture:8040')
     monkeypatch.setenv('CI_PLATFORM_FIXTURE_KEY', 'test-fixture-key')
     parameter = {'key': 'cloud_connection', 'provides': ['cloud_grant']}
-    if consent_status == 403:
-        with pytest.raises(requests.HTTPError):
+    if consent_status != 200:
+        with pytest.raises(RuntimeError, match=f'HTTP {consent_status}'):
             seeds.seed_cloud_connection(ctx, parameter)
         assert admin.request.call_count == 1
         assert not ctx.values
@@ -212,9 +218,48 @@ def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, c
     session.post.assert_called_once_with(
         'http://fixture:8040/ci/consent',
         headers={'Authorization': 'Bearer test-fixture-key'},
-        json={'connection_id': 'connection'},
+        json={
+            'connection_id': 'connection',
+            'authorize_url': 'http://soev-provider-fixture:8040/ci/consent/11111111-1111-4111-8111-111111111111',
+        },
         timeout=30,
     )
+
+
+@pytest.mark.parametrize('failure', [400, 'foreign-connection', 'transport'])
+def test_consent_fixture_failure_is_recorded_and_never_enables_a_grant(monkeypatch, failure):
+    parameter = {
+        'key': 'cloud_connection',
+        'name': 'connection_id',
+        'prefix': '/connections/{connection_id}',
+        'seeded_by': 'seed_cloud_connection',
+        'provides': ['cloud_grant'],
+        'depends_on': [],
+    }
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(
+        201, {'connection_id': 'fictional-connection', 'authorize_url': 'fictional-start'}
+    )
+    session = Mock()
+    session.post.return_value = response(400, {}) if failure == 400 else response(200, {'id': 'foreign-connection'})
+    if failure == 'transport':
+        session.post.side_effect = requests.ConnectionError('Fictional disconnected fixture')
+    manager = Mock()
+    manager.__enter__ = Mock(return_value=session)
+    manager.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr(seeds.requests, 'Session', Mock(return_value=manager))
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_URL', 'http://fixture:8040')
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_KEY', 'fictional-fixture-key')
+    resolved = seeds.resolve_parameters(
+        client,
+        surface={'parameter': [parameter]},
+        spec={'paths': {'/connections/{connection_id}': {'get': {}}}},
+        collect_failures=True,
+    )
+    assert set(resolved.failures) == {'cloud_connection'}
+    assert set(resolved.blocked) == {'GET /connections/{connection_id}'}
+    assert not resolved
+    client.request.assert_called_once()
 
 
 def test_a_later_pass_reuses_the_consented_connection_without_new_consent(monkeypatch):

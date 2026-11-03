@@ -647,13 +647,23 @@ def seed_cloud_connection(ctx, parameter):
         # state is seeded; the application must admit the owner and create its grant.
         with requests.Session() as session:
             session.trust_env = False
-            response = session.post(
-                os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
-                headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
-                json={'connection_id': connection},
-                timeout=30,
-            )
-            response.raise_for_status()
+            try:
+                response = session.post(
+                    os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+                    headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+                    json={'connection_id': connection, 'authorize_url': created['authorize_url']},
+                    timeout=30,
+                )
+            except requests.RequestException as error:
+                raise RuntimeError('Consent fixture request failed') from error
+            if response.status_code != 200:
+                raise RuntimeError(f'Consent fixture refused the operation: HTTP {response.status_code}')
+            try:
+                accepted = response.json()
+            except ValueError:
+                raise RuntimeError('Consent fixture returned invalid JSON') from None
+            if not isinstance(accepted, dict) or accepted.get('id') != connection:
+                raise RuntimeError('Consent fixture did not acknowledge this connection')
     grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
     ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
