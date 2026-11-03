@@ -1694,7 +1694,7 @@ reason = "group_policy.py: console-owned group identity and membership; reads st
 [[field]]
 route = "POST /api/v1/groups/id/{id}/update"
 description = "Admin positive control for product settings only. routers/groups.py:require_group_update protects console identity/membership; get_admin_user deliberately returns 401 ACCESS_PROHIBITED for user/intruder settings writes."
-json = { permissions = { chat = { file_upload = false } }, data = { config = { share = false } } }
+v2 = { json = { permissions = { chat = { file_upload = false } }, data = { config = { share = false } } } }
 
 [[control]]
 runtime_soev_backed = "drive"
