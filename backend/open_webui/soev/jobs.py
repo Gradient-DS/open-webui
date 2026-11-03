@@ -110,6 +110,24 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
             return await _finish(file, job, 'job disappeared')
         raise
     status = result['status']
+    log.info(
+        'soev job status: file=%s job=%s status=%s',
+        file.id,
+        job['job_id'],
+        status
+        if status
+        in {
+            'AWAITING_UPLOAD',
+            'QUEUED',
+            'RUNNING',
+            'SUCCEEDED',
+            'COMPLETED_WITH_ERRORS',
+            'FAILED',
+            'CANCELLED',
+            'EXPIRED',
+        }
+        else 'UNKNOWN',
+    )
     age = now - job['submitted_at']
     if status == 'AWAITING_UPLOAD':
         return await _commit_upload(client, file, job) if age >= 60 else 0
