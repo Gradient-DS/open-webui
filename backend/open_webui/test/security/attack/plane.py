@@ -444,6 +444,8 @@ def _throwaway(admin):
 
 
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
+    from .diagnostics import timed
+
     tally = _PASSES.setdefault(pass_name, Seeding())
     guard = (
         preserve_configuration(
@@ -455,7 +457,7 @@ def _drive_one(client, route_id, filled, pass_name, **kwargs):
         if route_id.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
         else nullcontext()
     )
-    with guard:
+    with timed(f'{pass_name} {route_id}'), guard:
         return _drive_response(client, route_id, filled, pass_name, **kwargs)
 
 

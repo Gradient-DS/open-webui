@@ -247,6 +247,8 @@ def _disposable_user(admin: AttackClient, email: str) -> AttackClient:
 
 
 def _request(admin, actor, route, target, tally, kwargs):
+    from .diagnostics import timed
+
     guard = (
         plane.preserve_configuration(
             admin,
@@ -262,7 +264,7 @@ def _request(admin, actor, route, target, tally, kwargs):
     invalidates_identity = route in seeds.DESTRUCTIVE and route.split(' ', 1)[1].startswith(
         ('/api/v1/auths/', '/api/v1/users/')
     )
-    with guard, _actor(admin, actor, invalidates_identity) as client:
+    with timed(f'crossuser {route}'), guard, _actor(admin, actor, invalidates_identity) as client:
         response = client.request(route.split(' ', 1)[0], target, **deepcopy(kwargs))
         try:
             # The shared driver's Outcome truncates diagnostics; authorization

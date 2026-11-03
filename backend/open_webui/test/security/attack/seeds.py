@@ -24,6 +24,7 @@ import requests
 from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
+from .diagnostics import timed
 from .identities import create_oidc_identity
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -834,7 +835,8 @@ def resolve_parameters(
             failures[key] = f'Failed dependencies: {dependencies}'
             continue
         try:
-            value = _seed_parameter(ctx, p)
+            with timed(f'seed parameter {key}', announce=True):
+                value = _seed_parameter(ctx, p)
             ctx.values[key] = _extract(
                 {'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias'))
             )
@@ -842,6 +844,7 @@ def resolve_parameters(
             if not collect_failures or isinstance(error, AuthenticationError):
                 raise
             failures[key] = str(error)
+            print(f'Sweep seed failed: {key}: {error}', flush=True)
     resolved = {}
     for path in spec['paths']:
         for name in re.findall(r'\{([^}]+)\}', path):
@@ -854,10 +857,12 @@ def resolve_parameters(
     fields = {}
     for entry in surface.get('field', []):
         try:
-            fields.update(resolve_fields(ctx, entries=[entry]))
+            with timed(f'seed fields {entry["route"]}', announce=bool(entry.get('setup'))):
+                fields.update(resolve_fields(ctx, entries=[entry]))
         except RuntimeError as error:
             if not collect_failures or isinstance(error, AuthenticationError):
                 raise
             failures[entry['route']] = str(error)
             blocked[entry['route']] = str(error)
+            print(f'Sweep seed failed: {entry["route"]}: {error}', flush=True)
     return Resolved(resolved, fields=fields, failures=failures, blocked=blocked)
