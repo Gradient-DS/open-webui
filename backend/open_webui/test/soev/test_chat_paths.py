@@ -1893,3 +1893,31 @@ async def test_reader_chat_open_never_requests_or_returns_versions(dark_api, mon
     result = await dark_api.browser.get('/api/v1/chats/fictional-thread?current=true')
     assert result.status_code == 200 and 'versions' not in result.json()
     versions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sweep_folder_control_succeeds_and_still_refuses_revoked_access(dark_api, monkeypatch):
+    from open_webui.models.folders import Folders
+    from open_webui.test.security.attack import crossuser, seeds
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/chats/{id}/folder'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE)
+    context.values['folder'] = 'fictional-folder'
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    lookup = AsyncMock(return_value=SimpleNamespace(id='fictional-folder', user_id=dark_api.user.id))
+    monkeypatch.setattr(Folders, 'get_folder_by_id_and_user_id', lookup)
+    path = '/api/v1/chats/fictional-chat/folder'
+    invalid = await dark_api.browser.post(path, json={})
+    assert invalid.status_code == 422
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    owned = await dark_api.browser.post(path, **request)
+    assert owned.status_code == 200, owned.text
+    assert owned.json()['folder_id'] == 'fictional-folder'
+    lookup.assert_awaited_once_with('fictional-folder', dark_api.user.id)
+    writes = list(dark_api.records.writes)
+    dark_api.state['allowed'] = False
+    revoked = await dark_api.browser.post(path, **request)
+    assert revoked.status_code == 404, revoked.text
+    assert dark_api.records.writes == writes

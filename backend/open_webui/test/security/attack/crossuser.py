@@ -387,10 +387,16 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     with own_fixtures(identities, spec=spec) as (parameters, markers, surface, owners):
         with pass_run('crossuser', routes, identities.admin) as tally:
             result = Authorization(tally, shared=_shared())
-            # Delete children before parents within the shared removal group.
+            # File cleanup detaches KB documents, so its KB must still be available.
+            # Path depth alone cannot express that cross-resource dependency.
             ordered = sorted(
                 routes,
-                key=lambda r: (plane._read_before_destroy(r)[0], -r.count('/') if r.startswith('DELETE ') else 0, r),
+                key=lambda r: (
+                    plane._read_before_destroy(r)[0],
+                    r == 'DELETE /api/v1/knowledge/{id}/delete',
+                    -r.count('/') if r.startswith('DELETE ') else 0,
+                    r,
+                ),
             )
             for route in ordered:
                 target = plane._target(route, parameters, tally)

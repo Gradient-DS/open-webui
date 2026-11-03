@@ -1333,10 +1333,21 @@ reason = "The private sweep observed functions/create returning 403 after #535; 
 
 [[control]]
 runtime_soev_backed = "drive"
+all_actors = true
 route = "POST /api/chat/actions/{action_id}"
-status = 400
-detail = "Action not found:"
-reason = "main.py still mounts chat/actions and verifies chat ownership. utils/actions.py looks up the action before model dispatch; v2 cannot install the fictional action because function creation is refused. Keep probing the route with an owned chat and readable model."
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "main.chat_action calls thread_content.refuse_local_content before verify_chat_ownership or action dispatch; threads.enabled() makes this an unconditional 409 unavailable for every authenticated actor in drive mode."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/chats/shared/{id}/access/update"
+status = 409
+detail = "unavailable"
+json = { "state" = "unavailable" }
+reason = "soev/chat_routes.chat sends sharing routes to thread_sharing.dispatch; its explicit method/route allowlist omits POST /shared/{id}/access/update and returns 409 unavailable after require_login, before ownership or grant mutation."
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -1754,6 +1765,11 @@ v2 = { json = { model = "{model}", chat_id = "{chat}", messages = [{ role = "use
 route = "POST /api/v1/evaluations/feedback"
 description = "Rate a committed platform message without accepting caller-chosen model or agent metadata."
 v2 = { json = { thread_id = "{chat}", position = "{chat_message}", rating = 1 }, json_integer_fields = ["position"] }
+
+[[field]]
+route = "POST /api/v1/chats/{id}/folder"
+description = "soev/chat_routes.organize requires exactly the folder_id key, even though the legacy ChatFolderIdForm makes it optional. The seeded folder and chat have the same admin owner."
+json = { folder_id = "{folder}" }
 
 [[field]]
 route = "POST /api/v1/chats/{id}"
