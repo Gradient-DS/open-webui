@@ -197,9 +197,21 @@ async def test_moa_adapts_one_json_result_to_frontend_sse(task_api):
 
 
 @pytest.mark.asyncio
-async def test_image_prompt_is_unavailable_in_platform_mode(task_api):
-    response = await task_api.browser.post('/tasks/image_prompt/completions', json=FORM)
+async def test_image_prompt_is_unavailable_in_platform_mode(task_api, monkeypatch):
+    from open_webui.test.security.attack import crossuser, seeds
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/tasks/image_prompt/completions'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE)
+    context.values['model'] = FORM['model']
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    response = await task_api.browser.post(
+        '/tasks/image_prompt/completions', **crossuser._benign(route, parameters, seeds.SPEC)
+    )
     assert response.status_code == 404
+    declaration = crossuser.expected_refusals()[route]
+    assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
     assert task_api.platform.requests == []
 
 

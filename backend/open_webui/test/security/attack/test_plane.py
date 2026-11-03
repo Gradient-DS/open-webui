@@ -826,6 +826,33 @@ def test_the_drive_pass_sends_declared_json_alone_on_a_seeded_route():
     assert client.request.call_args_list[0].kwargs['json'] == {'a': 'real-id'}
 
 
+def test_image_prompt_drive_sends_the_body_before_checking_the_v2_refusal(monkeypatch):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    path = '/api/v1/tasks/image_prompt/completions'
+    route = f'POST {path}'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE)
+    context.values['model'] = 'fictional-model'
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    client = Mock(spec=plane.transport.AttackClient)
+    client.request.side_effect = lambda *args, **kwargs: response(404, {'detail': 'Not Found'})
+
+    spec = {**seeds.SPEC, 'paths': {path: seeds.SPEC['paths'][path]}}
+    outcome = plane.drive_every_route(client, parameters, spec=spec)[route]
+
+    client.request.assert_called_once_with(
+        'POST',
+        path,
+        json={'model': 'fictional-model', 'messages': [{'role': 'user', 'content': 'Fictional image prompt control'}]},
+    )
+    declaration = crossuser.expected_refusals()[route]
+    assert declaration['status'] == 404
+    assert crossuser.refused_as_expected(declaration, outcome.status, outcome.body)
+    assert not crossuser.refused_as_expected(declaration, 422, '{"detail":"body missing"}')
+
+
 @pytest.mark.parametrize(
     'status,body,unavailable',
     [

@@ -1741,6 +1741,11 @@ json = { "detail" = "Not Found" }
 reason = "tasks.generate_image_prompt explicitly refuses under v2; image prompt generation is not a soev.task/1 operation."
 
 [[field]]
+route = "POST /api/v1/tasks/image_prompt/completions"
+description = "task_completion_body requires a JSON object before generate_image_prompt can return its declared v2 404."
+v2 = { json = { model = "{model}", messages = [{ role = "user", content = "Fictional image prompt control" }] } }
+
+[[field]]
 route = "POST /api/v1/tasks/title/completions"
 description = "Supported typed task positive control for the image-prompt refusal, using the seeded owner's completed thread and catalog model."
 v2 = { json = { model = "{model}", chat_id = "{chat}", messages = [{ role = "user", content = "Fictional title control" }] } }
