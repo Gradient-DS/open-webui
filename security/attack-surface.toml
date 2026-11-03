@@ -212,6 +212,14 @@ prefix = "/api/tasks/chat/{chat_id}"
 description = "Handler reads the same Chats.id created by chats.new."
 same_as = "chat"
 
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/tasks/chat/{chat_id}/stop"
+status = 409
+detail = "unavailable"
+json = { detail = "unavailable" }
+reason = "The seeded chat has completed its turn. The platform deliberately returns 409 thread_active when cancellation has no cancellable run; ThreadClient preserves the conflict without exposing upstream details. Other users must still be refused by platform ownership."
+
 [[parameter]]
 key = "chat_stats"
 name = "chat_id"
