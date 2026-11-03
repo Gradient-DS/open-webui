@@ -46,15 +46,53 @@ _RECORDED = deque(maxlen=_RECORD_LIMIT)
 _RECORD_LOCK = Lock()
 
 
-def _completion(model):
+def structured_content(payload):
+    schema = (payload.get('response_format') or {}).get('json_schema', {}).get('schema')
+    if schema is None:
+        for message in payload.get('messages', []):
+            if message.get('role') != 'system' or not isinstance(message.get('content'), str):
+                continue
+            text = message['content']
+            for match in re.finditer(r'\{', text):
+                try:
+                    candidate, _ = json.JSONDecoder().raw_decode(text[match.start() :])
+                except ValueError:
+                    continue
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get('type') == 'object'
+                    and candidate.get('properties')
+                    and candidate.get('required')
+                ):
+                    schema = candidate
+                    break
+    if not isinstance(schema, dict):
+        return None
+    return json.dumps(schema_value(schema))
+
+
+def schema_value(schema):
+    if 'enum' in schema:
+        return schema['enum'][0]
+    kind = schema.get('type')
+    if kind == 'object':
+        return {name: schema_value(schema['properties'][name]) for name in schema.get('required', [])}
+    if kind == 'array':
+        return [schema_value(schema['items']) for _ in range(max(1, schema.get('minItems', 0)))]
+    if kind in {'integer', 'number'}:
+        return schema.get('minimum', 1)
+    if kind == 'boolean':
+        return True
+    return 'Fictional control'
+
+
+def _completion(model, content='stub response'):
     return {
         'id': 'chatcmpl-ci',
         'object': 'chat.completion',
         'created': 0,
         'model': model,
-        'choices': [
-            {'index': 0, 'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': 'stub response'}}
-        ],
+        'choices': [{'index': 0, 'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': content}}],
         'usage': {'prompt_tokens': 1, 'completion_tokens': 2, 'total_tokens': 3},
     }
 
@@ -195,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 return
 
-        for index, delta in enumerate(STREAM_DELTAS):
+        for index, delta in enumerate((structured_content(payload),) if structured_content(payload) else STREAM_DELTAS):
             if ollama:
                 frame(
                     {
@@ -311,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
             if payload.get('stream'):
                 self._send_stream(payload)
             else:
-                self._send(_completion(payload.get('model', MODEL)))
+                self._send(_completion(payload.get('model', MODEL), structured_content(payload) or 'stub response'))
         elif path in {'/v1/embeddings', '/api/embed', '/api/embeddings'}:
             inputs = payload.get('input', payload.get('prompt', ''))
             count = len(inputs) if isinstance(inputs, list) and (not inputs or not isinstance(inputs[0], int)) else 1
