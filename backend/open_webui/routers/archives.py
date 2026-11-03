@@ -5,30 +5,33 @@ Admin endpoints for managing user data archives.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.config import Config
 from open_webui.models.user_archives import (
-    UserArchives,
-    UserArchiveModel,
-    UserArchiveSummaryModel,
     CreateArchiveForm,
     UpdateArchiveForm,
+    UserArchiveModel,
+    UserArchives,
+    UserArchiveSummaryModel,
 )
 from open_webui.services.archival import ArchiveService
 from open_webui.soev import acting, identity
 from open_webui.soev.client import SoevApiError, SoevClient
-from open_webui.utils.auth import get_admin_user
-
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def require_archive_contract(user=Depends(get_verified_user)) -> None:
+    refuse_local_content()
 
 
 async def requester_client(user) -> SoevClient:
@@ -172,7 +175,7 @@ async def get_archives(
     return ArchiveListResponse(items=archives, total=total)
 
 
-@router.get('/{archive_id}', response_model=UserArchiveModel)
+@router.get('/{archive_id}', response_model=UserArchiveModel, dependencies=[Depends(require_archive_contract)])
 async def get_archive(
     request: Request,
     archive_id: str,
@@ -201,7 +204,7 @@ async def get_archive(
     return archive
 
 
-@router.get('/{archive_id}/export')
+@router.get('/{archive_id}/export', dependencies=[Depends(require_archive_contract)])
 async def export_archive_chats(
     request: Request,
     archive_id: str,
@@ -235,7 +238,7 @@ async def export_archive_chats(
     return JSONResponse(content=chats)
 
 
-@router.post('/user/{user_id}', response_model=CreateArchiveResponse)
+@router.post('/user/{user_id}', response_model=CreateArchiveResponse, dependencies=[Depends(require_archive_contract)])
 async def create_user_archive(
     request: Request,
     user_id: str,
@@ -284,7 +287,7 @@ async def create_user_archive(
     )
 
 
-@router.patch('/{archive_id}', response_model=UserArchiveSummaryModel)
+@router.patch('/{archive_id}', response_model=UserArchiveSummaryModel, dependencies=[Depends(require_archive_contract)])
 async def update_archive(
     request: Request,
     archive_id: str,
@@ -329,7 +332,7 @@ async def update_archive(
     return UserArchiveSummaryModel.model_validate(archive)
 
 
-@router.delete('/{archive_id}')
+@router.delete('/{archive_id}', dependencies=[Depends(require_archive_contract)])
 async def delete_archive(
     request: Request,
     archive_id: str,

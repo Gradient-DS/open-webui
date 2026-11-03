@@ -61,6 +61,12 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def require_console_offboarding(user=Depends(get_verified_user)) -> None:
+    from open_webui.soev.policy_jobs import refuse_offboarding
+
+    refuse_offboarding()
+
+
 def merge_user_ui_settings(defaults: dict, settings: dict) -> dict:
     merged = dict(defaults)
     for key, value in settings.items():
@@ -1065,7 +1071,7 @@ async def update_user_by_id(
 ############################
 
 
-@router.get('/{user_id}/shared-data')
+@router.get('/{user_id}/shared-data', dependencies=[Depends(require_console_offboarding)])
 async def get_user_shared_data(
     user_id: str,
     user=Depends(get_admin_user),
@@ -1077,7 +1083,7 @@ async def get_user_shared_data(
     return {'items': (await inventory(user_id, db=db)).shared}
 
 
-@router.delete('/{user_id}', response_model=bool)
+@router.delete('/{user_id}', response_model=bool, dependencies=[Depends(require_console_offboarding)])
 async def delete_user_by_id(
     request: Request,
     user_id: str,

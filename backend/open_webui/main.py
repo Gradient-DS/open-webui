@@ -2159,7 +2159,11 @@ async def chat_action(
         )
 
 
-@app.post('/api/tasks/stop/{task_id}')
+async def require_legacy_task_dispatch(user=Depends(get_verified_user)) -> None:
+    refuse_local_content()
+
+
+@app.post('/api/tasks/stop/{task_id}', dependencies=[Depends(require_legacy_task_dispatch)])
 async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
     try:
         result = await stop_task(request.app.state.redis, task_id)

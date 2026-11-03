@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def require_group_write(user=Depends(get_verified_user)) -> None:
+    refuse_group_write()
+
+
 async def _visible_group(id: str, user: UserModel, db: AsyncSession) -> GroupModel:
     if user.role != 'admin':
         visible_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
@@ -69,7 +73,7 @@ async def get_groups(
 ############################
 
 
-@router.post('/create', response_model=Optional[GroupResponse])
+@router.post('/create', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
 async def create_new_group(
     request: Request,
     form_data: GroupForm,
@@ -146,7 +150,7 @@ async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSes
 ############################
 
 
-@router.post('/id/{id}/update', response_model=Optional[GroupResponse])
+@router.post('/id/{id}/update', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
 async def update_group_by_id(
     request: Request,
     id: str,
@@ -188,7 +192,7 @@ async def update_group_by_id(
 ############################
 
 
-@router.post('/id/{id}/users/add', response_model=Optional[GroupResponse])
+@router.post('/id/{id}/users/add', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)])
 async def add_user_to_group(
     request: Request,
     id: str,
@@ -199,7 +203,9 @@ async def add_user_to_group(
     refuse_group_write()
 
 
-@router.post('/id/{id}/users/remove', response_model=Optional[GroupResponse])
+@router.post(
+    '/id/{id}/users/remove', response_model=Optional[GroupResponse], dependencies=[Depends(require_group_write)]
+)
 async def remove_users_from_group(
     request: Request,
     id: str,
@@ -215,7 +221,7 @@ async def remove_users_from_group(
 ############################
 
 
-@router.delete('/id/{id}/delete', response_model=bool)
+@router.delete('/id/{id}/delete', response_model=bool, dependencies=[Depends(require_group_write)])
 async def delete_group_by_id(
     request: Request, id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
