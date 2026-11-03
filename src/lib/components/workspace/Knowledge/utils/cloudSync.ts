@@ -19,7 +19,7 @@ export function connectResult(
 	trustedOrigins: Set<string>,
 	popup: Window,
 	connectionId?: string
-): 'pending' | 'error' | 'invalid' | null {
+): 'pending' | 'error' | 'invalid' | 'interaction_required' | null {
 	if (
 		!connectionId ||
 		!trustedOrigins.has(event.origin) ||
@@ -29,7 +29,7 @@ export function connectResult(
 	)
 		return null;
 	const result = event.data.result;
-	return result === 'pending' || result === 'error' || result === 'invalid' ? result : null;
+	return ['pending', 'error', 'invalid', 'interaction_required'].includes(result) ? result : null;
 }
 
 export function reconnectConnections(

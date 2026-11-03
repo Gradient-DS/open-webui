@@ -175,3 +175,30 @@ describe('cloud-sync thin router', () => {
 		});
 	});
 });
+
+it('lists, adds and removes shared mailboxes through the authenticated proxy', async () => {
+	const mailbox = { address: 'gedeeld@example.test', added_at: '2026-10-31T12:00:00Z' };
+	const state = { enabled: true, consented: false, mailboxes: [mailbox] };
+	const listing = respond(state);
+	expect(await cloudSync.listMailboxes(token, 'outlook')).toEqual(state);
+	expect(listing.mock.calls[0]).toEqual([
+		'/api/v1/cloud-sync/connections/outlook/mailboxes',
+		{ method: 'GET', headers: { Authorization: `Bearer ${token}` } }
+	]);
+	const adding = respond(mailbox, 201);
+	expect(await cloudSync.addMailbox(token, 'outlook', mailbox.address)).toEqual(mailbox);
+	expect(JSON.parse(adding.mock.calls[0][1].body)).toEqual({ address: mailbox.address });
+	const removing = respond(null, 204);
+	await cloudSync.removeMailbox(token, 'outlook', mailbox.address);
+	expect(removing.mock.calls[0][0]).toBe(
+		'/api/v1/cloud-sync/connections/outlook/mailboxes/gedeeld%40example.test'
+	);
+	expect(removing.mock.calls[0][1].method).toBe('DELETE');
+});
+
+it('requests silent reauthorization without supplying a browser-selected identity', async () => {
+	const fetch = respond({ authorize_url: 'https://provider.invalid/silent' });
+	await cloudSync.authorizeConnection(token, 'outlook', true);
+	expect(fetch.mock.calls[0][0]).toBe('/api/v1/cloud-sync/connections/outlook/authorize');
+	expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ silent: true });
+});

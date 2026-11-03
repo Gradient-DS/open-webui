@@ -25,16 +25,7 @@ const ALLOWLIST_PREFIXES = ['@gradient-ds/'];
 // Security fixes too young for the cooldown: exact name@version, until the
 // date the version ages out. An entry past its expiry fails the run, so it is
 // deleted rather than left to exempt later versions by accident.
-const SECURITY_EXEMPTIONS = {
-	'undici@7.30.1': {
-		reason: 'GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c',
-		expires: '2026-10-30'
-	},
-	'markdown-it@14.3.3': {
-		reason: 'GHSA-gfr2-rv44-r23c, GHSA-vfgh-jcmw-g37q',
-		expires: '2026-10-31'
-	}
-};
+const SECURITY_EXEMPTIONS = {};
 
 function parseArgs(argv) {
 	let lockfile = './package-lock.json';

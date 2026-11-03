@@ -18,6 +18,7 @@ export type SourceState =
 	| 'scheduled'
 	| 'paused'
 	| 'needs_reconnect'
+	| 'source_unavailable'
 	| 'needs_access'
 	| 'error';
 
@@ -71,6 +72,12 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	];
 	let state: SourceState;
 	if (pair.queued || schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
+	// An enabled connection makes this a source failure; reauth keeps its legacy errors below.
+	else if (
+		connection.lifecycle === 'enabled' &&
+		schedules.some((item) => (item.last_error ?? item.last_run?.error_code) === 'access_revoked')
+	)
+		state = 'source_unavailable';
 	else if (
 		[connection.lifecycle, ...errors].some((code) =>
 			reconnectCodes(connection.source_kind).includes(code ?? '')
@@ -109,7 +116,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 		skipped: pair.content?.last_run?.counts?.failed ?? 0,
 		otherKbs: Math.max(0, (schedule.subscriber_count ?? 1) - 1),
 		primary:
-			state === 'syncing'
+			state === 'syncing' || state === 'source_unavailable'
 				? null
 				: state === 'needs_reconnect'
 					? 'reconnect'

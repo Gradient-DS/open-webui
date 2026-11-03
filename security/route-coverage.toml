@@ -277,6 +277,11 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
+id = "DELETE /api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies shared mailboxes to soev-api and answers 503 without it. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
 id = "DELETE /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
@@ -295,6 +300,11 @@ reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py
 id = "GET /api/v1/cloud-sync/connections/{connection_id}/live/{family}"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies shared mailboxes to soev-api and answers 503 without it. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
 id = "GET /api/v1/cloud-sync/connections/{connection_id}/usage"
@@ -330,6 +340,11 @@ reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py
 id = "POST /api/v1/cloud-sync/connections/{connection_id}/live/{family}"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies shared mailboxes to soev-api and answers 503 without it. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
 id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules"

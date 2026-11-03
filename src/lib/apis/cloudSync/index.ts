@@ -106,8 +106,13 @@ export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));
 export const getConnectionUsage = (token: string, id: string) =>
 	request<{ knowledge_ids: string[] }>(token, `${connectionPath(id)}/usage`);
-export const authorizeConnection = (token: string, id: string) =>
-	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
+export const authorizeConnection = (token: string, id: string, silent = false) =>
+	request<Authorization>(
+		token,
+		`${connectionPath(id)}/authorize`,
+		'POST',
+		silent ? { silent: true } : undefined
+	);
 export const revokeConnection = (token: string, id: string) =>
 	request<void>(token, connectionPath(id), 'DELETE');
 // [Gradient] Live search on for what the Microsoft login connected; the families turned on now.
@@ -176,3 +181,19 @@ export const enableLiveFamily = (
 	id: string,
 	family: 'live_documents' | 'mail' = 'live_documents'
 ) => request<LiveGrant>(token, `${connectionPath(id)}/live/${family}`, 'POST');
+
+export interface SharedMailbox {
+	address: string;
+	added_at: string;
+}
+export interface MailboxList {
+	enabled: boolean;
+	consented: boolean;
+	mailboxes: SharedMailbox[];
+}
+export const listMailboxes = (token: string, id: string) =>
+	request<MailboxList>(token, `${connectionPath(id)}/mailboxes`);
+export const addMailbox = (token: string, id: string, address: string) =>
+	request<SharedMailbox>(token, `${connectionPath(id)}/mailboxes`, 'POST', { address });
+export const removeMailbox = (token: string, id: string, address: string) =>
+	request<void>(token, `${connectionPath(id)}/mailboxes/${encodeURIComponent(address)}`, 'DELETE');
