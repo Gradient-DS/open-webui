@@ -306,40 +306,6 @@ exceptions:
     approved_by: "@LexLubbers (pending, review on PR #523)"
     recheck: 2026-11-07
 
-  - id: CVE-2026-119284
-    package: joserfc
-    scanner: pip-audit
-    reason: >-
-      Compact JWS parsing splits the token before checking its size limits, so
-      an oversized token costs about one extra copy of its payload in memory.
-      Fixed in 1.7.6 (published 2026-10-18), which is inside the 14-day minimum
-      package age until 2026-11-01. 1.7.5 is pinned and fixes CVE-2026-119283.
-    replacement_considered: >-
-      Bump to 1.7.6 once it passes the 14-day age rule on 2026-11-01.
-    usage_analysis: >-
-      Not reachable by an attacker: joserfc only verifies the ID token that
-      authlib receives from the configured identity provider's token endpoint,
-      server to server over TLS. Back-channel logout tokens are parsed with
-      PyJWT, not joserfc, and no request path hands client input to joserfc.
-    approved_by: "@LexLubbers, 2026-10-30"
-    recheck: 2026-11-01
-
-  - id: GHSA-3f7j-7jwc-fxfj
-    package: systeminformation
-    scanner: npm
-    reason: >-
-      High. Windows command injection in services() through Unicode quotation
-      marks. Fixed in 5.33.16 (published 2026-10-19), which is inside the
-      14-day minimum package age until 2026-11-02.
-    replacement_considered: >-
-      Bump the package.json override from 5.33.15 to 5.33.16 on 2026-11-02.
-    usage_analysis: >-
-      Unreachable: the code path runs only on Windows and we build and ship
-      Linux only. systeminformation is a transitive build/dev dependency and
-      services() is never called with user input.
-    approved_by: "@LexLubbers, 2026-10-30"
-    recheck: 2026-11-02
-
   - id: CVE-2026-112908
     package: filelock
     scanner: pip-audit
