@@ -120,7 +120,10 @@ jobs:
     name: Backend Unit Tests
     needs: [reuse, changes]
     if: always()
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: ubuntu-26.04's libmagic 5.46 identifies the
+    # upload-guard zip fixtures differently. The image ships Debian bookworm's
+    # libmagic, which 24.04's is closer to.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       tested: ${{ steps.pytest.outcome == 'success' }}
