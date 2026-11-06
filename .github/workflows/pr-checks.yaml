@@ -86,7 +86,7 @@ jobs:
       hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@ade6cdd8c26f678ed19801839b10aa0e9c178c77 # v15
         with:
           workflow-key: backend-tests
 
@@ -283,6 +283,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@ade6cdd8c26f678ed19801839b10aa0e9c178c77 # v15
         with:
           workflow-key: backend-tests
