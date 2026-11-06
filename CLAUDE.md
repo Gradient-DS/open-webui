@@ -25,8 +25,8 @@ npm run test:frontend          # Vitest unit tests
 ```bash
 pip install -e ".[dev]"        # Install with dev dependencies
 open-webui dev                 # Dev server with auto-reload (port 8080)
-npm run lint:backend           # PyLint checks
-npm run format:backend         # Black formatting
+ruff check backend/            # CI gates on pyflakes (F) only; see pr-checks.yaml
+npm run format:backend         # ruff format
 ```
 
 Best hot-reload: backend (`open-webui dev`, port 8080) and frontend (`npm run dev`, port 5173, proxies to backend) in separate terminals. Full stack via `docker compose up -d`.
@@ -76,7 +76,7 @@ To develop this fork against the soev platform, run it from your checkout (comma
 ## Code style
 
 - Frontend: TypeScript strict, Svelte 5 runes (`$state`, `$derived`, `$effect`), Tailwind CSS 4, ESLint + Prettier.
-- Backend: type hints on signatures, Black (88 chars), PyLint.
+- Backend: type hints on signatures, Ruff (120 chars, single quotes; config in `pyproject.toml` `[tool.ruff]`). This fork keeps upstream's style: it does not follow the org Ruff baseline, and upstream files are never reformatted.
 - **i18n: all new user-facing text needs Dutch (nl-NL) translations** — add to both `src/lib/i18n/locales/en-US/translation.json` and `nl-NL/translation.json`. Keys alphabetically sorted; empty string in en-US means "use the key itself". Parse new strings: `npm run i18n:parse`.
 
 ## Security inventories: every route, in the same PR
