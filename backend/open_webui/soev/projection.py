@@ -18,6 +18,7 @@ from open_webui.models.knowledge import (
     KnowledgeModel,
     KnowledgeUserModel,
 )
+from open_webui.models.users import UserResponse
 
 #: The key under the collection's client-owned ``meta`` that holds OWUI's knowledge meta; other clients own the rest.
 META_NAMESPACE = 'owui'
@@ -25,6 +26,10 @@ META_NAMESPACE = 'owui'
 
 def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
+    meta = {**collection['meta'].get(META_NAMESPACE, {})}
+    meta.pop('soev_access_update', None)
+    if job := collection.get('_access_update'):
+        meta['soev_access_update'] = {'status': job['status']}
     return KnowledgeModel(
         id=collection['key'],
         user_id=creator.removeprefix('owui:user:')
@@ -33,7 +38,7 @@ def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
         type=collection['source_kind'],
         name=collection['name'],
         description=collection['description'] or '',
-        meta=collection['meta'].get(META_NAMESPACE, {}),
+        meta=meta,
         access_grants=grants_of(collection, service_principal=service_principal),
         created_at=int(dt.datetime.fromisoformat(collection['created_at']).timestamp()),
         updated_at=int(dt.datetime.fromisoformat(collection['updated_at']).timestamp()),
@@ -45,7 +50,7 @@ def meta_patch(current: dict, desired: dict) -> dict:
     """The RFC 7396 merge patch that turns ``current`` into ``desired``.
 
     Merge patch cannot store null, so a None in ``desired`` reads as an absent key."""
-    patch = {key: None for key in current if key not in desired}
+    patch: dict = {key: None for key in current if key not in desired}
     for key, value in desired.items():
         before = current.get(key)
         if isinstance(value, dict) and isinstance(before, dict):
@@ -177,7 +182,7 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
 def knowledge_user_of(collection: dict, *, service_principal: str, user: dict | None = None) -> KnowledgeUserModel:
     return KnowledgeUserModel(
         **knowledge_of(collection, service_principal=service_principal).model_dump(),
-        user=user,
+        user=None if user is None else UserResponse.model_validate(user),
         file_count=collection['document_count'],
     )
 

@@ -156,7 +156,8 @@ class SoevKnowledgeTable:
     async def _load_collection(self, key, *, user_id=None):
         try:
             row = await self._get(self._path(key), user_id=user_id)
-            return (await self._with_owners([row]))[0]
+            rows = await self._with_owners([row])
+            return (await self._with_access_jobs(rows, user_id=user_id))[0]
         except SoevApiError as error:
             if error.status == 404:
                 return None
@@ -171,8 +172,8 @@ class SoevKnowledgeTable:
     async def _load_collections(self, *, user_id=None, as_service=False):
         from open_webui.soev import ingest
 
-        client = self._client.as_service() if as_service else self._client
-        collections, jobs = await client.read_pages(
+        access_reads = await self._access_reads(user_id=user_id, as_service=as_service)
+        collections, jobs, *access_pages = await self._read_catalog_pages(
             [
                 {'resource': 'collections', 'query': {'limit': 200}},
                 {
@@ -183,12 +184,14 @@ class SoevKnowledgeTable:
                         'limit': 200,
                     },
                 },
+                *access_reads,
             ],
-            as_user=None if as_service else self._user_ref(user_id),
+            user_id=user_id,
+            as_service=as_service,
         )
         rows = (collections or {}).get('data', [])
         hidden = {job['collection_key'] for job in (jobs or {}).get('data', [])}
-        return await self._with_owners(
+        visible = await self._with_owners(
             [
                 row
                 for row in rows
@@ -198,6 +201,53 @@ class SoevKnowledgeTable:
                 and not ingest.is_folder_collection(row['key'])
             ]
         )
+        return await self._with_access_jobs(visible, user_id=user_id, as_service=as_service, job_pages=access_pages)
+
+    async def _access_markers(self, *, user_id=None, as_service=False):
+        from open_webui.soev import knowledge_access_jobs
+
+        ref = None if as_service else self._user_ref(user_id)
+        return await memoized(('access_job_refs', ref), lambda: knowledge_access_jobs.references(ref))
+
+    async def _read_catalog_pages(self, reads, *, user_id=None, as_service=False):
+        client = self._client.as_service() if as_service else self._client
+        pages = []
+        for offset in range(0, len(reads), 12):
+            pages.extend(
+                await client.read_pages(
+                    reads[offset : offset + 12], as_user=None if as_service else self._user_ref(user_id)
+                )
+            )
+        return pages
+
+    async def _access_reads(self, *, keys=None, user_id=None, as_service=False):
+        markers = await self._access_markers(user_id=user_id, as_service=as_service)
+        identifiers = list(
+            dict.fromkeys(marker['job_id'] for key, marker in markers.items() if keys is None or key in keys)
+        )
+        return [
+            {'resource': 'jobs', 'query': {'job_ids': identifiers[offset : offset + 200], 'limit': 200}}
+            for offset in range(0, len(identifiers), 200)
+        ]
+
+    async def _with_access_jobs(self, rows, *, user_id=None, as_service=False, job_pages=None):
+        markers = await self._access_markers(user_id=user_id, as_service=as_service)
+        if job_pages is None:
+            reads = await self._access_reads(keys={row['key'] for row in rows}, user_id=user_id, as_service=as_service)
+            job_pages = await self._read_catalog_pages(reads, user_id=user_id, as_service=as_service)
+        jobs = {job['job_id']: job for page in job_pages for job in (page or {}).get('data', [])}
+        result = []
+        for row in rows:
+            marker = markers.get(row['key'])
+            if marker is None:
+                result.append(row)
+                continue
+            job = jobs.get(marker['job_id'])
+            if job is not None and (job['kind'] != 'update_collection_access' or job['collection_key'] != row['key']):
+                job = None
+            terminal = job['job_id'] if job and job['status'] not in ('QUEUED', 'RUNNING') else marker.get('terminal')
+            result.append({**row, '_access_update': job, '_access_terminal_job': terminal})
+        return result
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
@@ -382,7 +432,18 @@ class SoevKnowledgeTable:
             'principals': sorted(set(readers) | owners),
             'writers': sorted(set(writers) | owners),
         }
-        await self._send('PUT', self._path(id) + '/access', access)
+        operation = json.dumps([id, access, current.get('_access_terminal_job')], sort_keys=True)
+        job = await self._send(
+            'PUT',
+            self._path(id) + '/access',
+            access,
+            idempotency_key='access:' + hashlib.sha256(operation.encode()).hexdigest(),
+        )
+        from open_webui.soev import knowledge_access_jobs
+        from open_webui.soev.request_cache import invalidate
+
+        await knowledge_access_jobs.remember(self._user_ref(), id, job['job_id'], current.get('_access_terminal_job'))
+        invalidate()
         if fields:
             return await self._send('PATCH', self._path(id), fields)
         return await self._collection(id)
@@ -440,7 +501,8 @@ class SoevKnowledgeTable:
         )
 
     async def _load_snapshot(self, key, *, user_id=None):
-        collection, documents, jobs, schedules = await self._client.read_pages(
+        access_reads = await self._access_reads(keys={key}, user_id=user_id)
+        collection, documents, jobs, schedules, *access_pages = await self._read_catalog_pages(
             [
                 {'resource': 'collection', 'collection_key': key},
                 {'resource': 'documents', 'collection_key': key, 'query': {'limit': 200}},
@@ -455,10 +517,13 @@ class SoevKnowledgeTable:
                     },
                 },
                 {'resource': 'schedules', 'query': {'collection_key': key, 'limit': 200}},
+                *access_reads,
             ],
-            as_user=self._user_ref(user_id),
+            user_id=user_id,
         )
-        collection = (await self._with_owners([collection]))[0] if collection else None
+        if collection:
+            rows = await self._with_owners([collection])
+            collection = (await self._with_access_jobs(rows, user_id=user_id, job_pages=access_pages))[0]
         remember(('collection', self, self._user_ref(user_id), key), collection)
         deleted = {item['source_id'] for job in (jobs or {}).get('data', []) for item in job.get('items') or []}
         return collection, (documents or {}).get('data', []), deleted, (schedules or {}).get('data', [])
@@ -516,7 +581,7 @@ class SoevKnowledgeTable:
         return grouped
 
     async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
-        result = {}
+        result: dict[str, int] = {}
         requested = set(knowledge_ids)
         if not requested:
             return result

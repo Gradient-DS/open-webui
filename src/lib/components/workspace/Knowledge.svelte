@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccessUpdateStatus from './Knowledge/AccessUpdateStatus.svelte';
 	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
 	import { enabledProviders } from '$lib/sources/policy';
@@ -485,6 +486,7 @@
 												</Tooltip>
 
 												<!-- [Gradient] Provider, sync and suspension chrome. -->
+												<AccessUpdateStatus meta={item.meta} />
 												{#if providerFor(item?.type)}
 													<Badge type="info" content={$i18n.t(providerFor(item?.type)!.label)} />
 												{:else if $config?.integration_providers?.[item?.type]}

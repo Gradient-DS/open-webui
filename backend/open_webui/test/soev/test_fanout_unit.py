@@ -20,6 +20,9 @@ def owner(monkeypatch):
     monkeypatch.setattr(acting, 'user_token', AsyncMock(return_value='fictional-owner-token'))
     monkeypatch.setattr(client, 'requester_ref', lambda: 'owui:user:alice')
     monkeypatch.setattr(client, 'user_token', AsyncMock(return_value='fictional-owner-token'))
+    access_jobs = SimpleNamespace(references=AsyncMock(return_value={}), remember=AsyncMock())
+    monkeypatch.setitem(sys.modules, 'open_webui.soev.knowledge_access_jobs', access_jobs)
+    return access_jobs
 
 
 @pytest.mark.asyncio
@@ -100,6 +103,113 @@ async def test_knowledge_snapshot_has_one_call_for_many_deletions(owner, monkeyp
         assert len(deleted) == 100 and documents[0]['source_id'] == 'readable'
     api.read_pages.assert_awaited_once()
     assert len(api.read_pages.call_args.args[0]) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['QUEUED', 'RUNNING', 'FAILED', 'SUCCEEDED'])
+async def test_snapshot_keeps_applied_access_and_current_job_in_one_bundle(owner, monkeypatch, status):
+    owner.references.return_value = {
+        'kb': {'job_id': 'access-job', 'terminal': 'previous-job'},
+        'other': {'job_id': 'other-job'},
+    }
+    applied = {'key': 'kb', 'principals': ['alice', 'bob'], 'writers': ['alice']}
+    job = {'job_id': 'access-job', 'kind': 'update_collection_access', 'collection_key': 'kb', 'status': status}
+    api = SimpleNamespace(
+        read_pages=AsyncMock(
+            return_value=[
+                applied,
+                {'data': []},
+                {'data': []},
+                {'data': []},
+                {'data': [job]},
+            ]
+        )
+    )
+    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+
+    store = SoevKnowledgeTable(client=api)
+    monkeypatch.setattr(store, '_with_owners', AsyncMock(side_effect=lambda rows: rows))
+    with request_cache():
+        row, *_ = await store._snapshot('kb', user_id='alice')
+        assert await store._collection('kb', user_id='alice') == row
+    assert row['principals'] == applied['principals'] and row['writers'] == applied['writers']
+    assert row['_access_update'] == job
+    assert row['_access_terminal_job'] == ('previous-job' if status in ('QUEUED', 'RUNNING') else 'access-job')
+    api.read_pages.assert_awaited_once()
+    reads = api.read_pages.call_args.args[0]
+    assert len(reads) == 5
+    assert reads[-1] == {'resource': 'jobs', 'query': {'job_ids': ['access-job'], 'limit': 200}}
+    assert api.read_pages.call_args.kwargs == {'as_user': 'owui:user:alice'}
+    owner.references.assert_awaited_once_with('owui:user:alice')
+
+
+@pytest.mark.asyncio
+async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(owner, monkeypatch):
+    rows = [{'key': str(i), 'principals': ['alice'], 'writers': ['alice']} for i in range(100)]
+    owner.references.return_value = {row['key']: {'job_id': 'job-' + row['key']} for row in rows}
+    jobs = [
+        {
+            'job_id': 'job-' + row['key'],
+            'kind': 'update_collection_access',
+            'collection_key': row['key'],
+            'status': 'RUNNING',
+        }
+        for row in rows
+    ]
+    api = SimpleNamespace(read_pages=AsyncMock(return_value=[{'data': rows}, {'data': []}, {'data': jobs}]))
+    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    monkeypatch.setitem(
+        sys.modules,
+        'open_webui.soev.ingest',
+        SimpleNamespace(
+            is_attachments_collection=lambda key: False,
+            is_assistant_collection=lambda key: False,
+            is_folder_collection=lambda key: False,
+        ),
+    )
+    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+
+    store = SoevKnowledgeTable(client=api)
+    monkeypatch.setattr(store, '_with_owners', AsyncMock(side_effect=lambda rows: rows))
+    with request_cache():
+        result = await store._collections(user_id='alice')
+    assert len(result) == 100
+    assert all(row['_access_update']['status'] == 'RUNNING' and row['writers'] == ['alice'] for row in result)
+    api.read_pages.assert_awaited_once()
+    reads = api.read_pages.call_args.args[0]
+    assert [read['resource'] for read in reads] == ['collections', 'jobs', 'jobs']
+    assert len(reads[-1]['query']['job_ids']) == 100
+    assert api.read_pages.call_args.kwargs == {'as_user': 'owui:user:alice'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'returned',
+    [
+        [],
+        [{'job_id': 'access-job', 'kind': 'ingest', 'collection_key': 'kb'}],
+        [{'job_id': 'access-job', 'kind': 'update_collection_access', 'collection_key': 'other'}],
+    ],
+)
+async def test_access_status_never_uses_hidden_or_mismatched_jobs(owner, monkeypatch, returned):
+    owner.references.side_effect = lambda ref: (
+        {'kb': {'job_id': 'access-job', 'terminal': 'previous'}} if ref == 'owui:user:alice' else {}
+    )
+    api = SimpleNamespace(read_pages=AsyncMock(return_value=[{'data': returned}]))
+    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+
+    store = SoevKnowledgeTable(client=api)
+    applied = {'key': 'kb', 'writers': ['alice']}
+    with request_cache():
+        [owner_row] = await store._with_access_jobs([applied], user_id='alice')
+        assert owner_row['_access_update'] is None
+        assert owner_row['_access_terminal_job'] == 'previous'
+        assert await store._with_access_jobs([applied], user_id='bob') == [applied]
+        assert await store._with_access_jobs([applied], as_service=True, job_pages=[]) == [applied]
+    api.read_pages.assert_awaited_once()
+    assert api.read_pages.call_args.kwargs == {'as_user': 'owui:user:alice'}
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import AccessUpdateStatus from './AccessUpdateStatus.svelte';
+	import { accessUpdateState } from './utils/accessUpdate';
+	import { knowledgeListCache } from './utils/listCache';
 	import { takeKnowledgeItems } from './utils/prefetch';
 	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
@@ -186,6 +189,26 @@
 	let showNewDirectoryModal = false;
 
 	let showAccessControlModal = false;
+	let accessPoll: ReturnType<typeof setTimeout> | undefined;
+	let savingAccess = false;
+	let accessRequest = 0;
+	const refreshAccess = async () => {
+		if (destroyed) return;
+		clearTimeout(accessPoll);
+		const currentId = id;
+		const request = ++accessRequest;
+		try {
+			const stored = await getKnowledgeById(localStorage.token, currentId);
+			if (destroyed || id !== currentId || request !== accessRequest) return;
+			appliedAccessGrants = structuredClone(stored.access_grants ?? []);
+			knowledge = { ...knowledge, access_grants: appliedAccessGrants, meta: stored.meta };
+			knowledgeListCache.invalidate();
+			if (accessUpdateState(stored.meta) === 'pending')
+				accessPoll = setTimeout(refreshAccess, 2000);
+		} catch (error) {
+			if (!destroyed) toast.error(`${error}`);
+		}
+	};
 	let showResetConfirm = false;
 
 	// Local-directory upload pipeline (upstream v0.10.2)
@@ -212,6 +235,7 @@
 			principal_id: string;
 			permission: 'read' | 'write';
 		}[];
+		meta?: Record<string, unknown>;
 		write_access?: boolean;
 		type?: string;
 		user_id?: string;
@@ -219,6 +243,7 @@
 
 	let id = null;
 	let knowledge: Knowledge | null = null;
+	let appliedAccessGrants: Knowledge['access_grants'] = [];
 	let knowledgeId = null;
 
 	// Present only in the "+ Add knowledge" builder flow: a path back to
@@ -328,6 +353,8 @@
 
 		// Don't null items — keep showing stale data during re-fetch
 		const currentFetchId = ++fetchId;
+		const contextAccessRequest = accessRequest;
+		const previousKnowledge = knowledge;
 
 		if (sortKey === null) {
 			direction = null;
@@ -360,6 +387,17 @@
 		if (destroyed || currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
+			if (
+				includeContext && res.knowledge && accessRequest === contextAccessRequest &&
+				knowledge === previousKnowledge
+			) {
+				knowledge = res.knowledge;
+				if (!Array.isArray(knowledge.access_grants)) knowledge.access_grants = [];
+				appliedAccessGrants = structuredClone(knowledge.access_grants);
+				clearTimeout(accessPoll);
+				if (accessUpdateState(knowledge.meta) === 'pending')
+					accessPoll = setTimeout(refreshAccess, 2000);
+			}
 			fileItems = res.items;
 			fileItemsTotal = res.total;
 			if (!isSearching) {
@@ -377,7 +415,7 @@
 			}
 		}
 		if (res?.collection_total != null) kbFileTotal = res.collection_total;
-		if (request.reused) void getItemsPage();
+		if (request.reused) void getItemsPage(false, includeContext);
 		queryDebounceActive = false;
 		return res;
 	};
@@ -1717,10 +1755,8 @@
 			}
 
 			const res = await updateKnowledgeById(localStorage.token, id, {
-				...knowledge,
 				name: knowledge.name,
-				description: knowledge.description,
-				access_grants: knowledge.access_grants ?? []
+				description: knowledge.description
 			}).catch((e) => {
 				toast.error(`${e}`);
 			});
@@ -1874,8 +1910,6 @@
 		]);
 		const res = initialPage?.knowledge;
 		if (!destroyed && res) {
-			knowledge = res;
-			if (!Array.isArray(knowledge.access_grants)) knowledge.access_grants = [];
 			if (syncStatusApplies(res.type, providers_enabled)) {
 				if (initialPage.sync_status_error || !initialPage.sync_status) {
 					syncStatusError = true;
@@ -1911,6 +1945,7 @@
 	});
 
 	onDestroy(() => {
+		clearTimeout(accessPoll);
 		clearTimeout(searchDebounceTimer);
 		if (treeRefreshTimer) {
 			clearTimeout(treeRefreshTimer);
@@ -2049,25 +2084,33 @@
 			<AccessControlModal
 				bind:show={showAccessControlModal}
 				bind:accessGrants={knowledge.access_grants}
-				readOnly={knowledge.user_id !== $user?.id}
+				readOnly={savingAccess || knowledge.user_id !== $user?.id}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
 					$user?.role === 'admin'}
 				onChange={async () => {
+					savingAccess = true;
+					clearTimeout(accessPoll);
+					const requested = knowledge.access_grants ?? [];
+					knowledge.access_grants = structuredClone(appliedAccessGrants);
+					accessRequest++;
 					try {
-						await updateKnowledgeAccessGrants(
-							localStorage.token,
-							id,
-							knowledge.access_grants ?? []
-						);
-						toast.success($i18n.t('Saved'));
+						const stored = await updateKnowledgeAccessGrants(localStorage.token, id, requested);
+						appliedAccessGrants = structuredClone(stored.access_grants ?? []);
+						knowledge.access_grants = appliedAccessGrants;
+						await refreshAccess();
 					} catch (error) {
 						toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
+						await refreshAccess();
+					} finally {
+						savingAccess = false;
 					}
 				}}
 				accessRoles={['read', 'write']}
-			/>
+			>
+				<AccessUpdateStatus meta={knowledge.meta} />
+			</AccessControlModal>
 		{/if}
 		<div class="w-full px-2">
 			<button
