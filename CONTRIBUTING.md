@@ -48,7 +48,7 @@ npm run format          # Prettier
 npm run test:frontend   # Vitest
 ```
 
-**Backend:** FastAPI, async SQLAlchemy. Ruff (88-char line length), type hints on signatures.
+**Backend:** FastAPI, async SQLAlchemy. Ruff (120-char lines, single quotes; config in `pyproject.toml` `[tool.ruff]`), type hints on signatures. The fork keeps upstream's style, so don't reformat upstream files.
 
 ```bash
 ruff format backend/
