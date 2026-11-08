@@ -27,6 +27,7 @@ SOEV = {
     'get_knowledge_bases_by_user_id',
     'get_knowledge_items_by_user_id',
     'get_knowledge_by_id',
+    'get_knowledge_page_by_id',
     'get_knowledge_by_id_and_user_id',
     'get_knowledge_by_file_id',
     'get_knowledges_by_file_id',
