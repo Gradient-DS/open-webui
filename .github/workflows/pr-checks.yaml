@@ -86,7 +86,7 @@ jobs:
       hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@71dea3696135309a19a1541157a249821bc08a2b # v16
         with:
           workflow-key: backend-tests
 
@@ -120,7 +120,10 @@ jobs:
     name: Backend Unit Tests
     needs: [reuse, changes]
     if: ${{ always() && github.event.pull_request.draft != true }}
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: ubuntu-26.04's libmagic 5.46 identifies the
+    # upload-guard zip fixtures differently. The image ships Debian bookworm's
+    # libmagic, which 24.04's is closer to.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       tested: ${{ steps.pytest.outcome == 'success' }}
@@ -280,6 +283,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@71dea3696135309a19a1541157a249821bc08a2b # v16
         with:
           workflow-key: backend-tests
