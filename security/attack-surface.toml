@@ -782,16 +782,19 @@ unseedable = "routers/notifications.py:create_notification_target stores a targe
 [[field]]
 backed_by = "soev-solutions"
 route = "GET /api/v1/chats/"
+description = "Load rows, pins, tags and folders through the caller's bundled sidebar read."
 params = { include_sidebar = true }
 
 [[field]]
 backed_by = "soev-solutions"
 route = "GET /api/v1/chats/list"
+description = "Drive the list alias with the same caller-bound sidebar bundle."
 params = { include_sidebar = true }
 
 [[field]]
 backed_by = "soev-solutions"
 route = "GET /api/v1/chats/{id}"
+description = "Load the current projection with versions restricted to the owner."
 params = { include_versions = true, current = true }
 
 [[field]]
