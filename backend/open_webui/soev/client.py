@@ -605,9 +605,10 @@ class SoevClient:
             log.debug(
                 'soev-api request %s %s %s %.1fms',
                 method,
-                route,
+                path.split('?', 1)[0],
                 status,
                 (time.perf_counter() - started) * 1000,
+                extra={'route': route},
             )
         if not response.is_success:
             failure = _response_error(response)
