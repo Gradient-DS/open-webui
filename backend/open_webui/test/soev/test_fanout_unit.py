@@ -1,9 +1,11 @@
 """Call budgets and owner isolation without an application or database."""
 
 import importlib
+import importlib.util
 import json
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,6 +16,30 @@ from open_webui.soev.chat_paths import ChatPaths
 from open_webui.soev.request_cache import request_cache
 
 
+def stub_module(monkeypatch, name, module):
+    monkeypatch.setitem(sys.modules, name, module)
+    parent, attribute = name.rsplit('.', 1)
+    if parent in sys.modules:
+        monkeypatch.setattr(sys.modules[parent], attribute, module, raising=False)
+
+
+def isolated_module(monkeypatch, name):
+    spec = importlib.util.spec_from_file_location(
+        'open_webui.soev._fanout_test_' + name,
+        Path(__file__).parents[2] / 'soev' / (name + '.py'),
+    )
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def knowledge_module(monkeypatch, owner):
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    return isolated_module(monkeypatch, 'knowledge_store')
+
+
 @pytest.fixture
 def owner(monkeypatch):
     monkeypatch.setattr(acting, 'requester_ref', lambda: 'owui:user:alice')
@@ -21,7 +47,7 @@ def owner(monkeypatch):
     monkeypatch.setattr(client, 'requester_ref', lambda: 'owui:user:alice')
     monkeypatch.setattr(client, 'user_token', AsyncMock(return_value='fictional-owner-token'))
     access_jobs = SimpleNamespace(references=AsyncMock(return_value={}), remember=AsyncMock())
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.knowledge_access_jobs', access_jobs)
+    stub_module(monkeypatch, 'open_webui.soev.knowledge_access_jobs', access_jobs)
     return access_jobs
 
 
@@ -81,7 +107,7 @@ async def test_cloud_status_batches_connection_details_without_an_owner_list(own
 
 
 @pytest.mark.asyncio
-async def test_knowledge_snapshot_has_one_call_for_many_deletions(owner, monkeypatch):
+async def test_knowledge_snapshot_has_one_call_for_many_deletions(owner, monkeypatch, knowledge_module):
     api = SimpleNamespace(
         read_pages=AsyncMock(
             return_value=[
@@ -92,8 +118,8 @@ async def test_knowledge_snapshot_has_one_call_for_many_deletions(owner, monkeyp
             ]
         )
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     store = SoevKnowledgeTable(client=api)
     monkeypatch.setattr(store, '_with_owners', AsyncMock(side_effect=lambda rows: rows))
@@ -107,7 +133,9 @@ async def test_knowledge_snapshot_has_one_call_for_many_deletions(owner, monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('status', ['QUEUED', 'RUNNING', 'FAILED', 'SUCCEEDED'])
-async def test_snapshot_keeps_applied_access_and_current_job_in_one_bundle(owner, monkeypatch, status):
+async def test_snapshot_keeps_applied_access_and_current_job_in_one_bundle(
+    owner, monkeypatch, knowledge_module, status
+):
     owner.references.return_value = {
         'kb': {'job_id': 'access-job', 'terminal': 'previous-job'},
         'other': {'job_id': 'other-job'},
@@ -125,8 +153,8 @@ async def test_snapshot_keeps_applied_access_and_current_job_in_one_bundle(owner
             ]
         )
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     store = SoevKnowledgeTable(client=api)
     monkeypatch.setattr(store, '_with_owners', AsyncMock(side_effect=lambda rows: rows))
@@ -145,7 +173,7 @@ async def test_snapshot_keeps_applied_access_and_current_job_in_one_bundle(owner
 
 
 @pytest.mark.asyncio
-async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(owner, monkeypatch):
+async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(owner, monkeypatch, knowledge_module):
     rows = [{'key': str(i), 'principals': ['alice'], 'writers': ['alice']} for i in range(100)]
     owner.references.return_value = {row['key']: {'job_id': 'job-' + row['key']} for row in rows}
     jobs = [
@@ -158,9 +186,9 @@ async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(
         for row in rows
     ]
     api = SimpleNamespace(read_pages=AsyncMock(return_value=[{'data': rows}, {'data': []}, {'data': jobs}]))
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    monkeypatch.setitem(
-        sys.modules,
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    stub_module(
+        monkeypatch,
         'open_webui.soev.ingest',
         SimpleNamespace(
             is_attachments_collection=lambda key: False,
@@ -168,7 +196,7 @@ async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(
             is_folder_collection=lambda key: False,
         ),
     )
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     store = SoevKnowledgeTable(client=api)
     monkeypatch.setattr(store, '_with_owners', AsyncMock(side_effect=lambda rows: rows))
@@ -192,13 +220,13 @@ async def test_collection_list_batches_all_pending_access_jobs_with_its_catalog(
         [{'job_id': 'access-job', 'kind': 'update_collection_access', 'collection_key': 'other'}],
     ],
 )
-async def test_access_status_never_uses_hidden_or_mismatched_jobs(owner, monkeypatch, returned):
+async def test_access_status_never_uses_hidden_or_mismatched_jobs(owner, monkeypatch, knowledge_module, returned):
     owner.references.side_effect = lambda ref: (
         {'kb': {'job_id': 'access-job', 'terminal': 'previous'}} if ref == 'owui:user:alice' else {}
     )
     api = SimpleNamespace(read_pages=AsyncMock(return_value=[{'data': returned}]))
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     store = SoevKnowledgeTable(client=api)
     applied = {'key': 'kb', 'writers': ['alice']}
@@ -213,14 +241,14 @@ async def test_access_status_never_uses_hidden_or_mismatched_jobs(owner, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_knowledge_initial_page_reuses_catalog_for_cloud_status(owner, monkeypatch):
-    monkeypatch.setitem(
-        sys.modules,
+async def test_knowledge_initial_page_reuses_catalog_for_cloud_status(owner, monkeypatch, knowledge_module):
+    stub_module(
+        monkeypatch,
         'open_webui.soev.capabilities',
         SimpleNamespace(CLOUD_SYNC='cloud_sync', has=AsyncMock(return_value=True), known=lambda: True),
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     api = SimpleNamespace(
         read_pages=AsyncMock(
@@ -261,15 +289,15 @@ async def test_index_consumers_in_one_request_share_one_authorized_page(owner, m
 
 
 @pytest.mark.asyncio
-async def test_sidebar_attachment_access_is_primed_in_two_owner_batches(owner, monkeypatch):
+async def test_sidebar_attachment_access_is_primed_in_two_owner_batches(owner, monkeypatch, knowledge_module):
     files = [SimpleNamespace(id=str(i), user_id='bob', meta={}) for i in range(100)]
-    monkeypatch.setitem(
-        sys.modules,
+    stub_module(
+        monkeypatch,
         'open_webui.models.files',
         SimpleNamespace(Files=SimpleNamespace(get_files_by_ids=AsyncMock(return_value=files))),
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
-    from open_webui.soev.knowledge_store import SoevKnowledgeTable
+    stub_module(monkeypatch, 'open_webui.soev.availability', SimpleNamespace(SoevNotConfigured=Exception))
+    SoevKnowledgeTable = knowledge_module.SoevKnowledgeTable
 
     documents = [{'source_id': file.id, 'collection_key': 'shared'} for file in files[:-1]]
     api = SimpleNamespace(
@@ -324,9 +352,8 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
         'open_webui.soev.ingest': ModuleType('ingest'),
     }
     for name, module in stubs.items():
-        monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.delitem(sys.modules, 'open_webui.soev.jobs', raising=False)
-    jobs = importlib.import_module('open_webui.soev.jobs')
+        stub_module(monkeypatch, name, module)
+    jobs = isolated_module(monkeypatch, 'jobs')
     api = SimpleNamespace(
         is_service=False,
         read_many=AsyncMock(
@@ -338,58 +365,55 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
             ]
         ),
     )
-    try:
-        assert await jobs.poll_once(api, now=2) == 0
-        api.read_many.assert_awaited_once()
-        reads = api.read_many.call_args.args[0]
-        assert len(reads) == 4
-        assert len(reads[0]['query']['job_ids']) == 150
-        assert api.read_many.call_args.kwargs == {'as_user': 'owui:user:alice'}
-        table.get_files_with_soev_jobs.assert_awaited_once_with(user_id='alice')
-        api.read_many.return_value = [{}, {'data': []}, {'data': []}, {'data': []}]
-        assert await jobs.poll_once(api, now=8) == 0
-        table.set_status.assert_not_called()
+    assert await jobs.poll_once(api, now=2) == 0
+    api.read_many.assert_awaited_once()
+    reads = api.read_many.call_args.args[0]
+    assert len(reads) == 4
+    assert len(reads[0]['query']['job_ids']) == 150
+    assert api.read_many.call_args.kwargs == {'as_user': 'owui:user:alice'}
+    table.get_files_with_soev_jobs.assert_awaited_once_with(user_id='alice')
+    api.read_many.return_value = [{}, {'data': []}, {'data': []}, {'data': []}]
+    assert await jobs.poll_once(api, now=8) == 0
+    table.set_status.assert_not_called()
 
-        monkeypatch.setattr(jobs.time, 'time', lambda: 2)
-        coalesced = client.SoevClient('https://soev.invalid', 'fictional-product-key')
-        broken = False
+    monkeypatch.setattr(jobs.time, 'time', lambda: 2)
+    coalesced = client.SoevClient('https://soev.invalid', 'fictional-product-key')
+    broken = False
 
-        async def respond(method, path, *, body, **kwargs):
-            results = []
-            for read in body['reads']:
-                payload = {'key': 'kb'} if read['resource'] == 'collection' else {'data': []}
-                status = 200
-                if read['resource'] == 'jobs':
-                    payload = {'data': [{'job_id': f'job-{index}', 'status': 'RUNNING'} for index in range(150)]}
-                    if broken:
-                        status, payload = 503, {'code': 'service_unavailable', 'detail': 'Unavailable'}
-                results.append({'status': status, 'body': payload})
-            return httpx.Response(200, json={'results': results})
+    async def respond(method, path, *, body, **kwargs):
+        results = []
+        for read in body['reads']:
+            payload = {'key': 'kb'} if read['resource'] == 'collection' else {'data': []}
+            status = 200
+            if read['resource'] == 'jobs':
+                payload = {'data': [{'job_id': f'job-{index}', 'status': 'RUNNING'} for index in range(150)]}
+                if broken:
+                    status, payload = 503, {'code': 'service_unavailable', 'detail': 'Unavailable'}
+            results.append({'status': status, 'body': payload})
+        return httpx.Response(200, json={'results': results})
 
-        monkeypatch.setattr(coalesced, '_request', AsyncMock(side_effect=respond))
-        monkeypatch.setattr(jobs.identity, 'build_client', lambda: coalesced, raising=False)
-        selected = [{'resource': 'collection', 'collection_key': 'kb'}]
-        with jobs.defer_owner_jobs('alice'):
-            assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
-            assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
-        sent = coalesced._request.call_args_list
-        assert len(sent) == 2
-        assert len(sent[0].kwargs['body']['reads']) == 5
-        assert sent[1].kwargs['body']['reads'] == selected
-        broken = True
-        with jobs.defer_owner_jobs('alice'):
-            assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
-        table.set_status.assert_not_called()
-        broken = False
-        coalesced._request.reset_mock()
-        monkeypatch.setattr(coalesced, '_require_thread_request', AsyncMock())
-        with request_cache(), jobs.defer_owner_jobs('alice'):
-            assert await coalesced.get('/v1/collections/kb', as_user='owui:user:alice') == {'key': 'kb'}
-            assert await coalesced.get('/v1/collections/kb', as_user='owui:user:alice') == {'key': 'kb'}
-        coalesced._request.assert_awaited_once()
-        assert len(coalesced._request.call_args.kwargs['body']['reads']) == 5
-    finally:
-        sys.modules.pop('open_webui.soev.jobs', None)
+    monkeypatch.setattr(coalesced, '_request', AsyncMock(side_effect=respond))
+    monkeypatch.setattr(jobs.identity, 'build_client', lambda: coalesced, raising=False)
+    selected = [{'resource': 'collection', 'collection_key': 'kb'}]
+    with jobs.defer_owner_jobs('alice'):
+        assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
+        assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
+    sent = coalesced._request.call_args_list
+    assert len(sent) == 2
+    assert len(sent[0].kwargs['body']['reads']) == 5
+    assert sent[1].kwargs['body']['reads'] == selected
+    broken = True
+    with jobs.defer_owner_jobs('alice'):
+        assert await coalesced.read_many(selected, as_user='owui:user:alice') == [{'key': 'kb'}]
+    table.set_status.assert_not_called()
+    broken = False
+    coalesced._request.reset_mock()
+    monkeypatch.setattr(coalesced, '_require_thread_request', AsyncMock())
+    with request_cache(), jobs.defer_owner_jobs('alice'):
+        assert await coalesced.get('/v1/collections/kb', as_user='owui:user:alice') == {'key': 'kb'}
+        assert await coalesced.get('/v1/collections/kb', as_user='owui:user:alice') == {'key': 'kb'}
+    coalesced._request.assert_awaited_once()
+    assert len(coalesced._request.call_args.kwargs['body']['reads']) == 5
 
 
 @pytest.mark.asyncio
@@ -455,7 +479,7 @@ async def test_opening_bundles_projection_and_versions_but_never_releases_reader
             ]
         )
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.soev.identity', SimpleNamespace(build_client=lambda: api))
+    stub_module(monkeypatch, 'open_webui.soev.identity', SimpleNamespace(build_client=lambda: api))
     service = ChatPaths(None, SimpleNamespace(list=AsyncMock(return_value=[])))
     page, versions = await service.opening('alice', 'thread', current=True)
     assert page.thread_id == 'thread'
@@ -489,9 +513,9 @@ async def test_expanded_folder_pages_share_the_sidebar_index(owner, monkeypatch)
     async def database():
         yield None
 
-    monkeypatch.setitem(sys.modules, 'open_webui.internal.db', SimpleNamespace(get_async_db_context=database))
-    monkeypatch.setitem(
-        sys.modules,
+    stub_module(monkeypatch, 'open_webui.internal.db', SimpleNamespace(get_async_db_context=database))
+    stub_module(
+        monkeypatch,
         'open_webui.routers.folders',
         SimpleNamespace(
             get_folders=owned,
