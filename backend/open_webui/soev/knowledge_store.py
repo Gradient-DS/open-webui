@@ -17,7 +17,7 @@ from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.principal_refs import collection_access
-from open_webui.soev.request_cache import memoized, remember
+from open_webui.soev.request_cache import memoized, remember, request_cache
 
 
 def _sort_file_rows(rows, filters, *, default_order='filename', default_descending=False):
@@ -634,8 +634,9 @@ class SoevKnowledgeTable:
 
     async def _references(self, ids, *, user_id=None, as_service=False):
         result = []
-        for source_id in sorted(ids):
-            result.extend(await self._source_references(source_id, user_id=user_id, as_service=as_service))
+        with request_cache():
+            for source_id in sorted(ids):
+                result.extend(await self._source_references(source_id, user_id=user_id, as_service=as_service))
         return result
 
     async def prime_sidebar_access(self, user_id, file_ids, collection_ids, *, index_read):
@@ -822,6 +823,12 @@ class SoevKnowledgeTable:
         return stmt
 
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
+        with request_cache():
+            return await self._search_files_by_id(
+                knowledge_id, user_id, filter, skip=skip, limit=limit, metadata_only=metadata_only, db=db
+            )
+
+    async def _search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
         try:
             path = self._directory_path(knowledge_id, filters.get('directory_id'))
