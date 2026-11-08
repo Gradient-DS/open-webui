@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from open_webui.test.soev.fake_api import person_ref
+from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
 SERVICE = 'owui:service:webui'
 FILE_BYTES = b'file content'
@@ -31,9 +31,9 @@ def ingest(client, *documents, **kwargs):
 
 
 @pytest.fixture
-def api(fake_api):
+def api():
     """Use a real HTTP client over MockTransport with inspectable fake state."""
-    fake = fake_api
+    fake = FakeSoevApi()
     fake.page_size = 1
     with httpx.Client(transport=httpx.MockTransport(fake.handle), base_url='https://soev.invalid') as client:
         yield fake, client
@@ -524,7 +524,7 @@ def test_get_delete_document_job_with_items_names_its_document(api):
         {'source_id': 'file', 'title': None, 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
     ]
     listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=QUEUED&include_items=true').json()['data']
-    assert listed == [send(client, 'GET', path).json()]
+    assert listed == [send(client, 'GET', path + '?include_items=true').json()]
 
 
 def test_advance_to_succeeded_materialises_the_documents(api):

@@ -93,7 +93,12 @@ async def test_owner_browser_settles_job_and_emits_status(token_app, env, monkey
     assert row.data['status'] == row.meta['status'] == expected
     assert row.data['error'] == row.meta['error'] == error
     assert row.meta['soev_job'] is None
-    reads = [r for r in env.api.requests if r.url.path == f'/v1/jobs/{job_id}']
+    reads = [
+        r
+        for r in env.api.requests
+        if r.url.path == '/v1/chat/reads'
+        and any(job_id in selector.get('query', {}).get('job_ids', []) for selector in json.loads(r.content)['reads'])
+    ]
     assert len(reads) == 1
     assert reads[0].headers['X-Soev-User-Token'] == 'fictional-access-token'
     env.events.assert_awaited_once_with(

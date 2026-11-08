@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from open_webui.test.soev.fake_api import person_ref
+from open_webui.test.soev.fake_api import person_ref, recorded_reads
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -104,8 +104,8 @@ async def test_empty_user_id_falls_back_to_the_acting_ref(env, ref):
     finally:
         acting._requester_ref.reset(token)
     assert env.api.requests
-    assert all(request.method == 'GET' for request in env.api.requests)
-    for request in env.api.requests:
+    assert all(request.method == 'GET' for request in recorded_reads(env.api.requests))
+    for request in recorded_reads(env.api.requests):
         if ref is None:
             assert 'X-Soev-' + 'Subject' not in request.headers
         else:
@@ -130,7 +130,7 @@ async def test_read_and_write_are_soev_apis_decision(env, user, read, write):
 async def test_one_request_answers_both_permissions(env, permission, expected):
     """Each permission check needs only one collection GET after ensuring the identity link."""
     assert await env.table.has_access('reader', 'knowledge', 'kb', permission) is expected
-    gets = [request for request in env.api.requests if request.method == 'GET']
+    gets = [request for request in recorded_reads(env.api.requests) if request.method == 'GET']
     assert len(gets) == 1
     assert gets[0].url.path == '/v1/collections/kb'
     assert subject(gets[0]) == 'owui:user:reader'
@@ -153,7 +153,7 @@ async def test_batch_access_lists_once_and_intersects_requested_ids(env, permiss
         'writer', 'knowledge', ['kb', 'public', 'deleted', 'missing'], permission, {'unrelated'}
     )
     assert result == expected
-    gets = [request for request in env.api.requests if request.url.path == '/v1/collections']
+    gets = [request for request in recorded_reads(env.api.requests) if request.url.path == '/v1/collections']
     assert len(gets) == 1
     assert subject(gets[0]) == 'owui:user:writer'
     env.api.requests.clear()
@@ -200,8 +200,11 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
     finally:
         acting._requester_ref.reset(token)
     assert env.api.requests
-    assert all(request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
-    assert all(subject(request) == f'owui:user:{requester}' for request in env.api.requests)
+    assert all(
+        request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers
+        for request in recorded_reads(env.api.requests)
+    )
+    assert all(subject(request) == f'owui:user:{requester}' for request in recorded_reads(env.api.requests))
 
 
 @pytest.mark.asyncio
@@ -210,7 +213,7 @@ async def test_a_user_query_still_uses_the_assertion(env, permission, expected):
     """A supplied user takes precedence over local group IDs for both permissions."""
     result = await env.table.get_accessible_resource_ids('reader', 'knowledge', ['kb'], permission, {'writers'})
     assert result == expected
-    gets = [request for request in env.api.requests if request.method == 'GET']
+    gets = [request for request in recorded_reads(env.api.requests) if request.method == 'GET']
     assert gets
     assert all(subject(request) == 'owui:user:reader' for request in gets)
 
@@ -231,7 +234,10 @@ async def test_grant_reads_are_identity_free_projections(env):
         ('writers', 'read'),
         ('writers', 'write'),
     }
-    assert all(request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers for request in env.api.requests)
+    assert all(
+        request.method == 'GET' and 'X-Soev-' + 'Subject' not in request.headers
+        for request in recorded_reads(env.api.requests)
+    )
 
 
 @pytest.mark.asyncio
@@ -249,7 +255,7 @@ async def test_setting_grants_commissions_one_atomic_access_job(env):
         await env.table.set_access_grants('knowledge', 'kb', grants)
     finally:
         acting._requester_ref.reset(token)
-    writes = [request for request in env.api.requests if request.method in ('PATCH', 'PUT')]
+    writes = [request for request in recorded_reads(env.api.requests) if request.method in ('PATCH', 'PUT')]
     assert [request.method for request in writes] == ['PUT', 'PUT']
     assert all(request.url.path == '/v1/collections/kb/access' for request in writes)
     assert json.loads(writes[0].content) == {

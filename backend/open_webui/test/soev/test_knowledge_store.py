@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from open_webui.test.soev.fake_api import person_ref
+from open_webui.test.soev.fake_api import person_ref, recorded_reads
 from sqlalchemy import event, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -811,7 +811,7 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
         'first': (env.api.documents['kb', 'first'], 'alice'),
         'shared': (env.api.documents['second', 'shared'], 'bob'),
     }
-    requests = [request for request in env.api.requests if request.method == 'GET']
+    requests = [request for request in recorded_reads(env.api.requests) if request.method == 'GET']
     assert requests
     for request in requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
@@ -1043,7 +1043,7 @@ async def test_add_file_before_submit_records_the_collection_key(env, job_meta):
     assert [item.id for item in await env.files.Files.get_pending_files_for_knowledge('kb')] == [row.id]
     listed = await env.store.search_files_by_id('kb', 'alice', {}, metadata_only=True)
     assert [(item.id, item.status) for item in listed.items] == [(row.id, 'pending')]
-    assert all(request.method == 'GET' for request in env.api.requests)
+    assert all(request.method == 'GET' for request in recorded_reads(env.api.requests))
 
 
 @pytest.mark.asyncio
@@ -1292,7 +1292,7 @@ async def test_reset_cancels_in_flight_jobs_before_deleting_documents(env):
     await env.files.Files.update_file_metadata_by_id(failed.id, {'soev_job': None, 'status': 'failed'})
     env.api.requests.clear()
     assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
-    writes = [request for request in env.api.requests if request.method != 'GET']
+    writes = [request for request in recorded_reads(env.api.requests) if request.method != 'GET']
     assert [request.method for request in writes] == ['POST', 'POST', 'DELETE', 'DELETE']
     assert {request.url.path for request in writes[:2]} == {
         f'/v1/jobs/{file.meta["soev_job"]["job_id"]}/cancel' for file in (row, landed)

@@ -8,6 +8,7 @@ import httpx
 import pytest
 from open_webui.soev.client import SoevClient
 from open_webui.soev.knowledge_store import SoevKnowledgeTable
+from open_webui.test.soev.fake_api import recorded_reads
 
 
 @pytest.fixture
@@ -189,7 +190,7 @@ async def test_folder_sources_appear_as_top_level_directories(folder_store):
     assert sorted(row.name for row in page.directories) == ['Folder', 'Reports', 'Reports', 'Uploads']
     assert len({row.id for row in page.directories}) == 4
     assert all(row.parent_id is None for row in page.directories)
-    assert sum(request.url.path == '/v1/schedules' for request in env.requests) == 1
+    assert sum(request.url.path == '/v1/schedules' for request in recorded_reads(env.requests)) == 1
     again = await env.store.get_all_directories('kb')
     assert {row.id for row in page.directories} <= {row.id for row in again}
 
@@ -293,7 +294,7 @@ async def test_opening_a_kb_fetches_each_resource_once(folder_store):
         )
         assert all(count == 1 for count in resources.values()), resources
         counts.append(len(env.requests))
-    assert counts == [1, 1, 2]
+    assert counts == [1, 2, 2]
 
 
 @pytest.mark.asyncio
@@ -319,5 +320,6 @@ async def test_files_and_sync_status_use_bounded_bundles_in_one_request(folder_s
             env.store.search_files_by_id('kb', 'alice', {'directory_id': None}),
             CloudSync(env.client, 'owui:user:alice').sync_status('kb'),
         )
-    assert len(env.requests) == 3
-    assert all(request.url.path == '/v1/chat/reads' for request in env.requests)
+    assert len(env.requests) == 4
+    assert sum(request.url.path == '/v1/collections/kb/folders' for request in env.requests) == 1
+    assert all(request.url.path in {'/v1/chat/reads', '/v1/collections/kb/folders'} for request in env.requests)

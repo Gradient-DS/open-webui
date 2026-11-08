@@ -348,17 +348,16 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
     for job in (first_job, second_job):
         env.api.advance(job['job_id'], 'SUCCEEDED')
     monkeypatch.setattr(env.files.Files, 'get_files_with_soev_jobs', AsyncMock(return_value=[first, second]))
-    if failure == 'api':
-        env.api.failures.append(503)
-    else:
-        get = env.client.get
+    settle = env.jobs._settle_file
 
-        async def fail_first(path, **kwargs):
-            if path.endswith(first_job['job_id']):
-                raise ValueError('secret-assertion secret-key https://private.invalid')
-            return await get(path, **kwargs)
+    async def fail_first(client, file, *args):
+        if file.id == first.id:
+            if failure == 'api':
+                raise env.module.SoevApiError(503, 'injected_failure', 'private failure')
+            raise ValueError('secret-assertion secret-key https://private.invalid')
+        return await settle(client, file, *args)
 
-        monkeypatch.setattr(env.client, 'get', fail_first)
+    monkeypatch.setattr(env.jobs, '_settle_file', fail_first)
     assert await poll(env, now=second_job['submitted_at']) == 1
     assert (await env.files.Files.get_file_by_id(first.id)).data == first.data
     assert (await env.files.Files.get_file_by_id(second.id)).meta['status'] == 'completed'

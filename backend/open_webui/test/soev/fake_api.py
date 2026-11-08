@@ -17,6 +17,35 @@ def person_ref(user_id):
     return 'platform:user:' + str(uuid5(NAMESPACE_URL, f'owui-test-person:{user_id}'))
 
 
+def recorded_reads(requests):
+    result = []
+    for request in requests:
+        if request.url.path != '/v1/chat/reads':
+            result.append(request)
+            continue
+        assert request.method == 'POST'
+        for read in json.loads(request.content)['reads']:
+            resource = read['resource']
+            if resource == 'document_lookup':
+                path = '/v1/documents'
+            elif resource == 'connection':
+                path = '/v1/connections/' + quote(read['connection_id'], safe='')
+            elif resource in {'collection', 'documents'}:
+                path = '/v1/collections/' + quote(read['collection_key'], safe='')
+                if resource == 'documents':
+                    path += '/documents'
+            else:
+                assert resource in {'collections', 'jobs', 'schedules'}
+                path = '/v1/' + resource
+            query = [
+                (name, str(item).lower() if isinstance(item, bool) else str(item))
+                for name, value in read.get('query', {}).items()
+                for item in (value if isinstance(value, list) else [value])
+            ]
+            result.append(httpx.Request('GET', 'https://soev.invalid' + path, params=query, headers=request.headers))
+    return result
+
+
 class Problem(Exception):
     def __init__(self, status, code, constraint=None):
         self.status, self.code, self.constraint = status, code, constraint

@@ -1,5 +1,6 @@
 """Missing reference MIME is filled only with the owner's current login token."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -40,6 +41,18 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
 
     def handle(request):
         sent.append(request)
+        if request.url.path == '/v1/chat/reads':
+            job = {'job_id': file.meta['soev_job']['job_id'], 'status': 'SUCCEEDED'}
+            document = {'source_id': file.id, **({} if lookup == 'no-mime' else {'content_type': 'application/pdf'})}
+            return httpx.Response(
+                200,
+                json={
+                    'results': [
+                        {'status': 200, 'body': {'data': [job]}},
+                        {'status': 200, 'body': {'data': [] if lookup == 'denied' else [document]}},
+                    ]
+                },
+            )
         if '/jobs/' in request.url.path:
             return httpx.Response(200, json={'status': 'SUCCEEDED'})
         if request.url.path == '/v1/capabilities':
@@ -59,9 +72,12 @@ async def test_next_owner_request_completes_reference_with_login_proof(token_app
         sent.clear()
         response = await ctx.browser.get('/call/product')
     assert response.status_code == 200
-    metadata = [r for r in sent if '/documents/' in r.url.path]
+    metadata = [r for r in sent if r.url.path == '/v1/chat/reads']
     assert len(metadata) == 1
-    assert metadata[0].url.path.endswith('/' + file.id)
+    reads = json.loads(metadata[0].content)['reads']
+    assert reads[0]['query']['job_ids'] == [file.meta['soev_job']['job_id']]
+    assert reads[1]['resource'] == 'documents'
+    assert json.loads(reads[1]['query']['source_ids']) == [file.id]
     assert metadata[0].headers['X-Soev-User-Token'] == 'fictional-access-token'
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-access-token' for r in sent if '/jobs/' in r.url.path)
     row = await env.files.Files.get_file_by_id(file.id)
