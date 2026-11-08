@@ -308,6 +308,11 @@ brotlicffi = false
 # CVE-2026-112907..112940) — see the pin comment in [project.optional-dependencies].
 # Remove this exemption once 0.27.37 ages past the 14-day window on 2026-11-20.
 unstructured = false
+# Security-fix exemption (2026-11-08): pyasn1 0.6.5 (published 2026-10-27) is the
+# first release fixing GHSA-2qm8-x737-gmw5, GHSA-mm57-4v3p-rchx,
+# GHSA-9m75-vc3g-4x39 and GHSA-fm9c-5rcf-2q5p. Remove this exemption once 0.6.5
+# ages past the 14-day window on 2026-11-10.
+pyasn1 = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
