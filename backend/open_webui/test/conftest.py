@@ -10,6 +10,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 os.environ.setdefault('STATIC_DIR', tempfile.mkdtemp(prefix='owui-test-static-'))
+# The image sets these; without them unstructured (>=0.26) pings its telemetry
+# endpoint on import, which the SSRF tests' HTTP boundary records.
+os.environ.setdefault('DO_NOT_TRACK', 'true')
+os.environ.setdefault('SCARF_NO_ANALYTICS', 'true')
 
 # Runtime security drives the configured container. The backend suite instead
 # builds the real migration schema in a fresh database for each pytest worker.
