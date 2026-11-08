@@ -8130,6 +8130,86 @@
         "title": "KnowledgeForm",
         "type": "object"
       },
+      "KnowledgePageResponse": {
+        "properties": {
+          "breadcrumbs": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeDirectoryModel"
+            },
+            "title": "Breadcrumbs",
+            "type": "array"
+          },
+          "collection_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Total"
+          },
+          "directories": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeDirectoryEntry"
+            },
+            "title": "Directories",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FileUserResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/FileUserMetadataResponse"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "knowledge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnowledgeFilesResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sync_status": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Status"
+          },
+          "sync_status_error": {
+            "default": false,
+            "title": "Sync Status Error",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "KnowledgePageResponse",
+        "type": "object"
+      },
       "KnowledgeResponse": {
         "properties": {
           "access_grants": {
@@ -22158,6 +22238,16 @@
           },
           {
             "in": "query",
+            "name": "include_sidebar",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Sidebar",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -22182,11 +22272,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ChatTitleIdResponse"
-                  },
-                  "title": "Response Get Session User Chat List Api V1 Chats  Get",
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "$ref": "#/components/schemas/ChatTitleIdResponse"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ],
+                  "title": "Response Get Session User Chat List Api V1 Chats  Get"
                 }
               }
             },
@@ -22773,6 +22871,16 @@
           },
           {
             "in": "query",
+            "name": "include_sidebar",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Sidebar",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -22797,11 +22905,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ChatTitleIdResponse"
-                  },
-                  "title": "Response Get Session User Chat List Api V1 Chats List Get",
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "$ref": "#/components/schemas/ChatTitleIdResponse"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ],
+                  "title": "Response Get Session User Chat List Api V1 Chats List Get"
                 }
               }
             },
@@ -23649,6 +23765,16 @@
             "schema": {
               "title": "Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_versions",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Versions",
+              "type": "boolean"
             }
           },
           {
@@ -32778,6 +32904,16 @@
               "description": "Filter by directory ID. Pass empty string for root.",
               "title": "Directory Id"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_context",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Context",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -32785,7 +32921,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KnowledgeFileListResponse"
+                  "$ref": "#/components/schemas/KnowledgePageResponse"
                 }
               }
             },

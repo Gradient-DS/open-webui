@@ -1380,3 +1380,12 @@ def test_conversation_routes_reuse_the_owner_thread_fixture(monkeypatch, suffix,
     assert parameter['same_as'] == 'meeting'
     assert parameter['backed_by'] == 'soev-solutions'
     assert f'{method} {path}' in seeds.ordinary_targets()
+
+
+def test_fanout_view_controls_use_the_new_queries_and_existing_owned_resources():
+    fields = {entry['route']: entry for entry in seeds.SURFACE['field']}
+    assert fields['GET /api/v1/chats/']['params'] == {'include_sidebar': True}
+    assert fields['GET /api/v1/chats/list']['params'] == {'include_sidebar': True}
+    assert fields['GET /api/v1/chats/{id}']['params'] == {'include_versions': True, 'current': True}
+    assert fields['GET /api/v1/knowledge/{id}/files']['params'] == {'include_context': True}
+    assert seeds.parameter_for('/api/v1/knowledge/{id}/files', 'id')['key'] == 'knowledge'

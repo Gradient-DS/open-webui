@@ -171,5 +171,11 @@ def platform_operations(spec=SPEC):
         for route in operations(spec)
         if route.split(' ', 1)[1].startswith(('/api/v1/cloud-sync/', '/api/v1/meetings', '/api/v1/threads'))
         or route
-        in {'POST /api/v1/files/onedrive/attach', 'HEAD /api/v1/files/{id}/content', 'POST /api/v1/audio/speech'}
+        in {
+            'POST /api/v1/files/onedrive/attach',
+            'HEAD /api/v1/files/{id}/content',
+            'POST /api/v1/audio/speech',
+            'GET /api/v1/chats/',
+            'GET /api/v1/chats/list',
+        }
     ]

@@ -744,3 +744,17 @@ def test_conversation_mark_read_crossuser_probe_reaches_authorization_without_se
         'second account received an object containing the seeded resource id',
         'second account accepted a write to the owner resource',
     }
+
+
+def test_batched_view_reads_keep_owner_controls_and_cross_user_oracles(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    routes, _ = crossuser.targets()
+    expected = {
+        'GET /api/v1/chats/',
+        'GET /api/v1/chats/list',
+        'GET /api/v1/chats/{id}',
+        'GET /api/v1/knowledge/{id}/files',
+    }
+    assert expected <= set(routes) & set(seeds.ordinary_targets())
+    assert expected <= set(seeds.SURFACE['required_drive_routes'])
+    assert not expected & set(crossuser.expected_refusals())

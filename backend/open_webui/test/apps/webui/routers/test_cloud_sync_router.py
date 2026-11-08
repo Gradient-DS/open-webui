@@ -158,8 +158,8 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api, cadence):
 def test_sync_status_shapes_the_schedule_and_the_connection(api):
     """Status includes run progress, due time, expiry and connection lifecycle across pages.
 
-    The listing now carries each schedule's own detail, so a page costs one
-    request instead of one per schedule: four calls here, not six. The
+    Catalog pages are bundled, followed by one authorized connection bundle:
+    three calls here including the second schedule page. The
     `last_run` below is a verbatim soev-api StoredRun — there is no `status`
     field; the fork derives one with `runStatus()`.
     """
@@ -188,19 +188,30 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     second = {**detail, 'id': 'schedule-2'}
     api.responses.extend(
         [
-            response({'key': 'kb-1'}),
-            response({'data': [detail], 'next_cursor': 'page-2'}),
-            response({'data': [second], 'next_cursor': None}),
-            response(connection),
+            response(
+                {
+                    'results': [
+                        {'status': 200, 'body': {'key': 'kb-1'}},
+                        {'status': 200, 'body': {'data': [detail], 'next_cursor': 'page-2'}},
+                    ]
+                }
+            ),
+            response({'results': [{'status': 200, 'body': {'data': [second], 'next_cursor': None}}]}),
+            response({'results': [{'status': 200, 'body': connection}]}),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-1/sync')
     assert result.status_code == 200
     assert result.json() == {'schedules': [{**detail, 'connection': connection}, {**second, 'connection': connection}]}
-    assert dict(api.requests[1].url.params) == {'collection_key': 'kb-1'}
-    assert dict(api.requests[2].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
+    assert json.loads(api.requests[0].content)['reads'][1]['query'] == {'collection_key': 'kb-1', 'limit': 200}
+    assert json.loads(api.requests[1].content)['reads'][0]['query'] == {
+        'collection_key': 'kb-1',
+        'limit': 200,
+        'cursor': 'page-2',
+    }
+    assert json.loads(api.requests[2].content)['reads'] == [{'resource': 'connection', 'connection_id': 'connection-1'}]
     # One connection fetch for two schedules sharing it, and no per-schedule call.
-    assert len(api.refs) == 4
+    assert len(api.refs) == 3
     assert_login_headers(api.requests)
 
 
@@ -695,7 +706,7 @@ def test_sync_status_with_unknown_capabilities_still_refuses(api, platform_capab
 
 def test_sync_status_maps_a_platform_failure(api):
     """A platform error on a status read still reaches the browser as an error."""
-    api.responses.extend([response({'code': 'internal_error', 'detail': 'boom'}, 500)] * 2)
+    api.responses.append(response({'code': 'internal_error', 'detail': 'boom'}, 500))
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-cloud/sync')
     assert result.status_code == 500
     assert result.json()['detail']['code'] == 'upstream_error'

@@ -175,7 +175,7 @@ async def test_search_counts_and_permissions_share_request_lookups(env, monkeypa
         await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice')
         await env.store.accessible_collection_ids('alice', ['kb'], 'write')
     assert owners.await_count == 1
-    assert len(env.api.requests) == 3  # collections + queued/running jobs, one page each
+    assert len(env.api.requests) == 2  # One collection/jobs bundle and the count listing.
 
 
 @pytest.mark.asyncio
@@ -558,8 +558,10 @@ async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monke
     assert (await store.get_knowledge_by_id_unfiltered('kb')).id == 'kb'
     env.api.advance(job['job_id'], 'FAILED')
     assert [row.id for row in await store.get_knowledge_bases()] == ['kb']
-    queries = [r.url.params['status'] for r in env.api.requests if r.url.path == '/v1/jobs']
-    assert queries == ['QUEUED', 'RUNNING'] * 3
+    queries = [
+        json.loads(r.content)['reads'][1]['query']['statuses'] for r in env.api.requests if r.url.path == '/v1/reads'
+    ]
+    assert queries == [['QUEUED', 'RUNNING']] * 3
     for request in env.api.requests:
         if request.method == 'DELETE' or (request.method == 'GET' and request.url.path == '/v1/jobs'):
             assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'

@@ -134,12 +134,11 @@ async def test_a_succeeded_job_completes_the_file_and_emits_completed(env):
     assert await poll(env, now=job['submitted_at'] + 1) == 1
     await assert_terminal(env, file)
     assert [(r.method, r.url.path) for r in env.api.requests] == [
-        ('GET', f'/v1/jobs/{job["job_id"]}'),
-        ('GET', f'/v1/collections/kb/documents/{file.id}'),
+        ('POST', '/v1/reads'),
     ]
-    assert env.api.requests[0].url.params['include_items'] == 'true'
+    assert json.loads(env.api.requests[0].content)['reads'][0]['query']['include_items'] is True
     assert await poll(env, now=job['submitted_at'] + 2) == 0
-    assert len(env.api.requests) == 2
+    assert len(env.api.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -217,7 +216,7 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
     assert await poll(env, now=job['submitted_at'] + 121) == 1
     await assert_terminal(env, file, error='did not complete within 120s')
     assert env.api.jobs[job['job_id']]['status'] == status
-    assert all(r.method == 'GET' for r in env.api.requests)
+    assert all(r.method == 'POST' and r.url.path == '/v1/reads' for r in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -334,7 +333,7 @@ async def test_owner_reads_and_moves_use_the_login_token(env):
     env.api.advance(job['job_id'], 'SUCCEEDED')
     env.api.documents['kb', file.id]['path'] = None
     assert await poll(env, now=job['submitted_at'] + 66) == 1
-    assert len(env.api.requests) == 5
+    assert len(env.api.requests) == 4
     assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
     await assert_terminal(env, file)

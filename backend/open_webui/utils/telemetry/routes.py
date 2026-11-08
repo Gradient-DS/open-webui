@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 TEMPLATES = {
     'soev-api': (
+        '/v1/reads',
         '/v1/collections/{collection_key}/documents/{source_id}/content',
         '/v1/collections/{collection_key}/documents/{source_id}/metadata',
         '/v1/collections/{collection_key}/documents/{source_id}/move',

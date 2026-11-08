@@ -1,4 +1,4 @@
-import { getKnowledgeById, searchKnowledgeFilesById } from '$lib/apis/knowledge';
+import { searchKnowledgeFilesById } from '$lib/apis/knowledge';
 
 const TTL = 30_000;
 type Entry = {
@@ -79,21 +79,16 @@ export const initialKnowledgeItemsArgs = (
 	1,
 	null,
 	true,
-	null
+	null,
+	true
 ];
 
 export function prefetchKnowledge(userId: string | undefined, token: string, id: string) {
-	cache.prefetch(knowledgeRequestKey(userId, 'detail', [token, id]), () =>
-		getKnowledgeById(token, id)
-	);
 	const args = initialKnowledgeItemsArgs(token, id);
 	cache.prefetch(knowledgeRequestKey(userId, 'items', args), () =>
 		searchKnowledgeFilesById(...args)
 	);
 }
-
-export const takeKnowledgeDetail = (userId: string | undefined, token: string, id: string) =>
-	cache.take(knowledgeRequestKey(userId, 'detail', [token, id]), () => getKnowledgeById(token, id));
 
 export const takeKnowledgeItems = (
 	userId: string | undefined,

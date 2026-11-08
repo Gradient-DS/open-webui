@@ -94,7 +94,7 @@ async def test_reload_enriches_projected_sources_and_models_with_one_events_read
     runtime.chat_events.assert_awaited_once_with(
         page.thread_id,
         as_user='owui:user:fictional-fern',
-        after=2,
+        after=0,
         through=5,
     )
     assert projection.await_count == 1
@@ -149,13 +149,12 @@ async def test_visible_citation_can_resolve_a_source_from_an_earlier_page(dark_a
     monkeypatch.setattr(
         dark_api.client, 'projection', AsyncMock(return_value=threads.ProjectionResult(projected, 'etag'))
     )
-    runtime = SimpleNamespace(chat_events=AsyncMock(side_effect=[events()[2:], events()[:2]]))
+    runtime = SimpleNamespace(chat_events=AsyncMock(return_value=events()))
     monkeypatch.setattr(identity, 'build_client', lambda: runtime)
     response = await dark_api.browser.get('/api/v1/chats/fictional-chat')
     assert response.json()['messages'][0]['content']['sources'][0]['n'] == 7
     assert [(call.kwargs['after'], call.kwargs['through']) for call in runtime.chat_events.await_args_list] == [
-        (4, 5),
-        (0, 4),
+        (0, 5),
     ]
 
 

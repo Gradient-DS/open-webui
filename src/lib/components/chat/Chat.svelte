@@ -550,7 +550,6 @@
 	let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
 	let threadPage: ProjectionPage | null = null;
 	let threadVersions: ThreadVersion[] = [];
-	let threadVersionLoad = 0;
 	let switchingThread = false;
 	let regeneratingThread = false;
 	let tags = [];
@@ -1079,7 +1078,6 @@
 		chat = null;
 		threadPage = null;
 		threadVersions = [];
-		threadVersionLoad++;
 		tags = [];
 		taskIds = null;
 		chatTasks = [];
@@ -2412,7 +2410,6 @@
 		chat = null;
 		threadPage = null;
 		threadVersions = [];
-		threadVersionLoad++;
 		acceptedDataWarnings = new Set();
 		resetWebSearchConfirmation();
 
@@ -2677,23 +2674,17 @@
 		version = '',
 		current = false
 	): Promise<ProjectionPage> => {
-		const page = await getChatById(localStorage.token, id, before, version, current);
+		const page = await getChatById(
+			localStorage.token,
+			id,
+			before,
+			version,
+			current,
+			!before && !version && current
+		);
 		return extendProjectionToTurn(page, (cursor) =>
 			getChatById(localStorage.token, id, cursor, page.thread_id)
 		);
-	};
-
-	const loadThreadVersions = async (conversation: string, page: ProjectionPage) => {
-		const load = ++threadVersionLoad;
-		try {
-			const { items } = await threadAPI(localStorage.token).versions(page.thread_id);
-			if (load !== threadVersionLoad || $chatId !== conversation || !threadPage) return;
-			threadVersions = items;
-			if (!generationController && !generating && !regeneratingThread)
-				await replaceThreadProjection(threadPage);
-		} catch (error) {
-			if (load === threadVersionLoad && $chatId === conversation) toast.error(`${error}`);
-		}
 	};
 
 	const captureThreadAnchor = (projected: ReturnType<typeof buildThreadHistory>) => {
@@ -2800,7 +2791,6 @@
 	const loadChat = async () => {
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
-		if ($config?.features?.enable_v2_threads) threadVersionLoad++;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
@@ -2824,13 +2814,12 @@
 		}
 		if ($config?.features?.enable_v2_threads) {
 			const owned = loadedChat.preferences !== null;
-			threadVersions = [];
+			threadVersions = loadedChat.versions ?? [];
 			if (isStaleLoad()) return 'aborted';
 			threadPage = loadedChat;
 			const projected = buildThreadHistory(threadPage!, threadVersions);
 			history = projected;
 			chat = { id: targetId, title: threadPage!.title, readonly: !owned };
-			if (owned) void loadThreadVersions(targetId, threadPage!);
 			const preferences = threadPage!.preferences as { features?: Record<string, unknown> } | null;
 			savedThreadFeatures = preferences?.features
 				? { id: targetId, features: preferences.features }
@@ -4850,7 +4839,6 @@
 		const fork = await api.fork(page.thread_id, at, true, kind);
 		if ($chatId !== conversation) return;
 		// The fork copied this prefix verbatim; no projection read is needed before sending.
-		threadVersionLoad++;
 		threadVersions = (await api.versions(fork.thread_id)).items;
 		if ($chatId !== conversation) return;
 		threadPage = {

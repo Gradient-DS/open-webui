@@ -134,12 +134,14 @@
 	let showSharedChats = false;
 	let showChatsMenu = false;
 
+	type SidebarFolderData = import('$lib/stores/chatList').SidebarFolderData;
 	let folders = {};
 	type SelectedSidebarFolder = { id: string } | null;
 	let folderRegistry: Record<
 		string,
 		{
 			setFolderItems?: () => unknown;
+			applyInitialPage?: () => boolean;
 			upsertChat?: (chat: Record<string, unknown>) => unknown;
 			setChatActive?: (chatId: string, active: boolean) => boolean;
 			setChatReadAt?: (chatId: string, lastReadAt: number) => boolean;
@@ -161,19 +163,21 @@
 
 	$: initSelectedFolderChats($selectedFolder as SelectedSidebarFolder);
 
-	const initFolders = async () => {
+	const initFolders = async (prefetched?: SidebarFolderData) => {
 		if ($config?.features?.enable_folders === false) {
 			return;
 		}
 
-		const [folderList, sharedFolderList] = await Promise.all([
-			getFolders(localStorage.token).catch((error) => {
-				return [];
-			}),
-			getSharedFolders(localStorage.token).catch((error) => {
-				return [];
-			})
-		]);
+		const [folderList, sharedFolderList] = prefetched
+			? [prefetched.owned, prefetched.shared]
+			: await Promise.all([
+					getFolders(localStorage.token).catch((error) => {
+						return [];
+					}),
+					getSharedFolders(localStorage.token).catch((error) => {
+						return [];
+					})
+				]);
 		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
 
 		sharedFolders = sharedFolderList;
@@ -286,6 +290,7 @@
 
 		await Promise.all([
 			(async () => {
+				if ($config?.features?.enable_v2_threads) return;
 				console.log('Init tags');
 				const _tags = await getAllTags(localStorage.token).catch((error) => {
 					toast.error($i18n.t(`${error}`));
@@ -318,13 +323,18 @@
 
 	const refreshChatRows = async () => {
 		try {
-			const [result] = await Promise.all([
-				refreshChatList(localStorage.token, { refreshPinned: true }),
-				initFolders()
-			]);
+			const result = await refreshChatList(localStorage.token, {
+				refreshPinned: true,
+				sidebar: !!$config?.features?.enable_v2_threads
+			});
 			if (result.accepted) {
+				if (result.tags) tags.set(result.tags);
+				await initFolders(result.folderData);
+				await tick();
 				await Promise.all(
-					Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.())
+					Object.values(folderRegistry).map((folder) =>
+						result.folderData ? folder?.applyInitialPage?.() : folder?.setFolderItems?.()
+					)
 				);
 				allChatsLoaded = result.allLoaded;
 			}

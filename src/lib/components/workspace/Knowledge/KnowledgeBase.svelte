@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { takeKnowledgeDetail, takeKnowledgeItems } from './utils/prefetch';
+	import { takeKnowledgeItems } from './utils/prefetch';
 	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
 	import { providerBadge } from '$lib/sources/badges';
@@ -323,7 +323,7 @@
 		}
 	}
 
-	const getItemsPage = async (usePrefetch = false) => {
+	const getItemsPage = async (usePrefetch = false, includeContext = false) => {
 		if (knowledgeId === null) return;
 
 		// Don't null items — keep showing stale data during re-fetch
@@ -349,7 +349,8 @@
 			currentPage,
 			null,
 			true,
-			isSearching ? undefined : (currentDirectoryId ?? null)
+			isSearching ? undefined : (currentDirectoryId ?? null),
+			includeContext
 		];
 		const request = usePrefetch
 			? takeKnowledgeItems($user?.id, args)
@@ -955,10 +956,13 @@
 
 	let finishingConnectionId: string | null = null;
 	let extraLivePoll = false;
-	const refreshCloudSync = async (refreshItems = true) => {
+	const refreshCloudSync = async (
+		refreshItems = true,
+		initialStatus?: Awaited<ReturnType<typeof cloudSync.getSyncStatus>>
+	) => {
 		if (!knowledgeId || destroyed) return false;
 		const request = ++syncStatusRequest;
-		const status = await cloudSync.getSyncStatus(localStorage.token, knowledgeId);
+		const status = initialStatus ?? await cloudSync.getSyncStatus(localStorage.token, knowledgeId);
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
@@ -1010,10 +1014,13 @@
 		syncPoll = setTimeout(pollCloudSyncStatus, 0);
 	};
 
-	const pollCloudSyncStatus = async (refreshItems = true) => {
+	const pollCloudSyncStatus = async (
+		refreshItems = true,
+		initialStatus?: Awaited<ReturnType<typeof cloudSync.getSyncStatus>>
+	) => {
 		let live = false;
 		try {
-			live = await refreshCloudSync(refreshItems);
+			live = await refreshCloudSync(refreshItems, initialStatus);
 		} catch {
 			syncStatusError = true;
 		} finally {
@@ -1851,26 +1858,6 @@
 		}
 	};
 
-	const loadKnowledge = async (requestId: string, usePrefetch = false) => {
-		const request = usePrefetch
-			? takeKnowledgeDetail($user?.id, localStorage.token, requestId)
-			: { promise: getKnowledgeById(localStorage.token, requestId), reused: false };
-		const previous = knowledge;
-		const res = await request.promise.catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
-		if (destroyed || knowledge !== previous) return null;
-		if (res) {
-			knowledge = res;
-			if (!Array.isArray(knowledge?.access_grants)) knowledge.access_grants = [];
-		} else {
-			goto('/workspace/knowledge');
-		}
-		if (request.reused) void loadKnowledge(requestId);
-		return res;
-	};
-
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
@@ -1881,17 +1868,23 @@
 		});
 		id = $page.params.id;
 		knowledgeId = id;
-		// [Gradient] Load the KB and its first items page together; the first items page covers
-		// this poll. Sync status is polled only where it can apply, so a local KB on a tenant
-		// without cloud providers makes no status call and shows no false error.
-		const [res] = await Promise.all([
-			Promise.all([loadKnowledge(id, true), policy]).then(async ([res, { providers_enabled }]) => {
-				if (res && !destroyed && syncStatusApplies(res.type, providers_enabled))
-					await pollCloudSyncStatus(false);
-				return res;
-			}),
-			getItemsPage(true)
+		const [initialPage, { providers_enabled }] = await Promise.all([
+			getItemsPage(true, true),
+			policy
 		]);
+		const res = initialPage?.knowledge;
+		if (!destroyed && res) {
+			knowledge = res;
+			if (!Array.isArray(knowledge.access_grants)) knowledge.access_grants = [];
+			if (syncStatusApplies(res.type, providers_enabled)) {
+				if (initialPage.sync_status_error || !initialPage.sync_status) {
+					syncStatusError = true;
+					syncPoll = setTimeout(pollCloudSyncStatus, SYNC_POLL_IDLE_MS);
+				} else await pollCloudSyncStatus(false, initialPage.sync_status);
+			}
+		} else if (!destroyed) {
+			goto('/workspace/knowledge');
+		}
 
 		if (destroyed) return;
 		if (res) {

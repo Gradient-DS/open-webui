@@ -17,7 +17,7 @@ from open_webui.soev.acting import requester_ref
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.principal_refs import collection_access
-from open_webui.soev.request_cache import memoized
+from open_webui.soev.request_cache import memoized, remember
 
 
 def _sort_file_rows(rows, filters, *, default_order='filename', default_descending=False):
@@ -148,6 +148,12 @@ class SoevKnowledgeTable:
         return '/v1/collections/' + quote(key, safe='')
 
     async def _collection(self, key, *, user_id=None):
+        return await memoized(
+            ('collection', self, self._user_ref(user_id), key),
+            lambda: self._load_collection(key, user_id=user_id),
+        )
+
+    async def _load_collection(self, key, *, user_id=None):
         try:
             row = await self._get(self._path(key), user_id=user_id)
             return (await self._with_owners([row]))[0]
@@ -165,12 +171,23 @@ class SoevKnowledgeTable:
     async def _load_collections(self, *, user_id=None, as_service=False):
         from open_webui.soev import ingest
 
-        rows, queued, running = await asyncio.gather(
-            self._pages('/v1/collections', user_id=user_id, as_service=as_service),
-            self._pages('/v1/jobs', user_id=user_id, params={'status': 'QUEUED'}, as_service=as_service),
-            self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
+        client = self._client.as_service() if as_service else self._client
+        collections, jobs = await client.read_pages(
+            [
+                {'resource': 'collections', 'query': {'limit': 200}},
+                {
+                    'resource': 'jobs',
+                    'query': {
+                        'statuses': ['QUEUED', 'RUNNING'],
+                        'kind': 'delete_collection',
+                        'limit': 200,
+                    },
+                },
+            ],
+            as_user=None if as_service else self._user_ref(user_id),
         )
-        hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
+        rows = (collections or {}).get('data', [])
+        hidden = {job['collection_key'] for job in (jobs or {}).get('data', [])}
         return await self._with_owners(
             [
                 row
@@ -211,6 +228,23 @@ class SoevKnowledgeTable:
 
     async def get_knowledge_by_id(self, id, db=None):
         return self._knowledge(await self._collection(id))
+
+    async def get_knowledge_page_by_id(self, id, db=None):
+        collection, _, _, _ = await self._snapshot(id)
+        return self._knowledge(collection)
+
+    async def page_sync_status(self, key):
+        from open_webui.soev import capabilities
+        from open_webui.soev.cloud_sync import CloudSync
+
+        if not await capabilities.has(capabilities.CLOUD_SYNC):
+            if capabilities.known():
+                return {'schedules': []}
+            raise SoevApiError(503, 'feature_unavailable', 'Capabilities unavailable')
+        collection, _, _, schedules = await self._snapshot(key)
+        return await CloudSync(self._client, self._user_ref()).sync_status(
+            key, catalog=(collection, {'data': schedules})
+        )
 
     async def describe_knowledge(self, ids, *, user_id=None):
         """The current name and description of each knowledge base the user can read, by id."""
@@ -399,24 +433,35 @@ class SoevKnowledgeTable:
         landed = {doc['source_id'] for doc in documents}
         return [file for file in files if file.id not in landed]
 
-    async def _deleted_sources(self, key, *, user_id=None):
-        listings = await asyncio.gather(
-            *(
-                self._pages('/v1/jobs', user_id=user_id, params={'collection_key': key, 'status': status})
-                for status in ('QUEUED', 'RUNNING')
-            )
+    async def _snapshot(self, key, *, user_id=None):
+        return await memoized(
+            ('knowledge-snapshot', self, self._user_ref(user_id), key),
+            lambda: self._load_snapshot(key, user_id=user_id),
         )
-        details = await asyncio.gather(
-            *(
-                self._get(
-                    '/v1/jobs/' + quote(job['job_id'], safe=''), user_id=user_id, params={'include_items': 'true'}
-                )
-                for jobs in listings
-                for job in jobs
-                if job['kind'] == 'delete_document'
-            )
+
+    async def _load_snapshot(self, key, *, user_id=None):
+        collection, documents, jobs, schedules = await self._client.read_pages(
+            [
+                {'resource': 'collection', 'collection_key': key},
+                {'resource': 'documents', 'collection_key': key, 'query': {'limit': 200}},
+                {
+                    'resource': 'jobs',
+                    'query': {
+                        'collection_key': key,
+                        'statuses': ['QUEUED', 'RUNNING'],
+                        'kind': 'delete_document',
+                        'include_items': True,
+                        'limit': 200,
+                    },
+                },
+                {'resource': 'schedules', 'query': {'collection_key': key, 'limit': 200}},
+            ],
+            as_user=self._user_ref(user_id),
         )
-        return {item['source_id'] for detail in details for item in detail['items']}
+        collection = (await self._with_owners([collection]))[0] if collection else None
+        remember(('collection', self, self._user_ref(user_id), key), collection)
+        deleted = {item['source_id'] for job in (jobs or {}).get('data', []) for item in job.get('items') or []}
+        return collection, (documents or {}).get('data', []), deleted, (schedules or {}).get('data', [])
 
     async def _members(self, key, *, user_id=None):
         return await memoized(
@@ -425,11 +470,11 @@ class SoevKnowledgeTable:
         )
 
     async def _load_members(self, key, *, user_id=None):
-        documents, deleted = await asyncio.gather(
-            self._documents(key, user_id=user_id), self._deleted_sources(key, user_id=user_id)
-        )
+        collection, documents, deleted, _ = await self._snapshot(key, user_id=user_id)
+        if collection is None:
+            return {}
         members = {doc['source_id']: (doc, doc['path']) for doc in documents}
-        for file in await self._unlanded(key, documents=documents, user_id=user_id):
+        for file in await self._unlanded(key, documents=documents, collection=collection, user_id=user_id):
             job = (file.meta or {}).get('soev_job') or {}
             members[file.id] = (None, job.get('path'))
         return {source: member for source, member in members.items() if source not in deleted}
@@ -501,32 +546,97 @@ class SoevKnowledgeTable:
             path, as_user=self._user_ref(user_id), range_header=range_header
         )
 
+    async def _source_references(self, source_id, *, user_id=None, as_service=False):
+        return await memoized(
+            ('source-references', self, self._user_ref(user_id), as_service, source_id),
+            lambda: self._load_source_references(source_id, user_id=user_id, as_service=as_service),
+        )
+
+    async def _load_source_references(self, source_id, *, user_id=None, as_service=False):
+        documents = await self._pages(
+            '/v1/documents', params={'source_id': source_id}, user_id=user_id, as_service=as_service
+        )
+        keys = list(dict.fromkeys(doc['collection_key'] for doc in documents))
+        rows = await asyncio.gather(
+            *(self._service_collection(key) if as_service else self._collection(key, user_id=user_id) for key in keys)
+        )
+        collections = dict(zip(keys, rows, strict=True))
+        return [
+            (collections[doc['collection_key']], doc)
+            for doc in documents
+            if collections[doc['collection_key']] is not None
+        ]
+
     async def _references(self, ids, *, user_id=None, as_service=False):
         result = []
-        collections = {}
         for source_id in sorted(ids):
-            documents = await self._pages(
-                '/v1/documents', params={'source_id': source_id}, user_id=user_id, as_service=as_service
-            )
-            keys = list(
-                dict.fromkeys(doc['collection_key'] for doc in documents if doc['collection_key'] not in collections)
-            )
-            rows = await asyncio.gather(
-                *(
-                    self._service_collection(key) if as_service else self._collection(key, user_id=user_id)
-                    for key in keys
-                ),
-                return_exceptions=True,
-            )
-            for key, row in zip(keys, rows):
-                if isinstance(row, BaseException):
-                    raise row
-                collections[key] = row
-            for document in documents:
-                collection = collections[document['collection_key']]
-                if collection is not None:
-                    result.append((collection, document))
+            result.extend(await self._source_references(source_id, user_id=user_id, as_service=as_service))
         return result
+
+    async def prime_sidebar_access(self, user_id, file_ids, collection_ids, *, index_read):
+        from open_webui.models.files import Files
+        from open_webui.soev import acting
+
+        acting.require_owner(user_id)
+        if self._client.is_service:
+            raise PermissionError('Sidebar access requires the owner client')
+        files = await Files.get_files_by_ids(sorted(file_ids)) if file_ids else []
+        foreign = [file for file in files if file.user_id != user_id]
+        keys = set(collection_ids) | {
+            file.meta['collection_name'] for file in foreign if (file.meta or {}).get('collection_name')
+        }
+        documents = []
+        for offset in range(0, len(foreign), 200):
+            page = (
+                await self._client.read_pages(
+                    [
+                        {
+                            'resource': 'document_lookup',
+                            'query': {
+                                'source_ids': json.dumps([file.id for file in foreign[offset : offset + 200]]),
+                                'limit': 200,
+                            },
+                        }
+                    ],
+                    as_user=self._user_ref(user_id),
+                )
+            )[0]
+            documents.extend((page or {}).get('data', []))
+        keys.update(doc['collection_key'] for doc in documents)
+        keys = sorted(keys)
+        selected = [
+            {'resource': 'collections', 'query': {'keys': json.dumps(keys[offset : offset + 200]), 'limit': 200}}
+            for offset in range(0, len(keys), 200)
+        ] + [index_read]
+        rows, index = [], None
+        for offset in range(0, len(selected), 12):
+            group = selected[offset : offset + 12]
+            pages = await self._client.read_many(group, as_user=self._user_ref(user_id))
+            for read, page in zip(group, pages, strict=True):
+                if read['resource'] == 'thread_index':
+                    index = page
+                elif page is not None:
+                    rows.extend(page['data'])
+                    if page.get('next_cursor'):
+                        tail = (
+                            await self._client.read_pages(
+                                [{**read, 'query': {**read['query'], 'cursor': page['next_cursor']}}],
+                                as_user=self._user_ref(user_id),
+                            )
+                        )[0]
+                        rows.extend((tail or {}).get('data', []))
+        collections = {row['key']: row for row in await self._with_owners(rows)}
+        ref = self._user_ref(user_id)
+        for key in keys:
+            remember(('collection', self, ref, key), collections.get(key))
+        for file in foreign:
+            references = [
+                (collections[doc['collection_key']], doc)
+                for doc in documents
+                if doc['source_id'] == file.id and doc['collection_key'] in collections
+            ]
+            remember(('source-references', self, ref, False, file.id), references)
+        return index
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
         rows = await self._references({file_id})
@@ -652,11 +762,8 @@ class SoevKnowledgeTable:
             path = self._directory_path(knowledge_id, filters.get('directory_id'))
         except ValueError:
             raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
-        collection, members, schedules = await asyncio.gather(
-            self._collection(knowledge_id, user_id=user_id),
-            self._members(knowledge_id, user_id=user_id),
-            self._pages('/v1/schedules', user_id=user_id, params={'collection_key': knowledge_id}),
-        )
+        collection, _, _, schedules = await self._snapshot(knowledge_id, user_id=user_id)
+        members = await self._members(knowledge_id, user_id=user_id)
         collection_total = len(members)
         view = await self._directory_view(knowledge_id, members=members, schedules=schedules, user_id=user_id)
         if 'directory_id' in filters:
@@ -751,7 +858,7 @@ class SoevKnowledgeTable:
             schedule['id'] for schedule in schedules if schedule['kind'] == 'content' and schedule['id'] not in folders
         }
         members = await self._members(key, user_id=user_id) if members is None else members
-        collection = await self._collection(key, user_id=user_id)
+        collection, _, _, _ = await self._snapshot(key, user_id=user_id)
         directories, paths = {}, {}
         if collection is None:
             return directories, paths
@@ -811,7 +918,7 @@ class SoevKnowledgeTable:
         )
 
     async def _directory_models(self, key, path=(), *, user_id=None, view=None):
-        collection = await self._collection(key, user_id=user_id)
+        collection, _, _, _ = await self._snapshot(key, user_id=user_id)
         if collection is None:
             return []
         view = await self._directory_view(key, user_id=user_id) if view is None else view

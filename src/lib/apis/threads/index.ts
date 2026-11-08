@@ -15,6 +15,7 @@ export type ProjectionPage = {
 	preferences: unknown;
 	messages: MessageView[];
 	next_cursor: string | null;
+	versions?: ThreadVersion[];
 };
 
 export type VersionKind = 'regenerate' | 'edit';

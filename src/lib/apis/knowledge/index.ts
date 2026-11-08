@@ -219,7 +219,8 @@ export const searchKnowledgeFilesById = async (
 	page: number = 1,
 	limit?: number | null,
 	metadataOnly: boolean = false,
-	directoryId?: string | null
+	directoryId?: string | null,
+	includeContext: boolean = false
 ) => {
 	let error = null;
 
@@ -231,6 +232,7 @@ export const searchKnowledgeFilesById = async (
 	searchParams.append('page', page.toString());
 	if (limit) searchParams.append('limit', limit.toString());
 	if (metadataOnly) searchParams.append('metadata_only', 'true');
+	if (includeContext) searchParams.append('include_context', 'true');
 	// directoryId: undefined = don't filter, null = root, string = specific dir
 	if (directoryId !== undefined) {
 		searchParams.append('directory_id', directoryId ?? '');

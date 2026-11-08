@@ -224,7 +224,8 @@ export const getChatList = async (
 	token: string = '',
 	page: number | null = null,
 	include_pinned: boolean = false,
-	include_folders: boolean = false
+	include_folders: boolean = false,
+	include_sidebar: boolean = false
 ) => {
 	let error = null;
 	const searchParams = new URLSearchParams();
@@ -236,6 +237,7 @@ export const getChatList = async (
 	if (include_folders) {
 		searchParams.append('include_folders', 'true');
 	}
+	if (include_sidebar) searchParams.append('include_sidebar', 'true');
 
 	if (include_pinned) {
 		searchParams.append('include_pinned', 'true');
@@ -698,12 +700,13 @@ export const getChatById = async (
 	id: string,
 	before = '',
 	threadId = '',
-	current = false
+	current = false,
+	includeVersions = false
 ) => {
 	let error = null;
 
 	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(current ? { current: 'true' } : {}) })}` : ''}`,
+		`${WEBUI_API_BASE_URL}/chats/${id}${v2ThreadsEnabled() ? `?${new URLSearchParams({ limit: '20', before, ...(threadId ? { thread_id: threadId } : {}), ...(current ? { current: 'true' } : {}), ...(includeVersions ? { include_versions: 'true' } : {}) })}` : ''}`,
 		{
 			method: 'GET',
 			headers: {
