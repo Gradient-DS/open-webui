@@ -66,7 +66,7 @@ jobs:
       needs.changes.outputs.relevant == 'true'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
-    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@d710f1cf333253f61eabb4b8b22bc6200013e98f # v12
     # The tooling repository is private, so the workflow needs the org App
     # credentials to check itself out; without them it fails at that checkout.
     secrets: inherit
@@ -95,6 +95,10 @@ jobs:
         -v
       # Fail the audit on runtime findings; runtime-gate propagates that result.
       enforce: true
+      # Pinned, not ubuntu-latest: on ubuntu-26.04 the kernel's BPF verifier
+      # rejects Falco 0.44.1's modern_ebpf probe and Falco exits mid-run.
+      # Move up once the pinned Falco loads on 26.04.
+      runs-on: ubuntu-24.04
       # No cache-scope: INSTALL_SECURITY_CI_DEPS installs private security-ci
       # packages in the image. The reusable workflow exports all built services
       # with mode=max, and this public repository's GHA cache is fork-readable.
@@ -126,7 +130,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: Gradient-DS/security-ci
-          ref: e18c245d84975f79da5c97d1987b83039c13292e # v8
+          ref: d710f1cf333253f61eabb4b8b22bc6200013e98f # v12
           token: ${{ steps.tooling-token.outputs.token }}
           path: .security-tooling
       - uses: actions/setup-python@v6
