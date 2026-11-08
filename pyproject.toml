@@ -152,7 +152,7 @@ mariadb = [
     "mariadb==1.1.14",
 ]
 unstructured = [
-    "unstructured==0.24.1", # security: CVE-2026-71428 (SSRF via url= partitioning) fixed in 0.24.0; was 0.22.31
+    "unstructured==0.27.37", # security: CVE-2026-71428 (SSRF via url= partitioning) fixed in 0.24.0; 0.27.37 is the first release that allows filelock>=4.2.1 (GHSA-v4x8-3wr5-3wq8, CVE-2026-112907..112940); was 0.24.1
 ]
 
 all = [
@@ -173,7 +173,7 @@ all = [
     "colbert-ai==0.2.22",
 
     "azure-search-documents==12.0.0",
-    "unstructured==0.24.1", # security: CVE-2026-71428 (SSRF via url= partitioning) fixed in 0.24.0; was 0.22.31
+    "unstructured==0.27.37", # security: CVE-2026-71428 (SSRF via url= partitioning) fixed in 0.24.0; 0.27.37 is the first release that allows filelock>=4.2.1 (GHSA-v4x8-3wr5-3wq8, CVE-2026-112907..112940); was 0.24.1
 ]
 
 soev = [
@@ -293,6 +293,11 @@ black = false
 # exemptions once both age past the 14-day window on 2026-11-05.
 brotli = false
 brotlicffi = false
+# Security-fix exemption (2026-11-08): unstructured 0.27.37 (published 2026-11-06)
+# is the first release that allows filelock>=4.2.1 (GHSA-v4x8-3wr5-3wq8,
+# CVE-2026-112907..112940) — see the pin comment in [project.optional-dependencies].
+# Remove this exemption once 0.27.37 ages past the 14-day window on 2026-11-20.
+unstructured = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
