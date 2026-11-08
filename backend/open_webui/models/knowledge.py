@@ -811,6 +811,9 @@ class KnowledgeTable:
         except Exception:
             return None
 
+    async def get_knowledge_page_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
+        return await self.get_knowledge_by_id(id, db=db)
+
     async def get_knowledge_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
