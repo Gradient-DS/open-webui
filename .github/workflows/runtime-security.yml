@@ -68,7 +68,7 @@ jobs:
       needs.changes.outputs.relevant == 'true'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
-    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@ade6cdd8c26f678ed19801839b10aa0e9c178c77 # v15
+    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
     # The tooling repository is private, so the workflow needs the org App
     # credentials to check itself out; without them it fails at that checkout.
     secrets: inherit
