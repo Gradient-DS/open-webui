@@ -49,6 +49,8 @@
   "Access Control": "Toegangsbeheer",
   "Access Grants": "Toegangsrechten",
   "Access List": "Toegangslijst",
+  "Access changes are being applied. Showing current access.": "Toegangswijzigingen worden toegepast. De huidige toegang wordt getoond.",
+  "Access changes failed. Showing current access.": "Toegangswijzigingen zijn mislukt. De huidige toegang wordt getoond.",
   "Access denied — the account lacks permission.": "Toegang geweigerd — het account heeft onvoldoende rechten.",
   "Access level": "",
   "Access prohibited": "",

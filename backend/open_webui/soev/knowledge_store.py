@@ -150,7 +150,8 @@ class SoevKnowledgeTable:
     async def _collection(self, key, *, user_id=None):
         try:
             row = await self._get(self._path(key), user_id=user_id)
-            return (await self._with_owners([row]))[0]
+            rows = await self._with_owners([row])
+            return (await self._with_access_jobs(rows, user_id=user_id))[0]
         except SoevApiError as error:
             if error.status == 404:
                 return None
@@ -171,7 +172,7 @@ class SoevKnowledgeTable:
             self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
         )
         hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
-        return await self._with_owners(
+        visible = await self._with_owners(
             [
                 row
                 for row in rows
@@ -181,6 +182,30 @@ class SoevKnowledgeTable:
                 and not ingest.is_folder_collection(row['key'])
             ]
         )
+        return await self._with_access_jobs(visible, user_id=user_id, as_service=as_service)
+
+    async def _with_access_jobs(self, rows, *, user_id=None, as_service=False):
+        from open_webui.soev import knowledge_access_jobs
+
+        ref = None if as_service else self._user_ref(user_id)
+        markers = await memoized(('access_job_refs', ref), lambda: knowledge_access_jobs.references(ref))
+        result = []
+        for row in rows:
+            marker = markers.get(row['key'])
+            if marker is None:
+                result.append(row)
+                continue
+            try:
+                job = await self._get('/v1/jobs/' + quote(marker['job_id'], safe=''), user_id=user_id)
+            except SoevApiError as error:
+                if error.status != 404:
+                    raise
+                job = None
+            if job is not None and (job['kind'] != 'update_collection_access' or job['collection_key'] != row['key']):
+                job = None
+            terminal = job['job_id'] if job and job['status'] not in ('QUEUED', 'RUNNING') else marker.get('terminal')
+            result.append({**row, '_access_update': job, '_access_terminal_job': terminal})
+        return result
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
@@ -348,7 +373,18 @@ class SoevKnowledgeTable:
             'principals': sorted(set(readers) | owners),
             'writers': sorted(set(writers) | owners),
         }
-        await self._send('PUT', self._path(id) + '/access', access)
+        operation = json.dumps([id, access, current.get('_access_terminal_job')], sort_keys=True)
+        job = await self._send(
+            'PUT',
+            self._path(id) + '/access',
+            access,
+            idempotency_key='access:' + hashlib.sha256(operation.encode()).hexdigest(),
+        )
+        from open_webui.soev import knowledge_access_jobs
+        from open_webui.soev.request_cache import invalidate
+
+        await knowledge_access_jobs.remember(self._user_ref(), id, job['job_id'], current.get('_access_terminal_job'))
+        invalidate()
         if fields:
             return await self._send('PATCH', self._path(id), fields)
         return await self._collection(id)
@@ -471,7 +507,7 @@ class SoevKnowledgeTable:
         return grouped
 
     async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
-        result = {}
+        result: dict[str, int] = {}
         requested = set(knowledge_ids)
         if not requested:
             return result

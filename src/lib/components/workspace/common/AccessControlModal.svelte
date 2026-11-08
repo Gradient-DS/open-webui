@@ -64,6 +64,7 @@
 		</div>
 
 		<div class="w-full px-4 pb-3 dark:text-white">
+			<slot />
 			{#if modelId && sharing?.shares_knowledge}
 				<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('Sharing this assistant also shares its knowledge bases, files and notes.')}
