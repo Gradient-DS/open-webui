@@ -543,6 +543,67 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
 
 
 @pytest.mark.asyncio
+async def test_access_status_and_repeated_policies_follow_stored_jobs(env, monkeypatch):
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
+    for index, permission in enumerate(('read', 'write', 'read', 'write')):
+        env.api.now = f'2026-11-08T12:00:0{index}Z'
+        requested = [{'principal_type': 'user', 'principal_id': 'bob', 'permission': permission}]
+        before = await env.store.get_knowledge_by_id('kb')
+        await env.store.set_collection_access('kb', requested)
+        queued = await env.store.get_knowledge_by_id('kb')
+        assert queued.access_grants == before.access_grants
+        assert queued.meta['soev_access_update']['status'] == 'QUEUED'
+        [listed] = await env.store.get_knowledge_bases()
+        assert listed.access_grants == before.access_grants
+        assert listed.meta['soev_access_update']['status'] == 'QUEUED'
+        assert len(env.api.jobs) == index + 1
+        job = list(env.api.jobs.values())[-1]
+        env.api.advance(job['job_id'], 'SUCCEEDED')
+        applied = await env.store.get_knowledge_by_id('kb')
+        assert applied.meta['soev_access_update']['status'] == 'SUCCEEDED'
+        assert (('bob', 'write') in {(g.principal_id, g.permission) for g in applied.access_grants}) == (
+            permission == 'write'
+        )
+        assert ('bob', 'read') in {(g.principal_id, g.permission) for g in applied.access_grants}
+
+
+@pytest.mark.asyncio
+async def test_failed_access_job_keeps_applied_grants_and_can_be_retried(env, monkeypatch):
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
+    before = await env.store.get_knowledge_by_id('kb')
+    requested = [{'principal_type': 'user', 'principal_id': 'bob', 'permission': 'write'}]
+    await env.store.set_collection_access('kb', requested)
+    job = next(iter(env.api.jobs.values()))
+    env.api.advance(job['job_id'], 'FAILED')
+    failed = await env.store.get_knowledge_by_id('kb')
+    assert failed.access_grants == before.access_grants
+    assert failed.meta['soev_access_update']['status'] == 'FAILED'
+    [listed] = await env.store.get_knowledge_bases()
+    assert listed.access_grants == before.access_grants
+    assert listed.meta['soev_access_update']['status'] == 'FAILED'
+    await env.store.set_collection_access('kb', requested)
+    assert len(env.api.jobs) == 2
+
+
+@pytest.mark.asyncio
+async def test_access_job_reference_survives_store_recreation_and_stays_owner_scoped(env, monkeypatch):
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:alice')
+    grants = [{'principal_type': 'user', 'principal_id': 'bob', 'permission': 'read'}]
+    await env.store.set_collection_access('kb', grants)
+    env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
+    env.api.now = '2026-11-08T12:00:01Z'
+    await env.store.set_collection_access('kb', [{**grants[0], 'permission': 'write'}])
+    store = env.module.SoevKnowledgeTable(client=env.client, service_principal=SERVICE)
+    assert (await store.get_knowledge_by_id('kb')).meta['soev_access_update']['status'] == 'QUEUED'
+    monkeypatch.setattr(env.module, 'requester_ref', lambda: 'owui:user:bob')
+    env.api.requests.clear()
+    recipient = await store.get_knowledge_by_id('kb')
+    assert 'soev_access_update' not in recipient.meta
+    assert ('bob', 'write') not in {(g.principal_id, g.permission) for g in recipient.access_grants}
+    assert all(not request.url.path.startswith('/v1/jobs') for request in env.api.requests)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['delete_knowledge_by_id', 'soft_delete_by_id'])
 async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monkeypatch):
     """The deleting user's listing hides queued and running deletions immediately and reveals failed ones."""
