@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
@@ -16,6 +16,8 @@ import httpx
 
 from open_webui.soev.acting import requester_ref, user_token
 from open_webui.soev.request_cache import invalidate, memoized
+from open_webui.soev.timing import instrument_client
+from open_webui.utils.telemetry.routes import route_template
 
 if TYPE_CHECKING:
     from open_webui.soev.task_turns import TaskTurnRequest
@@ -41,6 +43,7 @@ def _shared_client() -> httpx.AsyncClient:
             follow_redirects=False,
             cookies=CookieJar(policy=_NoCookies()),
         )
+        instrument_client(client)
         _http_client = (loop, client)
     return _http_client[1]
 
@@ -59,8 +62,10 @@ class ChatEvent:
     position: int | None = None
 
 
-async def _chat_frames(response: httpx.Response) -> AsyncIterator[ChatEvent]:
-    event, data, position = 'message', [], None
+async def _chat_frames(response: httpx.Response) -> AsyncGenerator[ChatEvent, None]:
+    event = 'message'
+    data: list[str] = []
+    position: int | None = None
     async for line in response.aiter_lines():
         if not line:
             if data:
@@ -80,7 +85,7 @@ async def _chat_frames(response: httpx.Response) -> AsyncIterator[ChatEvent]:
             position = int(value)
 
 
-async def _chat_activity(response: httpx.Response, *, following: bool) -> AsyncIterator[ChatEvent | None]:
+async def _chat_activity(response: httpx.Response, *, following: bool) -> AsyncGenerator[ChatEvent | None, None]:
     frames = _chat_frames(response)
     pending = asyncio.create_task(anext(frames))
     try:
@@ -296,7 +301,7 @@ class SoevClient:
         thread_id: str | None = None,
         after: int = 0,
         follow: bool = False,
-    ) -> AsyncIterator[ChatEvent]:
+    ) -> AsyncGenerator[ChatEvent, None]:
         """Reconnect capped streams through events, never by replaying the POST."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
@@ -333,7 +338,7 @@ class SoevClient:
 
     async def _follow_chat(
         self, response: httpx.Response, thread_id: str, as_user: str, after: int, following: bool
-    ) -> AsyncIterator[ChatEvent]:
+    ) -> AsyncGenerator[ChatEvent, None]:
         async with aclosing(_chat_activity(response, following=following)) as frames:
             async for frame in frames:
                 if frame is not None:
@@ -420,7 +425,7 @@ class SoevClient:
             await response.aread()
             return response.text
 
-    async def stream(self, path: str, *, as_user: str) -> AsyncIterator[bytes]:
+    async def stream(self, path: str, *, as_user: str) -> AsyncGenerator[bytes, None]:
         """Stream bytes with the caller's admission on one download redemption."""
         if not as_user:
             raise ValueError('Acting as a user requires an acting user')
@@ -482,7 +487,7 @@ class SoevClient:
         self,
         job_id: str,
         source_id: str,
-        chunks: AsyncIterator[bytes],
+        chunks: AsyncGenerator[bytes, None],
         *,
         size: int,
         content_type: str,
@@ -569,7 +574,7 @@ class SoevClient:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()
         status = None
-        route = path.split('?', 1)[0]
+        route = route_template(path)
         try:
             response = await _shared_client().request(
                 method,
@@ -600,25 +605,15 @@ class SoevClient:
             log.debug(
                 'soev-api request %s %s %s %.1fms',
                 method,
-                route,
+                path.split('?', 1)[0],
                 status,
                 (time.perf_counter() - started) * 1000,
+                extra={'route': route},
             )
-        request_id = response.headers.get('X-Request-ID')
-        # [Gradient] Status and request id ride in the message; the deployed formatter drops extra.
-        log.log(
-            logging.INFO if response.is_success else logging.WARNING,
-            'soev-api response %s %s %s request_id=%s',
-            method,
-            route,
-            response.status_code,
-            request_id,
-            extra={'status': response.status_code, 'request_id': request_id},
-        )
         if not response.is_success:
-            error = _response_error(response)
-            error.method, error.path = method, route
-            raise error
+            failure = _response_error(response)
+            failure.method, failure.path = method, route
+            raise failure
         return response
 
     @staticmethod
