@@ -1,6 +1,6 @@
 import logging
-import traceback
-from typing import Collection, Union
+from collections.abc import Collection
+from urllib.parse import urlsplit
 
 from aiohttp import (
     TraceRequestEndParams,
@@ -8,7 +8,8 @@ from aiohttp import (
     TraceRequestStartParams,
 )
 from fastapi import FastAPI, status
-from open_webui.utils.telemetry.constants import SPAN_REDIS_TYPE, SpanAttributes
+from open_webui.utils.telemetry.constants import SpanAttributes
+from open_webui.utils.telemetry.routes import route_template, target_service
 from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import (
@@ -36,13 +37,7 @@ def requests_hook(span: Span, request: PreparedRequest):
     Http Request Hook
     """
 
-    span.update_name(f'{request.method} {request.url}')
-    span.set_attributes(
-        attributes={
-            SpanAttributes.HTTP_URL: request.url,
-            SpanAttributes.HTTP_METHOD: request.method,
-        }
-    )
+    _http_request(span, request.method, request.url)
 
 
 def response_hook(span: Span, request: PreparedRequest, response: Response):
@@ -58,41 +53,17 @@ def response_hook(span: Span, request: PreparedRequest, response: Response):
     span.set_status(StatusCode.ERROR if response.status_code >= 400 else StatusCode.OK)
 
 
-def redis_request_hook(span: Span, instance: Union[Redis | RedisCluster], args, kwargs):
+def redis_request_hook(span: Span, instance: Redis | RedisCluster, args, kwargs):
     """
     Redis Request Hook
     """
 
-    # In cluster mode, the instance can be of two types:
-    # - redis.asyncio.cluster.RedisCluster
-    # - redis.cluster.RedisCluster
-    # Instead of checking the type, we check if the instance has a nodes_manager attribute.
-    try:
-        db = ''
-        if hasattr(instance, 'nodes_manager'):
-            default_node = instance.nodes_manager.default_node
-            if not default_node:
-                return
-            host = default_node.host
-            port = default_node.port
-        else:
-            connection_kwargs: dict = instance.connection_pool.connection_kwargs
-            host = connection_kwargs.get('host')
-            port = connection_kwargs.get('port')
-            db = connection_kwargs.get('db')
-        span.set_attributes(
-            {
-                SpanAttributes.DB_INSTANCE: f'{host}/{db}',
-                SpanAttributes.DB_NAME: f'{host}/{db}',
-                SpanAttributes.DB_TYPE: SPAN_REDIS_TYPE,
-                SpanAttributes.DB_PORT: port,
-                SpanAttributes.DB_IP: host,
-                SpanAttributes.DB_STATEMENT: ' '.join([str(i) for i in args]),
-                SpanAttributes.DB_OPERATION: str(args[0]),
-            }
-        )
-    except Exception:  # pylint: disable=W0718
-        logger.error(traceback.format_exc())
+    span.update_name('db.statement')
+    operation = str(args[0]).upper() if args else 'STATEMENT'
+    span.set_attribute(
+        'db.operation.name',
+        operation if operation in {'GET', 'SET', 'DEL', 'EXPIRE', 'PUBLISH', 'SUBSCRIBE'} else 'STATEMENT',
+    )
 
 
 def httpx_request_hook(span: Span, request: RequestInfo):
@@ -100,13 +71,7 @@ def httpx_request_hook(span: Span, request: RequestInfo):
     HTTPX Request Hook
     """
 
-    span.update_name(f'{request.method.decode()} {str(request.url)}')
-    span.set_attributes(
-        attributes={
-            SpanAttributes.HTTP_URL: str(request.url),
-            SpanAttributes.HTTP_METHOD: request.method.decode(),
-        }
-    )
+    _http_request(span, request.method.decode(), str(request.url))
 
 
 def httpx_response_hook(span: Span, request: RequestInfo, response: ResponseInfo):
@@ -139,16 +104,10 @@ def aiohttp_request_hook(span: Span, request: TraceRequestStartParams):
     Aiohttp Request Hook
     """
 
-    span.update_name(f'{request.method} {str(request.url)}')
-    span.set_attributes(
-        attributes={
-            SpanAttributes.HTTP_URL: str(request.url),
-            SpanAttributes.HTTP_METHOD: request.method,
-        }
-    )
+    _http_request(span, request.method, str(request.url))
 
 
-def aiohttp_response_hook(span: Span, response: Union[TraceRequestExceptionParams, TraceRequestEndParams]):
+def aiohttp_response_hook(span: Span, response: TraceRequestExceptionParams | TraceRequestEndParams):
     """
     Aiohttp Response Hook
     """
@@ -158,7 +117,14 @@ def aiohttp_response_hook(span: Span, response: Union[TraceRequestExceptionParam
         span.set_status(StatusCode.ERROR if response.response.status >= status.HTTP_400_BAD_REQUEST else StatusCode.OK)
     elif isinstance(response, TraceRequestExceptionParams):
         span.set_status(StatusCode.ERROR)
-        span.set_attribute(SpanAttributes.ERROR_MESSAGE, str(response.exception))
+
+
+def _http_request(span: Span, method: str | None, url: str | None) -> None:
+    target = target_service(urlsplit(url or '').hostname or '')
+    route = route_template(url or '', target)
+    method = method if method in {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'} else 'OTHER'
+    span.update_name(f'{method} {route}')
+    span.set_attributes({'http.route': route, 'http.request.method': method})
 
 
 class Instrumentor(BaseInstrumentor):
