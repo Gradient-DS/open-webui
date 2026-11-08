@@ -414,6 +414,11 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
         assert await coalesced.get('/v1/collections/kb', as_user='owui:user:alice') == {'key': 'kb'}
     coalesced._request.assert_awaited_once()
     assert len(coalesced._request.call_args.kwargs['body']['reads']) == 5
+    table.get_files_with_soev_jobs.return_value = []
+    resolver = AsyncMock(return_value='unused-token')
+    monkeypatch.setattr(acting, 'user_token', resolver)
+    assert await jobs.poll_once(api, now=40) == 0
+    resolver.assert_not_awaited()
 
 
 @pytest.mark.asyncio

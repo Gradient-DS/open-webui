@@ -150,10 +150,10 @@ async def _settle_file(
 
 
 async def _claim_files(
-    owner_id: str, now: int, *, max_collections: int = 15
+    owner_id: str, now: int, *, max_collections: int = 15, candidates: list[FileModel] | None = None
 ) -> tuple[list[FileModel], dict[str, list[str]]]:
     candidates = sorted(
-        await Files.get_files_with_soev_jobs(user_id=owner_id),
+        await Files.get_files_with_soev_jobs(user_id=owner_id) if candidates is None else candidates,
         key=lambda file: (file.meta.get('soev_job_polled_at', 0), file.id),
     )
     if not candidates:
@@ -208,10 +208,13 @@ def _status_reads(claimed: list[FileModel], collections: dict[str, list[str]]) -
 
 async def poll_once(client: SoevClient, *, now: int) -> int:
     ref = acting.requester_ref()
-    if client.is_service or ref is None or not await acting.user_token(ref):
+    if client.is_service or ref is None:
         return 0
     owner_id = ref.removeprefix('owui:user:')
-    claimed, collections = await _claim_files(owner_id, now)
+    candidates = await Files.get_files_with_soev_jobs(user_id=owner_id)
+    if not candidates or not await acting.user_token(ref):
+        return 0
+    claimed, collections = await _claim_files(owner_id, now, candidates=candidates)
     if not claimed:
         return 0
     reads = _status_reads(claimed, collections)
