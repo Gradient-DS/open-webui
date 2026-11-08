@@ -68,7 +68,7 @@ async def test_members_list_reached_documents_under_the_kb(subscribed_store):
     env.store._with_owners = AsyncMock(side_effect=lambda rows: rows)
     members = await env.store._members('kb', user_id='alice')
     assert members == {doc['source_id']: (doc, doc['path']) for doc in env.documents}
-    assert [request.url.path for request in env.requests] == ['/v1/reads'] * 2
+    assert [request.url.path for request in env.requests] == ['/v1/chat/reads'] * 2
     assert json.loads(env.requests[1].content)['reads'][0]['query']['cursor'] == cursor
     assert all(request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in env.requests)
     assert not env.responses
@@ -142,7 +142,7 @@ def folder_store(monkeypatch, identity_config, login_tokens):
             '/v1/jobs': {'data': [], 'next_cursor': None},
             '/v1/connections/c': {'id': 'c', 'source_kind': 'onedrive', 'lifecycle': 'enabled'},
         }
-        if path == '/v1/reads':
+        if path == '/v1/chat/reads':
             assert request.method == 'POST'
             results = []
             for read in json.loads(request.content)['reads']:
@@ -287,7 +287,7 @@ async def test_opening_a_kb_fetches_each_resource_once(folder_store):
             for request in env.requests
             for read in (
                 json.loads(request.content)['reads']
-                if request.url.path == '/v1/reads'
+                if request.url.path == '/v1/chat/reads'
                 else [{'resource': str(request.url)}]
             )
         )
@@ -320,4 +320,4 @@ async def test_files_and_sync_status_use_bounded_bundles_in_one_request(folder_s
             CloudSync(env.client, 'owui:user:alice').sync_status('kb'),
         )
     assert len(env.requests) == 3
-    assert all(request.url.path == '/v1/reads' for request in env.requests)
+    assert all(request.url.path == '/v1/chat/reads' for request in env.requests)

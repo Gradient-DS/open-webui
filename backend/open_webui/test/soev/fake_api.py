@@ -70,7 +70,7 @@ class FakeSoevApi:
             request.method == 'GET'
             or request.url.path.startswith('/v1/chat/threads')
             or request.url.path.startswith('/v1/threads/')
-            or request.url.path in {'/v1/completions/task', '/v1/reads'}
+            or request.url.path in {'/v1/completions/task', '/v1/chat/reads'}
         ):
             return self._route(request, body, credential, subject)
         operation = request.headers.get('Idempotency-Key', '')
@@ -225,7 +225,7 @@ class FakeSoevApi:
         return httpx.Response(200, json={'results': results})
 
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
-        if request.url.path == '/v1/reads' and request.method == 'POST':
+        if request.url.path == '/v1/chat/reads' and request.method == 'POST':
             return self._reads(request, body, credential, subject)
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))

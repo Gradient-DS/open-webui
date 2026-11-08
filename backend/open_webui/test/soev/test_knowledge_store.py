@@ -620,7 +620,9 @@ async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monke
     env.api.advance(job['job_id'], 'FAILED')
     assert [row.id for row in await store.get_knowledge_bases()] == ['kb']
     queries = [
-        json.loads(r.content)['reads'][1]['query']['statuses'] for r in env.api.requests if r.url.path == '/v1/reads'
+        json.loads(r.content)['reads'][1]['query']['statuses']
+        for r in env.api.requests
+        if r.url.path == '/v1/chat/reads'
     ]
     assert queries == [['QUEUED', 'RUNNING']] * 3
     for request in env.api.requests:

@@ -310,7 +310,9 @@ def assert_login_headers(requests):
         assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
         assert request.headers['X-Soev-User-Token'] == 'fictional-alice-token'
         assert 'X-Soev-' + 'Subject' not in request.headers
-        if request.method != 'GET':
+        if request.url.path == '/v1/chat/reads':
+            assert request.method == 'POST' and 'Idempotency-Key' not in request.headers
+        elif request.method != 'GET':
             assert request.headers['Idempotency-Key']
 
 

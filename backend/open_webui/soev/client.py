@@ -441,7 +441,7 @@ class SoevClient:
         return self.batch_values(results)
 
     async def _read_many(self, reads: list[dict], *, as_user: str | None = None) -> list[dict]:
-        response = await self._request('POST', '/v1/reads', body={'reads': reads}, as_user=as_user)
+        response = await self._request('POST', '/v1/chat/reads', body={'reads': reads}, as_user=as_user)
         results = self._json_object(response).get('results')
         if not isinstance(results, list) or len(results) != len(reads):
             raise SoevApiError(502, 'upstream_error', 'Invalid read batch')

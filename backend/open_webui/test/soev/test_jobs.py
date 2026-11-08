@@ -134,7 +134,7 @@ async def test_a_succeeded_job_completes_the_file_and_emits_completed(env):
     assert await poll(env, now=job['submitted_at'] + 1) == 1
     await assert_terminal(env, file)
     assert [(r.method, r.url.path) for r in env.api.requests] == [
-        ('POST', '/v1/reads'),
+        ('POST', '/v1/chat/reads'),
     ]
     assert json.loads(env.api.requests[0].content)['reads'][0]['query']['include_items'] is True
     assert await poll(env, now=job['submitted_at'] + 2) == 0
@@ -216,7 +216,7 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
     assert await poll(env, now=job['submitted_at'] + 121) == 1
     await assert_terminal(env, file, error='did not complete within 120s')
     assert env.api.jobs[job['job_id']]['status'] == status
-    assert all(r.method == 'POST' and r.url.path == '/v1/reads' for r in env.api.requests)
+    assert all(r.method == 'POST' and r.url.path == '/v1/chat/reads' for r in env.api.requests)
 
 
 @pytest.mark.asyncio
