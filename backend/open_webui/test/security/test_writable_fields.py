@@ -167,3 +167,17 @@ def test_current_projection_parameter_and_fork_reason_are_classified(surface):
     schema = spec['components']['schemas']['open_webui__soev__thread_routes__ForkForm']
     assert schema['then'] == {'required': ['kind'], 'properties': {'kind': {'enum': ['regenerate', 'edit']}}}
     assert schema['else'] == {'not': {'required': ['kind']}}
+
+
+def test_fanout_flags_are_read_query_selectors():
+    spec = json.loads((REPO / 'security/openapi.json').read_text())
+    for path, name in [
+        ('/api/v1/chats/', 'include_sidebar'),
+        ('/api/v1/chats/list', 'include_sidebar'),
+        ('/api/v1/chats/{id}', 'include_versions'),
+        ('/api/v1/knowledge/{id}/files', 'include_context'),
+    ]:
+        operation = spec['paths'][path]['get']
+        assert 'requestBody' not in operation
+        flag = next(parameter for parameter in operation['parameters'] if parameter['name'] == name)
+        assert flag['in'] == 'query' and flag['schema']['type'] == 'boolean'

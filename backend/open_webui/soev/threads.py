@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from open_webui.soev import acting
 from open_webui.soev.client import _shared_client
+from open_webui.soev.request_cache import has_batch_hook, memoized
 
 VersionKind = Literal['regenerate', 'edit']
 
@@ -358,6 +359,24 @@ class ThreadClient:
         raise ThreadError(503, 'reconnect')
 
     async def index(self, *, q: str = '', limit: int = 50, cursor: str = '') -> IndexPage:
+        return await memoized(
+            ('thread-index', self.base_url, self.product_key, acting.requester_ref(), q, limit, cursor),
+            lambda: self._index(q=q, limit=limit, cursor=cursor),
+        )
+
+    async def _index(self, *, q: str, limit: int, cursor: str) -> IndexPage:
+        if has_batch_hook():
+            from open_webui.soev import identity
+            from open_webui.soev.client import SoevApiError
+
+            try:
+                result = await identity.build_client().read_many(
+                    [{'resource': 'thread_index', 'query': {'q': q, 'limit': _page_size(limit), 'cursor': cursor}}],
+                    as_user=acting.requester_ref(),
+                )
+                return IndexPage.model_validate(result[0])
+            except (SoevApiError, ValidationError) as error:
+                raise ThreadError(error.status if isinstance(error, SoevApiError) else 502, 'reconnect') from None
         return self._parse(
             await self._request(
                 'GET',

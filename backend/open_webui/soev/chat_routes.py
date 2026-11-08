@@ -1,6 +1,7 @@
 """Select prepared handlers before any legacy body, dependency or content access."""
 
 import json
+import logging
 
 from fastapi import Depends, Request
 from fastapi.dependencies.utils import get_flat_dependant
@@ -83,6 +84,8 @@ async def chat(request: Request, user, route: str):
 async def chat_read(service, request, user, identifier, route):
     if route == '/stats/usage' or route.startswith('/stats/export'):
         return (await service.client.usage()).model_dump()
+    if route in {'/', '/list'} and boolean(request, 'include_sidebar', False):
+        return await sidebar_read(service, request, user)
     if route in {
         '/',
         '/list',
@@ -110,6 +113,19 @@ async def chat_read(service, request, user, identifier, route):
             sort_dir=request.query_params.get('sort_dir', 'desc'),
         )
         return len(items) if route == '/archived/count' else items
+    if route == '/{id}' and boolean(request, 'include_versions', False):
+        page, versions = await service.opening(
+            user.id,
+            identifier,
+            window=integer(request, 'limit', 20),
+            before=request.query_params.get('before', ''),
+            thread_id=request.query_params.get('thread_id', ''),
+            current=boolean(request, 'current', not bool(request.query_params.get('thread_id'))),
+        )
+        page = await service.presentation(user.id, page)
+        return JSONResponse(
+            {**page.model_dump(), **({'versions': versions.model_dump()['items']} if versions is not None else {})}
+        )
     if route == '/{id}':
         result = await service.projection(
             user.id,
@@ -136,6 +152,98 @@ async def chat_read(service, request, user, identifier, route):
         await service.projection(user.id, identifier, window=1)
         return (await service.record(user.id, identifier)).pinned
     refused()
+
+
+async def sidebar_read(service, request, user):
+    if integer(request, 'page', 1) != 1:
+        raise ThreadError(422, 'invalid_request')
+    owned_available = await prime_sidebar_access(service, request, user)
+    items = await service.authorized(user.id)
+    visible = [item for item in items if not (item['organization'] or {}).get('archived', False)]
+    regular = [item for item in visible if service._included(item, None, False, None, False, False)]
+    pinned = [item for item in visible if (item['organization'] or {}).get('pinned', False)]
+    return {
+        'items': service.ui_rows(regular[:60]),
+        'pinned': service.ui_rows(pinned),
+        'tags': sorted({name for item in items for name in item['tags'] if isinstance(name, str)}),
+        'folder_data': await sidebar_folders(request, user, owned_available=owned_available),
+    }
+
+
+async def prime_sidebar_access(service, request, user):
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.folders import Folders
+    from open_webui.models.knowledge import Knowledges
+    from open_webui.routers.folders import check_folders_permission
+    from open_webui.soev.request_cache import remember
+
+    try:
+        async with get_async_db_context() as db:
+            await check_folders_permission(request, user, db=db)
+            folders = await Folders.get_folders_by_user_id(user.id, db=db)
+        entries = [
+            entry for folder in folders for entry in (folder.data or {}).get('files', []) if isinstance(entry, dict)
+        ]
+        files = {entry['id'] for entry in entries if entry.get('type') == 'file' and entry.get('id')}
+        collections = {entry['id'] for entry in entries if entry.get('type') == 'collection' and entry.get('id')}
+        if files or collections:
+            page = await Knowledges.prime_sidebar_access(
+                user.id,
+                files,
+                collections,
+                index_read={
+                    'resource': 'thread_index',
+                    'query': {'q': '', 'limit': 200, 'cursor': ''},
+                },
+            )
+            index = threads.IndexPage.model_validate(page)
+            client = service.client
+            remember(
+                ('thread-index', client.base_url, client.product_key, threads.acting.requester_ref(), '', 200, ''),
+                index,
+            )
+        return True
+    except HTTPException as error:
+        if error.status_code == 403:
+            return True
+        return False
+    except Exception as error:
+        logging.getLogger(__name__).warning('Sidebar attachment access unavailable (%s)', type(error).__name__)
+        return False
+
+
+async def sidebar_folders(request, user, *, owned_available=True):
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.routers.folders import get_folders, get_shared_folder_chats, get_shared_folders
+
+    result = {'owned': [], 'shared': []}
+    async with get_async_db_context() as db:
+        for name, reader in [('owned', get_folders), ('shared', get_shared_folders)]:
+            if name == 'owned' and not owned_available:
+                continue
+            try:
+                rows = await reader(request, user=user, db=db)
+                result[name] = [
+                    row.model_dump(mode='json') if hasattr(row, 'model_dump') else dict(row) for row in rows
+                ]
+            except Exception as error:
+                logging.getLogger(__name__).warning('Sidebar folder metadata unavailable (%s)', type(error).__name__)
+        for row in [*result['owned'], *result['shared']]:
+            if not row.get('is_expanded'):
+                continue
+            try:
+                row['initial_page'] = await get_shared_folder_chats(
+                    request,
+                    row['id'],
+                    page=1,
+                    sort_by='unread_updated_at',
+                    sort_dir='desc',
+                    user=user,
+                    db=db,
+                )
+            except Exception as error:
+                logging.getLogger(__name__).warning('Sidebar folder contents unavailable (%s)', type(error).__name__)
+    return result
 
 
 async def require_folder_read(user_id: str, folder_id: str) -> None:

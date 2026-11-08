@@ -99,9 +99,16 @@ def install(app: FastAPI) -> None:
                             raise HTTPException(status_code=401, detail='Identity could not be verified') from None
                 from open_webui.soev import jobs, pending_sync
 
-                await jobs.reconcile_owner_jobs(user.id)
-                await pending_sync.on_request(user.id, background_tasks)
-                yield user
+                if request.method == 'GET' and request.url.path.startswith(
+                    ('/api/v1/knowledge/', '/api/v1/chats/', '/api/v1/folders/')
+                ):
+                    await pending_sync.on_request(user.id, background_tasks)
+                    with jobs.defer_owner_jobs(user.id):
+                        yield user
+                else:
+                    await jobs.reconcile_owner_jobs(user.id)
+                    await pending_sync.on_request(user.id, background_tasks)
+                    yield user
         finally:
             _token_resolver.reset(resolver)
             _requester_ref.reset(requester)

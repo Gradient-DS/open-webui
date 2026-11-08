@@ -134,12 +134,11 @@ async def test_a_succeeded_job_completes_the_file_and_emits_completed(env):
     assert await poll(env, now=job['submitted_at'] + 1) == 1
     await assert_terminal(env, file)
     assert [(r.method, r.url.path) for r in env.api.requests] == [
-        ('GET', f'/v1/jobs/{job["job_id"]}'),
-        ('GET', f'/v1/collections/kb/documents/{file.id}'),
+        ('POST', '/v1/chat/reads'),
     ]
-    assert env.api.requests[0].url.params['include_items'] == 'true'
+    assert json.loads(env.api.requests[0].content)['reads'][0]['query']['include_items'] is True
     assert await poll(env, now=job['submitted_at'] + 2) == 0
-    assert len(env.api.requests) == 2
+    assert len(env.api.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -217,7 +216,7 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
     assert await poll(env, now=job['submitted_at'] + 121) == 1
     await assert_terminal(env, file, error='did not complete within 120s')
     assert env.api.jobs[job['job_id']]['status'] == status
-    assert all(r.method == 'GET' for r in env.api.requests)
+    assert all(r.method == 'POST' and r.url.path == '/v1/chat/reads' for r in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -334,7 +333,7 @@ async def test_owner_reads_and_moves_use_the_login_token(env):
     env.api.advance(job['job_id'], 'SUCCEEDED')
     env.api.documents['kb', file.id]['path'] = None
     assert await poll(env, now=job['submitted_at'] + 66) == 1
-    assert len(env.api.requests) == 5
+    assert len(env.api.requests) == 4
     assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
     await assert_terminal(env, file)
@@ -349,17 +348,16 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
     for job in (first_job, second_job):
         env.api.advance(job['job_id'], 'SUCCEEDED')
     monkeypatch.setattr(env.files.Files, 'get_files_with_soev_jobs', AsyncMock(return_value=[first, second]))
-    if failure == 'api':
-        env.api.failures.append(503)
-    else:
-        get = env.client.get
+    settle = env.jobs._settle_file
 
-        async def fail_first(path, **kwargs):
-            if path.endswith(first_job['job_id']):
-                raise ValueError('secret-assertion secret-key https://private.invalid')
-            return await get(path, **kwargs)
+    async def fail_first(client, file, *args):
+        if file.id == first.id:
+            if failure == 'api':
+                raise env.module.SoevApiError(503, 'injected_failure', 'private failure')
+            raise ValueError('secret-assertion secret-key https://private.invalid')
+        return await settle(client, file, *args)
 
-        monkeypatch.setattr(env.client, 'get', fail_first)
+    monkeypatch.setattr(env.jobs, '_settle_file', fail_first)
     assert await poll(env, now=second_job['submitted_at']) == 1
     assert (await env.files.Files.get_file_by_id(first.id)).data == first.data
     assert (await env.files.Files.get_file_by_id(second.id)).meta['status'] == 'completed'

@@ -35,3 +35,32 @@ def invalidate():
     cache = _cache.get()
     if cache is not None:
         cache.clear()
+
+
+def remember(key, value):
+    cache = _cache.get()
+    if cache is not None and key not in cache:
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(value)
+        cache[key] = future
+
+
+_batch_hook = ContextVar('soev_batch_hook', default=None)
+
+
+@contextmanager
+def batch_hook(callback):
+    token = _batch_hook.set(callback)
+    try:
+        yield
+    finally:
+        _batch_hook.reset(token)
+
+
+def has_batch_hook():
+    return _batch_hook.get() is not None
+
+
+async def fetch_batch(reads, fetch):
+    hook = _batch_hook.get()
+    return await fetch(reads) if hook is None else await hook(reads, fetch)

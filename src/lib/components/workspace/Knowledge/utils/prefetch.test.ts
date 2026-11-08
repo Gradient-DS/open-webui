@@ -6,7 +6,6 @@ import {
 	invalidateKnowledgePrefetch,
 	knowledgeRequestKey,
 	prefetchKnowledge,
-	takeKnowledgeDetail,
 	takeKnowledgeItems
 } from './prefetch';
 
@@ -25,17 +24,16 @@ afterEach(() => {
 });
 
 describe('knowledge prefetch', () => {
-	it('starts the exact detail and root-items requests together and deduplicates hover/focus', async () => {
+	it('starts one complete root-page request and deduplicates hover/focus', async () => {
 		let resolve!: (value: object) => void;
-		vi.mocked(getKnowledgeById).mockReturnValue(
+		vi.mocked(searchKnowledgeFilesById).mockReturnValue(
 			new Promise((done) => {
 				resolve = done;
 			})
 		);
-		vi.mocked(searchKnowledgeFilesById).mockResolvedValue({ items: [], total: 0 });
 		prefetchKnowledge('user', 'token', 'kb');
 		prefetchKnowledge('user', 'token', 'kb');
-		expect(getKnowledgeById).toHaveBeenCalledExactlyOnceWith('token', 'kb');
+		expect(getKnowledgeById).not.toHaveBeenCalled();
 		expect(searchKnowledgeFilesById).toHaveBeenCalledExactlyOnceWith(
 			'token',
 			'kb',
@@ -46,16 +44,14 @@ describe('knowledge prefetch', () => {
 			1,
 			null,
 			true,
-			null
+			null,
+			true
 		);
-		const detail = takeKnowledgeDetail('user', 'token', 'kb');
 		const items = takeKnowledgeItems('user', initialKnowledgeItemsArgs('token', 'kb'));
-		resolve({ id: 'kb' });
-		expect(await detail.promise).toEqual({ id: 'kb' });
-		expect(await items.promise).toEqual({ items: [], total: 0 });
-		expect(detail.reused).toBe(true);
+		resolve({ knowledge: { id: 'kb' }, items: [], total: 0 });
+		expect(await items.promise).toEqual({ knowledge: { id: 'kb' }, items: [], total: 0 });
 		expect(items.reused).toBe(true);
-		expect(getKnowledgeById).toHaveBeenCalledTimes(1);
+		expect(getKnowledgeById).not.toHaveBeenCalled();
 		expect(searchKnowledgeFilesById).toHaveBeenCalledTimes(1);
 	});
 

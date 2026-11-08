@@ -264,19 +264,22 @@ async def require_chat_import_permission(request: Request, user, db: AsyncSessio
 ############################
 
 
-@router.get('/', response_model=list[ChatTitleIdResponse])
-@router.get('/list', response_model=list[ChatTitleIdResponse])
+@router.get('/', response_model=list[ChatTitleIdResponse] | dict)
+@router.get('/list', response_model=list[ChatTitleIdResponse] | dict)
 async def get_session_user_chat_list(
     request: Request,
     user=Depends(get_verified_user),
     page: int | None = None,
     include_pinned: bool | None = False,
     include_folders: bool | None = False,
+    include_sidebar: bool = False,
     sort_by: str = 'updated_at',
     sort_dir: str = 'desc',
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
+        if include_sidebar:
+            raise HTTPException(status_code=409, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
         if page is not None:
             limit = 60
             skip = (page - 1) * limit
@@ -1290,10 +1293,13 @@ async def compact_chat_by_id(
 async def get_chat_by_id(
     id: str,
     request: Request,
+    include_versions: bool = False,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
     current: bool = False,
 ):
+    if include_versions:
+        raise HTTPException(status_code=409, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     chat = await Chats.get_chat_by_id_for_user(
         id,
         user,

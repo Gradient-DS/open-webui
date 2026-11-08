@@ -182,7 +182,7 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 [[waived]]
 id = "GET /api/v1/knowledge/{id}/files"
 backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live. The existing owned KB seed and required_drive_routes exercise the bounded read bundle in the private full-stack sweep; its missing and foreign selectors are proved in the platform leak matrix."
 
 [[waived]]
 id = "GET /api/v1/knowledge/{id}/files/pending"

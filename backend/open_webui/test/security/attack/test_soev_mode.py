@@ -383,3 +383,11 @@ def test_retired_approval_is_an_exact_all_actor_control_and_never_waived(monkeyp
     assert crossuser.refused_as_expected(declaration, 409, '{"state":"unavailable"}')
     for status, body in [(200, '{}'), (404, '{"state":"unavailable"}'), (409, '{"state":"other"}')]:
         assert not crossuser.refused_as_expected(declaration, status, body)
+
+
+def test_fanout_controls_require_the_platform_without_new_waivers():
+    routes = {'GET /api/v1/chats/', 'GET /api/v1/chats/list', 'GET /api/v1/chats/{id}'}
+    fields = [entry for entry in seeds.SURFACE['field'] if entry['route'] in routes]
+    assert len(fields) == 3
+    assert all(entry['backed_by'] == 'soev-solutions' for entry in fields)
+    assert not routes & set(seeds.SOEV_BACKED)

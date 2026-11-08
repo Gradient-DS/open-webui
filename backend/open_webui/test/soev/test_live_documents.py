@@ -76,7 +76,16 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     assert len(messages['files']) == 1
     next_turn = {'user_id': 'alice', 'files': messages['files']}
     assert await agent_v2._attachments(next_turn) == {'attachment_notes': ['still processing: Quarterly plan.pdf']}
-    client = SimpleNamespace(is_service=False, get=AsyncMock(return_value={'status': 'SUCCEEDED'}), send=AsyncMock())
+    client = SimpleNamespace(
+        is_service=False,
+        read_many=AsyncMock(
+            return_value=[
+                {'data': [{'job_id': rows[0].meta['soev_job']['job_id'], 'status': 'SUCCEEDED'}]},
+                {'data': [{'source_id': rows[0].id}]},
+            ]
+        ),
+        send=AsyncMock(),
+    )
     client.as_service = lambda: client
     with owner_login():
         assert await env.jobs.poll_once(client, now=rows[0].meta['soev_job']['submitted_at']) == 1
@@ -356,7 +365,13 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
     event = {**attachment(), 'content_type': None}
     row = await live_documents.register_attachment('alice', event)
     client = SimpleNamespace(
-        is_service=False, get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}])
+        is_service=False,
+        read_many=AsyncMock(
+            return_value=[
+                {'data': [{'job_id': row.meta['soev_job']['job_id'], 'status': 'SUCCEEDED'}]},
+                {'data': [{'source_id': row.id, 'content_type': 'application/pdf'}]},
+            ]
+        ),
     )
     client.as_service = lambda: client
     from open_webui.soev import acting
@@ -371,7 +386,7 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
     updated = await env.files.Files.get_file_by_id(row.id)
     assert updated.meta['content_type'] == 'application/pdf'
     assert updated.meta['status'] == 'completed'
-    assert client.get.call_args.kwargs['as_user'] == 'owui:user:alice'
+    assert client.read_many.call_args.kwargs['as_user'] == 'owui:user:alice'
 
 
 @pytest.mark.asyncio

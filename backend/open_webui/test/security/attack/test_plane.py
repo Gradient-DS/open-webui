@@ -916,3 +916,17 @@ def test_conversation_mark_read_is_driven_as_a_bodyless_write(monkeypatch):
         'POST', '/api/v1/threads/owner-thread/read', headers={'Content-Type': 'application/json'}
     )
     assert outcomes[route].entered
+
+
+def test_fanout_queries_extend_existing_reads_without_adding_routes():
+    assert len(plane.operations()) == 534
+    for path, name in [
+        ('/api/v1/chats/', 'include_sidebar'),
+        ('/api/v1/chats/list', 'include_sidebar'),
+        ('/api/v1/chats/{id}', 'include_versions'),
+        ('/api/v1/knowledge/{id}/files', 'include_context'),
+    ]:
+        parameters = seeds.SPEC['paths'][path]['get']['parameters']
+        parameter = next(item for item in parameters if item['name'] == name)
+        assert parameter['in'] == 'query' and parameter['schema']['type'] == 'boolean'
+        assert parameter['schema']['default'] is False

@@ -36,6 +36,10 @@ preserve_configuration = true
 # The image-prompt operation has an exact all-actor refusal below; its supported
 # title-task control uses the same seeded chat, model and authenticated owner.
 required_drive_routes = [
+  "GET /api/v1/chats/",
+  "GET /api/v1/chats/list",
+  "GET /api/v1/chats/{id}",
+  "GET /api/v1/knowledge/{id}/files",
   "GET /api/v1/cloud-sync/policy",
   "GET /api/v1/configs/data-retention",
   "GET /api/v1/groups/id/{id}/preview",
@@ -680,7 +684,7 @@ backed_by = "soev-solutions"
 key = "cloud_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
-description = "Use a separate KB, created as OneDrive: a KB's source kind is fixed at creation and only a matching, unshared KB may subscribe."
+description = "Use a separate KB, created as OneDrive: a KB's source kind is fixed at creation and only a matching, unshared KB may subscribe. GET sync status uses bounded collection, schedule and individually authorized connection reads."
 via = "POST /api/v1/knowledge/create"
 body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
@@ -777,6 +781,30 @@ unseedable = "routers/notifications.py:create_notification_target stores a targe
 
 [[field]]
 backed_by = "soev-solutions"
+route = "GET /api/v1/chats/"
+description = "Load rows, pins, tags and folders through the caller's bundled sidebar read."
+params = { include_sidebar = true }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "GET /api/v1/chats/list"
+description = "Drive the list alias with the same caller-bound sidebar bundle."
+params = { include_sidebar = true }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "GET /api/v1/chats/{id}"
+description = "Load the current projection with versions restricted to the owner."
+params = { include_versions = true, current = true }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "GET /api/v1/knowledge/{id}/files"
+description = "The initial page includes readable KB metadata and sync status under the same owner token."
+params = { include_context = true }
+
+[[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/files/onedrive/attach"
 description = "Inspect and ingest the fixed provider document using the owner's real live grant."
 json = { grant_id = "{cloud_grant}", drive_id = "ci-picker-drive", item_id = "ci-document", name = "ci-document.txt", web_url = "https://ci.example.invalid/document", size = 59 }
@@ -810,6 +838,7 @@ description = "The event query requires both bounds; the fixture event is inside
 params = { start = "2033-05-18T00:00:00Z", end = "2033-05-19T00:00:00Z", calendar_ids = "{calendar}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "GET /api/v1/chats/search"
 description = "Search needs a text query; the fixture token identifies this pass's chats."
 params = { text = "{token}" }

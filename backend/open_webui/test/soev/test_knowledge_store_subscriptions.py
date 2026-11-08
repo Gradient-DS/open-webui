@@ -1,5 +1,6 @@
 """Subscribed corpus documents are projected as members of the requesting KB."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -7,6 +8,7 @@ import httpx
 import pytest
 from open_webui.soev.client import SoevClient
 from open_webui.soev.knowledge_store import SoevKnowledgeTable
+from open_webui.test.soev.fake_api import recorded_reads
 
 
 @pytest.fixture
@@ -42,18 +44,33 @@ async def test_members_list_reached_documents_under_the_kb(subscribed_store):
     env = subscribed_store
     cursor = 'corpus:drive|after/item+1='
     env.responses.extend(
-        httpx.Response(200, json=body)
-        for body in [
-            {'data': env.documents[:1], 'next_cursor': cursor},
-            {'data': env.documents[1:], 'next_cursor': None},
-            {'data': [], 'next_cursor': None},
-            {'data': [], 'next_cursor': None},
+        [
+            httpx.Response(
+                200,
+                json={
+                    'results': [
+                        {'status': 200, 'body': {'key': 'kb'}},
+                        {'status': 200, 'body': {'data': env.documents[:1], 'next_cursor': cursor}},
+                        {'status': 200, 'body': {'data': [], 'next_cursor': None}},
+                        {'status': 200, 'body': {'data': [], 'next_cursor': None}},
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    'results': [
+                        {'status': 200, 'body': {'data': env.documents[1:], 'next_cursor': None}},
+                    ]
+                },
+            ),
         ]
     )
+    env.store._with_owners = AsyncMock(side_effect=lambda rows: rows)
     members = await env.store._members('kb', user_id='alice')
     assert members == {doc['source_id']: (doc, doc['path']) for doc in env.documents}
-    assert [request.url.path for request in env.requests[:2]] == ['/v1/collections/kb/documents'] * 2
-    assert env.requests[1].url.params['cursor'] == cursor
+    assert [request.url.path for request in env.requests] == ['/v1/chat/reads'] * 2
+    assert json.loads(env.requests[1].content)['reads'][0]['query']['cursor'] == cursor
     assert all(request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for request in env.requests)
     assert not env.responses
 
@@ -117,7 +134,6 @@ def folder_store(monkeypatch, identity_config, login_tokens):
 
     async def handle(request):
         requests.append(request)
-        assert request.method == 'GET'
         path = request.url.path
         bodies = {
             '/v1/collections/kb': collection,
@@ -127,6 +143,21 @@ def folder_store(monkeypatch, identity_config, login_tokens):
             '/v1/jobs': {'data': [], 'next_cursor': None},
             '/v1/connections/c': {'id': 'c', 'source_kind': 'onedrive', 'lifecycle': 'enabled'},
         }
+        if path == '/v1/chat/reads':
+            assert request.method == 'POST'
+            results = []
+            for read in json.loads(request.content)['reads']:
+                resource = read['resource']
+                inner = {'connection': '/v1/connections/' + read.get('connection_id', '')}.get(
+                    resource, '/v1/' + resource
+                )
+                if resource in {'collection', 'documents'}:
+                    inner = '/v1/collections/' + read['collection_key']
+                    if resource == 'documents':
+                        inner += '/documents'
+                results.append({'status': 200, 'body': bodies[inner]})
+            return httpx.Response(200, json={'results': results})
+        assert request.method == 'GET'
         if path == '/v1/collections/kb/folders':
             folders = (
                 [] if request.url.params.get('under') else [{'path': 'Uploads', 'created_at': collection['created_at']}]
@@ -159,7 +190,7 @@ async def test_folder_sources_appear_as_top_level_directories(folder_store):
     assert sorted(row.name for row in page.directories) == ['Folder', 'Reports', 'Reports', 'Uploads']
     assert len({row.id for row in page.directories}) == 4
     assert all(row.parent_id is None for row in page.directories)
-    assert sum(request.url.path == '/v1/schedules' for request in env.requests) == 1
+    assert sum(request.url.path == '/v1/schedules' for request in recorded_reads(env.requests)) == 1
     again = await env.store.get_all_directories('kb')
     assert {row.id for row in page.directories} <= {row.id for row in again}
 
@@ -252,10 +283,18 @@ async def test_opening_a_kb_fetches_each_resource_once(folder_store):
         env.requests.clear()
         with request_cache():
             await operation()
-        resources = Counter(str(request.url) for request in env.requests)
+        resources = Counter(
+            read['resource']
+            for request in env.requests
+            for read in (
+                json.loads(request.content)['reads']
+                if request.url.path == '/v1/chat/reads'
+                else [{'resource': str(request.url)}]
+            )
+        )
         assert all(count == 1 for count in resources.values()), resources
         counts.append(len(env.requests))
-    assert counts == [1, 6, 3]
+    assert counts == [1, 2, 2]
 
 
 @pytest.mark.asyncio
@@ -268,8 +307,8 @@ async def test_counts_use_one_collection_listing(folder_store):
 
 
 @pytest.mark.asyncio
-async def test_schedule_listing_is_shared_with_sync_status_in_one_request(folder_store):
-    """Folder projection and status share schedules if they run in the same request."""
+async def test_files_and_sync_status_use_bounded_bundles_in_one_request(folder_store):
+    """Independent file and sync consumers keep bounded calls in one request."""
     import asyncio
 
     from open_webui.soev.cloud_sync import CloudSync
@@ -281,5 +320,6 @@ async def test_schedule_listing_is_shared_with_sync_status_in_one_request(folder
             env.store.search_files_by_id('kb', 'alice', {'directory_id': None}),
             CloudSync(env.client, 'owui:user:alice').sync_status('kb'),
         )
-    assert sum(request.url.path == '/v1/schedules' for request in env.requests) == 1
-    assert sum(request.url.path == '/v1/collections/kb' for request in env.requests) == 1
+    assert len(env.requests) == 4
+    assert sum(request.url.path == '/v1/collections/kb/folders' for request in env.requests) == 1
+    assert all(request.url.path in {'/v1/chat/reads', '/v1/collections/kb/folders'} for request in env.requests)

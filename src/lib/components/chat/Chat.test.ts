@@ -301,7 +301,7 @@ it('uses whole turns when loading older messages and hides the button at the fir
 	await callback('loadOlderThread', state)();
 	expect(state.toast.error).not.toHaveBeenCalled();
 	expect(state.getChatById.mock.calls).toEqual([
-		['token', 'thread', 'before-25', 'thread', false],
+		['token', 'thread', 'before-25', 'thread', false, false],
 		['token', 'thread', 'before-21', 'thread']
 	]);
 	expect(state.threadPage.messages).toHaveLength(26);
@@ -787,16 +787,11 @@ it('edits a user input by forking before it and replaying edited text with origi
 	expect(state.threadPage.thread_id).toBe('edited');
 });
 
-it('opens with one current projection request and paints while the version list is pending', async () => {
+it('opens with the current projection and owner versions in one request', async () => {
 	const state = chatOpenState();
-	const page = { ...projection([1, 2], null), thread_id: 'latest' };
-	let resolveVersions!: (value: { items: unknown[] }) => void;
-	const versions = vi.fn(
-		() =>
-			new Promise<{ items: unknown[] }>((resolve) => {
-				resolveVersions = resolve;
-			})
-	);
+	const items = [{ thread_id: 'latest', parent_thread: null, parent_position: null, version_kind: null }];
+	const page = { ...projection([1, 2], null), thread_id: 'latest', versions: items };
+	const versions = vi.fn();
 	Object.assign(state, {
 		getChatById: vi.fn().mockResolvedValue(page),
 		threadAPI: () => ({ versions }),
@@ -807,20 +802,12 @@ it('opens with one current projection request and paints while the version list 
 		toast: { error: vi.fn() }
 	});
 	state.loadThreadProjection = callback('loadThreadProjection', state);
-	state.loadThreadVersions = callback('loadThreadVersions', state);
 	expect(await callback('loadChat', state)()).toBe('loaded');
-	expect(state.getChatById).toHaveBeenCalledExactlyOnceWith('token', 'thread', '', '', true);
+	expect(state.getChatById).toHaveBeenCalledExactlyOnceWith('token', 'thread', '', '', true, true);
 	expect(state.threadPage.thread_id).toBe('latest');
 	expect(Object.values(state.history.messages)).toHaveLength(2);
-	expect(versions).toHaveBeenCalledExactlyOnceWith('latest');
+	expect(versions).not.toHaveBeenCalled();
 	expect(state.replaceThreadProjection).not.toHaveBeenCalled();
-	const items = [
-		{ thread_id: 'latest', parent_thread: null, parent_position: null, version_kind: null }
-	];
-	resolveVersions({ items });
-	await vi.waitFor(() =>
-		expect(state.replaceThreadProjection).toHaveBeenCalledExactlyOnceWith(page)
-	);
 	expect(state.threadVersions).toEqual(items);
 });
 
@@ -831,7 +818,7 @@ it('pins older transport pages to the resolved version instead of resolving curr
 	state.getChatById = vi.fn().mockResolvedValueOnce(latest).mockResolvedValueOnce(older);
 	await callback('loadThreadProjection', state)('thread', '', '', true);
 	expect(state.getChatById.mock.calls).toEqual([
-		['token', 'thread', '', '', true],
+		['token', 'thread', '', '', true, true],
 		['token', 'thread', 'older', 'latest']
 	]);
 });
@@ -846,27 +833,14 @@ it('does not fetch versions for reader projections', async () => {
 	expect(state.loadThreadVersions).not.toHaveBeenCalled();
 });
 
-it('ignores a delayed version list after navigation', async () => {
-	let resolveVersions!: (value: { items: unknown[] }) => void;
-	const state: Record<string, any> = {
-		$chatId: 'thread',
-		threadVersionLoad: 0,
-		threadPage: projection([1, 2], null),
-		threadVersions: [],
-		localStorage: { token: 'token' },
-		threadAPI: () => ({
-			versions: () =>
-				new Promise((resolve) => {
-					resolveVersions = resolve;
-				})
-		}),
-		replaceThreadProjection: vi.fn(),
-		toast: { error: vi.fn() }
-	};
-	const pending = callback('loadThreadVersions', state)('thread', state.threadPage);
+it('ignores a delayed bundled projection and versions after navigation', async () => {
+	let resolvePage!: (value: unknown) => void;
+	const state = chatOpenState();
+	state.loadThreadProjection = vi.fn(() => new Promise((resolve) => { resolvePage = resolve; }));
+	const pending = callback('loadChat', state)();
 	state.$chatId = 'another';
-	resolveVersions({ items: [{ thread_id: 'stale' }] });
-	await pending;
+	state.chatIdProp = 'another';
+	resolvePage({ ...projection([1, 2], null), versions: [{ thread_id: 'stale' }] });
+	expect(await pending).toBe('aborted');
 	expect(state.threadVersions).toEqual([]);
-	expect(state.replaceThreadProjection).not.toHaveBeenCalled();
 });

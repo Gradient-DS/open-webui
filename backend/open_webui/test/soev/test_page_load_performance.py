@@ -138,7 +138,7 @@ async def test_knowledge_search_minimum_calls(env, monkeypatch):
                 '/knowledge/search (3 pending)',
                 env.api.requests,
                 lambda: knowledge.search_knowledge_bases(user=user, db=None),
-                6,
+                5,
             )
     finally:
         acting._requester_ref.reset(requester)

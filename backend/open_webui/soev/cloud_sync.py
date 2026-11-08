@@ -1,6 +1,5 @@
 """Subject-scoped connection and schedule calls through the existing soev-api client."""
 
-import asyncio
 import re
 from urllib.parse import quote
 from uuid import uuid4
@@ -135,27 +134,32 @@ class CloudSync:
             }
         return list(skipped.values())
 
-    async def sync_status(self, collection_key: str) -> dict:
-        # W2 projects the collection key directly as the OWUI knowledge id.
-        # Kept: this is what makes an unreadable or absent KB a 404 rather
-        # than an empty schedule list.
-        async def list_schedules():
-            return [
-                row
-                async for row in self.client.pages(
-                    '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
-                )
-            ]
-
-        _, schedules = await asyncio.gather(
-            self._get(f'/v1/collections/{quote(collection_key, safe="")}'), list_schedules()
+    async def sync_status(self, collection_key: str, *, catalog: tuple[dict | None, dict] | None = None) -> dict:
+        collection, page = (
+            catalog
+            if catalog is not None
+            else await self.client.read_pages(
+                [
+                    {'resource': 'collection', 'collection_key': collection_key},
+                    {'resource': 'schedules', 'query': {'collection_key': collection_key, 'limit': 200}},
+                ],
+                as_user=self.user_ref,
+            )
         )
-        # The listing carries each schedule's own detail, so the rest is one
-        # page plus one call per DISTINCT connection (usually exactly one).
-        # It used to also fetch every schedule individually, which made a
-        # status poll cost a round trip per schedule.
+        if collection is None:
+            raise SoevApiError(404, 'collection_not_found', 'Resource not found')
+        schedules = (page or {}).get('data', [])
         connection_ids = sorted({schedule['connection_id'] for schedule in schedules})
-        connections = dict(zip(connection_ids, await asyncio.gather(*(self.connection(key) for key in connection_ids))))
+        connections = {}
+        for offset in range(0, len(connection_ids), 14):
+            selected = connection_ids[offset : offset + 14]
+            views = await self.client.read_many(
+                [{'resource': 'connection', 'connection_id': key} for key in selected], as_user=self.user_ref
+            )
+            for key, view in zip(selected, views, strict=True):
+                if view is None:
+                    raise SoevApiError(404, 'connection_not_found', 'Resource not found')
+                connections[key] = view
         return {
             'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
         }

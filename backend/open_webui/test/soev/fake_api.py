@@ -17,6 +17,35 @@ def person_ref(user_id):
     return 'platform:user:' + str(uuid5(NAMESPACE_URL, f'owui-test-person:{user_id}'))
 
 
+def recorded_reads(requests):
+    result = []
+    for request in requests:
+        if request.url.path != '/v1/chat/reads':
+            result.append(request)
+            continue
+        assert request.method == 'POST'
+        for read in json.loads(request.content)['reads']:
+            resource = read['resource']
+            if resource == 'document_lookup':
+                path = '/v1/documents'
+            elif resource == 'connection':
+                path = '/v1/connections/' + quote(read['connection_id'], safe='')
+            elif resource in {'collection', 'documents'}:
+                path = '/v1/collections/' + quote(read['collection_key'], safe='')
+                if resource == 'documents':
+                    path += '/documents'
+            else:
+                assert resource in {'collections', 'jobs', 'schedules'}
+                path = '/v1/' + resource
+            query = [
+                (name, str(item).lower() if isinstance(item, bool) else str(item))
+                for name, value in read.get('query', {}).items()
+                for item in (value if isinstance(value, list) else [value])
+            ]
+            result.append(httpx.Request('GET', 'https://soev.invalid' + path, params=query, headers=request.headers))
+    return result
+
+
 class Problem(Exception):
     def __init__(self, status, code, constraint=None):
         self.status, self.code, self.constraint = status, code, constraint
@@ -70,7 +99,7 @@ class FakeSoevApi:
             request.method == 'GET'
             or request.url.path.startswith('/v1/chat/threads')
             or request.url.path.startswith('/v1/threads/')
-            or request.url.path == '/v1/completions/task'
+            or request.url.path in {'/v1/completions/task', '/v1/chat/reads'}
         ):
             return self._route(request, body, credential, subject)
         operation = request.headers.get('Idempotency-Key', '')
@@ -195,15 +224,45 @@ class FakeSoevApi:
         data, cursor = self._slice(rows, request)
         return httpx.Response(200, json={'data': data, 'next_cursor': cursor})
 
+    def _reads(self, request, body, credential, subject):
+        results = []
+        for read in body['reads']:
+            resource = read['resource']
+            if resource == 'document_lookup':
+                path = '/v1/documents'
+            elif resource == 'connection':
+                path = '/v1/connections/' + quote(read['connection_id'], safe='')
+            elif resource in {'collection', 'documents'}:
+                path = '/v1/collections/' + quote(read['collection_key'], safe='')
+                if resource == 'documents':
+                    path += '/documents'
+            else:
+                path = '/v1/' + resource
+            query = [
+                (name, str(item).lower() if isinstance(item, bool) else str(item))
+                for name, value in read.get('query', {}).items()
+                for item in (value if isinstance(value, list) else [value])
+            ]
+            child = httpx.Request('GET', 'https://soev.invalid' + path, params=query, headers=request.headers)
+            try:
+                response = self._route(child, None, credential, subject)
+            except Problem as error:
+                response = httpx.Response(
+                    error.status, json={'status': error.status, 'code': error.code, 'detail': error.code}
+                )
+            results.append({'status': response.status_code, 'body': response.json()})
+        return httpx.Response(200, json={'results': results})
+
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
+        if request.url.path == '/v1/chat/reads' and request.method == 'POST':
+            return self._reads(request, body, credential, subject)
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
         if request.url.path == '/v1/connections' and request.method == 'GET':
             return self._page([row for row in self.connections.values() if row['owner'] == subject], request)
         parts = request.url.path.strip('/').split('/')
-        if len(parts) == 3 and parts[:2] == ['v1', 'connections'] and request.method == 'DELETE':
-            self.connections.pop(parts[2], None)
-            return httpx.Response(204)
+        if len(parts) == 3 and parts[:2] == ['v1', 'connections']:
+            return self._connection_read_or_delete(request, parts[2], subject)
         if len(parts) == 3 and parts[:2] == ['v1', 'schedules']:
             schedule = self.schedules[parts[2]]
             if request.method == 'GET':
@@ -216,6 +275,15 @@ class FakeSoevApi:
         if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
             return self._cloud_create(request.url.path.rpartition('/')[2], body, subject)
         return self._catalog_route(request, body, credential, subject)
+
+    def _connection_read_or_delete(self, request, identifier, subject):
+        if request.method == 'DELETE':
+            self.connections.pop(identifier, None)
+            return httpx.Response(204)
+        row = self.connections.get(identifier)
+        if request.method != 'GET' or row is None or row['owner'] != subject:
+            raise Problem(404, 'connection_not_found')
+        return httpx.Response(200, json=copy.deepcopy(row))
 
     def _catalog_route(self, request, body, credential, subject):
         parts = [unquote(part) for part in request.url.raw_path.decode().split('?')[0].strip('/').split('/')]
@@ -313,6 +381,9 @@ class FakeSoevApi:
             for _, row in sorted(self.collections.items())
             if self._readable(row, subject or self.credentials[credential])
         ]
+        if 'keys' in request.url.params:
+            keys = set(json.loads(request.url.params['keys']))
+            rows = [row for row in rows if row['key'] in keys]
         return self._page(rows, request)
 
     def _schedules(self, request, credential, subject):
@@ -350,15 +421,19 @@ class FakeSoevApi:
 
     def _lookup_documents(self, request, credential, subject):
         source_id = request.url.params.get('source_id')
-        if not source_id or not source_id.strip():
+        if 'source_ids' in request.url.params:
+            sources = set(json.loads(request.url.params['source_ids']))
+        elif not source_id or not source_id.strip():
             raise Problem(400, 'malformed_request')
+        else:
+            sources = {source_id}
         rows = [
             row
             for key, collection in sorted(self.collections.items())
             if collection.get('kind', 'kb') == 'kb'
             and self._readable(collection, subject or self.credentials[credential])
             for row in self._document_rows(key, credential, subject)
-            if row['source_id'] == source_id
+            if row['source_id'] in sources
         ]
         return self._page(rows, request)
 
@@ -585,7 +660,21 @@ class FakeSoevApi:
         for field in ('status', 'collection_key'):
             if field in request.url.params:
                 rows = [row for row in rows if row[field] == request.url.params[field]]
-        return self._page([self._job_view(row) for row in rows], request)
+        rows = self._selected_jobs(rows, request)
+        return self._page(
+            [self._job_view(row, include_items=request.url.params.get('include_items') == 'true') for row in rows],
+            request,
+        )
+
+    @staticmethod
+    def _selected_jobs(rows, request):
+        if 'job_ids' in request.url.params:
+            rows = [row for row in rows if row['job_id'] in request.url.params.get_list('job_ids')]
+        if 'statuses' in request.url.params:
+            rows = [row for row in rows if row['status'] in request.url.params.get_list('statuses')]
+        if 'kind' in request.url.params:
+            rows = [row for row in rows if row['kind'] == request.url.params['kind']]
+        return rows
 
     def _job_action(self, job, action):
         if action == 'commit':
@@ -707,6 +796,9 @@ class FakeSoevApi:
         self._document_collection(parts, credential, subject)
         rows = self._document_rows(key, credential, subject)
         if len(parts) == 4:
+            if 'source_ids' in request.url.params:
+                selected = set(json.loads(request.url.params['source_ids']))
+                rows = [row for row in rows if row['source_id'] in selected]
             return self._page(rows, request)
         document = next((row for row in rows if row['source_id'] == parts[4]), None)
         if document is None:

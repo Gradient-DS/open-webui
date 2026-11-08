@@ -10,12 +10,12 @@ from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import TYPE_CHECKING
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
 from open_webui.soev.acting import requester_ref, user_token
-from open_webui.soev.request_cache import invalidate, memoized
+from open_webui.soev.request_cache import fetch_batch, has_batch_hook, invalidate, memoized
 from open_webui.soev.timing import instrument_client
 from open_webui.utils.telemetry.routes import route_template
 
@@ -395,10 +395,29 @@ class SoevClient:
     ) -> dict:
         await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
-        if not cache:
+
+        async def fetch():
+            parts = path.strip('/').split('/')
+            if has_batch_hook() and not self.is_service and len(parts) == 3 and parts[:2] == ['v1', 'collections']:
+                values = await self.read_many(
+                    [
+                        {
+                            'resource': 'collection',
+                            'collection_key': unquote(parts[2]),
+                            **({'query': params} if params else {}),
+                        }
+                    ],
+                    as_user=as_user,
+                )
+                if values[0] is None:
+                    raise SoevApiError(404, 'not_found', 'Resource not found')
+                return values[0]
             return self._json_object(
                 await self._request('GET', path, as_user=as_user, params=params, admission_headers=headers)
             )
+
+        if not cache:
+            return await fetch()
         key = (
             self._base_url,
             self._api_key,
@@ -406,12 +425,70 @@ class SoevClient:
             self.is_service,
             tuple(sorted(headers.items())),
             path,
-            tuple(sorted((params or {}).items())),
+            tuple(
+                (name, tuple(value) if isinstance(value, list) else value)
+                for name, value in sorted((params or {}).items())
+            ),
         )
-        response = await memoized(
-            key, lambda: self._request('GET', path, as_user=as_user, params=params, admission_headers=headers)
+        return await memoized(key, fetch)
+
+    async def read_many(self, reads: list[dict], *, as_user: str | None = None) -> list[dict | None]:
+        results = (
+            await fetch_batch(reads, lambda selected: self._read_many(selected, as_user=as_user))
+            if not self.is_service
+            else await self._read_many(reads, as_user=as_user)
         )
-        return self._json_object(response)
+        return self.batch_values(results)
+
+    async def _read_many(self, reads: list[dict], *, as_user: str | None = None) -> list[dict]:
+        response = await self._request('POST', '/v1/chat/reads', body={'reads': reads}, as_user=as_user)
+        results = self._json_object(response).get('results')
+        if not isinstance(results, list) or len(results) != len(reads):
+            raise SoevApiError(502, 'upstream_error', 'Invalid read batch')
+        return results
+
+    @staticmethod
+    def batch_values(results: list[dict]) -> list[dict | None]:
+        values = []
+        for result in results:
+            if not isinstance(result, dict) or not isinstance(result.get('body'), dict):
+                raise SoevApiError(502, 'upstream_error', 'Invalid read result')
+            status = result.get('status')
+            if status == 404:
+                values.append(None)
+            elif status == 200:
+                values.append(result['body'])
+            elif isinstance(status, int) and 400 <= status <= 599:
+                raise _response_error(
+                    httpx.Response(status, json=result['body'], headers={'Content-Type': 'application/problem+json'})
+                )
+            else:
+                raise SoevApiError(502, 'upstream_error', 'Invalid read status')
+        return values
+
+    async def read_pages(self, reads: list[dict], *, as_user: str | None = None) -> list[dict | None]:
+        pending = [(index, {**read, 'query': dict(read.get('query', {}))}) for index, read in enumerate(reads)]
+        values: list[dict | None] = [None] * len(reads)
+        seen = [set() for _ in reads]
+        while pending:
+            pages = await self.read_many([read for _, read in pending], as_user=as_user)
+            following = []
+            for (index, read), page in zip(pending, pages, strict=True):
+                if page is None:
+                    values[index] = None
+                    continue
+                if values[index] is None:
+                    values[index] = page
+                else:
+                    values[index]['data'].extend(page['data'])
+                cursor = page.get('next_cursor')
+                if cursor is not None:
+                    if cursor in seen[index]:
+                        raise SoevApiError(502, 'upstream_error', 'Repeated pagination cursor')
+                    seen[index].add(cursor)
+                    following.append((index, {**read, 'query': {**read['query'], 'cursor': cursor}}))
+            pending = following
+        return values
 
     async def get_retention_policy(self, *, as_user: str) -> dict | None:
         response = await self._request('GET', '/v1/retention-policy', as_user=as_user)

@@ -39,11 +39,19 @@ let loadingNextPage = false;
 type RefreshChatListOptions = {
 	refreshPinned?: boolean;
 	clearPinned?: boolean;
+	sidebar?: boolean;
+};
+
+export type SidebarFolderData = {
+	owned: Record<string, unknown>[];
+	shared: Record<string, unknown>[];
 };
 
 type ChatListResult = {
 	accepted: boolean;
 	allLoaded: boolean;
+	tags?: string[];
+	folderData?: SidebarFolderData;
 };
 
 export const refreshChatList = async (
@@ -54,12 +62,17 @@ export const refreshChatList = async (
 	paginationReady = false;
 	loadingNextPage = false;
 
-	const [nextChats, nextPinnedChats] = await Promise.all([
-		getChatList(token, 1) as Promise<ChatListItem[]>,
-		options.refreshPinned && !options.clearPinned
-			? (getPinnedChatList(token) as Promise<ChatListItem[]>)
-			: Promise.resolve(undefined as ChatListItem[] | undefined)
-	]);
+	const sidebar = options.sidebar
+		? await getChatList(token, 1, false, false, true)
+		: undefined;
+	const [nextChats, nextPinnedChats]: [ChatListItem[], ChatListItem[] | undefined] = sidebar
+		? [sidebar.items as ChatListItem[], sidebar.pinned as ChatListItem[]]
+		: await Promise.all([
+				getChatList(token, 1) as Promise<ChatListItem[]>,
+				options.refreshPinned && !options.clearPinned
+					? (getPinnedChatList(token) as Promise<ChatListItem[]>)
+					: Promise.resolve(undefined as ChatListItem[] | undefined)
+			]);
 
 	if (generation !== requestGeneration) {
 		return { accepted: false, allLoaded };
@@ -76,7 +89,7 @@ export const refreshChatList = async (
 	}
 
 	paginationReady = true;
-	return { accepted: true, allLoaded };
+	return { accepted: true, allLoaded, tags: sidebar?.tags, folderData: sidebar?.folder_data };
 };
 
 // The sidebar owns folder state. This bridge lets other components refresh it.

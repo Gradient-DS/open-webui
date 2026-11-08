@@ -200,9 +200,57 @@ class ChatPaths:
         record = await self.record(user_id, chat_id)
         return await self.client.projection(thread_id or record.thread_id, current=current and not thread_id, **kwargs)
 
+    async def opening(
+        self,
+        user_id: str,
+        chat_id: str,
+        *,
+        thread_id: str = '',
+        current: bool = False,
+        window: int = 20,
+        before: str = '',
+    ):
+        from open_webui.soev import identity
+        from open_webui.soev.client import SoevApiError
+
+        record = await self.record(user_id, chat_id)
+        identifier = threads._identifier(thread_id or record.thread_id)
+        try:
+            page, versions = await identity.build_client().read_many(
+                [
+                    {
+                        'resource': 'thread',
+                        'thread_id': identifier,
+                        'query': {
+                            'limit': threads._page_size(window),
+                            'before': before,
+                            'current': current and not thread_id,
+                        },
+                    },
+                    {'resource': 'thread_versions', 'thread_id': identifier},
+                ],
+                as_user=f'owui:user:{user_id}',
+            )
+        except SoevApiError as error:
+            raise ThreadError(error.status, 'sign_in' if error.status == 401 else 'reconnect') from None
+        if page is None:
+            raise ThreadError(404, 'unavailable')
+        try:
+            projected = threads.ProjectionPage.model_validate(page)
+            family = (
+                threads.ThreadVersions.model_validate(versions)
+                if versions is not None and projected.preferences is not None
+                else None
+            )
+        except ValidationError:
+            raise ThreadError(502, 'reconnect') from None
+        if not current and projected.thread_id != identifier:
+            raise ThreadError(502, 'reconnect')
+        return projected, family
+
     async def presentation(self, user_id: str, page: threads.ProjectionPage) -> threads.ProjectionPage:
         from open_webui.soev import acting, identity
-        from open_webui.soev.chat_presentation import needs_events, needs_sources, present_projection
+        from open_webui.soev.chat_presentation import needs_events, present_projection
         from open_webui.soev.client import SoevApiError
 
         events = []
@@ -210,20 +258,12 @@ class ChatPaths:
             try:
                 client = identity.build_client()
                 requester = acting.requester_ref() or f'owui:user:{user_id}'
-                after = min(m.position for m in page.messages) - 1
                 events = await client.chat_events(
                     page.thread_id,
                     as_user=requester,
-                    after=after,
+                    after=0,
                     through=max(m.position for m in page.messages),
                 )
-                enriched = await present_projection(page, events)
-                if not after or not needs_sources(enriched):
-                    return enriched
-                # A visible answer can cite a source read on an earlier page.
-                # Resolve that dependency only when the visible window needs it.
-                previous = await client.chat_events(page.thread_id, as_user=requester, after=0, through=after)
-                events = previous + events
             except SoevApiError:
                 logging.getLogger(__name__).warning('Thread presentation sources unavailable')
         return await present_projection(page, events)

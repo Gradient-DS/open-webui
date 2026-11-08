@@ -536,6 +536,12 @@ class KnowledgeFilesResponse(KnowledgeResponse):
     write_access: bool | None = False
 
 
+class KnowledgePageResponse(KnowledgeFileListResponse):
+    knowledge: KnowledgeFilesResponse | None = None
+    sync_status: dict | None = None
+    sync_status_error: bool = False
+
+
 @router.get('/{id}', response_model=KnowledgeFilesResponse | None)
 async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -793,7 +799,7 @@ async def get_pending_knowledge_files(
 ############################
 
 
-@router.get('/{id}/files', response_model=KnowledgeFileListResponse)
+@router.get('/{id}/files', response_model=KnowledgePageResponse)
 async def get_knowledge_files_by_id(
     id: str,
     query: Optional[str] = None,
@@ -804,10 +810,11 @@ async def get_knowledge_files_by_id(
     limit: Optional[int] = 30,
     metadata_only: Optional[bool] = False,
     directory_id: str | None = Query(None, description='Filter by directory ID. Pass empty string for root.'),
+    include_context: bool = False,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    knowledge = await Knowledges.get_knowledge_page_by_id(id=id, db=db)
     if not knowledge:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -849,9 +856,18 @@ async def get_knowledge_files_by_id(
     if directory_id is not None:
         filter['directory_id'] = directory_id if directory_id else None
 
-    return await Knowledges.search_files_by_id(
+    result = await Knowledges.search_files_by_id(
         id, user.id, filter=filter, skip=skip, limit=limit, metadata_only=metadata_only, db=db
     )
+    page_result = KnowledgePageResponse(**result.model_dump())
+    if include_context:
+        page_result.knowledge = await get_knowledge_by_id(id, user=user, db=db)
+        try:
+            page_result.sync_status = await Knowledges.page_sync_status(id)
+        except Exception as error:
+            log.warning('Knowledge sync status unavailable (%s)', type(error).__name__)
+            page_result.sync_status_error = True
+    return page_result
 
 
 ############################

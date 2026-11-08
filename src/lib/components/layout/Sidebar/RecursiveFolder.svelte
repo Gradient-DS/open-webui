@@ -352,8 +352,10 @@
 
 	onMount(async () => {
 		open = folders[folderId].is_expanded;
+		applyInitialPage();
 		folderRegistry[folderId] = {
 			setFolderItems,
+			applyInitialPage,
 			upsertChat: (chat) => {
 				if (chat.folder_id && chat.folder_id !== folderId) {
 					return;
@@ -530,7 +532,27 @@
 	let queuedReload = false;
 	let pendingUpsertChats = [];
 
+	const applyInitialPage = () => {
+		const initial = folders[folderId]?.initial_page;
+		if (!initial || !open) return false;
+		if (chatsLoading) {
+			queuedReload = true;
+			return false;
+		}
+		const nextChats = initial.chats ?? [];
+		chats = mergeFolderChats(nextChats, pendingUpsertChats);
+		pendingUpsertChats = pendingUpsertChats.filter(
+			(pendingChat) => !nextChats.some((chat) => chat.id === pendingChat.id)
+		);
+		chatsPage = 1;
+		hasMoreChats = initial.has_more ?? false;
+		chatsLoading = false;
+		delete folders[folderId].initial_page;
+		return true;
+	};
+
 	export const setFolderItems = async (append = false) => {
+		if (!append && applyInitialPage()) return;
 		if (open && chatsLoading) {
 			if (!append) {
 				queuedReload = true;
