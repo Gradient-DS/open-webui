@@ -37,7 +37,6 @@ from open_webui.env import (
     log,
 )
 from open_webui.models.config import Config
-from open_webui.utils.oauth_issuer import require_tenant_allowlist
 from open_webui.utils.json_codec import JSONCodec
 
 
@@ -2131,24 +2130,6 @@ if _google_oauth_authorize_params:
     except (JSONCodec.JSONDecodeError, TypeError):
         log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
-MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '')
-
-MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '')
-
-MICROSOFT_CLIENT_TENANT_ID = os.getenv('MICROSOFT_CLIENT_TENANT_ID', '')
-
-MICROSOFT_CLIENT_LOGIN_BASE_URL = os.getenv('MICROSOFT_CLIENT_LOGIN_BASE_URL', 'https://login.microsoftonline.com')
-
-MICROSOFT_CLIENT_PICTURE_URL = os.getenv(
-    'MICROSOFT_CLIENT_PICTURE_URL',
-    'https://graph.microsoft.com/v1.0/me/photo/$value',
-)
-
-
-MICROSOFT_OAUTH_SCOPE = os.getenv('MICROSOFT_OAUTH_SCOPE', 'openid email profile')
-
-MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', '')
-
 GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID', '')
 
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET', '')
@@ -2229,7 +2210,6 @@ OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_D
 OAUTH_ALLOWED_TENANTS = [
     tenant.strip() for tenant in os.getenv('OAUTH_ALLOWED_TENANTS', '').split(',') if tenant.strip()
 ]
-require_tenant_allowlist(MICROSOFT_CLIENT_TENANT_ID, OAUTH_ALLOWED_TENANTS)
 
 OAUTH_UPDATE_PICTURE_ON_LOGIN = os.getenv('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true'
 
@@ -2275,7 +2255,9 @@ def oauth_client_kwargs(scope: str, **kwargs):
 
 def load_oauth_providers():
     OAUTH_PROVIDERS.clear()
-    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    # Platform user sessions must carry the broker's OIDC token.
+    platform_login = bool(os.getenv('SOEV_API_URL'))
+    if not platform_login and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
         def google_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2293,25 +2275,7 @@ def load_oauth_providers():
             'register': google_oauth_register,
         }
 
-    if MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET and MICROSOFT_CLIENT_TENANT_ID:
-
-        def microsoft_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='microsoft',
-                client_id=MICROSOFT_CLIENT_ID,
-                client_secret=MICROSOFT_CLIENT_SECRET,
-                server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL}/{MICROSOFT_CLIENT_TENANT_ID}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID}',
-                client_kwargs=oauth_client_kwargs(MICROSOFT_OAUTH_SCOPE),
-                redirect_uri=MICROSOFT_REDIRECT_URI,
-            )
-            return client
-
-        OAUTH_PROVIDERS['microsoft'] = {
-            'picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-            'register': microsoft_oauth_register,
-        }
-
-    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+    if not platform_login and GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
 
         def github_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2357,7 +2321,7 @@ def load_oauth_providers():
             'register': oidc_oauth_register,
         }
 
-    if FEISHU_CLIENT_ID and FEISHU_CLIENT_SECRET:
+    if not platform_login and FEISHU_CLIENT_ID and FEISHU_CLIENT_SECRET:
 
         def feishu_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2384,8 +2348,6 @@ def load_oauth_providers():
     configured_providers = []
     if GOOGLE_CLIENT_ID:
         configured_providers.append('Google')
-    if MICROSOFT_CLIENT_ID:
-        configured_providers.append('Microsoft')
     if GITHUB_CLIENT_ID:
         configured_providers.append('GitHub')
     if FEISHU_CLIENT_ID:
@@ -2971,13 +2933,6 @@ DEFAULT_CONFIG = {
     'oauth.google.client_secret': GOOGLE_CLIENT_SECRET,
     'oauth.google.scope': GOOGLE_OAUTH_SCOPE,
     'oauth.google.redirect_uri': GOOGLE_REDIRECT_URI,
-    'oauth.microsoft.client_id': MICROSOFT_CLIENT_ID,
-    'oauth.microsoft.client_secret': MICROSOFT_CLIENT_SECRET,
-    'oauth.microsoft.tenant_id': MICROSOFT_CLIENT_TENANT_ID,
-    'oauth.microsoft.login_base_url': MICROSOFT_CLIENT_LOGIN_BASE_URL,
-    'oauth.microsoft.picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-    'oauth.microsoft.scope': MICROSOFT_OAUTH_SCOPE,
-    'oauth.microsoft.redirect_uri': MICROSOFT_REDIRECT_URI,
     'oauth.github.client_id': GITHUB_CLIENT_ID,
     'oauth.github.client_secret': GITHUB_CLIENT_SECRET,
     'oauth.github.scope': GITHUB_CLIENT_SCOPE,

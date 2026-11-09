@@ -134,40 +134,25 @@
 								</div>
 							</div>
 
-							{#if $config?.oauth?.providers?.microsoft}
+							{#if $config?.oauth?.providers?.oidc}
 								<div class="mt-4">
 									<button
 										type="button"
 										class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
 										on:click={() => {
-											window.location.href = `${WEBUI_BASE_URL}/oauth/microsoft/login`;
+											window.location.href = `${WEBUI_BASE_URL}/oauth/oidc/login`;
 										}}
 									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 21 21"
-											class="size-6 mr-3"
-											aria-hidden="true"
+										<span
+											>{$i18n.t('Continue with {{provider}}', {
+												provider: $config.oauth.providers.oidc
+											})}</span
 										>
-											<rect x="1" y="1" width="9" height="9" fill="#f25022" />
-											<rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-											<rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-											<rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-										</svg>
-										<span>{$i18n.t('Sign in with Microsoft')}</span>
 									</button>
 								</div>
 							{/if}
 
 							{#if $config?.features?.enable_login_form}
-								{#if $config?.oauth?.providers?.microsoft}
-									<div class="flex items-center my-4 text-xs text-gray-500 dark:text-gray-400">
-										<div class="flex-1 border-t dark:border-gray-800"></div>
-										<span class="px-3 uppercase tracking-wide">{$i18n.t('or')}</span>
-										<div class="flex-1 border-t dark:border-gray-800"></div>
-									</div>
-								{/if}
-
 								<div class="flex flex-col mt-4">
 									<div class="mb-2">
 										<label for="name" class="text-sm font-medium text-left mb-1 block">
