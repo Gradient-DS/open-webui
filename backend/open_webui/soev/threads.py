@@ -15,7 +15,9 @@ from open_webui.soev.request_cache import has_batch_hook, memoized
 
 VersionKind = Literal['regenerate', 'edit']
 
-ThreadState = Literal['reconnect', 'unavailable', 'sign_in', 'invalid_request', 'share_refused', 'legacy_share']
+ThreadState = Literal[
+    'reconnect', 'no_access', 'unavailable', 'sign_in', 'invalid_request', 'share_refused', 'legacy_share'
+]
 
 
 class ThreadError(Exception):
@@ -281,6 +283,8 @@ class ThreadClient:
         if response.status_code in {200, 201, 204}:
             return response
         status = response.status_code
+        if status == 404 and method == 'GET' and path == '/v1/threads':
+            raise ThreadError(403, 'no_access')
         if status == 412:
             raise ThreadError(412, 'reconnect')
         if status in {401, 403, 404, 409, 422}:
@@ -374,6 +378,9 @@ class ThreadClient:
                     [{'resource': 'thread_index', 'query': {'q': q, 'limit': _page_size(limit), 'cursor': cursor}}],
                     as_user=acting.requester_ref(),
                 )
+                # Only the caller's own index is an access signal; a missing chat is not.
+                if result[0] is None:
+                    raise ThreadError(403, 'no_access')
                 return IndexPage.model_validate(result[0])
             except (SoevApiError, ValidationError) as error:
                 raise ThreadError(error.status if isinstance(error, SoevApiError) else 502, 'reconnect') from None
