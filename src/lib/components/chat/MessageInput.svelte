@@ -125,6 +125,16 @@
 	import Wrench from '../icons/Wrench.svelte';
 	import Cube from '../icons/Cube.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+	import Database from '../icons/Database.svelte';
+	import {
+		PROVISIONED_KNOWLEDGE_PIN_PREFIX,
+		requestedProvisionedKnowledge,
+		toggleProvisionedKnowledge
+	} from '$lib/utils/provisionedKnowledge';
+	import {
+		provisionedKnowledge,
+		loadProvisionedKnowledge
+	} from '$lib/utils/provisionedKnowledgeStore';
 	import Mic from '../icons/Mic.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -247,6 +257,8 @@
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
+	// Provisioned collections enabled for this chat.
+	export let selectedProvisionedKnowledgeIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
 	export let liveDocumentsState: LiveToolState = 'off';
@@ -307,6 +319,7 @@
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds,
+		selectedProvisionedKnowledgeIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
 		liveDocumentsState,
@@ -921,7 +934,19 @@
 	$: dataSeparationSide = strictDataSeparation
 		? getActiveSide({
 				messages: dataSeparationMessages,
-				files,
+				// Enabled provisioned knowledge counts as internal.
+				files: [
+					...files,
+					...($config?.features?.enable_provisioned_knowledge
+						? requestedProvisionedKnowledge(
+								selectedProvisionedKnowledgeIds,
+								$provisionedKnowledge
+							).map((id) => ({
+								type: 'collection',
+								id
+							}))
+						: [])
+				],
 				webSearchEnabled: webSearchEnabled && showWebSearchButton
 			})
 		: null;
@@ -945,6 +970,7 @@
 								'attach_meetings',
 								'knowledge',
 								'reference_chats',
+								'provisioned_knowledge',
 								'google_drive',
 								'onedrive'
 							]
@@ -956,11 +982,22 @@
 	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
 	// every item that is on, in menu order (inputItems.ts). The "Attach Files"
 	// submenu shares the upload_files restriction key with the menu.
-	$: inputBarAllowed = (id: string) =>
-		(inputMenuRestrictTo === null ||
-			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
-			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
-		!dataSeparationBlockedItems.has(id);
+	$: inputBarAllowed = (id: string) => {
+		// Individual pins share the provisioned knowledge gates.
+		const key = id.startsWith(PROVISIONED_KNOWLEDGE_PIN_PREFIX) ? 'provisioned_knowledge' : id;
+		return (
+			(inputMenuRestrictTo === null ||
+				inputMenuRestrictTo.includes(key === 'attach_files' ? 'upload_files' : key) ||
+				(key.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+			!dataSeparationBlockedItems.has(key) &&
+			(key !== 'provisioned_knowledge' || provisionedKnowledgeShown)
+		);
+	};
+	$: provisionedKnowledgeShown =
+		!!$config?.features?.enable_provisioned_knowledge && ($provisionedKnowledge ?? []).length > 0;
+	$: if ($config?.features?.enable_provisioned_knowledge && $provisionedKnowledge === null) {
+		void loadProvisionedKnowledge(localStorage.token);
+	}
 	// [Gradient] A live family is on only with a grant; without one its pinned button connects.
 	$: liveMailGranted = liveGranted($liveGrants, 'mail') === true;
 	$: liveDocumentsGranted = liveGranted($liveGrants, 'live_documents') === true;
@@ -977,6 +1014,12 @@
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
 			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
+		),
+		...Object.fromEntries(
+			(selectedProvisionedKnowledgeIds ?? []).map((id: string) => [
+				`${PROVISIONED_KNOWLEDGE_PIN_PREFIX}${id}`,
+				itemState(true)
+			])
 		)
 	};
 	// Items used in this chat keep their button until the next chat, which shows only the
@@ -991,7 +1034,10 @@
 		usedInputItems = usedItemIds(usedInputItems, inputItemStates);
 	}
 	$: inputBarItems = barItemIds({
-		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
+		order: inputItemOrder(
+			toggleFilters.map((filter: { id: string }) => filter.id),
+			($provisionedKnowledge ?? []).map((source) => source.id)
+		),
 		pinned: normalizePins($settings?.pinnedInputItems),
 		states: inputItemStates,
 		used: usedInputItems,
@@ -2551,6 +2597,7 @@
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
+											bind:selectedProvisionedKnowledgeIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
@@ -2732,6 +2779,50 @@
 															<ClockRotateRight className="size-4" />
 														</button>
 													</Tooltip>
+												{:else if itemId === 'provisioned_knowledge'}
+													<Tooltip content={$i18n.t('Data sources')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Data sources')}
+															on:click={() => inputMenuRef?.openTab('provisioned_knowledge')}
+														>
+															<Database className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId.startsWith(PROVISIONED_KNOWLEDGE_PIN_PREFIX)}
+													{@const pinnedSource = ($provisionedKnowledge ?? []).find(
+														(source) => `${PROVISIONED_KNOWLEDGE_PIN_PREFIX}${source.id}` === itemId
+													)}
+													{#if pinnedSource}
+														{@const sourceOn = selectedProvisionedKnowledgeIds.includes(
+															pinnedSource.id
+														)}
+														{@const sourceTooltip = pinnedStateTooltip(
+															pinnedSource.name,
+															sourceOn,
+															sourceOn
+																? $i18n.t('The model decides whether to search this data source')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														<Tooltip content={sourceTooltip} placement="top">
+															<button
+																type="button"
+																aria-label={sourceTooltip}
+																aria-pressed={sourceOn}
+																on:click|preventDefault={() => {
+																	selectedProvisionedKnowledgeIds = toggleProvisionedKnowledge(
+																		selectedProvisionedKnowledgeIds,
+																		pinnedSource.id
+																	);
+																}}
+																class={pinnedToggleClass(sourceOn)}
+															>
+																<Database className="size-4" />
+																<span class="max-w-28 truncate">{pinnedSource.name}</span>
+															</button>
+														</Tooltip>
+													{/if}
 												{:else if itemId === 'web_search' && showWebSearchButton}
 													<Tooltip
 														content={imageGenerationEnabled

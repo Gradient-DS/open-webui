@@ -369,3 +369,13 @@ others' items appear as left out in both share dialogs (`GET /models/model/shari
 grants or knowledge; writers can edit other fields. Non-owner folder/assistant deletion refuses remote cleanup.
 `soev_pending_sync` markers settle after an owner's authenticated response, at most once per 30 seconds per process,
 using that request's token. No detached folder/assistant file retry tasks or assistant event sink remain.
+
+
+Provisioned knowledge stays in the chat composer. `ENABLE_PROVISIONED_KNOWLEDGE`
+(`provisioned_knowledge.enable`, default false) also needs the agent route and platform
+capability `provisioned_knowledge`. Collection views identify it with
+`provisioning: "provisioned"`; keys are opaque. `GET /api/v1/provisioned-knowledge/`
+lists the caller's readable provisioned collections, apart from ordinary knowledge lists.
+The composer saves `features.provisioned_knowledge`; each turn rechecks status and access
+and appends enabled collections to ordinary `input.knowledge`. Strict data separation
+counts these as internal knowledge. Provisioning belongs in the console.

@@ -5,6 +5,8 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
+	import { requestedProvisionedKnowledge } from '$lib/utils/provisionedKnowledge';
+	import { provisionedKnowledge } from '$lib/utils/provisionedKnowledgeStore';
 	import type { LiveToolState } from '$lib/utils/toolState';
 	import {
 		grantedLiveState,
@@ -401,6 +403,7 @@
 	let selectedToolIds: string[] = [];
 	let selectedSkillIds: string[] = [];
 	let selectedFilterIds: string[] = [];
+	let selectedProvisionedKnowledgeIds: string[] = [];
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
@@ -466,7 +469,8 @@
 		documentWriterEnabled,
 		selectedToolIds,
 		selectedSkillIds,
-		selectedFilterIds
+		selectedFilterIds,
+		selectedProvisionedKnowledgeIds
 	});
 	let composerSession = 0;
 	const restoreComposerPreferences = (value: ComposerPreferences) => {
@@ -480,7 +484,8 @@
 			documentWriterEnabled,
 			selectedToolIds,
 			selectedSkillIds,
-			selectedFilterIds
+			selectedFilterIds,
+			selectedProvisionedKnowledgeIds
 		} = value);
 		composerInitialized = true;
 	};
@@ -1131,7 +1136,8 @@
 		documentWriterEnabled,
 		selectedToolIds,
 		selectedSkillIds,
-		selectedFilterIds
+		selectedFilterIds,
+		selectedProvisionedKnowledgeIds
 	});
 	$: if (composerInitialized && !loading && !settingDefaults) {
 		const current = JSON.stringify(composerSnapshot);
@@ -4253,6 +4259,10 @@
 				live_mail: $config?.features?.enable_live_mail
 					? grantedLiveState(liveMailState, liveGranted($liveGrants, 'mail'))
 					: 'off',
+				// The server rechecks access and adds these to input.knowledge.
+				provisioned_knowledge: $config?.features?.enable_provisioned_knowledge
+					? requestedProvisionedKnowledge(selectedProvisionedKnowledgeIds, $provisionedKnowledge)
+					: [],
 				web_search: webSearchActive
 			};
 
@@ -5625,6 +5635,7 @@
 										bind:selectedToolIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
+										bind:selectedProvisionedKnowledgeIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
@@ -5721,6 +5732,7 @@
 										bind:selectedToolIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
+										bind:selectedProvisionedKnowledgeIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
@@ -5784,6 +5796,7 @@
 									bind:selectedToolIds
 									bind:selectedSkillIds
 									bind:selectedFilterIds
+									bind:selectedProvisionedKnowledgeIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
