@@ -14,6 +14,7 @@ from open_webui.soev.client import SoevApiError
 
 LIVE_DOCUMENTS = 'live_documents'
 LIVE_MAIL = 'live_mail'
+PROVISIONED_KNOWLEDGE = 'provisioned_knowledge'
 CLOUD_SYNC = 'cloud_sync'
 MEETINGS = 'meetings'
 IMAGES = 'images'

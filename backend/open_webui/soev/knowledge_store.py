@@ -163,14 +163,15 @@ class SoevKnowledgeTable:
                 return None
             raise
 
-    async def _collections(self, *, user_id=None, as_service=False):
+    async def _collections(self, *, user_id=None, as_service=False, provisioned=False):
         return await memoized(
-            ('collections', self, self._user_ref(user_id), as_service),
-            lambda: self._load_collections(user_id=user_id, as_service=as_service),
+            ('collections', self, self._user_ref(user_id), as_service, provisioned),
+            lambda: self._load_collections(user_id=user_id, as_service=as_service, provisioned=provisioned),
         )
 
-    async def _load_collections(self, *, user_id=None, as_service=False):
+    async def _load_collections(self, *, user_id=None, as_service=False, provisioned=False):
         from open_webui.soev import ingest
+        from open_webui.soev.provisioned_knowledge import is_provisioned
 
         access_reads = await self._access_reads(user_id=user_id, as_service=as_service)
         collections, jobs, *access_pages = await self._read_catalog_pages(
@@ -199,9 +200,14 @@ class SoevKnowledgeTable:
                 and not ingest.is_attachments_collection(row['key'])
                 and not ingest.is_assistant_collection(row['key'])
                 and not ingest.is_folder_collection(row['key'])
+                and is_provisioned(row) is provisioned
             ]
         )
         return await self._with_access_jobs(visible, user_id=user_id, as_service=as_service, job_pages=access_pages)
+
+    async def provisioned_knowledge(self, user_id=None):
+        rows = await self._collections(user_id=user_id, provisioned=True)
+        return sorted(rows, key=lambda row: (_sort_value(row['name']), row['key']))
 
     async def _access_markers(self, *, user_id=None, as_service=False):
         from open_webui.soev import knowledge_access_jobs

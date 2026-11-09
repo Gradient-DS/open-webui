@@ -18,6 +18,11 @@
 # ordinary reads and crossuser admin-refusal checks, with no sharing allowance.
 
 # --- OAuth: the sealed stack has no identity provider ------------------------
+
+[[waived]]
+id = "GET /api/v1/provisioned-knowledge/"
+backed_by = "soev-solutions"
+reason = "Requires platform capability provisioned_knowledge and caller-authorized collection views with provisioning=provisioned. The sealed stack has no soev-api. Unit tests exercise the gate, collection filtering and caller access; a platform tenant with the capability is needed for live coverage."
 # Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real
 # surface. An OIDC issuer stub on the CI network would close all seven.
 

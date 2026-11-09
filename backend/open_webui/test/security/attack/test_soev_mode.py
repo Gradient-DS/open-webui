@@ -10,6 +10,10 @@ from .. import test_route_coverage as coverage
 from . import plane, seeds
 
 
+def test_provisioned_knowledge_needs_the_platform_in_public_ci():
+    assert 'GET /api/v1/provisioned-knowledge/' in seeds.SOEV_BACKED
+
+
 @pytest.mark.parametrize('value,expected', [(None, 'waive'), ('waive', 'waive'), ('drive', 'drive')])
 def test_runtime_mode(monkeypatch, value, expected):
     monkeypatch.delenv('RUNTIME_SOEV_BACKED', raising=False)

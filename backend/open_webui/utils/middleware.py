@@ -125,6 +125,7 @@ from open_webui.utils.tools import (
 from open_webui.utils.agent_routing import agent_owns_tool_execution
 from open_webui.utils.skill_bundles import resolve_skill_bundle_files
 from open_webui.utils.data_separation import request_mixes_data_sources
+from open_webui.soev import provisioned_knowledge
 from open_webui.config import (
     FEATURE_BUILTIN_TOOLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -2685,6 +2686,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         form_data.get('files'),
         form_data.get('messages'),
         features.get('web_search'),
+        await provisioned_knowledge.chosen(features, user_id=user.id),
     ):
         raise HTTPException(
             status_code=400,

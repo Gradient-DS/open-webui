@@ -71,3 +71,14 @@ def test_history_files_missing_or_none_is_safe():
 
 def test_empty_request_is_no_conflict():
     assert request_mixes_data_sources(None, None, False) is False
+
+
+def test_conflict_web_search_plus_data_source():
+    # A data source is a knowledge base to the agent: internal, like a selected collection.
+    assert request_mixes_data_sources([], [], True, ['publications']) is True
+    assert request_mixes_data_sources([{'type': 'url', 'url': 'https://x.com'}], [], False, ['source-a']) is True
+
+
+def test_provisioned_knowledge_alone_or_none_are_no_conflict():
+    assert request_mixes_data_sources([{'type': 'collection'}], [], False, ['source-a']) is False
+    assert request_mixes_data_sources([], [], True, []) is False

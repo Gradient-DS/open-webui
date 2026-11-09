@@ -12,6 +12,13 @@ from .test_shapes import reply
 offline = test_shapes.offline
 
 
+def test_provisioned_knowledge_is_a_caller_scoped_platform_read():
+    route = 'GET /api/v1/provisioned-knowledge/'
+    assert route in platform_operations()
+    assert route in crossuser.targets()[0]
+    assert route not in crossuser._shared()
+
+
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()

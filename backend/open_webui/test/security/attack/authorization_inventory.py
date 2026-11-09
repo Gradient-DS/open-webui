@@ -169,7 +169,9 @@ def platform_operations(spec=SPEC):
     return [
         route
         for route in operations(spec)
-        if route.split(' ', 1)[1].startswith(('/api/v1/cloud-sync/', '/api/v1/meetings', '/api/v1/threads'))
+        if route.split(' ', 1)[1].startswith(
+            ('/api/v1/cloud-sync/', '/api/v1/meetings', '/api/v1/threads', '/api/v1/provisioned-knowledge/')
+        )
         or route
         in {
             'POST /api/v1/files/onedrive/attach',
