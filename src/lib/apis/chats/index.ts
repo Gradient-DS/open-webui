@@ -272,10 +272,18 @@ export const getChatList = async (
 		return [];
 	}
 
-	return res.map((chat) => ({
-		...chat,
-		time_range: getTimeRange(chat.updated_at)
-	}));
+	const withTimeRange = (chats) =>
+		chats.map((chat) => ({
+			...chat,
+			time_range: getTimeRange(chat.updated_at)
+		}));
+
+	// The sidebar read returns one object: chats, pinned chats, tags and folders.
+	if (include_sidebar) {
+		return { ...res, items: withTimeRange(res.items), pinned: withTimeRange(res.pinned) };
+	}
+
+	return withTimeRange(res);
 };
 
 export const getArchivedChatList = async (

@@ -76,6 +76,25 @@ it('normalizes the global v2 tag list and surfaces sidebar state errors', async 
 	await expect(getChatList('token', 1)).rejects.toBe('Reconnect to view this chat');
 });
 
+it('returns the sidebar read as one object with timed chats', async () => {
+	const { getChatList } = await import('./index');
+	const sidebar = {
+		items: [{ id: 'fictional-chat', updated_at: 1 }],
+		pinned: [{ id: 'fictional-pinned', updated_at: 2 }],
+		tags: ['fictional_grove'],
+		folder_data: []
+	};
+	const fetch = vi.fn(async () => new Response(JSON.stringify(sidebar)));
+	vi.stubGlobal('fetch', fetch);
+	const result = await getChatList('token', 1, false, false, true);
+	expect(fetch.mock.calls[0][0]).toBe('/api/v1/chats/?page=1&include_sidebar=true');
+	expect(result.items.map((chat) => chat.id)).toEqual(['fictional-chat']);
+	expect(result.pinned.map((chat) => chat.id)).toEqual(['fictional-pinned']);
+	expect(result.items[0]).toHaveProperty('time_range');
+	expect(result.tags).toEqual(['fictional_grove']);
+	expect(result.folder_data).toEqual([]);
+});
+
 it('uses exact runtime creation and metadata bodies in v2 and preserves legacy bodies', async () => {
 	const { config } = await import('$lib/stores');
 	const { createNewChat, updateChatById, updateChatFolderIdById, forkChatById } =
