@@ -582,6 +582,9 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.retention import deletion_feed_worker
 
     deletion_feed_task = asyncio.create_task(deletion_feed_worker()) if v2_enabled() else None
+    from open_webui.soev.offboarding import start_worker as start_offboarding_worker
+
+    offboarding_task = start_offboarding_worker()
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -679,6 +682,9 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.group_mirror import stop_reconciler
 
     await stop_reconciler(app)
+    from open_webui.soev.offboarding import stop_worker as stop_offboarding_worker
+
+    await stop_offboarding_worker(offboarding_task)
     # [Gradient] Release the soev-api keep-alive pool after its workers stop.
     from open_webui.soev.client import close_client
 
