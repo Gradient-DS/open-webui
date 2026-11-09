@@ -1,5 +1,5 @@
 <script lang="ts">
-	import SourceIcon from './SourceIcon.svelte';
+	import CitationHeader from './CitationHeader.svelte';
 	import SearchSnippetNote from './SearchSnippetNote.svelte';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { WorkBook } from 'xlsx';
@@ -21,7 +21,6 @@
 	import { citationFileInfo, resolveExternalUrl } from './useCitationDocument';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 
 	const i18n = getContext('i18n');
@@ -37,6 +36,7 @@
 
 	let mergedDocuments = [];
 	let previewAvailable = true;
+	let previewType: string | undefined;
 	// 'preview' = split view (rail + rendered doc); 'content' = full chunks.
 	// Only offered as a toggle when a preview is available; otherwise the
 	// content view is the fallback.
@@ -104,8 +104,9 @@
 		isImage,
 		isAudio,
 		isPreviewable,
-		showSnippetRail
-	} = citationFileInfo(citation, mergedDocuments));
+		showSnippetRail,
+		textOnly
+	} = citationFileInfo(citation, mergedDocuments, previewType));
 	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
 
 	// Active snippet drives the highlight in the viewer pane.
@@ -152,7 +153,10 @@
 
 	// [Gradient] Probe on every open and every citation, even for the same file; only the latest
 	// probe reports, so a late failure for an earlier citation never hides this one's preview.
-	const availability = createPreviewProbe((available) => (previewAvailable = available));
+	const availability = createPreviewProbe((available, contentType) => {
+		previewAvailable = available;
+		previewType = contentType;
+	});
 	$: checkAvailability(show, citation, fileId);
 	function checkAvailability(open: boolean, _citation: unknown, id: string | undefined) {
 		if (open) void availability.check(id);
@@ -285,113 +289,12 @@
 			highlightDocxFor(documentLevel ? '' : text);
 		}
 	};
-
-	const decodeString = (str: string) => {
-		try {
-			return decodeURIComponent(str);
-		} catch {
-			return str;
-		}
-	};
-
-	const getTextFragmentUrl = (doc: any): string | null => {
-		const { metadata, source, document: content } = doc ?? {};
-		const { file_id, page } = metadata ?? {};
-		const sourceUrl = source?.url;
-
-		const baseUrl = file_id
-			? `${WEBUI_API_BASE_URL}/files/${file_id}/content${page !== undefined ? `#page=${page + 1}` : ''}`
-			: sourceUrl?.includes('http')
-				? sourceUrl
-				: null;
-
-		if (!baseUrl || !content) return baseUrl;
-
-		// Extract first and last words for text fragment, filtering out URLs and emojis
-		const words = content
-			.trim()
-			.replace(/\s+/g, ' ')
-			.split(' ')
-			.filter((w: string) => w.length > 0 && !/https?:\/\/|[\u{1F300}-\u{1F9FF}]/u.test(w));
-
-		if (words.length === 0) return baseUrl;
-
-		const clean = (w: string) => w.replace(/[^\w]/g, '');
-		const first = clean(words[0]);
-		const last = clean(words.at(-1));
-		const fragment = words.length === 1 ? first : `${first},${last}`;
-
-		return fragment ? `${baseUrl}#:~:text=${fragment}` : baseUrl;
-	};
 </script>
 
 <Modal size="xl" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-4.5 pt-3 pb-2">
-			<div class=" text-lg font-medium self-center flex items-center gap-1.5 min-w-0">
-				{#if citation?.source?.name}
-					{@const document = mergedDocuments?.[0]}
-					{@const docFileId = document?.metadata?.file_id}
-					<SourceIcon source={citation.source} />
-					{#if docFileId || externalUrl}
-						{@const isFileMissing = !!docFileId && !previewAvailable}
-						{@const linksToFile = !!docFileId && !isFileMissing}
-						<Tooltip
-							className="w-fit min-w-0"
-							content={isFileMissing && !externalUrl
-								? $i18n.t('File no longer available')
-								: linksToFile
-									? $i18n.t('Open file')
-									: $i18n.t('Open link')}
-							placement="top-start"
-							tippyOptions={{ duration: [500, 0] }}
-						>
-							{#if isFileMissing && !externalUrl}
-								<span class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed">
-									{decodeString(citation?.source?.name)}
-								</span>
-							{:else}
-								<a
-									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
-									href={linksToFile
-										? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-										: (externalUrl ?? `#`)}
-									target="_blank"
-									rel="noreferrer"
-								>
-									{decodeString(citation?.source?.name)}
-								</a>
-							{/if}
-						</Tooltip>
-						{#if externalUrl && linksToFile}
-							<!-- Original-page link, shown alongside the file download only
-							     when the title already points at the file (avoids a
-							     redundant icon for plain web/fetch citations, where the
-							     title itself links to the external URL). -->
-							<Tooltip
-								className="w-fit shrink-0"
-								content={$i18n.t('Open original page')}
-								placement="top-start"
-								tippyOptions={{ duration: [500, 0] }}
-							>
-								<a
-									class="shrink-0 text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
-									href={externalUrl}
-									target="_blank"
-									rel="noreferrer"
-									aria-label={$i18n.t('Open original page')}
-								>
-									<ArrowTopRightOnSquare className="size-4" />
-								</a>
-							</Tooltip>
-						{/if}
-					{:else}
-						{decodeString(citation?.source?.name)}
-					{/if}
-				{:else}
-					{$i18n.t('Citation')}
-				{/if}
-			</div>
+			<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl} {textOnly} />
 			<button
 				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close citation modal')}
@@ -612,21 +515,7 @@
 									<div
 										class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1"
 									>
-										{#if document.source?.url?.includes('http')}
-											{@const snippetUrl = getTextFragmentUrl(document)}
-											{#if snippetUrl}
-												<a
-													href={snippetUrl}
-													target="_blank"
-													class="underline hover:text-gray-500 dark:hover:text-gray-100"
-													>{$i18n.t('Content')}</a
-												>
-											{:else}
-												{$i18n.t('Content')}
-											{/if}
-										{:else}
-											{$i18n.t('Content')}
-										{/if}
+										{$i18n.t('Content')}
 
 										{#if showRelevance && document.distance !== undefined}
 											<Tooltip

@@ -4,21 +4,29 @@ import { rectsFromMetadata } from '$lib/utils/citationRects';
 import type { CitationDocument } from './citationDocuments';
 import type { DisplayCitation } from './reduceSources';
 
+/**
+ * `contentType` is what the content route serves, when probed: a catalog document named by its title says
+ * through it that it is a PDF, and one served as text (no original, only its markdown) has nothing to preview.
+ */
 export function citationFileInfo(
 	citation: DisplayCitation | null | undefined,
-	documents: CitationDocument[]
+	documents: CitationDocument[],
+	contentType?: string
 ) {
 	const fileName = documents[0]?.metadata?.name ?? citation?.source?.name ?? '';
 	const fileId = documents[0]?.metadata?.file_id;
-	const isPDF = fileName.toLowerCase().endsWith('.pdf');
-	const isDocx = fileName.toLowerCase().endsWith('.docx');
-	const isXlsx = fileName.toLowerCase().endsWith('.xlsx');
-	const isPptx = fileName.toLowerCase().endsWith('.pptx');
-	const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
-	const isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
+	const name = fileName.toLowerCase();
+	const textOnly = !!contentType?.startsWith('text/');
+	const isPDF = !textOnly && (name.endsWith('.pdf') || contentType === 'application/pdf');
+	const isDocx = !textOnly && name.endsWith('.docx');
+	const isXlsx = !textOnly && name.endsWith('.xlsx');
+	const isPptx = !textOnly && name.endsWith('.pptx');
+	const isImage = !textOnly && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
+	const isAudio = !textOnly && /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
 	return {
 		fileName,
 		fileId,
+		textOnly,
 		isPDF,
 		isDocx,
 		isXlsx,
@@ -76,34 +84,4 @@ export const decodeString = (str: string) => {
 	} catch {
 		return str;
 	}
-};
-
-export const getTextFragmentUrl = (doc: CitationDocument): string | null => {
-	const { metadata, source, document: content } = doc ?? {};
-	const { file_id, page } = metadata ?? {};
-	const sourceUrl = source?.url;
-
-	const baseUrl = file_id
-		? `${WEBUI_API_BASE_URL}/files/${file_id}/content${page !== undefined ? `#page=${Number(page) + 1}` : ''}`
-		: sourceUrl?.includes('http')
-			? sourceUrl
-			: null;
-
-	if (!baseUrl || !content) return baseUrl;
-
-	// Extract first and last words for text fragment, filtering out URLs and emojis
-	const words = content
-		.trim()
-		.replace(/\s+/g, ' ')
-		.split(' ')
-		.filter((w: string) => w.length > 0 && !/https?:\/\/|[\u{1F300}-\u{1F9FF}]/u.test(w));
-
-	if (words.length === 0) return baseUrl;
-
-	const clean = (w: string) => w.replace(/[^\w]/g, '');
-	const first = clean(words[0]);
-	const last = clean(words.at(-1) ?? '');
-	const fragment = words.length === 1 ? first : `${first},${last}`;
-
-	return fragment ? `${baseUrl}#:~:text=${fragment}` : baseUrl;
 };

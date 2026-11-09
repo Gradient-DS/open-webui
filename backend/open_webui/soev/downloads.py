@@ -13,11 +13,22 @@ INLINE_TYPES = frozenset({'application/pdf', 'image/png', 'image/jpeg', 'image/g
 
 
 async def proxy_download(
-    context: AbstractAsyncContextManager[httpx.Response], *, filename: str, content_type: str, attachment: bool
+    context: AbstractAsyncContextManager[httpx.Response],
+    *,
+    filename: str,
+    content_type: str,
+    attachment: bool,
+    sniff_pdf: bool = False,
 ) -> StreamingResponse:
     stack = AsyncExitStack()
     try:
         response = await stack.enter_async_context(context)
+        chunks_iterator = response.aiter_bytes()
+        first = b''
+        if sniff_pdf and response.status_code == 200:
+            first = await anext(chunks_iterator, b'')
+            if first.startswith(b'%PDF-'):
+                content_type = 'application/pdf'
     except BaseException:
         await stack.aclose()
         raise
@@ -32,7 +43,9 @@ async def proxy_download(
 
     async def chunks() -> AsyncIterator[bytes]:
         try:
-            async for chunk in response.aiter_bytes():
+            if first:
+                yield first
+            async for chunk in chunks_iterator:
                 yield chunk
         finally:
             await stack.aclose()

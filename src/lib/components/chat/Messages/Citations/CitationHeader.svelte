@@ -15,6 +15,9 @@
 	export let mergedDocuments: CitationDocument[] = [];
 	export let previewAvailable = true;
 	export let externalUrl: string | null = null;
+	// [Gradient] Served as text only (a catalog document without an original): the title stays plain and
+	// the icon opens the document where it lives, as for OneDrive.
+	export let textOnly = false;
 	// [Gradient] 'sm' matches the side-panel tab labels; 'lg' is the modal title.
 	export let size: 'sm' | 'lg' = 'lg';
 </script>
@@ -31,35 +34,42 @@
 		<SourceIcon source={citation.source} />
 		{#if docFileId || externalUrl}
 			{@const isFileMissing = !!docFileId && !previewAvailable}
-			{@const linksToFile = !!docFileId && !isFileMissing}
-			<Tooltip
-				className="w-fit min-w-0"
-				content={isFileMissing && !externalUrl
-					? $i18n.t('File no longer available')
-					: linksToFile
-						? $i18n.t('Open file')
-						: $i18n.t('Open link')}
-				placement="top-start"
-				tippyOptions={{ duration: [500, 0] }}
-			>
-				{#if isFileMissing && !externalUrl}
-					<span class="block min-w-0 truncate text-gray-500 dark:text-gray-400 cursor-not-allowed">
-						{decodeString(citation?.source?.name)}
-					</span>
-				{:else}
-					<a
-						class="hover:text-gray-500 dark:hover:text-gray-100 underline block min-w-0 truncate"
-						href={linksToFile
-							? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${Number(document.metadata.page) + 1}` : ''}`
-							: (externalUrl ?? `#`)}
-						target="_blank"
-						rel="noreferrer"
-					>
-						{decodeString(citation?.source?.name)}
-					</a>
-				{/if}
-			</Tooltip>
-			{#if externalUrl && linksToFile}
+			{@const textAtSource = !!docFileId && textOnly && !!externalUrl}
+			{@const linksToFile = !!docFileId && !isFileMissing && !textAtSource}
+			{#if textAtSource}
+				<span class="min-w-0 truncate">{decodeString(citation?.source?.name)}</span>
+			{:else}
+				<Tooltip
+					className="w-fit min-w-0"
+					content={isFileMissing && !externalUrl
+						? $i18n.t('File no longer available')
+						: linksToFile
+							? $i18n.t('Open file')
+							: $i18n.t('Open link')}
+					placement="top-start"
+					tippyOptions={{ duration: [500, 0] }}
+				>
+					{#if isFileMissing && !externalUrl}
+						<span
+							class="block min-w-0 truncate text-gray-500 dark:text-gray-400 cursor-not-allowed"
+						>
+							{decodeString(citation?.source?.name)}
+						</span>
+					{:else}
+						<a
+							class="hover:text-gray-500 dark:hover:text-gray-100 underline block min-w-0 truncate"
+							href={linksToFile
+								? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${Number(document.metadata.page) + 1}` : ''}`
+								: (externalUrl ?? `#`)}
+							target="_blank"
+							rel="noreferrer"
+						>
+							{decodeString(citation?.source?.name)}
+						</a>
+					{/if}
+				</Tooltip>
+			{/if}
+			{#if externalUrl && (linksToFile || textAtSource)}
 				<!-- Original-page link, shown alongside the file download only
 				     when the title already points at the file (avoids a
 				     redundant icon for plain web/fetch citations, where the

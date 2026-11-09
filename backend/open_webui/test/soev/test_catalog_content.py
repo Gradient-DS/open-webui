@@ -239,3 +239,84 @@ async def test_file_previews_relay_ranges_and_status(
     assert response.headers['Accept-Ranges'] == 'bytes'
     assert response.headers['Cache-Control'] == 'private, no-store'
     assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'case', ['original', 'no_original', 'original_missing', 'no_rendition', 'unreadable', 'attachment']
+)
+async def test_provisioned_document_content(env, monkeypatch, case):  # noqa: F811
+    """Serve originals or retained text with caller authorization."""
+    from open_webui.models import knowledge
+    from open_webui.routers import files
+
+    monkeypatch.setattr(knowledge, 'Knowledges', env.store)
+    env.api.collections['publications'] = {
+        **env.api.collections.get('kb', {}),
+        'key': 'publications',
+        'name': 'Publications',
+        'provisioning': 'provisioned',
+        'description': None,
+        'visibility': 'public',
+        'principals': [],
+        'writers': [],
+        'created_at': env.api.now,
+        'updated_at': env.api.now,
+    }
+    env.api.add_document(
+        'publications',
+        'a' * 64,
+        filename=None,
+        title='Bodem en water v2.1 rapport',
+        content_type=None,
+        visibility='restricted' if case == 'unreadable' else 'public',
+        principals=['owui:user:bob'] if case == 'unreadable' else [],
+        rendition=None if case == 'no_rendition' else '# Bodem\n\nKlei houdt water vast.',
+    )
+
+    def handle(request):
+        if request.url.path == '/v1/downloads/fictional-code':
+            return httpx.Response(200, content=b'%PDF-1.7 bytes')
+        if request.url.path.endswith('/original'):
+            env.api.requests.append(request)
+            if case == 'original':
+                return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
+            if case == 'original_missing':
+                return httpx.Response(
+                    409,
+                    json={'code': 'original_missing', 'detail': 'No original'},
+                    headers={'Content-Type': 'application/problem+json'},
+                )
+        return env.api.handle(request)
+
+    from open_webui.soev.client import close_client
+
+    await close_client()
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient',
+        lambda **kwargs: AsyncClient(transport=httpx.MockTransport(handle), **kwargs),
+    )
+    user = SimpleNamespace(id='alice', role='user')
+    result = files.get_file_content_by_id_inline('a' * 64, user=user, db=None, attachment=case == 'attachment')
+    if case in {'no_rendition', 'unreadable'}:
+        with pytest.raises(HTTPException) as error:
+            await result
+        assert error.value.status_code == 404
+        return
+    response = await result
+    content_path = '/v1/collections/publications/documents/' + 'a' * 64 + '/content'
+    if case == 'original':
+        assert b''.join([chunk async for chunk in response.body_iterator]) == b'%PDF-1.7 bytes'
+        assert response.headers['content-type'] == 'application/pdf'
+        assert response.headers['content-disposition'].startswith('inline;')
+        assert not any(request.url.raw_path.decode() == content_path for request in env.api.requests)
+        return
+    assert response.body.decode() == '# Bodem\n\nKlei houdt water vast.'
+    assert response.headers['content-type'] == 'text/plain; charset=utf-8'
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    disposition = 'attachment' if case == 'attachment' else 'inline'
+    name = 'Bodem%20en%20water%20v2.1%20rapport.md'
+    assert response.headers['content-disposition'] == f"{disposition}; filename*=UTF-8''{name}"
+    reads = [request for request in env.api.requests if request.url.raw_path.decode() == content_path]
+    assert reads and all(request.headers.get('X-Soev-User-Token') for request in reads)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in reads)

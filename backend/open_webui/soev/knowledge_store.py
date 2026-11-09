@@ -612,10 +612,19 @@ class SoevKnowledgeTable:
         if not members:
             return None
         collection, document = members[0]
+        row = _catalog_file_row(document, user_id)
+        row['meta']['soev_collection_key'] = collection['key']
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
-        return _catalog_file_row(document, user_id), self._client.stream_response(
-            path, as_user=self._user_ref(user_id), range_header=range_header
-        )
+        return row, self._client.stream_response(path, as_user=self._user_ref(user_id), range_header=range_header)
+
+    async def catalog_rendition(self, collection_key, source_id, *, user_id):
+        path = self._path(collection_key) + '/documents/' + quote(source_id, safe='') + '/content'
+        try:
+            return await self._client.get_text(path, as_user=self._user_ref(user_id))
+        except SoevApiError as error:
+            if error.status == 404 or (error.status == 409 and error.code == 'rendition_missing'):
+                return None
+            raise
 
     async def _source_references(self, source_id, *, user_id=None, as_service=False):
         return await memoized(
