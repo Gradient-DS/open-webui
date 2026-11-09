@@ -16,8 +16,6 @@ import requests
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel, TypeAdapter
 
-from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
-
 from open_webui.env import (
     AGENT_API_AGENTS,
     DATA_DIR,
@@ -37,11 +35,16 @@ from open_webui.env import (
     log,
 )
 from open_webui.models.config import Config
-from open_webui.utils.oauth_issuer import require_tenant_allowlist
+from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
 from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.oauth_issuer import require_tenant_allowlist
 
 
 async def seed_registered_defaults():
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     await Config.rename_prefix('rag.web', 'web')
     await Config.repair_config_rows()
     await Config.seed_defaults(DEFAULT_CONFIG)

@@ -10,40 +10,40 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from open_webui.models.recovery_codes import RecoveryCodes
-from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
-from open_webui.soev.client import SoevApiError
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.auths import Auths
-from open_webui.models.config import Config
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
-from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
+from open_webui.models.config import Config
 from open_webui.models.groups import Groups
+from open_webui.models.knowledge import Knowledges
+from open_webui.models.models import Models
 from open_webui.models.oauth_sessions import OAuthSessionResponse, OAuthSessions
+from open_webui.models.recovery_codes import RecoveryCodes
+from open_webui.models.tools import Tools
 from open_webui.models.users import (
     UserGroupIdsListResponse,
     UserGroupIdsModel,
     UserInfoListResponse,
     UserInfoResponse,
-    UserSearchListResponse,
-    UserSearchResponse,
     UserModel,
     UserRoleUpdateForm,
     Users,
+    UserSearchListResponse,
+    UserSearchResponse,
     UserSettings,
     UserStatus,
     UserUpdateForm,
 )
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.models import Models
-from open_webui.models.tools import Tools
-from open_webui.soev.availability import configured
+from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
+from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
 from open_webui.socket.main import disconnect_user_sessions  # [Gradient] Revoke deleted users' live sessions.
+from open_webui.soev.availability import configured
+from open_webui.soev.client import SoevApiError
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     get_admin_user,
@@ -476,6 +476,10 @@ async def update_default_user_permissions(request: Request, form_data: UserPermi
 @router.get('/default/permissions/defaults', response_model=UserPermissions)
 async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
     from open_webui.config import DEFAULT_USER_PERMISSIONS
+    from open_webui.soev import product_config
+
+    if product_config.v2_enabled():
+        return await product_config.permissions()
 
     return {
         'workspace': WorkspacePermissions(**DEFAULT_USER_PERMISSIONS.get('workspace', {})),

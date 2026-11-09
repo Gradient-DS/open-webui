@@ -3,7 +3,6 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from open_webui.soev.chat_routes import NoteChatRoute
 from open_webui.config import (
     ENABLE_ADMIN_EXPORT,
 )
@@ -13,7 +12,6 @@ from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import ChatForm, ChatResponse, Chats
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.notes import (
     NoteForm,
@@ -23,21 +21,25 @@ from open_webui.models.notes import (
     NoteUserResponse,
 )
 from open_webui.models.users import UserResponse, Users
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import close_note_rooms, note_access_change, sio
+from open_webui.soev.chat_routes import NoteChatRoute
 from open_webui.utils.access_control import (
+    can_bypass_access_control,
     filter_allowed_access_grants,
     has_permission,
     has_public_read_access_grant,
     has_public_write_access_grant,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import require_platform_feature
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(route_class=NoteChatRoute)
+
+router = APIRouter(dependencies=[Depends(require_platform_feature('notes.enable'))], route_class=NoteChatRoute)
 
 
 def _truncate_note_data(data: Optional[dict], max_length: int = 1000) -> Optional[dict]:

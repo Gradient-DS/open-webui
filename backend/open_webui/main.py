@@ -14,8 +14,6 @@ from uuid import uuid4
 
 import aiohttp
 import anyio.to_thread
-from redis.asyncio import Redis as AsyncRedis
-
 from cryptography.fernet import InvalidToken
 from fastapi import (
     Depends,
@@ -30,6 +28,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from redis.asyncio import Redis as AsyncRedis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
@@ -45,9 +44,6 @@ from starsessions import (
 )
 from starsessions.stores.redis import RedisStore
 
-from open_webui.soev.thread_approvals import require_legacy_approval
-from open_webui.soev.thread_content import refuse_local_content
-from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.config import (
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
@@ -55,12 +51,11 @@ from open_webui.config import (
     # Admin
     ENABLE_ADMIN_ANALYTICS,
     ENABLE_ADMIN_EXPORT,
+    ENABLE_AGENT_TRACE_DOWNLOAD,
     # [Gradient] GDPR data export
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
-    ENABLE_AGENT_TRACE_DOWNLOAD,
-    USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
     # OpenAI
@@ -80,14 +75,15 @@ from open_webui.config import (
     FEATURE_DOCUMENT_WRITER,
     FEATURE_INPUT_MENU,
     FEATURE_KNOWLEDGE,
+    FEATURE_MEETINGS,
     FEATURE_MODEL_METERS,
     FEATURE_MODELS,
     FEATURE_NOTES_AI_CONTROLS,
     FEATURE_PLAYGROUND,
     FEATURE_PROMPTS,
+    FEATURE_READ_ALOUD,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
-    WHATS_NEW_MODELS,
     FEATURE_SKILL_FILES,
     FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -99,8 +95,6 @@ from open_webui.config import (
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
-    FEATURE_READ_ALOUD,
-    FEATURE_MEETINGS,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -116,20 +110,15 @@ from open_webui.config import (
     STATIC_DIR,
     THREAD_POOL_SIZE,
     THREAD_POOL_THREAD_NAME_PREFIX,
+    USE_STYLIZED_PDF_EXPORT,
     WEBUI_AUTH,
     WEBUI_NAME,
+    WHATS_NEW_MODELS,
     async_reset_config,
     import_legacy_config_json,
     seed_registered_defaults,
 )
-from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
-from open_webui.soev.acting import install
-from open_webui.soev import capabilities, model_catalog, system_prompt
-from open_webui.soev import threads as soev_threads
-from open_webui.soev.availability import SoevNotConfigured
-from open_webui.soev.client import SoevApiError
-from open_webui.soev.errors import problem_message
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -206,13 +195,12 @@ from open_webui.routers import (
     automations,
     calendar,
     chats,
-    configs,
     cloud_sync,
+    configs,
     data_warnings,
     evaluations,
     export,
     feedback_report,
-    meetings,
     files,
     folders,
     functions,
@@ -220,6 +208,7 @@ from open_webui.routers import (
     integrations,
     invites,
     knowledge,
+    meetings,
     memories,
     models,
     notes,
@@ -237,6 +226,8 @@ from open_webui.routers import (
     users,
     utils,
 )
+from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.socket.main import (
     MODELS,
     get_event_emitter,
@@ -248,6 +239,15 @@ from open_webui.socket.main import (
 from open_webui.socket.main import (
     app as socket_app,
 )
+from open_webui.soev import capabilities, model_catalog, system_prompt
+from open_webui.soev import threads as soev_threads
+from open_webui.soev.acting import install
+from open_webui.soev.availability import SoevNotConfigured
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.errors import problem_message
+from open_webui.soev.thread_approvals import require_legacy_approval
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.tasks import (
     cleanup_task,
     create_task,
@@ -259,7 +259,7 @@ from open_webui.tasks import (
     stop_task,
 )  # Import from tasks.py
 from open_webui.utils import logger
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
@@ -288,15 +288,15 @@ from open_webui.utils.chat_variables import (
     normalize_chat_variables,
 )
 from open_webui.utils.embeddings import generate_embeddings
+from open_webui.utils.features import feature_enabled
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
 )
-from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
-from open_webui.utils.log_context import install_log_context
-
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.json_response import apply_orjson_http_json
+from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
+from open_webui.utils.log_context import install_log_context
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -328,15 +328,13 @@ from open_webui.utils.oauth import (
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.redis import clear_connection_cache, get_redis_client
 from open_webui.utils.session_pool import get_session
+from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tool_approval import (
     ResolveToolCallForm,
     build_tool_approval_resume_payload,
     resolve_tool_call_output,
 )
-from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
-from open_webui.services.email.auth import is_mail_configured  # [Gradient]
-from open_webui.utils.access_control import can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -887,7 +885,7 @@ async def initialize_runtime_config(app: FastAPI):
                     )
 
     arena_models = await Config.get('evaluation.arena.models', []) or []
-    if any('access_control' in m.get('meta', {}) for m in arena_models):
+    if not model_catalog.is_v2() and any('access_control' in m.get('meta', {}) for m in arena_models):
         for model in arena_models:
             migrate_access_control(model.get('meta', {}))
         await Config.upsert({'evaluation.arena.models': arena_models})
@@ -996,8 +994,7 @@ app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['in
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
-if FEATURE_SKILL_FILES:
-    app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
+app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
@@ -1238,6 +1235,7 @@ async def chat_completion(
             raise Exception('Model not found')
         model = request.app.state.MODELS[model_id]
         model_info = await Models.get_model_by_id(model_id)
+        model = await model_catalog.configured_model(model, model_info)
         missing_base_model = bool(
             model_info and model_info.base_model_id and model_info.base_model_id not in request.app.state.MODELS
         )
@@ -2522,42 +2520,54 @@ async def get_app_config(request: Request):
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # [Gradient] Feature Flags (SaaS Tier Control)
-                    'feature_chat_controls': FEATURE_CHAT_CONTROLS,
-                    'feature_capture': FEATURE_CAPTURE,
-                    'feature_artifacts': FEATURE_ARTIFACTS,
-                    'feature_document_writer': FEATURE_DOCUMENT_WRITER,
-                    'feature_playground': FEATURE_PLAYGROUND,
-                    'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
-                    'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
-                    'feature_voice': FEATURE_VOICE,
-                    'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
-                    'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
-                    'feature_changelog': FEATURE_CHANGELOG,
-                    'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
-                    'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
-                    'feature_models': FEATURE_MODELS,
-                    'feature_model_meters': FEATURE_MODEL_METERS,
-                    'feature_knowledge': FEATURE_KNOWLEDGE,
-                    'feature_prompts': FEATURE_PROMPTS,
-                    'feature_tools': FEATURE_TOOLS,
-                    'feature_skills': FEATURE_SKILLS,
-                    'feature_skill_files': FEATURE_SKILL_FILES,
+                    'feature_chat_controls': await feature_enabled('chat_controls', FEATURE_CHAT_CONTROLS),
+                    'feature_capture': await feature_enabled('capture', FEATURE_CAPTURE),
+                    'feature_artifacts': await feature_enabled('artifacts', FEATURE_ARTIFACTS),
+                    'feature_document_writer': await feature_enabled('document_writer', FEATURE_DOCUMENT_WRITER),
+                    'feature_playground': await feature_enabled('playground', FEATURE_PLAYGROUND),
+                    'feature_chat_overview': await feature_enabled('chat_overview', FEATURE_CHAT_OVERVIEW),
+                    'feature_notes_ai_controls': await feature_enabled('notes_ai_controls', FEATURE_NOTES_AI_CONTROLS),
+                    'feature_voice': await feature_enabled('voice', FEATURE_VOICE),
+                    'feature_voice_call': await feature_enabled('voice', FEATURE_VOICE)
+                    and await feature_enabled('voice_call', FEATURE_VOICE_CALL),
+                    'feature_read_aloud': await feature_enabled('voice', FEATURE_VOICE)
+                    and await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
+                    'feature_changelog': await feature_enabled('changelog', FEATURE_CHANGELOG),
+                    'feature_meetings': await feature_enabled('meetings', FEATURE_MEETINGS)
+                    and await capabilities.has(capabilities.MEETINGS),
+                    'feature_system_prompt': await feature_enabled('system_prompt', FEATURE_SYSTEM_PROMPT),
+                    'feature_models': await feature_enabled('models', FEATURE_MODELS),
+                    'feature_model_meters': await feature_enabled('model_meters', FEATURE_MODEL_METERS),
+                    'feature_knowledge': await feature_enabled('knowledge', FEATURE_KNOWLEDGE),
+                    'feature_prompts': await feature_enabled('prompts', FEATURE_PROMPTS),
+                    'feature_tools': await feature_enabled('tools', FEATURE_TOOLS),
+                    'feature_skills': await feature_enabled('skills', FEATURE_SKILLS),
+                    'feature_skill_files': await feature_enabled('skill_files', FEATURE_SKILL_FILES),
                     'enable_skill_execution': ENABLE_SKILL_EXECUTION,
-                    'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
-                    'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
-                    'feature_admin_settings': FEATURE_ADMIN_SETTINGS,
-                    'feature_admin_settings_tabs': FEATURE_ADMIN_SETTINGS_TABS,
-                    'feature_chat_controls_sections': FEATURE_CHAT_CONTROLS_SECTIONS,
-                    'feature_webpage_url': FEATURE_WEBPAGE_URL,
-                    'feature_reference_chats': FEATURE_REFERENCE_CHATS,
-                    'feature_simple_assistant_builder': FEATURE_SIMPLE_ASSISTANT_BUILDER,
-                    'feature_input_menu': FEATURE_INPUT_MENU,
-                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT and not soev_threads.enabled(),
-                    'feature_tool_servers': FEATURE_TOOL_SERVERS,
-                    'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
-                    'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
-                    'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
-                    'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
+                    'feature_admin_evaluations': await feature_enabled('admin_evaluations', FEATURE_ADMIN_EVALUATIONS),
+                    'feature_admin_functions': await feature_enabled('admin_functions', FEATURE_ADMIN_FUNCTIONS),
+                    'feature_admin_settings': await feature_enabled('admin_settings', FEATURE_ADMIN_SETTINGS),
+                    'feature_admin_settings_tabs': await feature_enabled(
+                        'admin_settings_tabs', FEATURE_ADMIN_SETTINGS_TABS
+                    ),
+                    'feature_chat_controls_sections': await feature_enabled(
+                        'chat_controls_sections', FEATURE_CHAT_CONTROLS_SECTIONS
+                    ),
+                    'feature_webpage_url': await feature_enabled('webpage_url', FEATURE_WEBPAGE_URL),
+                    'feature_reference_chats': await feature_enabled('reference_chats', FEATURE_REFERENCE_CHATS),
+                    'feature_simple_assistant_builder': await feature_enabled(
+                        'simple_assistant_builder', FEATURE_SIMPLE_ASSISTANT_BUILDER
+                    ),
+                    'feature_input_menu': await feature_enabled('input_menu', FEATURE_INPUT_MENU),
+                    'feature_temporary_chat': await feature_enabled('temporary_chat', FEATURE_TEMPORARY_CHAT)
+                    and not soev_threads.enabled(),
+                    'feature_tool_servers': await feature_enabled('tool_servers', FEATURE_TOOL_SERVERS),
+                    'feature_terminal_servers': await feature_enabled('terminal_servers', FEATURE_TERMINAL_SERVERS),
+                    'feature_user_demographics': await feature_enabled('user_demographics', FEATURE_USER_DEMOGRAPHICS),
+                    'feature_builtin_tools': await feature_enabled('builtin_tools', FEATURE_BUILTIN_TOOLS),
+                    'feature_strict_data_separation': await feature_enabled(
+                        'strict_data_separation', FEATURE_STRICT_DATA_SEPARATION
+                    ),
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
                     'enable_agent_trace_download': ENABLE_AGENT_TRACE_DOWNLOAD,  # [Gradient]

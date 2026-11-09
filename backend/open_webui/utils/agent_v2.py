@@ -49,7 +49,7 @@ from open_webui.utils.access_control import can_bypass_access_control, has_permi
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.features import feature_enabled
 from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
@@ -998,7 +998,7 @@ async def _web_search_allowed(user_id: str) -> bool:
 
 async def _documents_allowed(user_id: str) -> bool:
     """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
-    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+    if not await feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
         return False
     user = await Users.get_user_by_id(user_id)
     if user is None:

@@ -17,6 +17,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
+from open_webui import config
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
 from open_webui.events import EVENTS, publish_event
@@ -24,7 +25,6 @@ from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
 from open_webui.models.files import Files
-from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
     ModelAccessListResponse,
@@ -37,21 +37,24 @@ from open_webui.models.models import (
     ModelResponse,
     Models,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.chat_variables import get_chat_variables_schema
-from open_webui.utils.models import get_all_models
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.soev import assistant_sharing, knowledge_sharing
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui import config
-from open_webui.utils.access_control import can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
+from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.chat_variables import get_chat_variables_schema
+from open_webui.utils.features import require_platform_feature
+from open_webui.utils.models import get_all_models
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+
+router = APIRouter(
+    dependencies=[Depends(require_platform_feature('feature.models'))],
+)
 
 
 def add_chat_variables_schema(model_dict: dict) -> dict:

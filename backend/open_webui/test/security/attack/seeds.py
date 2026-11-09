@@ -388,10 +388,8 @@ def register_readable_model(ctx, model_id):
 
 
 def catalog_default_model(ctx, parameter):
-    # Drive mode runs the v2 runtime, where soev-api's catalog is the only source of
-    # registry models (utils/models.py:get_all_base_models); upstream ids never list.
-    # /api/config names the catalog default (soev/model_catalog.default_models) even
-    # while an earlier pass's toggle has hidden it from /api/models.
+    # The sweep requires one product-configured catalog model; an empty selection
+    # cannot establish a positive model control.
     default = ctx.request('GET', '/api/config', actor=ctx.admin).get('default_models')
     if not isinstance(default, str) or not default or ',' in default:
         raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {default!r}')
@@ -400,8 +398,32 @@ def catalog_default_model(ctx, parameter):
 
 def seed_model(ctx, parameter):
     model_id = catalog_default_model(ctx, parameter)
+    if runtime_soev_backed() == 'drive':
+        registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
+        if model_id not in {model['id'] for model in registry['data']}:
+            raise RuntimeError(f'Catalog default {model_id} must be active in product configuration')
+        return model_id
     register_readable_model(ctx, model_id)
     return model_id
+
+
+def seed_skill_bundle(ctx, parameter):
+    skill_id = f'fictional-skill-{ctx.token}'
+    created = ctx.request(
+        'POST',
+        '/api/v1/skills/create',
+        actor=ctx.admin,
+        json={'id': skill_id, 'name': skill_id, 'content': 'Fictional skill instructions.'},
+    )
+    skill_id = _extract(created, 'id', name=parameter['key'], via='POST /api/v1/skills/create')
+    for path in ('fictional-edit.txt', 'fictional-move.txt', 'fictional-remove.txt'):
+        ctx.request(
+            'POST',
+            f'/api/v1/skills/id/{skill_id}/files',
+            actor=ctx.admin,
+            json={'path': path, 'content': 'Fictional skill file.'},
+        )
+    return skill_id
 
 
 def seed_chat(ctx, parameter):
@@ -702,6 +724,7 @@ _SEEDERS = {
         seed_terminal,
         seed_export,
         seed_model,
+        seed_skill_bundle,
         seed_chat,
         seed_chat_message,
         seed_chat_share,

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from copy import deepcopy
 from typing import Any, ClassVar
 
 from fastapi.encoders import jsonable_encoder
@@ -140,6 +141,10 @@ class Config(Base):
 
     @classmethod
     def persistent_enabled_for(cls, key: str) -> bool:
+        from open_webui.soev.policy_jobs import v2_enabled
+
+        if v2_enabled():
+            return False
         if not cls.PERSISTENT_ENABLED:
             return False
         if key.startswith(_ENV_AUTHORITATIVE_KEY_PREFIXES):
@@ -157,6 +162,12 @@ class Config(Base):
     @staticmethod
     async def get(key: str, default: Any = None) -> Any:
         """Get a config value by key. Returns default if not set."""
+        from open_webui.soev import product_config
+
+        if product_config.v2_enabled():
+            if product_config.owns(key):
+                return await product_config.get(key)
+            return deepcopy(Config.default_value(key, default))
         if not Config.persistent_enabled_for(key):
             return Config.default_value(key, default)
         async with get_async_db() as db:
@@ -166,6 +177,16 @@ class Config(Base):
     @staticmethod
     async def get_many(*keys: str) -> dict:
         """Get multiple config values. Returns {key: value} for keys that exist."""
+        from open_webui.soev import product_config
+
+        if product_config.v2_enabled():
+            product_keys = [key for key in keys if product_config.owns(key)]
+            values = await product_config.get_many(*product_keys) if product_keys else {}
+            return {
+                key: values[key] if key in values else deepcopy(Config.default_value(key))
+                for key in keys
+                if key in values or key in Config.DEFAULTS
+            }
         disabled_values = {
             key: Config.default_value(key)
             for key in keys
@@ -186,6 +207,12 @@ class Config(Base):
     @staticmethod
     async def get_namespace(namespace: str) -> dict:
         """Get all config keys under a dotted namespace."""
+        from open_webui.soev import product_config
+
+        if product_config.v2_enabled():
+            return await Config.get_many(
+                *(key for key in {*Config.DEFAULTS, *product_config.SETTINGS} if key.startswith(f'{namespace}.'))
+            )
         default_values = {
             key: value
             for key, value in Config.DEFAULTS.items()
@@ -202,6 +229,10 @@ class Config(Base):
     @staticmethod
     async def get_all() -> dict:
         """Get all config as {key: value}."""
+        from open_webui.soev import product_config
+
+        if product_config.v2_enabled():
+            return await Config.get_many(*{*Config.DEFAULTS, *product_config.SETTINGS})
         if not Config.PERSISTENT_ENABLED:
             return dict(Config.DEFAULTS)
         async with get_async_db() as db:
@@ -214,6 +245,16 @@ class Config(Base):
     @staticmethod
     async def upsert(updates: dict) -> None:
         """Upsert multiple config key-value pairs. Raises on failure."""
+        from open_webui.soev import product_config
+        from open_webui.soev.client import SoevApiError
+
+        if updates and product_config.v2_enabled():
+            raise SoevApiError(
+                403,
+                'policy_forbids',
+                'Configuration is managed outside Open WebUI',
+                constraint='product_config:read_only',
+            )
         persistent_updates = {}
         for key, value in updates.items():
             value = _json_value(value)
@@ -261,6 +302,10 @@ class Config(Base):
         Called at startup to ensure all known config keys have values.
         Existing DB values take precedence over defaults.
         """
+        from open_webui.soev.policy_jobs import v2_enabled
+
+        if v2_enabled():
+            return
         async with get_async_db() as db:
             result = await db.execute(select(Config.key))
             existing_keys = {row[0] for row in result.all()}

@@ -8,7 +8,6 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.prompt_history import (
     PromptHistories,
@@ -23,11 +22,12 @@ from open_webui.models.prompts import (
     Prompts,
     PromptUserResponse,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.services.remaining_request_bodies import access_grants_body
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import require_platform_feature
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 
 class PromptVersionUpdateForm(BaseModel):
@@ -40,7 +40,9 @@ class PromptMetadataForm(BaseModel):
     tags: list[str] | None = None
 
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_platform_feature('feature.prompts'))],
+)
 
 PAGE_ITEM_COUNT = 30
 

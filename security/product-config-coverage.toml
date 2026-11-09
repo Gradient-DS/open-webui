@@ -1,0 +1,38 @@
+# Platform reads retain the existing route authentication and resource grants.
+# These declarations supplement attack-surface.toml; they waive no routes.
+
+[configuration]
+routes = ["GET /api/config", "GET /api/v1/configs/export", "POST /api/v1/configs/import"]
+classification = "tenant_configuration"
+read = "Product settings use the cached service snapshot; all other persistent settings use deployment values."
+write = "Config.upsert refuses every platform write before changing defaults or rows."
+proof = "backend/open_webui/test/soev/test_product_config.py"
+seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
+
+[permissions]
+routes = ["GET /api/v1/users/permissions", "GET /api/v1/users/default/permissions", "GET /api/v1/users/default/permissions/defaults", "POST /api/v1/users/default/permissions"]
+classification = "tenant_permissions"
+rule = "Only permissions.<path> leaves apply. Authentication and administrator dependencies are preserved; group membership and resource grants are unchanged."
+proof = "backend/open_webui/test/soev/test_product_config.py:test_permission_endpoints_use_product_leaves"
+seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
+
+[features]
+prefixes = ["/api/v1/knowledge", "/api/v1/prompts", "/api/v1/models", "/api/v1/skills", "/api/v1/notes", "/api/v1/tools", "/api/v1/terminals", "/api/v1/audio", "/api/v1/meetings"]
+classification = "feature_and_resource_authority"
+rule = "Unentitled or disabled product gates refuse their operations, including administrator callers. Existing ownership and access-grant checks still apply when enabled."
+proof = "backend/open_webui/test/soev/test_product_config.py:test_disabled_product_routes_are_refused"
+seed = "security/attack-surface.toml"
+
+[models]
+routes = ["GET /api/models", "POST /api/chat/completions", "POST /api/v1/chat/completions"]
+classification = "catalog_and_assistant_authority"
+rule = "Catalog content uses models.overrides; disabled catalog models refuse turns. Assistant rows retain their own resource grants."
+proof = "backend/open_webui/test/soev/test_model_catalog.py"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_model"
+
+[skill_files]
+routes = ["GET /api/v1/skills/id/{id}/files", "POST /api/v1/skills/id/{id}/files", "PUT /api/v1/skills/id/{id}/files", "POST /api/v1/skills/id/{id}/files/move", "POST /api/v1/skills/id/{id}/files/remove", "GET /api/v1/skills/id/{id}/files/content"]
+classification = "private_skill_content"
+rule = "Both product skill gates apply. Writes require the owner's authority or a write grant; content reads retain skill-scoped token and read-grant checks."
+proof = "backend/open_webui/test/apps/webui/routers/test_skill_file_scoped_token.py"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_skill_bundle"

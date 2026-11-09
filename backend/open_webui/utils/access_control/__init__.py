@@ -1,5 +1,6 @@
 from typing import Any
 
+from open_webui import config
 from open_webui.config import DEFAULT_USER_PERMISSIONS
 from open_webui.models.access_grants import (
     has_anyone_read_access_grant,
@@ -13,7 +14,6 @@ from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.json_codec import JSONCodec
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui import config
 
 
 def can_bypass_access_control(user: UserModel | dict) -> bool:
@@ -50,6 +50,11 @@ async def get_permissions(
     If a permission is defined in multiple groups, the most permissive value is used (True > False).
     Permissions are nested in a dict with the permission key as the key and a boolean as the value.
     """
+
+    from open_webui.soev import product_config
+
+    if product_config.v2_enabled():
+        return await product_config.permissions()
 
     def combine_permissions(permissions: dict[str, Any], group_permissions: dict[str, Any]) -> dict[str, Any]:
         """Combine permissions from multiple groups by taking the most permissive value."""
@@ -92,6 +97,11 @@ async def has_permission(
 
     Permission keys can be hierarchical and separated by dots ('.').
     """
+
+    from open_webui.soev import product_config
+
+    if product_config.v2_enabled():
+        return bool(await product_config.get(f'permissions.{permission_key}'))
 
     def get_permission(permissions: dict[str, Any], keys: list[str]) -> bool:
         """Traverse permissions dict using a list of keys (from dot-split permission_key)."""

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -13,7 +14,7 @@ def _speech_client(monkeypatch, gates):
         return default
 
     monkeypatch.setattr(audio.Config, 'get', config)
-    monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: gates.get(feature, True))
+    monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(side_effect=lambda feature: gates.get(feature, True)))
     endpoint = next(r.endpoint for r in audio.router.routes if r.path == '/speech')
     app = FastAPI()
     app.add_api_route('/speech', endpoint, methods=['POST'], response_model=None)

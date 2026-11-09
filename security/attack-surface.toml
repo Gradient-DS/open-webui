@@ -131,7 +131,7 @@ depends_on = ["namespace"]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "Select the soev-api catalog default through /api/config and register a publicly readable model override for the security pass. Direct Ollama routes use the separate upstream_model from ollama_index."
+description = "Select one product-configured default through /api/config and verify it is active in /api/models. The console seed must configure this default. Only legacy mode registers a local readable row. Direct Ollama routes use upstream_model from ollama_index."
 seeded_by = "seed_model"
 depends_on = []
 fresh = false
@@ -449,6 +449,15 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
+key = "skill_bundle"
+name = "id"
+prefix = "/api/v1/skills/id/{id}/files"
+description = "Seed a private skill with separate inline text files for read/edit, move and removal. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
+seeded_by = "seed_skill_bundle"
+depends_on = []
+actor = "admin"
+
+[[parameter]]
 key = "prompt"
 name = "prompt_id"
 prefix = "/api/v1/prompts/id/{prompt_id}"
@@ -457,6 +466,31 @@ via = "POST /api/v1/prompts/create"
 body = { "command" = "attack-{token}", "name" = "Attack prompt", "content" = "Attack prompt {token}" }
 extract = "id"
 actor = "admin"
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files"
+description = "Create a new inline file in the owned skill; file_id and content are mutually exclusive."
+json = { path = "fictional-create.txt", content = "Fictional new skill file." }
+
+[[field]]
+route = "PUT /api/v1/skills/id/{id}/files"
+description = "Edit the seeded file without consuming the files used by move and remove controls."
+json = { path = "fictional-edit.txt", content = "Fictional edited skill file." }
+
+[[field]]
+route = "GET /api/v1/skills/id/{id}/files/content"
+description = "Read the seeded private file through its skill path and the caller's session."
+params = { path = "fictional-edit.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/move"
+description = "Move the dedicated seed file without consuming read/edit or remove controls."
+json = { from_path = "fictional-move.txt", to_path = "fictional-moved.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/remove"
+description = "Remove the dedicated seed file from the owned skill."
+json = { path = "fictional-remove.txt" }
 
 [[parameter]]
 key = "prompt_history"

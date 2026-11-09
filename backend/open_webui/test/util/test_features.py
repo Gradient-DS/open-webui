@@ -1,11 +1,11 @@
-import pytest
 from unittest.mock import patch
-from fastapi import HTTPException
 
+import pytest
+from fastapi import HTTPException
 from open_webui.utils.features import (
+    FEATURE_FLAGS,
     is_feature_enabled,
     require_feature,
-    FEATURE_FLAGS,
 )
 
 
@@ -42,7 +42,8 @@ class TestFeatureFlags:
 class TestRequireFeature:
     """Tests for require_feature dependency function."""
 
-    def test_require_feature_passes_when_enabled(self):
+    @pytest.mark.asyncio
+    async def test_require_feature_passes_when_enabled(self):
         """Test that require_feature passes when feature is enabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -50,10 +51,11 @@ class TestRequireFeature:
         ):
             check = require_feature('voice')
             # Should not raise, returns True
-            result = check()
+            result = await check()
             assert result is True
 
-    def test_require_feature_raises_403_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_feature_raises_403_when_disabled(self):
         """Test that require_feature raises 403 when feature is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -61,7 +63,7 @@ class TestRequireFeature:
         ):
             check = require_feature('voice')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
             assert 'voice' in exc_info.value.detail
 
@@ -89,7 +91,8 @@ class TestVoiceFeature:
         ):
             assert is_feature_enabled('voice') is False
 
-    def test_require_voice_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_voice_blocks_when_disabled(self):
         """Should raise 403 when voice is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -97,7 +100,7 @@ class TestVoiceFeature:
         ):
             check = require_feature('voice')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 
@@ -118,7 +121,8 @@ class TestChangelogFeature:
         """Test that changelog feature is registered in FEATURE_FLAGS."""
         assert 'changelog' in FEATURE_FLAGS
 
-    def test_require_changelog_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_changelog_blocks_when_disabled(self):
         """Should raise 403 when changelog is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -126,7 +130,7 @@ class TestChangelogFeature:
         ):
             check = require_feature('changelog')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 
@@ -147,7 +151,8 @@ class TestSystemPromptFeature:
         """Test that system_prompt feature is registered in FEATURE_FLAGS."""
         assert 'system_prompt' in FEATURE_FLAGS
 
-    def test_require_system_prompt_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_system_prompt_blocks_when_disabled(self):
         """Should raise 403 when system_prompt is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -155,7 +160,7 @@ class TestSystemPromptFeature:
         ):
             check = require_feature('system_prompt')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 
@@ -176,7 +181,8 @@ class TestAdminEvaluationsFeature:
         """Test that admin_evaluations feature is registered in FEATURE_FLAGS."""
         assert 'admin_evaluations' in FEATURE_FLAGS
 
-    def test_require_admin_evaluations_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_admin_evaluations_blocks_when_disabled(self):
         """Should raise 403 when admin_evaluations is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -184,7 +190,7 @@ class TestAdminEvaluationsFeature:
         ):
             check = require_feature('admin_evaluations')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 
@@ -205,7 +211,8 @@ class TestAdminFunctionsFeature:
         """Test that admin_functions feature is registered in FEATURE_FLAGS."""
         assert 'admin_functions' in FEATURE_FLAGS
 
-    def test_require_admin_functions_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_admin_functions_blocks_when_disabled(self):
         """Should raise 403 when admin_functions is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -213,7 +220,7 @@ class TestAdminFunctionsFeature:
         ):
             check = require_feature('admin_functions')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 
@@ -234,7 +241,8 @@ class TestAdminSettingsFeature:
         """Test that admin_settings feature is registered in FEATURE_FLAGS."""
         assert 'admin_settings' in FEATURE_FLAGS
 
-    def test_require_admin_settings_blocks_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_require_admin_settings_blocks_when_disabled(self):
         """Should raise 403 when admin_settings is disabled."""
         with patch.dict(
             'open_webui.utils.features.FEATURE_FLAGS',
@@ -242,7 +250,7 @@ class TestAdminSettingsFeature:
         ):
             check = require_feature('admin_settings')
             with pytest.raises(HTTPException) as exc_info:
-                check()
+                await check()
             assert exc_info.value.status_code == 403
 
 

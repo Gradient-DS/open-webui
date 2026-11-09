@@ -30,6 +30,26 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     assert set(routes) == expected - unseedable
 
 
+def test_skill_file_routes_require_owner_controls_and_have_no_sharing_allowance():
+    routes, admins = crossuser.targets()
+    expected = {
+        'GET /api/v1/skills/id/{id}/files',
+        'POST /api/v1/skills/id/{id}/files',
+        'PUT /api/v1/skills/id/{id}/files',
+        'GET /api/v1/skills/id/{id}/files/content',
+        'POST /api/v1/skills/id/{id}/files/move',
+        'POST /api/v1/skills/id/{id}/files/remove',
+    }
+    assert expected <= set(routes)
+    assert not expected & admins
+    assert not expected & crossuser._shared().keys()
+    assert not expected & crossuser.expected_refusals().keys()
+    for route in expected:
+        assert route in seeds.ordinary_targets()
+        path = route.split(' ', 1)[1]
+        assert seeds.parameter_for(path, 'id')['seeded_by'] == 'seed_skill_bundle'
+
+
 def test_oauth_sessions_keep_a_cross_user_refusal_and_require_a_positive_owner():
     route = 'GET /api/v1/users/{user_id}/oauth/sessions'
     routes, admins = crossuser.targets()

@@ -16,7 +16,6 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
-from open_webui.soev import threads as soev_threads
 from open_webui.config import (
     CODE_INTERPRETER_BLOCKED_MODULES,
     CODE_INTERPRETER_PYODIDE_PROMPT,
@@ -26,6 +25,7 @@ from open_webui.config import (
 )
 from open_webui.constants import TASKS
 from open_webui.env import (
+    AGENT_API_ENABLED,  # Agent API bypass flag
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     ENABLE_API_OUTLET_FILTERS,
@@ -43,7 +43,6 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.notes import Notes
 from open_webui.models.users import UserModel
-from open_webui.soev.availability import SoevNotConfigured
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.retrieval import (
     SearchForm,
@@ -59,16 +58,22 @@ from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
 )
+from open_webui.soev import threads as soev_threads
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.tasks import clear_response_stream, save_response_stream
-from open_webui.utils.access_control import has_connection_access, has_permission
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.access_control import can_bypass_access_control, has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
+
+# [Gradient] Fork-only imports (upstream equivalents already imported above).
+from open_webui.utils.agent_routing import agent_owns_tool_execution
 from open_webui.utils.ask_user import stage_ask_user_tool_calls
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.context_compaction import compact_messages_for_request
+from open_webui.utils.data_separation import request_mixes_data_sources
+from open_webui.utils.features import feature_enabled
 from open_webui.utils.files import (
     convert_markdown_base64_images,
     get_file_url_from_base64,
@@ -94,8 +99,8 @@ from open_webui.utils.misc import (
     get_last_user_message_item,
     get_message_list,
     get_output_text,
-    get_response_error_detail,
     get_reasoning_details,
+    get_response_error_detail,
     get_system_message,
     is_string_allowed,
     merge_system_messages,
@@ -106,12 +111,12 @@ from open_webui.utils.misc import (
 from open_webui.utils.payload import apply_params_to_form_data, apply_system_prompt_to_body, resolve_system_prompt
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
+from open_webui.utils.skill_bundles import resolve_skill_bundle_files
 from open_webui.utils.task import (
     get_task_model_id,
     rag_template,
     tools_function_calling_generation_template,
 )
-from open_webui.utils.webhook import post_webhook
 from open_webui.utils.tools import (
     build_tool_server_headers,
     get_attached_knowledge,
@@ -120,19 +125,8 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
-
-# [Gradient] Fork-only imports (upstream equivalents already imported above).
-from open_webui.utils.agent_routing import agent_owns_tool_execution
-from open_webui.utils.skill_bundles import resolve_skill_bundle_files
-from open_webui.utils.data_separation import request_mixes_data_sources
-from open_webui.config import (
-    FEATURE_BUILTIN_TOOLS,
-    FEATURE_STRICT_DATA_SEPARATION,
-    FEATURE_SKILL_FILES,
-)
-from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
+from open_webui.utils.webhook import post_webhook
 from starlette.responses import JSONResponse, StreamingResponse
-from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -2681,7 +2675,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # internet (web search / webpage URLs) OR internal documents (files / KBs),
     # never both. No-op unless the feature flag is enabled. The frontend grays
     # out the unavailable side; this is the server-side hard guard.
-    if FEATURE_STRICT_DATA_SEPARATION and request_mixes_data_sources(
+    if await feature_enabled('strict_data_separation') and request_mixes_data_sources(
         form_data.get('files'),
         form_data.get('messages'),
         features.get('web_search'),
@@ -2700,7 +2694,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     raw_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', None)
     if features:
         # [Gradient] features is client-supplied; call mode is tenant-gated.
-        if 'voice' in features and features['voice'] and is_feature_enabled('voice_call'):
+        if 'voice' in features and features['voice'] and await feature_enabled('voice_call'):
             if await Config.get('task.voice.prompt.enable'):
                 template = await Config.get('task.voice.prompt_template')
                 if not template:
@@ -2873,7 +2867,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # empty list; the 'files' key is only included when non-empty so
         # that skills without files are forwarded byte-identically to today.
         # Resolve bundled files only when the skill-files extension is enabled.
-        skill_bundle_files = await resolve_skill_bundle_files(available_skills) if FEATURE_SKILL_FILES else {}
+        skill_bundle_files = (
+            await resolve_skill_bundle_files(available_skills) if await feature_enabled('skill_files') else {}
+        )
 
         metadata['skills'] = [
             {
@@ -2887,14 +2883,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             for s in available_skills
         ]
 
-        # [Gradient] Observability: make the forwarded skill bundle explicit so a
-        # misconfiguration (e.g. FEATURE_SKILL_FILES off on the serving process)
-        # or an empty file manifest is visible in logs instead of silently
-        # surfacing as "agent only has view_skill, no read_skill_file/run_script".
         log.info(
-            '[skills] forwarding %d skill(s) to agent (FEATURE_SKILL_FILES=%s): %s',
+            '[skills] forwarding %d skill(s) to agent (skill_files=%s): %s',
             len(metadata['skills']),
-            FEATURE_SKILL_FILES,
+            await feature_enabled('skill_files'),
             [
                 {
                     'name': s['name'],
@@ -3092,8 +3084,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # Inject builtin tools for native function calling based on enabled features and model capability.
         # Only inject when the request originates from the UI (identified by session_id).
         # API callers don't expect hidden tools; they can explicitly request tools via tool_ids.
-        # [Gradient] FEATURE_BUILTIN_TOOLS is the fork-level kill switch for builtin tool injection.
-        if use_builtin_tools and FEATURE_BUILTIN_TOOLS:
+        if use_builtin_tools and await feature_enabled('builtin_tools'):
             # Add file context to user messages
             chat_id = metadata.get('chat_id')
             form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)

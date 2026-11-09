@@ -103,15 +103,14 @@ async def base_models() -> list[dict]:
     return models
 
 
-def apply_catalog(models: list[dict], base: list[dict]) -> None:
-    """Give each catalog model its own copy of the catalog meta, below an admin's model row. The name stays the
-    provider/model id, also over an admin's or a migrated v1 row's name."""
+def apply_catalog(models: list[dict], base: list[dict], names: dict[str, str] | None = None) -> None:
+    """Preserve catalog capability facts under product metadata; only explicit product overrides rename models."""
     pristine = {model['id']: model['info'] for model in base if model.get('owned_by') == OWNER}
     for model in models:
         info = pristine.get(model['id'])
         if info is None:
             continue
-        model['name'] = model['id']
+        model['name'] = (names or {}).get(model['id'], model['id'])
         if model.get('info') is info:
             model['info'] = copy.deepcopy(info)
             continue
@@ -129,14 +128,60 @@ def is_unconfigured(model: dict) -> bool:
 
 
 async def is_offered(model_id: str, role: str | None) -> bool:
-    """In v2 mode soev-api decides model access: every catalog model is open to every user and admin."""
+    """Active catalog models are available to every verified user and admin in v2 mode."""
     if not is_v2() or role not in ('user', 'admin'):
         return False
-    return any(entry['id'] == model_id for entry in await catalog())
+    return any(entry['id'] == model_id for entry in await catalog()) and (await model_settings(model_id)).is_active
+
+
+async def is_catalog_model(model_id: str) -> bool:
+    """Known catalog IDs retain product content through a transient catalog outage."""
+    entries = await catalog()
+    return any(entry['id'] == model_id for entry in entries or CATALOG_CACHE['entries'])
+
+
+async def model_settings(model_id: str):
+    from open_webui.models.models import ModelModel
+    from open_webui.soev import product_config
+
+    overrides = await product_config.get('models.overrides')
+    fields = overrides.get(model_id, {})
+    return ModelModel(
+        id=model_id,
+        user_id=OWNER,
+        name=fields.get('name', model_id),
+        base_model_id=fields.get('base_model_id'),
+        params=fields.get('params', {}),
+        meta=fields.get('meta', {}),
+        is_active=fields.get('is_active', True),
+        created_at=0,
+        updated_at=0,
+    )
+
+
+async def configured_rows(rows: list, base: list[dict]) -> tuple[list, dict]:
+    if not is_v2():
+        return rows, {}
+    settings = {model['id']: await model_settings(model['id']) for model in base if model.get('owned_by') == OWNER}
+    return [row for row in rows if row.id not in settings] + list(settings.values()), settings
+
+
+async def configured_model(model: dict, model_info) -> dict:
+    if not is_v2():
+        return model
+    if model_info and not model_info.is_active:
+        raise HTTPException(status_code=403, detail='Model not found')
+    if await is_catalog_model(model['id']):
+        model = copy.deepcopy(model)
+        model['info'] = model_info.model_dump(exclude={'params'})
+        apply_catalog([model], await base_models(), names={model['id']: model_info.name})
+    return model
 
 
 async def default_models(configured: str | None) -> str | None:
-    """The catalog default replaces ui.default_models in v2 mode."""
+    """Product configuration owns the default selection on the platform route."""
     if not is_v2():
         return configured
-    return next((entry['id'] for entry in await catalog() if entry.get('default')), None)
+    from open_webui.soev import product_config
+
+    return await product_config.get('ui.default_models')

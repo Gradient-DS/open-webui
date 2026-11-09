@@ -1080,21 +1080,74 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
     asyncio.run(exercise())
 
 
-def test_drive_model_seed_registers_the_soev_catalog_default(monkeypatch):
+def test_drive_model_seed_requires_the_active_soev_catalog_default(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
     ctx.request = Mock(
         side_effect=[
             {'default_models': 'ci/chat'},
-            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': True},
+            {'data': [{'id': 'ci/chat'}]},
         ]
     )
     assert seeds.seed_model(ctx, {'key': 'model'}) == 'ci/chat'
     assert 'upstream_model' not in ctx.values
+    config, registry = ctx.request.call_args_list
+    assert config.args == ('GET', '/api/config')
+    assert config.kwargs == {'actor': ctx.admin}
+    assert registry.args == ('GET', '/api/models')
+    assert registry.kwargs == {'actor': ctx.admin, 'params': {'refresh': True}}
+
+
+def test_legacy_model_seed_preserves_public_read_registration(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(
+        side_effect=[
+            {'default_models': 'fictional/chat'},
+            {'id': 'fictional/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': True},
+        ]
+    )
+    assert seeds.seed_model(ctx, {'key': 'model'}) == 'fictional/chat'
+    assert 'upstream_model' not in ctx.values
     config, registration = ctx.request.call_args_list
     assert config.args == ('GET', '/api/config')
     assert config.kwargs == {'actor': ctx.admin}
-    assert registration.kwargs['json'] == {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ]}
+    assert registration.kwargs['json'] == {'id': 'fictional/chat', 'access_grants': [PUBLIC_MODEL_READ]}
+
+
+def test_skill_bundle_seed_creates_separate_owned_files():
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill_bundle')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(side_effect=[{'id': 'fictional-skill'}, {}, {}, {}])
+    assert seeds.seed_skill_bundle(ctx, entry) == 'fictional-skill'
+    requests = ctx.request.call_args_list
+    assert requests[0].args == ('POST', '/api/v1/skills/create')
+    assert {call.kwargs['json']['path'] for call in requests[1:]} == {
+        'fictional-edit.txt',
+        'fictional-move.txt',
+        'fictional-remove.txt',
+    }
+    assert all(call.kwargs['actor'] is ctx.admin for call in requests)
+
+
+def test_product_config_inventory_has_real_routes_proofs_and_seeds():
+    coverage = tomllib.loads((ROOT / 'security/product-config-coverage.toml').read_text())
+    operations = {
+        f'{method.upper()} {path}' for path, item in SPEC['paths'].items() for method in item if method in METHODS
+    }
+    for entry in coverage.values():
+        assert set(entry.get('routes', ())) <= operations
+        assert entry['classification'] and entry['seed']
+        proof = entry['proof'].split(':', 1)[0]
+        assert (ROOT / proof).is_file()
+    expected = {
+        f'{method.upper()} {path}'
+        for path, item in SPEC['paths'].items()
+        if path.startswith('/api/v1/skills/id/{id}/files')
+        for method in item
+        if method in METHODS
+    }
+    assert set(coverage['skill_files']['routes']) == expected
 
 
 def test_ollama_seed_uses_a_model_from_its_connection_instead_of_the_catalog():

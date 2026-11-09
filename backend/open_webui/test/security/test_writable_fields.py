@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 530 operations. Audit bodies across all
-# OpenAPI methods (534 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 536 operations. Audit bodies across all
+# OpenAPI methods (540 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (530, 534), (
-        f'Expected 530 five-method operations / 534 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (536, 540), (
+        f'Expected 536 five-method operations / 540 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,9 +63,9 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        195,
-        2152,
-    ), f'Expected 195 routes / 2152 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        199,
+        2160,
+    ), f'Expected 199 routes / 2160 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     # image_prompt refuses platform mode before consuming either field.
     for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
@@ -80,9 +80,9 @@ def test_derived_counts(surface):
         'threads[].versions[]',
     ]
     assert query_counts == (
-        48,
-        98,
-    ), f'Expected 48 routes / 98 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        49,
+        99,
+    ), f'Expected 49 routes / 99 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):

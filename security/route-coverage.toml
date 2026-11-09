@@ -1,3 +1,5 @@
+# Product configuration boundaries are classified in product-config-coverage.toml.
+# Skill-file routes have ordinary owner seeds and no coverage exemption.
 # Routes no security test drives, each with the reason it cannot be driven on
 # the sealed CI stack. Read by backend/open_webui/test/security/test_route_coverage.py,
 # which fails on an empty reason, on a waiver for a route that no longer exists,
