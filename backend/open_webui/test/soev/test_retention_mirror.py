@@ -408,6 +408,7 @@ async def test_owner_chat_deletion_removes_remote_threads_before_pending_local_c
     await seed(mirror, 'child-fern', ['thread-oak'], parent='chat-fern')
     monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
     monkeypatch.setattr(chats, 'has_permission', AsyncMock(return_value=True))
+    monkeypatch.setattr(chats.Config, 'get', AsyncMock(return_value={}))
     monkeypatch.setattr(chats, 'stop_item_tasks', AsyncMock())
     monkeypatch.setattr(chats, 'publish_event', AsyncMock())
     monkeypatch.setattr(Chats, 'delete_orphan_tags_for_user', AsyncMock())

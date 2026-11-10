@@ -169,7 +169,7 @@ async def test_stock_memory_embedding_is_preserved(platform, memory_state, monke
 def dictation_app(platform, monkeypatch, tmp_path):
     from open_webui.main import soev_api_error_handler
 
-    monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr(audio, 'publish_event', AsyncMock())
     monkeypatch.setattr(audio.Config, 'get', AsyncMock(side_effect=AssertionError('STT settings must not be read')))
     app = FastAPI()
@@ -233,7 +233,7 @@ async def test_dictation_size_bound_precedes_read(platform):
 
 @pytest.mark.asyncio
 async def test_voice_gate_still_binds_v2_admin(platform, dictation_app, monkeypatch):
-    monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: False)
+    monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(return_value=False))
     async with platform.http(
         transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
     ) as client:
@@ -389,9 +389,9 @@ async def test_speech_permission_and_feature_gates(platform, dictation_app, monk
     async with platform.http(
         transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
     ) as client:
-        monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: False)
+        monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(return_value=False))
         assert (await client.post('/speech', json={'input': 'Fictional speech.'})).status_code == 403
-        monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: True)
+        monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(return_value=True))
         platform.user.role = 'user'
         monkeypatch.setattr(audio.Config, 'get', AsyncMock(return_value={}))
         monkeypatch.setattr(audio, 'has_permission', AsyncMock(return_value=False))
