@@ -85,10 +85,6 @@ export type WorkspaceAction = {
 };
 
 export const workspaceActions: Writable<WorkspaceAction[]> = writable([]);
-export const adminUserCount: Writable<number | null> = writable(null);
-export const adminGroupCount: Writable<number | null> = writable(null);
-export const adminLeaderboardCount: Writable<number | null> = writable(null);
-export const adminFeedbackCount: Writable<number | null> = writable(null);
 
 export const toolServers = writable([]);
 export const terminalServers: Writable<any[] | null> = writable(null);
@@ -407,9 +403,9 @@ type Config = {
 		confluence_shared_kb_id?: string;
 		confluence_oauth_configured?: boolean;
 		enable_image_generation: boolean;
-		enable_admin_export: boolean;
 		enable_data_export: boolean;
-		enable_admin_analytics: boolean;
+		feedback_reasons?: { id: string; labels: { nl: string; en: string } }[];
+		feedback_tags?: { id: string; labels: { nl: string; en: string } }[];
 		enable_context_compaction?: boolean;
 		enable_tool_permissions?: boolean;
 		enable_community_sharing: boolean;
@@ -439,10 +435,6 @@ type Config = {
 		feature_knowledge?: boolean;
 		feature_prompts?: boolean;
 		feature_tools?: boolean;
-		feature_admin_evaluations?: boolean;
-		feature_admin_functions?: boolean;
-		feature_admin_settings?: boolean;
-		feature_admin_settings_tabs?: string[];
 		feature_agent_api_enabled?: boolean;
 		enable_live_documents?: boolean;
 		enable_live_mail?: boolean;

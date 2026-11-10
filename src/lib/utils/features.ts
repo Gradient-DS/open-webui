@@ -26,9 +26,6 @@ export type Feature =
 	| 'skills'
 	| 'webpage_url'
 	| 'reference_chats'
-	| 'admin_evaluations'
-	| 'admin_functions'
-	| 'admin_settings'
 	| 'input_menu'
 	| 'temporary_chat'
 	| 'builtin_tools'
@@ -36,7 +33,7 @@ export type Feature =
 
 /**
  * Check if a feature is enabled globally.
- * These flags apply to ALL users including admins.
+ * These flags apply to all users.
  * Used for SaaS tier-based feature control.
  */
 export function isFeatureEnabled(feature: Feature): boolean {
@@ -54,7 +51,7 @@ export function isFeatureEnabled(feature: Feature): boolean {
 /**
  * Check if user has access to a feature considering both:
  * 1. Global feature flag (tier-based, applies to everyone)
- * 2. User permission (role-based, admins bypass)
+ * 2. User permission
  *
  * @param feature - The feature to check
  * @param user - The user object with role and permissions
@@ -79,12 +76,7 @@ export function hasFeatureAccess(
 		return true;
 	}
 
-	// Admin bypass for permissions (but NOT for feature flags)
-	if (user?.role === 'admin') {
-		return true;
-	}
-
-	// Check specific permission for non-admins
+	// Check the requested permission.
 	const keys = permissionPath.split('.');
 	let perms: boolean | PermissionTree | undefined = user?.permissions;
 	for (const key of keys) {
@@ -111,102 +103,11 @@ export function isAgentRouted(): boolean {
 }
 
 /**
- * All valid admin settings tab IDs
- */
-export const ADMIN_SETTINGS_TABS = [
-	'general',
-	'connections',
-	'models',
-	'system-prompt',
-	'evaluations',
-	'integrations',
-	'documents',
-	'web',
-	'code-execution',
-	'interface',
-	'audio',
-	'images',
-	'pipelines',
-	'email',
-	'security',
-	'db',
-	'acceptance',
-	'external-agents'
-] as const;
-
-// [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
-const knownAdminSettingsTabs = new Set<string>([...ADMIN_SETTINGS_TABS, 'analytics']);
-
-export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
-
-/**
  * All valid chat control section IDs
  */
 export const CHAT_CONTROL_SECTIONS = ['files', 'valves', 'system_prompt', 'params'] as const;
 
 export type ChatControlSection = (typeof CHAT_CONTROL_SECTIONS)[number];
-
-/**
- * Check if admin settings section is enabled globally.
- */
-export function isAdminSettingsEnabled(): boolean {
-	return isFeatureEnabled('admin_settings');
-}
-
-/**
- * Check if a specific admin settings tab is enabled.
- * For the audio tab, also requires FEATURE_VOICE to be true.
- *
- * @param tab - The tab ID to check
- * @returns true if the tab should be visible
- */
-export function isAdminSettingsTabEnabled(tab: string): boolean {
-	// [Gradient] Reject unknown and intentionally hidden tabs, including deep links.
-	if (!knownAdminSettingsTabs.has(tab)) return false;
-	const $config = get(config);
-	if (tab === 'analytics') return $config?.features?.enable_admin_analytics ?? true;
-	// First check if admin settings is enabled at all
-	if (!isAdminSettingsEnabled()) {
-		return false;
-	}
-
-	const allowedTabs = $config?.features?.feature_admin_settings_tabs ?? [];
-
-	// If no tabs specified, all tabs are allowed
-	const tabAllowed = allowedTabs.length === 0 || allowedTabs.includes(tab);
-
-	// Audio tab has additional requirement: FEATURE_VOICE must be true
-	if (tab === 'audio') {
-		return tabAllowed && isFeatureEnabled('voice');
-	}
-
-	// [Gradient] The global system prompt belongs to the models: a tenant that allows the models tab gets it too.
-	if (tab === 'system-prompt') {
-		return tabAllowed || allowedTabs.includes('models');
-	}
-
-	// External Agents tab requires AGENT_API_ENABLED on the backend.
-	if (tab === 'external-agents') {
-		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
-	}
-
-	return tabAllowed;
-}
-
-/**
- * Get the first available admin settings tab.
- * Used for redirecting when accessing a disabled tab.
- *
- * @returns The first enabled tab ID, or null if none available
- */
-export function getFirstAvailableAdminSettingsTab(): AdminSettingsTab | null {
-	for (const tab of ADMIN_SETTINGS_TABS) {
-		if (isAdminSettingsTabEnabled(tab)) {
-			return tab;
-		}
-	}
-	return null;
-}
 
 /**
  * Check if a specific chat control section is enabled.
@@ -237,7 +138,7 @@ export function canContinueResponse(
 	$user: { role?: string; permissions?: { chat?: { continue_response?: boolean } } } | undefined
 ): boolean {
 	if ($config?.features?.feature_agent_api_enabled) return false;
-	return $user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true);
+	return $user?.permissions?.chat?.continue_response ?? true;
 }
 
 export function canRegenerateResponse(
@@ -247,7 +148,6 @@ export function canRegenerateResponse(
 	done: boolean,
 	idle = true
 ): boolean {
-	if (!($user?.role === 'admin' || ($user?.permissions?.chat?.regenerate_response ?? true)))
-		return false;
+	if (!($user?.permissions?.chat?.regenerate_response ?? true)) return false;
 	return !$config?.features?.enable_v2_threads || (isLastMessage && done && idle);
 }

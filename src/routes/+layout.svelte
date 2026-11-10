@@ -73,7 +73,6 @@
 	import { getSessionUser, updateUserTimezone, userSignOut } from '$lib/apis/auths';
 	import { getAllTags } from '$lib/apis/chats';
 	import { isTemporaryChatId } from '$lib/utils/chatId';
-	import { addTerminalConnection, removeTerminalConnection } from '$lib/utils/connections';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import {
@@ -83,14 +82,13 @@
 		getUserTimezone,
 		removeAllDetails
 	} from '$lib/utils';
-	import { setTextScale } from '$lib/utils/text-scale';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import SyncStatsModal from '$lib/components/chat/Settings/SyncStatsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
-	import { getUserSettings } from '$lib/apis/users';
+
 	import dayjs from 'dayjs';
 
 	const unregisterServiceWorkers = async () => {
@@ -752,28 +750,6 @@
 				models.set(await getModels(token, null));
 			}
 			return;
-		}
-
-		const token = localStorage.token;
-		if (!token) return;
-
-		// Only admins can modify system-level connections
-		if ($user?.role !== 'admin') return;
-
-		try {
-			if (event.type === 'connections:terminal') {
-				if (event.data.action === 'add') {
-					await addTerminalConnection(token, {
-						url: event.data.url,
-						key: event.data.key,
-						name: 'Local Open Terminal'
-					});
-				} else if (event.data.action === 'remove') {
-					await removeTerminalConnection(token, event.data.url);
-				}
-			}
-		} catch (e) {
-			console.error('Desktop connection update failed:', e);
 		}
 	};
 

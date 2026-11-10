@@ -1,28 +1,21 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { createEventDispatcher } from 'svelte';
-	import { onMount, getContext } from 'svelte';
-	import { addUser } from '$lib/apis/auths';
+	import { getContext } from 'svelte';
 
 	import Modal from '../../common/Modal.svelte';
-	import {
-		getFunctionValvesById,
-		getFunctionValvesSpecById,
-		updateFunctionValvesById
-	} from '$lib/apis/functions';
+
 	import { getToolValvesById, getToolValvesSpecById, updateToolValvesById } from '$lib/apis/tools';
 
 	import {
 		getUserValvesSpecById as getToolUserValvesSpecById,
 		getUserValvesById as getToolUserValvesById,
-		updateUserValvesById as updateToolUserValvesById,
-		getTools
+		updateUserValvesById as updateToolUserValvesById
 	} from '$lib/apis/tools';
 	import {
 		getUserValvesSpecById as getFunctionUserValvesSpecById,
 		getUserValvesById as getFunctionUserValvesById,
-		updateUserValvesById as updateFunctionUserValvesById,
-		getFunctions
+		updateUserValvesById as updateFunctionUserValvesById
 	} from '$lib/apis/functions';
 
 	import Spinner from '../../common/Spinner.svelte';
@@ -82,10 +75,6 @@
 					res = await updateToolValvesById(localStorage.token, id, valves).catch((error) => {
 						toast.error(`${error}`);
 					});
-				} else if (type === 'function') {
-					res = await updateFunctionValvesById(localStorage.token, id, valves).catch((error) => {
-						toast.error(`${error}`);
-					});
 				}
 			}
 
@@ -116,9 +105,6 @@
 				if (type === 'tool') {
 					valves = await getToolValvesById(localStorage.token, id);
 					valvesSpec = await getToolValvesSpecById(localStorage.token, id);
-				} else if (type === 'function') {
-					valves = await getFunctionValvesById(localStorage.token, id);
-					valvesSpec = await getFunctionValvesSpecById(localStorage.token, id);
 				}
 			}
 

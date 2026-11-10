@@ -81,13 +81,13 @@
 				id: 'skills-new',
 				label: $i18n.t('Create'),
 				href: '/workspace/skills/create',
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills
+				visible: $user?.permissions?.workspace?.skills
 			},
 			{
 				id: 'skills-import',
 				label: $i18n.t('Import JSON'),
 				onClick: () => importInputElement?.click(),
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills_import
+				visible: $user?.permissions?.workspace?.skills_import
 			},
 			{
 				id: 'skills-export',
@@ -104,7 +104,7 @@
 						saveAs(blob, `skills-export-${Date.now()}.json`);
 					}
 				},
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills_export
+				visible: $user?.permissions?.workspace?.skills_export
 			}
 		]);
 	}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	import { models, config, user } from '$lib/stores';
 
 	import { toast } from 'svelte-sonner';
@@ -167,8 +167,7 @@
 								accessRoles={['read']}
 								sharePublic={chatSharing($user).public}
 								shareOpen={chatSharing($user).open}
-								shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
-									$user?.role === 'admin'}
+								shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 								onChange={saveAccessGrants}
 							/>
 						</div>

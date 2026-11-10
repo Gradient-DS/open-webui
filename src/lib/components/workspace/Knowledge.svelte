@@ -17,11 +17,7 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { WEBUI_NAME, user, config, workspaceActions } from '$lib/stores';
-	import {
-		deleteKnowledgeById,
-		searchKnowledgeBases,
-		exportKnowledgeById
-	} from '$lib/apis/knowledge';
+	import { deleteKnowledgeById, searchKnowledgeBases } from '$lib/apis/knowledge';
 
 	import { goto } from '$app/navigation';
 	import { capitalizeFirstLetter } from '$lib/utils';
@@ -210,25 +206,6 @@
 
 		if (createModalCloseHref) {
 			await goto(createModalCloseHref);
-		}
-	};
-
-	const exportHandler = async (item: KnowledgeListItem) => {
-		try {
-			const blob = await exportKnowledgeById(localStorage.token, item.id);
-			if (blob) {
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				a.download = `${item.name}.zip`;
-				document.body.appendChild(a);
-				a.click();
-				document.body.removeChild(a);
-				URL.revokeObjectURL(url);
-				toast.success($i18n.t('Knowledge exported successfully'));
-			}
-		} catch (e) {
-			toast.error(`${e}`);
 		}
 	};
 
@@ -551,14 +528,10 @@
 									</Tooltip>
 								</div>
 
-								{#if item?.write_access || $user?.role === 'admin'}
+								{#if item?.write_access}
 									<div class="ml-2 flex shrink-0 flex-row items-center self-center">
 										<ItemMenu
-											onExport={$user?.role === 'admin'
-												? () => {
-														exportHandler(item);
-													}
-												: null}
+											onExport={null}
 											on:delete={() => {
 												selectedItem = item;
 												showDeleteConfirm = true;

@@ -102,7 +102,7 @@
 				id: 'prompts-import',
 				label: $i18n.t('Import JSON'),
 				onClick: () => promptsImportInputElement?.click(),
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.prompts_import
+				visible: $user?.permissions?.workspace?.prompts_import
 			},
 			{
 				id: 'prompts-export',
@@ -113,7 +113,7 @@
 					});
 					saveAs(blob, `prompts-export-${Date.now()}.json`);
 				},
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.prompts_export
+				visible: $user?.permissions?.workspace?.prompts_export
 			}
 		]);
 	}

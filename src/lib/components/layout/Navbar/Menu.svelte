@@ -5,8 +5,7 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { downloadChatAsPDF } from '$lib/apis/utils';
-	import { copyToClipboard, createMessagesList } from '$lib/utils';
+	import { createMessagesList } from '$lib/utils';
 	import { copyFormattedChat } from '$lib/utils/copy';
 	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
@@ -19,10 +18,8 @@
 		openDocumentTabSignal,
 		mobile,
 		temporaryChatEnabled,
-		theme,
 		user,
 		config,
-		settings,
 		folders,
 		showEmbeds,
 		artifactContents,
@@ -323,7 +320,7 @@
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 			{/if}
 
-			{#if $mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
+			{#if $mobile && isFeatureEnabled('chat_controls') && ($user?.permissions.chat?.controls ?? true)}
 				<button
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-controls-button"
@@ -408,7 +405,7 @@
 				</button>
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+			{#if $user.permissions?.chat?.export ?? true}
 				<DropdownSub contentClass="select-none z-50">
 					<button
 						slot="trigger"
@@ -527,7 +524,7 @@
 					<div class="flex items-center">{$i18n.t('Archive')}</div>
 				</button>
 
-				{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+				{#if $user?.permissions?.chat?.delete ?? true}
 					<button
 						draggable="false"
 						class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[0.8125rem] cursor-pointer select-none hover:bg-gray-50/40 dark:hover:bg-gray-800/40"

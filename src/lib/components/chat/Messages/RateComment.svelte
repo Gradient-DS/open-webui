@@ -13,9 +13,9 @@
 	export let message;
 	export let show = false;
 
-	let tags = [];
+	let tags: { name: string }[] = [];
 
-	let selectedReason = null;
+	let selectedReason: string | null = null;
 	let comment = '';
 
 	let detailedRating = null;
@@ -27,6 +27,7 @@
 	$: layer3Prompt = $config?.features?.feedback_layer3_prompt || '';
 
 	type Definition = { id: string; labels: { nl: string; en: string } };
+	let language: 'nl' | 'en';
 	$: language = $i18n.language.startsWith('nl') ? 'nl' : 'en';
 	$: definitions = ($config?.features?.feedback_reasons ?? []) as Definition[];
 	$: tagDefinitions = ($config?.features?.feedback_tags ?? []) as Definition[];
@@ -154,10 +155,10 @@
 								? 'bg-gray-100 dark:bg-gray-800'
 								: ''} transition rounded-xl"
 							on:click={() => {
-                                selectedReason = selectedReason === reason ? null : reason;
+								selectedReason = selectedReason === reason ? null : reason;
 							}}
 						>
-                            {reasonLabels[reason]}
+							{reasonLabels[reason]}
 						</button>
 					{/each}
 				</div>

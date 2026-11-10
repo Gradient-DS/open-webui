@@ -76,7 +76,7 @@
 
 	$: hasMessages = history?.messages && Object.keys(history.messages).length > 0;
 
-	$: showControlsTab = false; // [Gradient] $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true)
+	$: showControlsTab = false;
 	const chatContext = (terminal: any) => terminal?.contexts?.chat ?? {};
 	const chatContextAvailable = (terminal: any) => chatContext(terminal) !== false;
 	const chatContextNeedsSavedChat = (terminal: any) =>
@@ -91,8 +91,7 @@
 	$: terminalFilesAvailable = !!(
 		$selectedTerminalId &&
 		(selectedSystemTerminalAvailable ||
-			(!selectedSystemTerminal &&
-				($user?.role === 'admin' || ($user?.permissions?.features?.direct_tool_servers ?? true))))
+			(!selectedSystemTerminal && ($user?.permissions?.features?.direct_tool_servers ?? true)))
 	);
 	$: showFilesTab =
 		terminalFilesAvailable ||
@@ -153,7 +152,7 @@
 		$selectedTerminalId &&
 		$terminalServers !== null &&
 		!($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId) &&
-		!($user?.role === 'admin' || ($user?.permissions?.features?.direct_tool_servers ?? true))
+		!($user?.permissions?.features?.direct_tool_servers ?? true)
 	) {
 		selectedTerminalId.set(null);
 	}

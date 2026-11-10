@@ -16,11 +16,11 @@
 	const { saveAs } = fileSaver;
 
 	import { submitThreadRating } from '$lib/utils/threadFeedback';
-	import { createNewFeedback, getFeedbackById, updateFeedbackById } from '$lib/apis/evaluations';
+	import { createNewFeedback, updateFeedbackById } from '$lib/apis/evaluations';
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
 	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
-	import { downloadAgentTrace } from '$lib/apis/agentThreads'; // [Gradient]
+	// [Gradient]
 
 	import {
 		audioQueue,
@@ -34,13 +34,11 @@
 	import { synthesizeSpeech } from '$lib/apis/audio';
 	import {
 		copyToClipboard as _copyToClipboard,
-		approximateToHumanReadable,
 		getMessageContentParts,
 		sanitizeResponseContent,
 		createMessagesList,
 		formatMessageTimestamp,
 		formatMessageTimestampFull,
-		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
 	import {
@@ -49,7 +47,7 @@
 		isFeatureEnabled
 	} from '$lib/utils/features';
 	import { answeredByLabel } from '$lib/utils/models/catalog';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
@@ -76,7 +74,7 @@
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
-	import { flyAndScale } from '$lib/utils/transitions';
+
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
@@ -641,21 +639,6 @@
 		} catch (e) {
 			console.error('Message DOCX export failed:', e);
 			toast.error($i18n.t('Failed to export Word document'));
-		}
-	};
-
-	// [Gradient] The v2 thread behind this answer, for admins: the trace file opens in soev-agents-inspect.
-	$: traceThreadId =
-		$user?.role === 'admin' && $config?.features?.enable_agent_trace_download
-			? (message?.meta?.agent_v2?.thread_id ?? null)
-			: null;
-
-	const downloadMessageTrace = async (threadId: string) => {
-		try {
-			saveAs(await downloadAgentTrace(localStorage.token, threadId), `${threadId}.trace.json`);
-		} catch (e) {
-			console.error('Message trace download failed:', e);
-			toast.error($i18n.t('Failed to download trace'));
 		}
 	};
 
@@ -1709,23 +1692,6 @@
 													</div>
 												</button>
 											{/if}
-											{#if traceThreadId}
-												<button
-													class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
-													on:click={() => {
-														downloadMessageTrace(traceThreadId);
-														showDownloadMenu = false;
-													}}
-												>
-													<div class="flex items-center line-clamp-1">
-														{$i18n.t('Agent trace (.json)')}
-														<span
-															class="ml-1.5 rounded-lg bg-orange-500/15 px-1.5 text-xs font-medium text-orange-700 dark:text-orange-300"
-															>{$i18n.t('dev')}</span
-														>
-													</div>
-												</button>
-											{/if}
 										</div>
 									</div>
 								</Dropdown>
@@ -1746,7 +1712,7 @@
 									</Tooltip>
 								{/if}
 
-								{#if isFeatureEnabled('read_aloud') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
+								{#if isFeatureEnabled('read_aloud') && !readOnly && ($user?.permissions?.chat?.tts ?? true)}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}
@@ -1879,7 +1845,7 @@
 								{/if}
 
 								{#if !readOnly}
-									{#if !$temporaryChatEnabled && ($config?.features.enable_message_rating ?? true) && ($user?.role === 'admin' || ($user?.permissions?.chat?.rate_response ?? true))}
+									{#if !$temporaryChatEnabled && ($config?.features.enable_message_rating ?? true) && ($user?.permissions?.chat?.rate_response ?? true)}
 										<Tooltip content={$i18n.t('Good Response')} placement="bottom">
 											<button
 												aria-label={$i18n.t('Good Response')}
@@ -2137,7 +2103,7 @@
 										</Tooltip>
 									{/each}
 
-									{#if message.done && !readOnly && forkHandler && ($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true))}
+									{#if message.done && !readOnly && forkHandler && ($user?.permissions?.chat?.import ?? true)}
 										<Tooltip content="Fork chat" placement="bottom">
 											<button
 												aria-label="Fork chat"
@@ -2168,7 +2134,7 @@
 										</Tooltip>
 									{/if}
 
-									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete_message ?? true)}
+									{#if $user?.permissions?.chat?.delete_message ?? true}
 										{#if !$config?.features?.enable_v2_threads && siblings.length > 1}
 											<Tooltip content={$i18n.t('Delete')} placement="bottom">
 												<button

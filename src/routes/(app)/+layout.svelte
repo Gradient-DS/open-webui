@@ -1,10 +1,4 @@
 <script lang="ts">
-	// [Gradient] Tenant gates also apply to settings deep links.
-	import {
-		isAdminSettingsEnabled,
-		isAdminSettingsTabEnabled,
-		getFirstAvailableAdminSettingsTab
-	} from '$lib/utils/features';
 	import { toast } from 'svelte-sonner';
 	import { onMount, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
@@ -34,10 +28,7 @@
 		user,
 		settings,
 		models,
-		knowledge,
 		tools,
-		functions,
-		tags,
 		banners,
 		showSettings,
 		showChangelog,
@@ -242,13 +233,7 @@
 		handledSettingsUrl = urlKey;
 
 		let targetSettings = requestedSettings;
-		if (requestedSettings.startsWith('admin:')) {
-			if ($user?.role !== 'admin' || !isAdminSettingsEnabled()) targetSettings = 'general';
-			else if (!isAdminSettingsTabEnabled(requestedSettings.slice(6))) {
-				const first = getFirstAvailableAdminSettingsTab();
-				targetSettings = first ? 'admin:' + first : 'general';
-			}
-		}
+
 		showSettings.set(targetSettings);
 
 		const params = new URLSearchParams($page.url.searchParams);
@@ -396,7 +381,7 @@
 				} else if (shortcut === Shortcut.NEW_TEMPORARY_CHAT) {
 					console.log('Shortcut triggered: NEW_TEMPORARY_CHAT');
 					event.preventDefault();
-					if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+					if ($user?.permissions?.chat?.temporary_enforced) {
 						temporaryChatEnabled.set(true);
 					} else {
 						temporaryChatEnabled.set(!$temporaryChatEnabled);
@@ -439,42 +424,18 @@
 		};
 		setupKeyboardShortcuts();
 
-		if (
-			isFeatureEnabled('changelog') &&
-			$user?.role === 'admin' &&
-			($settings?.showChangelog ?? true)
-		) {
-			showChangelog.set($settings?.version !== $config.version);
-		}
-
-		if ($user?.role === 'admin' || ($user?.permissions?.chat?.temporary ?? true)) {
+		if ($user?.permissions?.chat?.temporary ?? true) {
 			if ($page.url.searchParams.get('temporary-chat') === 'true') {
 				temporaryChatEnabled.set(true);
 			}
 
-			if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+			if ($user?.permissions?.chat?.temporary_enforced) {
 				temporaryChatEnabled.set(true);
 			}
 		}
 
 		// Check for version updates
-		if (
-			isFeatureEnabled('changelog') &&
-			$user?.role === 'admin' &&
-			$config?.features?.enable_version_update_check
-		) {
-			// Check if the user has dismissed the update toast in the last 24 hours
-			if (localStorage.dismissedUpdateToast) {
-				const dismissedUpdateToast = new Date(Number(localStorage.dismissedUpdateToast));
-				const now = new Date();
 
-				if (now - dismissedUpdateToast > 24 * 60 * 60 * 1000) {
-					checkForVersionUpdates();
-				}
-			} else {
-				checkForVersionUpdates();
-			}
-		}
 		// Persist showControls: track open/close state separately from saved size
 		// chatControlsSize always retains the last width for openPane()
 		await showControls.set(!$mobile ? localStorage.showControls === 'true' : false);

@@ -13,14 +13,12 @@
 	export let onSubmit = () => {};
 
 	export let connection = null;
-	export let direct = false;
 
 	let showConfigModal = false;
 </script>
 
 <AddToolServerModal
 	edit
-	{direct}
 	bind:show={showConfigModal}
 	{connection}
 	onDelete={() => {

@@ -99,8 +99,7 @@
 				bind:groupIds
 				bind:selectedUsers
 				platformPeople={true}
-				includeUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
-					$user?.role === 'admin'}
+				includeUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 				pagination={true}
 				disabled={busy || !loaded}
 			/>

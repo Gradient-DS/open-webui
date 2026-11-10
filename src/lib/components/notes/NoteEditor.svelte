@@ -976,9 +976,9 @@ ${content}
 		bind:show={showAccessControlModal}
 		bind:accessGrants={note.access_grants}
 		accessRoles={['read', 'write']}
-		share={$user?.permissions?.sharing?.notes || $user?.role === 'admin'}
-		sharePublic={$user?.permissions?.sharing?.public_notes || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+		share={$user?.permissions?.sharing?.notes}
+		sharePublic={$user?.permissions?.sharing?.public_notes}
+		shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 		onChange={async () => {
 			if (id) {
 				try {
@@ -1047,8 +1047,7 @@ ${content}
 								type="text"
 								bind:value={note.title}
 								placeholder={titleGenerating ? $i18n.t('Generating...') : $i18n.t('Title')}
-								disabled={(note?.user_id !== $user?.id && $user?.role !== 'admin') ||
-									titleGenerating}
+								disabled={note?.user_id !== $user?.id || titleGenerating}
 								required
 								on:focus={() => {
 									titleInputFocused = true;
@@ -1073,8 +1072,7 @@ ${content}
 										<button
 											class="flex size-5 items-center justify-center self-center dark:hover:text-white transition disabled:cursor-not-allowed"
 											id="generate-title-button"
-											disabled={(note?.user_id !== $user?.id && $user?.role !== 'admin') ||
-												titleGenerating}
+											disabled={note?.user_id !== $user?.id || titleGenerating}
 											on:mouseenter={() => {
 												ignoreBlur = true;
 											}}
@@ -1241,7 +1239,7 @@ ${content}
 											on:click={() => {
 												showAccessControlModal = true;
 											}}
-											disabled={note?.user_id !== $user?.id && $user?.role !== 'admin'}
+											disabled={note?.user_id !== $user?.id}
 										/>
 									</div>
 								{:else}
