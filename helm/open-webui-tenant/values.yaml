@@ -166,7 +166,6 @@ openWebui:
     webuiAuth: "true"
     enableSignup: "false"
     enableLoginForm: "true"
-    enableInitialAdminSignup: "true"
     defaultUserRole: "user"
     enableOauthSignup: "false"
     oauthInviteRequired: "false"
@@ -282,10 +281,6 @@ openWebui:
     featureSkillFiles: "False"
     enableSkillExecution: "False"
     featureBuiltinTools: "False"
-    featureAdminEvaluations: "True"
-    featureAdminFunctions: "False"
-    featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
     featureWebpageUrl: "True"
     featureReferenceChats: "True"
     featureSimpleAssistantBuilder: "False"
@@ -436,18 +431,12 @@ openWebui:
     userPermissionsFeaturesApiKeys: "false"
 
     # Admin
-    enableAdminExport: "false"
     enableDataExport: "true"
     dataExportRetentionHours: "24"
     # Legacy feedback access only; never grants access to chats.
-    enableAdminChatAccess: "false"
-    enableAdminAnalytics: "true"  # Aggregate usage only
-    enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
-    bypassAdminAccessControl: "false"  # Admin must follow access control
     # Tools and Functions run admin-written Python in the pod, which holds the
     # tenant's credentials. Off unless a tenant needs them.
     enablePlugins: "false"
-    showAdminDetails: "false"
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
     # Google Drive Integration

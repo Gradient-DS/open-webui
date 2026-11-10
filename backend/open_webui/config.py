@@ -20,7 +20,6 @@ from open_webui.env import (
     AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
-    ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_DB_MIGRATIONS,
     ENV,
     FRONTEND_BUILD_DIR,
@@ -229,7 +228,6 @@ if CUSTOM_NAME:
             WEBUI_NAME = data['name']
     except Exception as e:
         log.exception(e)
-        pass
 
 
 ####################################
@@ -1714,13 +1712,6 @@ DEFAULT_ARENA_MODEL = {
 
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
 
-ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
-
-ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
-
-BYPASS_ADMIN_ACCESS_CONTROL = os.getenv('BYPASS_ADMIN_ACCESS_CONTROL', 'False').lower() == 'true'
-
-ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = os.getenv('ENABLE_COMMUNITY_SHARING', 'True').lower() == 'true'
 
@@ -1793,11 +1784,6 @@ except Exception as e:
     banners = []
 
 WEBUI_BANNERS = banners
-
-
-SHOW_ADMIN_DETAILS = os.getenv('SHOW_ADMIN_DETAILS', 'true').lower() == 'true'
-
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', None)
 
 
 ####################################
@@ -2223,14 +2209,9 @@ OAUTH_ROLES_CLAIM = os.getenv('OAUTH_ROLES_CLAIM', 'roles')
 OAUTH_ROLES_SEPARATOR = os.getenv('OAUTH_ROLES_SEPARATOR', ',')
 
 OAUTH_ALLOWED_ROLES = [
-    role.strip()
-    for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(OAUTH_ROLES_SEPARATOR)
-    if role
+    role.strip() for role in os.getenv('OAUTH_ALLOWED_ROLES', 'user').split(OAUTH_ROLES_SEPARATOR) if role
 ]
 
-OAUTH_ADMIN_ROLES = [
-    role.strip() for role in os.getenv('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role
-]
 
 OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_DOMAINS', '*').split(',')]
 OAUTH_ALLOWED_TENANTS = [
@@ -2600,15 +2581,6 @@ ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'tr
 # [Gradient] Admins' "Agent trace (.json)" download; off unless a tenant turns it on.
 ENABLE_AGENT_TRACE_DOWNLOAD = os.environ.get('ENABLE_AGENT_TRACE_DOWNLOAD', 'False').lower() == 'true'
 
-FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS = os.environ.get('FEATURE_ADMIN_SETTINGS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS_TABS = [
-    tab.strip() for tab in os.environ.get('FEATURE_ADMIN_SETTINGS_TABS', '').split(',') if tab.strip()
-]
 
 FEATURE_CHAT_CONTROLS_SECTIONS = [
     section.strip() for section in os.environ.get('FEATURE_CHAT_CONTROLS_SECTIONS', '').split(',') if section.strip()
@@ -2919,8 +2891,6 @@ DEFAULT_CONFIG = {
     'ui.enable_message_rating': ENABLE_MESSAGE_RATING,
     'ui.enable_user_webhooks': ENABLE_USER_WEBHOOKS,
     'ui.banners': WEBUI_BANNERS,
-    'auth.admin.show': SHOW_ADMIN_DETAILS,
-    'auth.admin.email': ADMIN_EMAIL,
     'task.model.default': TASK_MODEL,
     'task.model.external': TASK_MODEL_EXTERNAL,
     'task.model.params': TASK_MODEL_PARAMS,
@@ -2996,7 +2966,6 @@ DEFAULT_CONFIG = {
     'oauth.blocked_groups': OAUTH_BLOCKED_GROUPS,
     'oauth.roles_claim': OAUTH_ROLES_CLAIM,
     'oauth.allowed_roles': OAUTH_ALLOWED_ROLES,
-    'oauth.admin_roles': OAUTH_ADMIN_ROLES,
     'oauth.allowed_domains': OAUTH_ALLOWED_DOMAINS,
     'oauth.allowed_tenants': OAUTH_ALLOWED_TENANTS,
     'oauth.update_picture_on_login': OAUTH_UPDATE_PICTURE_ON_LOGIN,

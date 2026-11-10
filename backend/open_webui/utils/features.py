@@ -4,9 +4,6 @@ from typing import Literal
 
 from fastapi import HTTPException, status
 from open_webui.config import (
-    FEATURE_ADMIN_EVALUATIONS,
-    FEATURE_ADMIN_FUNCTIONS,
-    FEATURE_ADMIN_SETTINGS,
     FEATURE_ARTIFACTS,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
@@ -49,9 +46,6 @@ Feature = Literal[
     'prompts',
     'tools',
     'skills',
-    'admin_evaluations',
-    'admin_functions',
-    'admin_settings',
     'tool_servers',
     'terminal_servers',
     'builtin_tools',
@@ -76,9 +70,6 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'prompts': FEATURE_PROMPTS,
     'tools': FEATURE_TOOLS,
     'skills': FEATURE_SKILLS,
-    'admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
-    'admin_functions': FEATURE_ADMIN_FUNCTIONS,
-    'admin_settings': FEATURE_ADMIN_SETTINGS,
     'tool_servers': FEATURE_TOOL_SERVERS,
     'terminal_servers': FEATURE_TERMINAL_SERVERS,
     'builtin_tools': FEATURE_BUILTIN_TOOLS,
