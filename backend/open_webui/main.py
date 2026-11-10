@@ -479,8 +479,22 @@ async def periodic_export_cleanup():
             log.error(f'Error in export cleanup: {e}')
 
 
+def validate_bootstrap_environment() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if not v2_enabled():
+        return
+    for variable in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'):
+        if variable in os.environ:
+            raise RuntimeError(f'{variable} is not supported on the platform route')
+    if RESET_CONFIG_ON_START:
+        raise RuntimeError('RESET_CONFIG_ON_START is not supported on the platform route')
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_bootstrap_environment()
+
     # Store reference to main event loop for sync->async calls (e.g., embedding generation)
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
@@ -853,9 +867,10 @@ app.state.BASE_MODELS = []
 
 async def initialize_runtime_config(app: FastAPI):
     # Migrate legacy access_control → access_grants on boot.
+    from open_webui.soev.policy_jobs import v2_enabled
     from open_webui.utils.access_control import migrate_access_control
 
-    connections = await Config.get('tool_server.connections', []) or []
+    connections = [] if v2_enabled() else await Config.get('tool_server.connections', []) or []
     if any('access_control' in c.get('config', {}) for c in connections):
         for connection in connections:
             migrate_access_control(connection.get('config', {}))
@@ -2928,7 +2943,15 @@ except Exception as e:
     )
 
 
+def require_tool_server_registration() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+
 async def register_client(request, client_id: str) -> bool:
+    require_tool_server_registration()
     server_type, server_id = client_id.split(':', 1)
 
     connection = None
@@ -3023,13 +3046,16 @@ async def register_client(request, client_id: str) -> bool:
     return True
 
 
-@app.get('/oauth/clients/{client_id}/authorize')
+@app.get(
+    '/oauth/clients/{client_id}/authorize', description='MCP client authorization is unavailable on the platform route.'
+)
 async def oauth_client_authorize(
     client_id: str,
     request: Request,
     response: Response,
     user=Depends(get_verified_user),
 ):
+    require_tool_server_registration()
     # ensure_valid_client_registration
     client = await oauth_client_manager.get_client(client_id)
     client_info = await oauth_client_manager.get_client_info(client_id)

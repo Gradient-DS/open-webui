@@ -37,6 +37,7 @@ reason = "Never attempted: every owner pass skips it because `provider` is decla
 
 [[waived]]
 id = "GET /oauth/clients/{client_id}/authorize"
+runtime_soev_backed = "waive"
 reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
 
 [[waived]]

@@ -89,6 +89,10 @@ if ENABLE_DB_MIGRATIONS:
 
 async def import_legacy_config_json():
     """Migrate legacy config.json → database on first run."""
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     if not os.path.exists(f'{DATA_DIR}/config.json'):
         return
     with open(f'{DATA_DIR}/config.json', 'r') as _f:

@@ -21049,6 +21049,7 @@
     },
     "/api/v1/auths/signup": {
       "post": {
+        "description": "Platform users sign in through the identity provider.",
         "operationId": "signup_api_v1_auths_signup_post",
         "requestBody": {
           "content": {
@@ -42394,6 +42395,7 @@
     },
     "/oauth/clients/{client_id}/authorize": {
       "get": {
+        "description": "MCP client authorization is unavailable on the platform route.",
         "operationId": "oauth_client_authorize_oauth_clients__client_id__authorize_get",
         "parameters": [
           {

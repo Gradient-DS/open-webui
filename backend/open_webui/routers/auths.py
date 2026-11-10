@@ -1064,6 +1064,13 @@ async def signin(
 ############################
 
 
+def require_local_signup() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+
 async def signup_handler(
     request: Request,
     email: str,
@@ -1081,6 +1088,8 @@ async def signup_handler(
     Returns the newly created UserModel.
     Raises HTTPException on failure.
     """
+    require_local_signup()
+
     # Insert with default role first to avoid TOCTOU race on first signup.
     # If has_users() is checked before insert, concurrent requests during
     # first-user registration can all see an empty table and each get admin.
@@ -1122,13 +1131,16 @@ async def signup_handler(
     return user
 
 
-@router.post('/signup', response_model=SessionUserResponse)
+@router.post(
+    '/signup', response_model=SessionUserResponse, description='Platform users sign in through the identity provider.'
+)
 async def signup(
     request: Request,
     response: Response,
     form_data: SignupForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    require_local_signup()
     has_users = await Users.has_users(db=db)
 
     if WEBUI_AUTH:

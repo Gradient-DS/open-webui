@@ -61,6 +61,7 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'platform_thread',
         'platform_thread_versions',
         'platform_thread_read',
+        'disabled_oauth_client',
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
@@ -391,3 +392,20 @@ def test_fanout_controls_require_the_platform_without_new_waivers():
     assert len(fields) == 3
     assert all(entry['backed_by'] == 'soev-solutions' for entry in fields)
     assert not routes & set(seeds.SOEV_BACKED)
+
+
+def test_platform_oauth_authorization_has_a_seed_and_an_exact_refusal(monkeypatch):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'GET /oauth/clients/{client_id}/authorize'
+    parameter = seeds.parameter_for('/oauth/clients/{client_id}/authorize', 'client_id')
+    assert seeds.seed_enabled(parameter)
+    assert parameter['seeded_by'] == 'seed_disabled_oauth_client'
+    assert seeds.seed_disabled_oauth_client(None, parameter) == 'mcp:fictional-disabled'
+    assert route in seeds.ordinary_targets()
+    declaration = crossuser.expected_refusals()[route]
+    assert declaration['all_actors'] is True
+    assert declaration['status'] == 403
+    assert declaration['json'] == {'detail': 'The requested action has been restricted as a security measure.'}
+    assert route not in coverage.waivers()

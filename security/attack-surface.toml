@@ -1843,3 +1843,35 @@ v2 = { json = { title = "Fictional conversation {token}" } }
 route = "POST /api/v1/feedback/report"
 description = "Fictional report positive control; requires bug_reports.enabled and an explicitly configured disposable public HTTPS receiver in soev-api. Uses the owner login; delivery failure is a failed control."
 json = { category = "bug", description = "Fictional sweep delivery control", "context.route" = "/fictional", "context.trace_id" = "fictional-trace" }
+
+[[parameter]]
+key = "disabled_oauth_client"
+name = "client_id"
+prefix = "/oauth/clients/{client_id}/authorize"
+backed_by = "soev-solutions"
+seeded_by = "seed_disabled_oauth_client"
+depends_on = []
+description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id drives this boundary for every authenticated actor."
+
+[[field]]
+route = "POST /api/v1/auths/signup"
+description = "Platform signup refuses before user creation or first-user promotion; identities come from the login provider."
+v2 = { json = { email = "fictional-signup-{token}@example.invalid", password = "Fictional-Signup-Passw0rd!", name = "Fictional signup" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /oauth/clients/{client_id}/authorize"
+status = 403
+detail = "The requested action has been restricted as a security measure."
+json = { detail = "The requested action has been restricted as a security measure." }
+reason = "Platform tool servers are disabled; refuse authorization before OAuth registration can persist product configuration."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/signup"
+status = 403
+detail = "The requested action has been restricted as a security measure."
+json = { detail = "The requested action has been restricted as a security measure." }
+reason = "Platform identities use the configured login provider. Refuse before local account creation, admin promotion or signup configuration writes."

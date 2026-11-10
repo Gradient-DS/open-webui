@@ -296,6 +296,10 @@ def connection_index(ctx, parameter):
     return '0'
 
 
+def seed_disabled_oauth_client(ctx, parameter):
+    return 'mcp:fictional-disabled'
+
+
 def seed_admin_user(ctx, parameter):
     return ctx.admin.identity['id']
 
@@ -722,6 +726,7 @@ def seed_cloud_authorize_connection(ctx, parameter):
 _SEEDERS = {
     function.__name__: function
     for function in (
+        seed_disabled_oauth_client,
         prepare_configuration,
         connection_index,
         seed_admin_user,

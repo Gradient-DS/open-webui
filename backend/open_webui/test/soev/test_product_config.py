@@ -410,3 +410,118 @@ async def test_legacy_disabled_skill_routes_remain_absent(live, monkeypatch):
             response = await api.request(method, '/id/fictional-skill/files')
             assert response.status_code == 404, response.text
     assert not live.calls
+
+
+@pytest.mark.asyncio
+async def test_platform_lifespan_completes_without_config_writes(live, monkeypatch, tmp_path):
+    import asyncio
+    from unittest.mock import Mock
+
+    from open_webui.services.deletion import cleanup_worker
+    from open_webui.soev import group_mirror, offboarding, retention
+    from open_webui.utils import automations
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    main = importlib.import_module('open_webui.main')
+
+    for name in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME', 'RESET_CONFIG_ON_START'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(main, 'WEBUI_ADMIN_EMAIL', '')
+    monkeypatch.setattr(main, 'WEBUI_ADMIN_PASSWORD', '')
+    monkeypatch.setattr(main, 'RESET_CONFIG_ON_START', False)
+    monkeypatch.setattr(main, 'LICENSE_KEY', '')
+    monkeypatch.setattr(main, 'SAFE_MODE', False)
+    monkeypatch.setattr(main, 'get_redis_client', lambda **kwargs: None)
+    monkeypatch.setattr(main, 'install_tool_and_function_dependencies', AsyncMock())
+    monkeypatch.setattr(main.capabilities, 'refresh', AsyncMock())
+    monkeypatch.setattr(group_mirror, 'start_reconciler', Mock())
+    monkeypatch.setattr(group_mirror, 'stop_reconciler', AsyncMock())
+    monkeypatch.setattr(cleanup_worker, 'start_cleanup_worker', Mock())
+    monkeypatch.setattr(cleanup_worker, 'stop_cleanup_worker', Mock())
+    monkeypatch.setattr(offboarding, 'start_worker', Mock(return_value=None))
+    monkeypatch.setattr(offboarding, 'stop_worker', AsyncMock())
+    monkeypatch.setattr(retention, 'deletion_feed_worker', AsyncMock())
+    monkeypatch.setattr(automations, 'scheduler_worker_loop', AsyncMock())
+    for name in (
+        'periodic_usage_pool_cleanup',
+        'periodic_session_pool_cleanup',
+        'periodic_archive_cleanup',
+        'periodic_data_retention_cleanup',
+        'periodic_export_cleanup',
+    ):
+        monkeypatch.setattr(main, name, AsyncMock())
+    monkeypatch.setattr(config, 'DATA_DIR', tmp_path)
+    legacy = tmp_path / 'config.json'
+    legacy.write_text('{"models.system_prompt": "Fictional obsolete prompt"}')
+    monkeypatch.setattr(
+        Config,
+        'DEFAULTS',
+        {
+            **Config.DEFAULTS,
+            'tool_server.connections': [{'config': {'access_control': {}}}],
+            'evaluation.arena.models': [{'meta': {'access_control': {}}}],
+            'models.base_models_cache': False,
+        },
+    )
+    monkeypatch.setattr(main, 'set_tool_servers', AsyncMock())
+    monkeypatch.setattr(main, 'set_terminal_servers', AsyncMock())
+    writes = {}
+    for name in ('upsert', 'clear', 'delete', 'seed_defaults', 'rename_prefix', 'repair_config_rows'):
+        writes[name] = AsyncMock(side_effect=AssertionError('Platform startup must not write configuration'))
+        monkeypatch.setattr(Config, name, writes[name])
+    main.app.state.startup_complete = False
+    statements = []
+
+    def record_config_writes(connection, cursor, statement, parameters, context, executemany):
+        sql = ' '.join(statement.lower().replace('"', '').split())
+        if sql.startswith(('insert into config ', 'update config ', 'delete from config')):
+            statements.append(statement)
+
+    event.listen(Engine, 'before_cursor_execute', record_config_writes)
+    try:
+        async with main.app.router.lifespan_context(main.app):
+            assert main.app.state.startup_complete is True
+            assert live.calls
+            await asyncio.sleep(0)
+    finally:
+        event.remove(Engine, 'before_cursor_execute', record_config_writes)
+    for write in writes.values():
+        write.assert_not_called()
+    assert statements == []
+    assert legacy.exists()
+    assert not (tmp_path / 'old_config.json').exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('variable', ['WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'])
+async def test_platform_lifespan_rejects_admin_environment(live, monkeypatch, variable):
+    main = importlib.import_module('open_webui.main')
+
+    for name in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, 'fictional-admin-value')
+    create = AsyncMock(side_effect=AssertionError('No account may be created'))
+    monkeypatch.setattr(main, 'create_admin_user', create)
+    with pytest.raises(RuntimeError, match=variable) as error:
+        async with main.app.router.lifespan_context(main.app):
+            pytest.fail('Invalid environment must refuse startup')
+    assert 'fictional-admin-value' not in str(error.value)
+    create.assert_not_called()
+    assert not live.calls
+
+
+@pytest.mark.asyncio
+async def test_platform_local_signup_and_oauth_registration_refuse_before_writes(live, monkeypatch):
+    main = importlib.import_module('open_webui.main')
+    from open_webui.routers import auths
+
+    create = AsyncMock(side_effect=AssertionError('No local signup may occur'))
+    monkeypatch.setattr(auths.Auths, 'insert_new_auth', create)
+    with pytest.raises(HTTPException) as signup:
+        await auths.signup_handler(None, 'fern@example.invalid', 'Fictional-password', 'Fern', db=None)
+    with pytest.raises(HTTPException) as oauth:
+        await main.register_client(None, 'mcp:fictional-disabled')
+    assert signup.value.status_code == oauth.value.status_code == 403
+    create.assert_not_called()
+    assert not live.calls
