@@ -230,12 +230,13 @@ from open_webui.socket.main import (
 from open_webui.socket.main import (
     app as socket_app,
 )
-from open_webui.soev import capabilities, model_catalog, system_prompt
+from open_webui.soev import capabilities, model_catalog, sessions, system_prompt
 from open_webui.soev import threads as soev_threads
 from open_webui.soev.acting import install
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
+from open_webui.soev.login_attach import validate_login_config
 from open_webui.soev.thread_approvals import require_legacy_approval
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.soev.thread_routes import NO_STORE, create_thread_router
@@ -262,6 +263,7 @@ from open_webui.utils.auth import (
     get_http_authorization_cred,
     get_license_data,
     get_verified_user,
+    is_valid_token,
 )
 from open_webui.utils.chat import (
     chat_completed as chat_completed_handler,
@@ -524,6 +526,7 @@ async def lifespan(app: FastAPI):
 
     await import_legacy_config_json()
     await seed_registered_defaults()
+    await validate_login_config()
     await initialize_runtime_config(app)
     await migrate_legacy_webhook_config()
     await publish_event(app, EVENTS.SYSTEM_STARTUP_STARTED, source='system')
@@ -2237,8 +2240,11 @@ async def get_app_config(request: Request):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail='Invalid token',
             )
-        if data is not None and 'id' in data:
-            user = await Users.get_user_by_id(data['id'])
+        # [Gradient] Same session boundary as every other route: revoked,
+        # scoped and partial tokens, and unbound platform accounts, read only
+        # the public configuration.
+        if data is not None and 'id' in data and await is_valid_token(data, getattr(request.app.state, 'redis', None)):
+            user = sessions.session_user(await Users.get_user_by_id(data['id']), data)
 
     onboarding = False
     if user is None:
@@ -2893,8 +2899,16 @@ async def oauth_login_callback(
     """Handle the OAuth provider callback.
 
     Resolution order:
-    1. Match by subject ID bound to the provider.
-    2. If no match and signup policy allows it, create a new user.
+    1. Match by subject ID bound to the provider. With soev-api configured, use
+       only the verified token's sub and verify an existing person binding
+       against /v1/me before login; mismatches refuse (403). A missing person
+       is bound from /v1/me only if no other account already holds it.
+    2. With soev-api configured, resolve the login token's person and attach to
+       that person's existing account. A different bound subject refuses (403);
+       failed discovery refuses with a retryable error (503).
+    3. If no person account matches and signup policy allows it, create a new user
+       atomically with the verified person binding. Concurrent creation resolves
+       through the unique person binding. No platform session lacks a person.
        An already registered email is refused; it never links accounts.
     """
     return await oauth_manager.handle_callback(request, provider, response, db=db)

@@ -38,6 +38,7 @@ from open_webui.env import (
 from open_webui.models.auths import Auths
 from open_webui.models.config import Config
 from open_webui.models.users import Users
+from open_webui.soev import sessions
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import parse_duration
@@ -398,6 +399,7 @@ async def get_current_user(
                 detail='Invalid token',
             )
 
+        sessions.require_session_purpose(data)
         # Partial tokens (pending 2FA verification or pending 2FA enrollment)
         # must never grant a normal session — only the dedicated 2FA endpoints
         # may accept them.
@@ -424,6 +426,7 @@ async def get_current_user(
                 )
 
             user = await Users.get_user_by_id(data['id'])
+            sessions.require_session(user, data)
             if user is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -482,6 +485,7 @@ async def get_current_user(
 async def get_current_user_by_api_key(request, api_key: str):
     # Each function call manages its own short-lived session internally
     user = await Users.get_user_by_api_key(api_key)
+    sessions.require_session(user)
 
     if user is None:
         raise HTTPException(
@@ -581,6 +585,7 @@ async def get_verified_user_by_token(token: str, redis=None):
         return None
 
     user = await Users.get_user_by_id(decoded['id'])
+    user = sessions.session_user(user, decoded)
     if user is None or user.role not in VERIFIED_USER_ROLES:
         return None
 

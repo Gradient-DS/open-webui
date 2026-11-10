@@ -3,6 +3,10 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('service_unavailable', 'oauth:person_discovery'): (
+        'Sign-in is temporarily unavailable. Please try again.',
+        'Inloggen is tijdelijk niet beschikbaar. Probeer het opnieuw.',
+    ),
     ('invalid_field', 'retention:rules'): (
         'Choose valid retention periods or leave them empty to disable deletion.',
         'Kies geldige bewaartermijnen of laat ze leeg om verwijdering uit te schakelen.',

@@ -40,6 +40,18 @@ preserves product settings, returns changed-row counts, and refuses unmapped ids
 or conflicting targets. The caller commits or rolls back; the function makes no
 network calls.
 
+Before that group step and before reopening login, call
+`soev.migrate_persons.cutover_persons(session, person_map)` with the migration
+journal's complete map of OWUI user id to canonical `platform:user:<uuid>`.
+Every retained account must be mapped. The helper validates all entries before
+writing `user.person_id`: unknown or unmapped user ids, duplicate person ids,
+invalid refs and changes to an existing binding refuse. It preserves account ids,
+OAuth bindings, settings and content, returns `{'users': changed_count}`, and
+does not commit or make network calls. Repeating the same map returns zero
+changes. The cutover Job owns the transaction for both steps and must roll it
+back on any refusal. The platform remains responsible for migration proof and
+quarantine; OWUI never derives this map from email.
+
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
 With External Secrets enabled and a platform URL set, provide `soevApiKey` in the configured 1Password item instead of inline secrets.
 Startup validates the product credential when the platform URL is set. Missing platform
@@ -62,13 +74,53 @@ OPENID_PROVIDER_URL=https://login.example.invalid/realms/fictional-tenant/.well-
 OAUTH_CLIENT_ID=fictional-owui-client
 OAUTH_CLIENT_SECRET=<client secret>
 OAUTH_SCOPES=openid email profile
+OAUTH_SUB_CLAIM=sub
 ENABLE_LOGIN_FORM=false
 ```
 
 Set the client secret through the deployment's secret store. Password login takes
 place only through Keycloak; OWUI's login form stays disabled. Existing users must
-have their OIDC identity mapping provisioned by the migration; matching email
-addresses do not link accounts.
+have `user.person_id` provisioned by the migration before reopening. On an unknown
+provider/sub, OWUI asks soev-api `/v1/me` with that login's access token and the
+product credential. If the returned person already owns an OWUI account, OWUI
+attaches the provider/sub to that account and logs in with its existing id,
+settings and content. An existing different subject for that provider refuses
+with `403`, logged as `oauth_person_provider_conflict`; a discovery failure or
+invalid person response refuses with a retryable `503` before signup. No person
+account match keeps the existing signup policy and email-conflict refusal.
+Matching email addresses never link accounts; email merging and its runtime
+configuration have been removed, including support for stale persisted settings.
+With soev-api configured, the account key is always the `sub` from Authlib's
+verified ID-token claims. Startup refuses any `OAUTH_SUB_CLAIM` or persisted
+`oauth.sub_claim` value other than `sub` or unset. A later configuration change
+or userinfo response cannot override the account key. A known provider/sub whose
+account already has `person_id` must also agree with the person returned by
+`/v1/me` for this login token before any session is issued. A mismatch refuses
+with `403`, logged as `oauth_person_mismatch`, without signup or attachment;
+failed discovery refuses with the same retryable `503` as an unknown login.
+Every platform callback verifies `/v1/me`, including a known provider/sub whose
+account has no person yet. That account binds the verified person before login;
+if another account already holds the person, login refuses with `403`. New OAuth
+accounts insert their credential and verified person binding in one transaction.
+Concurrent creation resolves through the unique `user.person_id`, never email;
+a losing insert leaves no credential or unbound account. No platform OAuth
+session is issued without the verified person persisted on its account.
+Runtime OAuth settings updates also refuse a custom `oauth.sub_claim` with `403`
+before writing any configuration. OAuth token exchange is always refused with
+`403` when soev-api is configured, including when `ENABLE_OAUTH_TOKEN_EXCHANGE`
+is enabled; it logs `oauth_platform_token_exchange_refused` and issues no session.
+`Config.upsert` enforces the same claim policy for every caller, including config
+imports, before any database or in-memory defaults are changed. A rejected batch
+does not partially apply its other settings.
+`SOEV_API_URL` also refuses local password sign-in, forgot-password, reset-token
+validation and password reset with logged `403` responses before account lookup.
+Keycloak owns login and recovery. This boundary applies even when
+`AGENT_API_ENABLED` is false; the narrower agent-routing predicate `v2_enabled()`
+is not the login-mode predicate.
+LDAP, trusted-header and no-auth sign-in are also refused, as is local signup.
+`soev.login_attach.require_local_signup()` uses the same `SOEV_API_URL` predicate;
+the router calls it by module name so the parallel admin-removal branch's older
+local helper cannot shadow this boundary. No OWUI role changes enable these paths.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product

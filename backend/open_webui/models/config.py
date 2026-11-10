@@ -241,6 +241,7 @@ class Config(Base):
         """Upsert multiple config key-value pairs. Raises on failure."""
         from open_webui.soev import product_config
         from open_webui.soev.client import SoevApiError
+        from open_webui.soev.login_attach import validate_config_updates
 
         if updates and product_config.v2_enabled():
             raise SoevApiError(
@@ -249,6 +250,7 @@ class Config(Base):
                 'Configuration is managed outside Open WebUI',
                 constraint='product_config:read_only',
             )
+        validate_config_updates(updates)
         persistent_updates = {}
         for key, value in updates.items():
             value = _json_value(value)

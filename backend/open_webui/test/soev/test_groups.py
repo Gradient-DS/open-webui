@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.groups import GroupMember, Groups, GroupUpdateForm
 from open_webui.soev import group_mirror
 from sqlalchemy import select
@@ -300,7 +301,7 @@ async def test_ldap_management_refuses_before_binding_or_writing(group_db, monke
             db=group_db,
         )
     assert error.value.status_code == 403
-    assert error.value.detail['code'] == 'platform_groups_read_only'
+    assert error.value.detail == ERROR_MESSAGES.ACCESS_PROHIBITED
     bind.assert_not_called()
     assert await Groups.get_group_user_ids_by_id('13b95f20-57d8-48c6-9a13-042bcf78d021', db=group_db) == ['fern']
 

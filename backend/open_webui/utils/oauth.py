@@ -84,6 +84,12 @@ from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.soev import silent_connect
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.group_policy import refuse_group_write
+from open_webui.soev.login_attach import (
+    attach_person_login,
+    insert_oauth_account,
+    platform_mode,
+    require_verified_person,
+)
 from open_webui.utils.auth import (
     create_token,
     get_optional_verified_user_from_request,
@@ -1724,8 +1730,11 @@ class OAuthManager:
                 log.warning('OAuth callback failed, user data is missing')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # Extract the "sub" claim, using custom claim if configured
-            if auth_config.OAUTH_SUB_CLAIM:
+            # Authlib verifies these ID-token claims during the code exchange.
+            # Platform identity never follows a mutable claim or userinfo override.
+            if platform_mode():
+                sub = id_token_claims.get('sub')
+            elif auth_config.OAUTH_SUB_CLAIM:
                 sub = user_data.get(auth_config.OAUTH_SUB_CLAIM)
             else:
                 # Fallback to the default sub claim if not configured
@@ -1798,8 +1807,9 @@ class OAuthManager:
                 log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # [Gradient] Only an existing provider/sub binding identifies an account.
+            # [Gradient] Platform account selection must agree with the login's person.
             user = await Users.get_user_by_oauth_sub(provider, sub, db=db)
+            user, person_id = await attach_person_login(provider, sub, token.get('access_token'), user=user, db=db)
 
             if user:
                 provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None
@@ -1892,7 +1902,7 @@ class OAuthManager:
 
                 # [Gradient] A concurrent password signup or invite acceptance
                 # never authorizes attaching a previously unknown OAuth subject.
-                existing_user = await Users.get_user_by_email(email, db=db)
+                existing_user = await Users.get_user_by_email(email, db=db) if not platform_mode() else None
                 if existing_user:
                     log.warning(
                         'OAuth signup denied',
@@ -1927,7 +1937,10 @@ class OAuthManager:
                     # Subsequent logins still let ENABLE_OAUTH_ROLE_MANAGEMENT reconcile.
                     role = 'user'
 
-                    user = await Auths.insert_new_auth(
+                    user = await insert_oauth_account(
+                        provider=provider,
+                        sub=sub,
+                        person_id=person_id,
                         email=email,
                         password=await get_password_hash(str(uuid.uuid4())),  # Random password, not used
                         name=name,
@@ -1951,6 +1964,7 @@ class OAuthManager:
                         data={'role': user.role, 'provider': provider},
                     )
 
+            require_verified_person(user, person_id)
             jwt_token = create_token(
                 data={'id': user.id},
                 expires_delta=parse_duration(auth_config.JWT_EXPIRES_IN),

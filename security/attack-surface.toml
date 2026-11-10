@@ -28,6 +28,9 @@
 # Compare the complete public configuration around every pass and mutation.
 # Any change fails the sweep; no local management writer remains to restore it.
 preserve_configuration = true
+# Config.upsert validates oauth.sub_claim for every writer (including imports)
+# before any database or in-memory defaults change. Platform mode accepts only
+# sub or unset; an unsafe batch refuses 403 without applying any other setting.
 
 # Required owner controls for sweep12's previously unentered operations.
 # The image-prompt operation has an exact all-actor refusal below; its supported
@@ -437,6 +440,7 @@ unseedable = "The only cache file the API creates is a data export, and services
 
 [[parameter]]
 key = "reset_token"
+v2_refused_value = "attack-reset-token"
 name = "token"
 prefix = "/api/v1/auths/password/reset/{token}"
 description = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
@@ -451,16 +455,17 @@ unseedable = "auths.py:delete_oauth_session_by_provider requires an OAuthSession
 
 [[parameter]]
 key = "oauth_exchange_provider"
+v2_refused_value = "attack-oidc-provider"
 name = "provider"
 prefix = "/api/v1/auths/oauth/{provider}"
-description = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
-unseedable = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
+description = "With SOEV_API_URL configured, auths.py:token_exchange refuses 403 before feature flags, rate limiting, provider lookup, token inspection or session creation; login_attach.py logs oauth_platform_token_exchange_refused. Drive mode uses an explicit fictional provider to probe this all-actor boundary without an issuer. Standalone exchange still requires an environment-registered provider and issuer token."
+unseedable = "Standalone auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer. In drive mode v2_refused_value probes the unconditional platform refusal instead."
 
 [[parameter]]
 key = "oauth_login_provider"
 name = "provider"
 prefix = "/oauth/{provider}"
-description = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
+description = "utils/oauth.py registers login providers from environment configuration. With soev-api configured, callback account selection uses only the verified token sub. Startup refuses custom OAUTH_SUB_CLAIM or oauth.sub_claim settings. The login token's /v1/me person selects an unknown login's account by user.person_id and must agree with a known account's person_id before login. Null person bindings are written from /v1/me with uniqueness enforced; new accounts and credentials are inserted atomically with the verified person, and concurrent creation resolves by person_id. No platform OAuth session lacks a verified person; email never attaches. Another subject already bound to that provider or a person mismatch refuses 403; discovery failures refuse 503 before signup. Unit coverage: test/soev/test_login_attach.py and test/soev/test_login_subject.py. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 unseedable = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 
 [[parameter]]
@@ -676,6 +681,19 @@ id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Deletes the caller provider session, removing OAuth credentials needed by later provider requests."
 
 [[field]]
+route = "POST /api/v1/auths/oauth/{provider}/token/exchange"
+description = "An explicit fictional access token exercises the platform exchange refusal; no provider token or session is required."
+json = { token = "fictional-exchange-token" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/oauth/{provider}/token/exchange"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Platform logins use the OAuth callback with immutable sub and /v1/me person verification. Token exchange is unavailable with SOEV_API_URL configured, even when its feature flag is enabled; no account lookup, provider request or session is allowed."
+
+[[field]]
 backed_by = "soev-solutions"
 route = "GET /api/v1/chats/"
 description = "Load rows, pins, tags and folders through the caller's bundled sidebar read."
@@ -824,6 +842,7 @@ json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/auths/signin"
+v2 = { setup = [] }
 description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
 json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
 setup = [
@@ -1332,6 +1351,46 @@ route = "POST /api/v1/chats/{id}"
 description = "Prepared metadata writes accept title/tags/features, not the legacy history dictionary."
 v2 = { json = { title = "Fictional conversation {token}" } }
 
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/signin"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/password/forgot"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/password/reset"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/auths/password/reset/{token}/validate"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/ldap"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
+
 [[field]]
 route = "POST /api/v1/feedback/report"
 description = "Fictional report positive control; requires bug_reports.enabled and an explicitly configured disposable public HTTPS receiver in soev-api. Uses the owner login; delivery failure is a failed control."
@@ -1356,22 +1415,15 @@ runtime_soev_backed = "drive"
 all_actors = true
 route = "POST /api/v1/auths/signup"
 status = 403
-detail = "The requested action has been restricted as a security measure."
-json = { detail = "The requested action has been restricted as a security measure." }
-reason = "Platform identities use the configured login provider. Refuse before local account creation, admin promotion or signup configuration writes."
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+json = { detail = "You do not have permission to access this resource. Please contact your administrator for assistance." }
+reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
 
 [[fixture]]
 key = "model"
 seeded_by = "seed_model"
 depends_on = []
 actor = "user"
-
-[[control]]
-route = "POST /api/v1/auths/signin"
-all_actors = true
-status = 400
-detail = "The email or password provided is incorrect. Please check for typos and try logging in again."
-reason = "The provider-only actors have no local password; invalid credentials must remain refused."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1430,6 +1482,22 @@ status = 403
 detail = "Feature is unavailable"
 all_actors = true
 reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/verify"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. Local TOTP and recovery-code login completion refuse before token/account lookup, code consumption or session issuance, including when agent routing is disabled."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/totp/enable"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. A partial setup token is refused by the dependency before account lookup, and a full session reaches the same refusal before local enrollment writes or session issuance. Standalone partial-token completion remains supported with revocation checks."
 
 [removed]
 reason = "Local administration moved to the management console."

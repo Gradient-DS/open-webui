@@ -1055,6 +1055,16 @@ def _multipart_properties(operation):
     return set(schema.get('properties', {}))
 
 
+def test_every_control_names_a_unique_live_route():
+    operations = {
+        f'{method.upper()} {path}' for path, item in SPEC['paths'].items() for method in item if method in METHODS
+    }
+    controls = seeds.SURFACE['control']
+    routes = [entry['route'] for entry in controls]
+    assert len(routes) == len(set(routes))
+    assert set(routes) <= operations
+
+
 def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
     # A declaration outliving its field, or naming a key nothing seeds, would
     # send a plausible body the handler never reads -- the route reported driven

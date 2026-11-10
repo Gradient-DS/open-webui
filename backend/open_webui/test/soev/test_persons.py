@@ -2,6 +2,7 @@
 
 import importlib
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -13,6 +14,7 @@ from open_webui.models.users import User
 from open_webui.soev import persons
 from open_webui.soev.client import SoevApiError
 from open_webui.test.soev.test_keycloak_token import token_app as token_app
+from open_webui.utils.auth import get_current_user_by_api_key as resolve_api_key
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 PERSON = 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'
@@ -25,6 +27,8 @@ async def person_store(token_app, monkeypatch):
         await connection.run_sync(User.__table__.create)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     token_app.user.person_id = None
+    monkeypatch.setattr(token_app.auth, 'get_current_user_by_api_key', resolve_api_key)
+    monkeypatch.setattr(token_app.auth.Users, 'get_user_by_api_key', AsyncMock(return_value=token_app.user))
     async with sessions() as db:
         db.add(User(**token_app.user.model_dump(exclude={'variables'})))
         await db.commit()
@@ -40,10 +44,13 @@ async def person_store(token_app, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_first_oidc_request_stores_person_without_a_subject_assertion(person_store):
+async def test_person_discovery_precedes_the_first_platform_session_request(person_store):
     ctx, sessions = person_store
     ctx.session.expires_at = 1
-    assert (await ctx.browser.get('/call/product')).status_code == 200
+    assert (await ctx.browser.get('/call/product')).status_code == 401
+    assert ctx.requests == []
+    ctx.refresh.assert_not_awaited()
+    await persons.remember_person(ctx.user, 'fictional-refreshed-token')
     me = ctx.requests[0]
     assert me.url.path == '/v1/me'
     assert me.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
@@ -53,7 +60,8 @@ async def test_first_oidc_request_stores_person_without_a_subject_assertion(pers
         assert (await db.get(User, ctx.user.id)).person_id == PERSON
     assert ctx.user.person_id == PERSON
     assert 'person_id' not in ctx.user.model_dump()
-    assert (await ctx.browser.get('/call/product')).status_code == 200
+    assert (await ctx.browser.get('/call/json')).status_code == 200
+    ctx.refresh.assert_awaited_once_with(ctx.session)
     assert sum(request.url.path == '/v1/me' for request in ctx.requests) == 1
 
 
@@ -69,7 +77,8 @@ async def test_no_person_is_inferred_without_the_users_oidc_proof(person_store, 
         ctx.browser.headers['Authorization'] = 'Bearer sk-fictional'
     else:
         ctx.session.user_id = 'lark'
-    assert (await ctx.browser.get('/call/product')).status_code == 200
+    assert (await ctx.browser.get('/call/product')).status_code == 401
+    assert ctx.requests == []
     assert all(request.url.path != '/v1/me' for request in ctx.requests)
     async with sessions() as db:
         assert (await db.get(User, ctx.user.id)).person_id is None
@@ -97,14 +106,15 @@ async def test_identity_failure_keeps_the_mapping_empty(person_store, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_unavailable_person_discovery_does_not_fail_the_request(person_store, monkeypatch):
+async def test_unavailable_person_discovery_cannot_authorize_an_unbound_session(person_store, monkeypatch):
     ctx, sessions = person_store
 
-    async def unavailable(self, access_token):
-        raise SoevApiError(503, 'service_unavailable', 'unavailable')
-
+    unavailable = AsyncMock(side_effect=SoevApiError(503, 'service_unavailable', 'unavailable'))
     monkeypatch.setattr(persons.SoevClient, 'me', unavailable)
-    assert (await ctx.browser.get('/call/product')).status_code == 200
+    await persons.remember_person(ctx.user, 'fictional-access-token')
+    unavailable.assert_awaited_once_with('fictional-access-token')
+    assert (await ctx.browser.get('/call/product')).status_code == 401
+    assert ctx.requests == []
     async with sessions() as db:
         assert (await db.get(User, ctx.user.id)).person_id is None
 

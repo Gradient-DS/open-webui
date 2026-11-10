@@ -59,6 +59,12 @@ from open_webui.models.users import (
     Users,
     UserStatus,
 )
+from open_webui.soev.login_attach import (
+    refuse_platform_login,
+    refuse_platform_signin,
+    refuse_platform_token_exchange,
+)
+from open_webui.soev import login_attach
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
@@ -568,6 +574,7 @@ async def forgot_password(
     """Self-service password reset request. Always returns the same generic
     response (no account enumeration). Sends a reset email only when the
     feature is enabled and the email maps to an active local password user."""
+    refuse_platform_login('password_recovery')
     email = form_data.email.lower().strip()
     try:
         eligible = (
@@ -624,6 +631,7 @@ async def validate_password_reset_token(
     token: str,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('password_reset')
     record = await PasswordResetTokens.get_by_token_hash(hash_reset_token(token), db=db)
     return {'valid': is_reset_token_usable(record, int(time.time()))}
 
@@ -634,6 +642,7 @@ async def reset_password(
     form_data: ResetPasswordForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('password_reset')
     if not await Config.get('email.enable_forgot_password'):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
@@ -671,6 +680,7 @@ async def ldap_auth(
     form_data: LdapForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('ldap')
     # Security checks FIRST - before loading any config
     if not await Config.get('ldap.enable'):
         raise HTTPException(400, detail='LDAP authentication is not enabled')
@@ -900,6 +910,7 @@ async def signin(
     form_data: SigninForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_signin(WEBUI_AUTH_TRUSTED_EMAIL_HEADER)
     if not ENABLE_PASSWORD_AUTH:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1047,13 +1058,6 @@ async def signin(
 ############################
 
 
-def require_local_signup() -> None:
-    from open_webui.soev.policy_jobs import v2_enabled
-
-    if v2_enabled():
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
-
-
 async def signup_handler(
     request: Request,
     email: str,
@@ -1071,8 +1075,7 @@ async def signup_handler(
     Returns the newly created UserModel.
     Raises HTTPException on failure.
     """
-    require_local_signup()
-
+    login_attach.require_local_signup()
     hashed = await get_password_hash(password)
 
     user = await Auths.insert_new_auth(
@@ -1113,7 +1116,7 @@ async def signup(
     form_data: SignupForm,
     db: AsyncSession = Depends(get_async_session),
 ):
-    require_local_signup()
+    login_attach.require_local_signup()
     has_users = await Users.has_users(db=db)
 
     if WEBUI_AUTH:
@@ -1656,6 +1659,7 @@ async def token_exchange(
     Exchange an external OAuth provider token for an OpenWebUI JWT.
     This endpoint is disabled by default. Set ENABLE_OAUTH_TOKEN_EXCHANGE=True to enable.
     """
+    refuse_platform_token_exchange()
     if not ENABLE_OAUTH_TOKEN_EXCHANGE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
