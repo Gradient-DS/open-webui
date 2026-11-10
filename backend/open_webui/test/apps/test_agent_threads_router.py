@@ -45,25 +45,24 @@ def _client(monkeypatch, fake: FakeSoev, *, role='admin', url='http://soev-api',
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_an_admin_downloads_the_trace_file_unchanged(monkeypatch):
-    """The export bytes pass through as a JSON attachment named after the thread, read as the caller."""
+def test_legacy_admin_cannot_download_a_retired_trace(monkeypatch):
+    """Retired trace exports never disclose stored events."""
     fake = FakeSoev()
     response = _client(monkeypatch, fake).get('/api/v1/agent-threads/thr-abc/trace')
-    assert response.status_code == 200, response.text
-    assert response.content == TRACE
-    assert response.headers['content-type'] == 'application/json'
-    assert response.headers['content-disposition'] == 'attachment; filename="thr-abc.trace.json"'
-    assert fake.calls == [('/v1/chat/threads/thr-abc/export', 'owui:user:u1')]
-    assert fake.closed
+    assert response.status_code == 404, response.text
+    assert response.json() == {'detail': 'Not Found'}
+    assert fake.calls == []
+    assert not fake.closed
 
 
 def test_a_thread_soev_api_does_not_give_the_caller_is_a_404(monkeypatch):
-    """soev-api answers another user's thread and an unknown one alike: 404 not_found."""
+    """Retired exports conceal foreign and missing threads without reading upstream."""
     fake = FakeSoev(fail=SoevApiError(404, 'not_found', 'Requested resource not found'))
     response = _client(monkeypatch, fake).get('/api/v1/agent-threads/thr-other/trace')
     assert response.status_code == 404
-    assert response.json()['detail']['code'] == 'not_found'
-    assert fake.closed
+    assert response.json() == {'detail': 'Not Found'}
+    assert fake.calls == []
+    assert not fake.closed
 
 
 def test_a_tenant_without_the_flag_answers_404_before_soev_api(monkeypatch):
@@ -76,7 +75,7 @@ def test_a_tenant_without_the_flag_answers_404_before_soev_api(monkeypatch):
 def test_a_user_who_is_not_an_admin_is_refused_before_soev_api(monkeypatch):
     fake = FakeSoev()
     response = _client(monkeypatch, fake, role='user').get('/api/v1/agent-threads/thr-abc/trace')
-    assert response.status_code == 401
+    assert response.status_code == 404
     assert fake.calls == []
 
 
@@ -92,6 +91,6 @@ def test_a_thread_id_outside_the_token_alphabet_never_reaches_soev_api(monkeypat
 def test_the_download_needs_soev_api(monkeypatch):
     fake = FakeSoev()
     response = _client(monkeypatch, fake, url='').get('/api/v1/agent-threads/thr-abc/trace')
-    assert response.status_code == 503
-    assert response.json()['detail']['code'] == 'soev_not_configured'
+    assert response.status_code == 404
+    assert response.json() == {'detail': 'Not Found'}
     assert fake.calls == []

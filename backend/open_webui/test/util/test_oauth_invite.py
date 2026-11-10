@@ -1,19 +1,4 @@
-"""Integration tests for the OAuth + invite signup flow.
-
-These tests mock just enough of the OAuth/authlib stack to drive
-``OAuthManager.handle_callback`` end-to-end on the *new-user* branch
-(which is where invite consumption + ``OAUTH_INVITE_REQUIRED`` decisions
-live). The DB layer is in-memory async SQLite; the remote OAuth client
-is mocked to return canned ``authorize_access_token`` / ``userinfo``
-data.
-
-We don't try to exercise every branch of the upstream callback —
-just the new behaviours wired in by the SSO-invite work:
-
-  * pending invite drives role + bypasses ``OAUTH_ALLOWED_DOMAINS``
-  * ``OAUTH_INVITE_REQUIRED`` denies signup when no invite is present
-  * expired invite is treated as no invite
-"""
+"""Legacy OAuth invitations preserve admission without granting administrator authority."""
 
 from __future__ import annotations
 
@@ -178,8 +163,6 @@ def oauth_manager_with_mocks(monkeypatch):
     monkeypatch.setattr(oauth_module.Users, 'get_user_by_oauth_sub', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth_module.Users, 'get_user_by_email', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth_module.Users, 'update_user_oauth_by_id', AsyncMock())
-    # Return >1 so the "if user_count == 1 -> admin" override never fires —
-    # we want the invite role to survive untouched in the provisioning path.
     monkeypatch.setattr(oauth_module.Users, 'get_num_users', AsyncMock(return_value=2))
     monkeypatch.setattr(oauth_module.Auths, 'insert_new_auth', AsyncMock(side_effect=fake_insert_new_auth))
     monkeypatch.setattr(oauth_module, 'apply_default_group_assignment', AsyncMock())
@@ -207,7 +190,7 @@ def _fake_response():
 
 
 @pytest.mark.asyncio
-async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_session, oauth_manager_with_mocks):
+async def test_oauth_signup_consumes_pending_invite_without_granting_admin(db_session, oauth_manager_with_mocks):
     manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
 
     await _make_invite(db_session, email='alice@example.com', role='admin', name='Alice')
@@ -218,7 +201,7 @@ async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_sess
 
     assert len(provisioned) == 1
     assert provisioned[0]['email'] == 'alice@example.com'
-    assert provisioned[0]['role'] == 'admin'
+    assert provisioned[0]['role'] == 'user'
     # Falls back to invite name when the OAuth claim doesn't carry one.
     assert provisioned[0]['name'] == 'Alice'
 
@@ -288,8 +271,8 @@ async def test_expired_invite_falls_through_to_domain_check(db_session, oauth_ma
 
 
 @pytest.mark.asyncio
-async def test_oauth_role_invite_takes_precedence_over_default(db_session, oauth_manager_with_mocks):
-    """Invite-supplied admin role should override the default role at signup."""
+async def test_oauth_legacy_invite_cannot_grant_admin(db_session, oauth_manager_with_mocks):
+    """Legacy invitations never grant local administrator authority."""
     manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
     auth_config.DEFAULT_USER_ROLE = 'user'
 
@@ -299,4 +282,4 @@ async def test_oauth_role_invite_takes_precedence_over_default(db_session, oauth
     await manager.handle_callback(_fake_request(), 'microsoft', _fake_response())
 
     assert len(provisioned) == 1
-    assert provisioned[0]['role'] == 'admin'
+    assert provisioned[0]['role'] == 'user'

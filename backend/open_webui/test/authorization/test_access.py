@@ -10,12 +10,12 @@ from .test_matrix import GRANTS, PRINCIPALS, PUBLIC, seed_resource
 
 @pytest.mark.parametrize('path', ('/api/v1/groups/id/readers', '/api/v1/users/owner'))
 @pytest.mark.parametrize('principal', (*PRINCIPALS, 'pending', None, 'invalid'))
-def test_administration_requires_real_admin_jwt(seeded, path, principal):
+def test_retired_administration_routes_are_absent_for_every_identity(seeded, path, principal):
     headers = {} if principal is None else seeded.headers(principal)
     if principal == 'invalid':
         headers = {'Authorization': 'Bearer invalid'}
     response = seeded.client.get(path, headers=headers)
-    assert response.status_code == (200 if principal == 'admin' else 401), response.text
+    assert response.status_code == 404, response.text
 
 
 @pytest.mark.parametrize('principal', (None, 'invalid', 'pending'))
@@ -32,8 +32,8 @@ def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, k
 
     from .test_matrix import request_for
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False, raising=False)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False, raising=False)
 
     async def prepare():
         model = await seed_resource(seeded, kind)
@@ -115,9 +115,7 @@ def test_filter_grants_by_seeded_sharing_permissions(
                 defaults, 'reader', role, grants, 'sharing.public_notes', 'sharing.anyone', db=db
             )
         expected = [
-            grant
-            for grant, allowed in zip(grants, (allow_public, allow_users, allow_groups, allow_anyone))
-            if allowed or role == 'admin'
+            grant for grant, allowed in zip(grants, (allow_public, allow_users, allow_groups, allow_anyone)) if allowed
         ]
         assert result == expected
 
@@ -415,7 +413,7 @@ def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
 
     # admin owner reader writer outsider other_group wildcard reader
     expected = 'DAAADDA'[PRINCIPALS.index(principal)] == 'A'
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass, raising=False)
 
     async def prepare():
         from open_webui.models.access_grants import AccessGrants
@@ -442,13 +440,13 @@ def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
 
 @pytest.mark.parametrize(
     'admin_bypass,model_bypass,allowed',
-    [(False, False, False), (True, False, True), (False, True, True), (True, True, True)],
+    [(False, False, False), (True, False, False), (False, True, True), (True, True, True)],
 )
 def test_model_listing_bypass_flags(seeded, monkeypatch, admin_bypass, model_bypass, allowed):
     from open_webui import config
     from open_webui.utils import models
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', admin_bypass)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', admin_bypass, raising=False)
     monkeypatch.setattr(models, 'BYPASS_MODEL_ACCESS_CONTROL', model_bypass)
     monkeypatch.setattr(models, 'MODEL_WHITELIST', [])
 

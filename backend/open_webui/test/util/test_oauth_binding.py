@@ -53,8 +53,6 @@ async def login(monkeypatch):
     monkeypatch.setattr(oauth.Invites, 'get_pending_invite_by_email', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth.Invites, 'consume_invite_by_email', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth, 'get_password_hash', AsyncMock(return_value='fictional-password-hash'))
-    monkeypatch.setattr(manager, 'get_user_role', AsyncMock(return_value='user'))
-    monkeypatch.setattr(manager, 'update_user_role_from_oauth', AsyncMock(side_effect=lambda **kwargs: kwargs['user']))
     monkeypatch.setattr(oauth.Config, 'get', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth, 'apply_default_group_assignment', AsyncMock())
     monkeypatch.setattr(oauth, 'publish_event', AsyncMock())
