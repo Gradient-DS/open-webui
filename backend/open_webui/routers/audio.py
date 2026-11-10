@@ -28,7 +28,7 @@ class SpeechForm(BaseModel):
 async def speech(request: Request, form_data: SpeechForm, user=Depends(get_verified_user)):
     if not (await feature_enabled('read_aloud') or await feature_enabled('voice_call')):
         raise HTTPException(status_code=403, detail="Feature 'read_aloud' is not available in your plan")
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
+    if not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
         raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     response = await primitives.speech(form_data.model_dump(exclude_none=True), user)
@@ -56,7 +56,7 @@ async def transcription(
             detail="Feature 'voice' is not available in your plan",
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.stt', await Config.get('user.permissions')):
+    if not await has_permission(user.id, 'chat.stt', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=403,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

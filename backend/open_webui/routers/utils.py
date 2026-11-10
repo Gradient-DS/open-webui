@@ -43,17 +43,6 @@ class CodeForm(BaseModel):
     code: str
 
 
-@router.post('/code/format')
-async def format_code(form_data: CodeForm, user=Depends(get_admin_user)):
-    try:
-        formatted_code = black.format_str(form_data.code, mode=black.Mode())
-        return {'code': formatted_code}
-    except black.NothingChanged:
-        return {'code': form_data.code}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @router.post('/code/execute')
 async def execute_code(request: Request, form_data: CodeForm, user=Depends(get_verified_user)):
     if not await Config.get('code_execution.enable'):

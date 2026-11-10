@@ -253,7 +253,7 @@ async def test_permission_endpoints_use_product_leaves(live):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url='https://fictional-owui.invalid'
     ) as api:
-        for path in ('/permissions', '/default/permissions', '/default/permissions/defaults'):
+        for path in ('/permissions',):
             response = await api.get(path)
             assert response.status_code == 200, response.text
             assert response.json()['workspace']['knowledge'] is False
@@ -427,8 +427,6 @@ async def test_platform_lifespan_completes_without_config_writes(live, monkeypat
 
     for name in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME', 'RESET_CONFIG_ON_START'):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(main, 'WEBUI_ADMIN_EMAIL', '')
-    monkeypatch.setattr(main, 'WEBUI_ADMIN_PASSWORD', '')
     monkeypatch.setattr(main, 'RESET_CONFIG_ON_START', False)
     monkeypatch.setattr(main, 'LICENSE_KEY', '')
     monkeypatch.setattr(main, 'SAFE_MODE', False)
@@ -491,24 +489,6 @@ async def test_platform_lifespan_completes_without_config_writes(live, monkeypat
     assert statements == []
     assert legacy.exists()
     assert not (tmp_path / 'old_config.json').exists()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('variable', ['WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'])
-async def test_platform_lifespan_rejects_admin_environment(live, monkeypatch, variable):
-    main = importlib.import_module('open_webui.main')
-
-    for name in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv(variable, 'fictional-admin-value')
-    create = AsyncMock(side_effect=AssertionError('No account may be created'))
-    monkeypatch.setattr(main, 'create_admin_user', create)
-    with pytest.raises(RuntimeError, match=variable) as error:
-        async with main.app.router.lifespan_context(main.app):
-            pytest.fail('Invalid environment must refuse startup')
-    assert 'fictional-admin-value' not in str(error.value)
-    create.assert_not_called()
-    assert not live.calls
 
 
 @pytest.mark.asyncio

@@ -119,7 +119,6 @@ class DataRetentionService:
         users_approaching = await Users.get_inactive_users(
             inactive_since=warning_cutoff,
             limit=100,
-            exclude_roles=['admin'],
         )
 
         locale = str(DEFAULT_LOCALE) if DEFAULT_LOCALE else 'en'
@@ -190,7 +189,6 @@ class DataRetentionService:
         users = await Users.get_inactive_users(
             inactive_since=cutoff,
             limit=50,
-            exclude_roles=['admin'],  # Never auto-delete admins
         )
 
         for user in users:
@@ -251,4 +249,4 @@ class DataRetentionService:
 
 async def _inactive_user_count(cutoff: int) -> int:
     async with get_async_db() as db:
-        return await db.scalar(select(func.count(User.id)).where(User.last_active_at < cutoff, User.role != 'admin'))
+        return await db.scalar(select(func.count(User.id)).where(User.last_active_at < cutoff, True))

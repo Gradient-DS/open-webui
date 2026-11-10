@@ -726,7 +726,7 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
 ) -> None:
     from open_webui import config
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(bypass).lower())
     item = stored_texts[item_id]
     if access != 'owner':
         item.user_id = 'bob'
@@ -743,7 +743,7 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         assert notices(chat) == [{'notices': ["Chat 'Stale title' is not accessible and was skipped."], 'removed': []}]
         agent_v2.AccessGrants.has_access.assert_not_awaited()
         return
-    if access == 'admin' and kind == 'note' and not bypass:
+    if access == 'admin' and kind == 'note':
         assert 'texts' not in chat.mutations()[-1][1]['input']
         assert notices(chat)[0]['notices'] == ["Note 'Stale title' is not accessible and was skipped."]
         agent_v2.AccessGrants.has_access.assert_awaited_once_with(
@@ -1560,7 +1560,7 @@ async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, mo
     ('enabled', 'role', 'permitted', 'allowed'),
     [
         (False, 'admin', True, False),
-        (True, 'admin', False, True),
+        (True, 'admin', False, False),
         (True, 'user', True, True),
         (True, 'user', False, False),
         (True, None, True, False),
@@ -3941,7 +3941,7 @@ async def test_documents_sends_its_state_on_every_turn(
     [
         (False, True, 'admin', True, False),
         (True, False, 'admin', True, False),
-        (True, True, 'admin', False, True),
+        (True, True, 'admin', False, False),
         (True, True, 'user', True, True),
         (True, True, 'user', False, False),
         (True, True, None, True, False),

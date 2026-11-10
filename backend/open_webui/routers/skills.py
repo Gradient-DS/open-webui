@@ -131,7 +131,7 @@ async def export_skills(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'workspace.skills_export',
         await Config.get('user.permissions'),
@@ -142,10 +142,7 @@ async def export_skills(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT:
-        return await Skills.get_skills(db=db)
-    else:
-        return await Skills.get_skills(db=db, user_id=user.id)
+    return await Skills.get_skills(db=db, user_id=user.id)
 
 
 ############################
@@ -160,7 +157,7 @@ async def create_new_skill(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not (
+    if not (
         await has_permission(user.id, 'workspace.skills', await Config.get('user.permissions'), db=db)
         or await has_permission(user.id, 'workspace.skills_import', await Config.get('user.permissions'), db=db)
     ):

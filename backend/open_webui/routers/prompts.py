@@ -148,7 +148,7 @@ async def create_new_prompt(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not (
+    if not (
         await has_permission(
             user.id,
             'workspace.prompts',

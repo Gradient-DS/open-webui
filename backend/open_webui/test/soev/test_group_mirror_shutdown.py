@@ -91,6 +91,7 @@ async def test_verified_requests_refresh_directory_on_demand(monkeypatch, creden
     from open_webui.models.users import UserModel
     from open_webui.utils import auth
 
+    monkeypatch.setattr(auth, 'has_permission', AsyncMock(return_value=True))
     user = UserModel(
         id='fictional-fern',
         name='Fern',

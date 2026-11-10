@@ -991,9 +991,7 @@ async def _web_search_allowed(user_id: str) -> bool:
     user = await Users.get_user_by_id(user_id)
     if user is None:
         return False
-    return user.role == 'admin' or await has_permission(
-        user.id, 'features.web_search', await Config.get('user.permissions')
-    )
+    return await has_permission(user.id, 'features.web_search', await Config.get('user.permissions'))
 
 
 async def _documents_allowed(user_id: str) -> bool:
@@ -1003,9 +1001,7 @@ async def _documents_allowed(user_id: str) -> bool:
     user = await Users.get_user_by_id(user_id)
     if user is None:
         return False
-    return user.role == 'admin' or await has_permission(
-        user.id, 'features.document_writer', await Config.get('user.permissions')
-    )
+    return await has_permission(user.id, 'features.document_writer', await Config.get('user.permissions'))
 
 
 # [Claude] What a notice above the answer calls a skipped item, by language: named, or unnamed.
@@ -2190,12 +2186,9 @@ async def _regenerated_input(
     turn: AgentTurn, source: dict, model: str | None, *, edited_text: str | None = None
 ) -> dict:
     user = await Users.get_user_by_id(turn.metadata['user_id'])
-    if user is None or (
-        edited_text is None
-        and not (
-            user.role == 'admin'
-            or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
-        )
+    if (user is None) or (
+        (edited_text is None)
+        and (not (await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))))
     ):
         raise threads.ThreadError(403, 'unavailable')
     if (

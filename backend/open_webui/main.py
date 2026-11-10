@@ -49,8 +49,6 @@ from open_webui.config import (
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
     # Admin
-    ENABLE_ADMIN_ANALYTICS,
-    ENABLE_ADMIN_EXPORT,
     ENABLE_AGENT_TRACE_DOWNLOAD,
     # [Gradient] GDPR data export
     ENABLE_DATA_EXPORT,
@@ -61,10 +59,6 @@ from open_webui.config import (
     # OpenAI
     ENV,
     # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
-    FEATURE_ADMIN_EVALUATIONS,
-    FEATURE_ADMIN_FUNCTIONS,
-    FEATURE_ADMIN_SETTINGS,
-    FEATURE_ADMIN_SETTINGS_TABS,
     FEATURE_ARTIFACTS,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
@@ -160,9 +154,6 @@ from open_webui.env import (
     VERSION,
     WEBSOCKET_HEARTBEAT_INTERVAL,
     # Admin Account Runtime Creation
-    WEBUI_ADMIN_EMAIL,
-    WEBUI_ADMIN_NAME,
-    WEBUI_ADMIN_PASSWORD,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
@@ -266,7 +257,6 @@ from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
-    create_admin_user,
     decode_token,
     get_admin_user,
     get_http_authorization_cred,
@@ -484,9 +474,6 @@ def validate_bootstrap_environment() -> None:
 
     if not v2_enabled():
         return
-    for variable in ('WEBUI_ADMIN_EMAIL', 'WEBUI_ADMIN_PASSWORD', 'WEBUI_ADMIN_NAME'):
-        if variable in os.environ:
-            raise RuntimeError(f'{variable} is not supported on the platform route')
     if RESET_CONFIG_ON_START:
         raise RuntimeError('RESET_CONFIG_ON_START is not supported on the platform route')
 
@@ -544,12 +531,6 @@ async def lifespan(app: FastAPI):
     license_task = None
     if LICENSE_KEY:
         license_task = asyncio.create_task(asyncio.to_thread(get_license_data, app, LICENSE_KEY))
-
-    # Create admin account from env vars if specified and no users exist
-    if WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD:
-        if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
-            # Disable signup since we now have an admin
-            await Config.upsert({'ui.enable_signup': False})
 
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
@@ -1023,8 +1004,6 @@ app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
 app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
-if ENABLE_ADMIN_ANALYTICS:
-    app.include_router(analytics.router, prefix='/api/v1/analytics', tags=['analytics'])
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
@@ -1103,84 +1082,8 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
     return {'data': models}
 
 
-@app.get('/api/models/base')
-async def get_base_models(request: Request, user=Depends(get_admin_user)):
-    models = await get_all_base_models(request, user=user)
-    # [Gradient] Apply global model whitelist filter (if configured)
-    if MODEL_WHITELIST:
-        models = [m for m in models if m.get('id') in MODEL_WHITELIST]
-    return {'data': models}
-
-
 class ModelUnloadForm(BaseModel):
     model: str
-
-
-@app.post('/api/models/unload')
-async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depends(get_admin_user)):
-    """
-    Unified model unload endpoint.
-    Resolves the provider that owns the model and calls its native unload mechanism.
-    Supports: Ollama (keep_alive=0) and llama.cpp (/models/unload).
-    """
-    model_id = form_data.model
-
-    ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
-
-    seen = set()
-    while model_id not in ollama_models and model_id not in seen:
-        seen.add(model_id)
-        model_info = await Models.get_model_by_id(model_id)
-        if not model_info or not model_info.base_model_id:
-            break
-        model_id = model_info.base_model_id
-
-    # --- Ollama provider ---
-    if model_id in ollama_models:
-        ollama_config = await Config.get_many('ollama.base_urls', 'ollama.api_configs')
-        ollama_base_urls = ollama_config.get('ollama.base_urls') or []
-        ollama_api_configs = ollama_config.get('ollama.api_configs') or {}
-        url_indices = ollama_models[model_id].get('urls', [])
-        errors = []
-        for idx in url_indices:
-            url = ollama_base_urls[idx]
-            api_config = ollama_api_configs.get(
-                str(idx),
-                ollama_api_configs.get(url, {}),
-            )
-            key = api_config.get('key', None)
-
-            prefix_id = api_config.get('prefix_id', None)
-            actual_model = strip_provider_model_prefix(model_id, prefix_id)
-
-            payload = JSONCodec.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
-
-            try:
-                timeout = aiohttp.ClientTimeout(total=30)
-                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-                    headers = {
-                        'Content-Type': 'application/json',
-                        **({'Authorization': f'Bearer {key}'} if key else {}),
-                    }
-                    async with session.post(
-                        f'{url}/api/generate',
-                        data=payload,
-                        headers=headers,
-                    ) as r:
-                        if not r.ok:
-                            errors.append({'url_idx': idx, 'error': await r.text()})
-            except Exception as e:
-                log.exception(f'Failed to unload model on Ollama node {idx}: {e}')
-                errors.append({'url_idx': idx, 'error': str(e)})
-
-        if errors:
-            raise HTTPException(
-                status_code=500,
-                detail=f'Failed to unload model on {len(errors)} node(s): {errors}',
-            )
-        return {'status': True}
-
-    raise HTTPException(status_code=404, detail=f'Model "{model_id}" not found')
 
 
 ##################################
@@ -1387,10 +1290,8 @@ async def chat_completion(
         # Drop tool_servers if caller lacks features.direct_tool_servers —
         # mirrors the storage-side strip in user/settings/update.
         tool_servers = form_data.pop('tool_servers', None)
-        if (
-            tool_servers
-            and user.role != 'admin'
-            and not await has_permission(
+        if (tool_servers) and (
+            not await has_permission(
                 user.id,
                 'features.direct_tool_servers',
                 await Config.get('user.permissions'),
@@ -1601,7 +1502,6 @@ async def chat_completion(
                             )
                         except Exception as e:
                             log.debug('Error inserting chat files: %s', e)
-                            pass
 
                     if initial_title_generation is not None and all_assistant_ids:
                         title_metadata = {
@@ -1709,7 +1609,6 @@ async def chat_completion(
                             )
                         except Exception as e:
                             log.debug('Error inserting chat files: %s', e)
-                            pass
 
                     # Save ALL assistant placeholders
                     user_message_id = metadata.get('user_message_id')
@@ -2143,8 +2042,6 @@ async def chat_completed(
     try:
         form_data.pop('model_item', None)
 
-        pass
-
         return await chat_completed_handler(request, form_data, user)
     except Exception as e:
         raise HTTPException(
@@ -2163,8 +2060,6 @@ async def chat_action(
     try:
         form_data.pop('model_item', None)
 
-        pass
-
         return await chat_action_handler(request, action_id, form_data, user)
     except Exception as e:
         raise HTTPException(
@@ -2175,20 +2070,6 @@ async def chat_action(
 
 async def require_legacy_task_dispatch(user=Depends(get_verified_user)) -> None:
     refuse_local_content()
-
-
-@app.post('/api/tasks/stop/{task_id}', dependencies=[Depends(require_legacy_task_dispatch)])
-async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
-    try:
-        result = await stop_task(request.app.state.redis, task_id)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-
-@app.get('/api/tasks')
-async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
-    return {'tasks': await list_tasks(request.app.state.redis)}
 
 
 @app.get('/api/tasks/chat/{chat_id:path}')
@@ -2535,9 +2416,7 @@ async def get_app_config(request: Request):
                     'enable_feedback_report': config.get('bug_reports.enabled'),  # [Gradient]
                     'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
                     'enable_user_status': config.get('users.enable_status'),
-                    'enable_admin_export': ENABLE_ADMIN_EXPORT,
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
-                    'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # [Gradient] Feature Flags (SaaS Tier Control)
                     'feature_chat_controls': await feature_enabled('chat_controls', FEATURE_CHAT_CONTROLS),
                     'feature_capture': await feature_enabled('capture', FEATURE_CAPTURE),
@@ -2563,12 +2442,6 @@ async def get_app_config(request: Request):
                     'feature_skills': await feature_enabled('skills', FEATURE_SKILLS),
                     'feature_skill_files': await feature_enabled('skill_files', FEATURE_SKILL_FILES),
                     'enable_skill_execution': ENABLE_SKILL_EXECUTION,
-                    'feature_admin_evaluations': await feature_enabled('admin_evaluations', FEATURE_ADMIN_EVALUATIONS),
-                    'feature_admin_functions': await feature_enabled('admin_functions', FEATURE_ADMIN_FUNCTIONS),
-                    'feature_admin_settings': await feature_enabled('admin_settings', FEATURE_ADMIN_SETTINGS),
-                    'feature_admin_settings_tabs': await feature_enabled(
-                        'admin_settings_tabs', FEATURE_ADMIN_SETTINGS_TABS
-                    ),
                     'feature_chat_controls_sections': await feature_enabled(
                         'chat_controls_sections', FEATURE_CHAT_CONTROLS_SECTIONS
                     ),
@@ -2699,13 +2572,7 @@ async def get_app_config(request: Request):
                     'iframe_csp': IFRAME_CSP,
                 },
                 'license_metadata': license_metadata,
-                **(
-                    {
-                        'active_entries': user_count,
-                    }
-                    if user.role == 'admin' and user_count is not None
-                    else {}
-                ),
+                **({}),
             }
             if user is not None and (user.role in ['admin', 'user'])
             else {
@@ -2752,101 +2619,6 @@ class EventWebhookUpdateForm(BaseModel):
     targets: list[dict[str, str]] | None = None
 
 
-@app.get('/api/events')
-async def get_event_catalog(user=Depends(get_admin_user)):
-    return {
-        'schema': VERSION,
-        'events': get_event_catalog_items(),
-    }
-
-
-@app.get('/api/events/webhooks')
-async def get_event_webhooks_api(user=Depends(get_admin_user)):
-    return await get_event_webhooks()
-
-
-@app.post('/api/events/webhooks')
-async def create_event_webhook(form_data: EventWebhookForm, user=Depends(get_admin_user)):
-    try:
-        webhook = await upsert_event_webhook(
-            {
-                'name': form_data.name,
-                'url': form_data.url,
-                'enabled': form_data.enabled,
-                'events': form_data.events,
-                'targets': form_data.targets,
-            }
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook['id'],
-        subject_type='config',
-        data={
-            'action': 'created',
-            'enabled': webhook.get('enabled'),
-            'events': webhook.get('events'),
-            'targets': webhook.get('targets'),
-        },
-    )
-    return webhook
-
-
-@app.put('/api/events/webhooks/{webhook_id}')
-async def update_event_webhook(webhook_id: str, form_data: EventWebhookUpdateForm, user=Depends(get_admin_user)):
-    webhooks = await get_event_webhooks()
-    existing = next((webhook for webhook in webhooks if webhook.get('id') == webhook_id), None)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
-
-    try:
-        webhook = await upsert_event_webhook(
-            {
-                **existing,
-                **form_data.model_dump(exclude_unset=True),
-                'id': webhook_id,
-            }
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook_id,
-        subject_type='config',
-        data={
-            'action': 'updated',
-            'enabled': webhook.get('enabled'),
-            'events': webhook.get('events'),
-            'targets': webhook.get('targets'),
-        },
-    )
-    return webhook
-
-
-@app.delete('/api/events/webhooks/{webhook_id}')
-async def delete_event_webhook_api(webhook_id: str, user=Depends(get_admin_user)):
-    deleted = await delete_event_webhook(webhook_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook_id,
-        subject_type='config',
-        data={'action': 'deleted'},
-    )
-    return {'status': True}
-
-
 @app.get('/api/version')
 async def get_app_version():
     return {
@@ -2890,7 +2662,7 @@ async def get_current_usage(user=Depends(get_verified_user)):
     """
     try:
         # If public visibility is disabled, only allow admins to access this endpoint
-        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role != 'admin':
+        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail='Access denied. Only administrators can view usage statistics.',

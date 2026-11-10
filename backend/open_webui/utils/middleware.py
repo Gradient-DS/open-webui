@@ -2707,7 +2707,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if 'memory' in features and features['memory'] and await Config.get('memories.system_context.enable'):
             # features is client-supplied; re-check the permission the native FC path enforces.
-            if getattr(user, 'role', None) == 'admin' or await has_permission(
+            if await has_permission(
                 getattr(user, 'id', ''),
                 'features.memories',
                 await Config.get('user.permissions'),
@@ -2728,7 +2728,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if 'web_search' in features and features['web_search'] and await Config.get('web.search.enable'):
             # features is client-supplied; re-check the permission the native FC path enforces.
-            if getattr(user, 'role', None) == 'admin' or await has_permission(
+            if await has_permission(
                 getattr(user, 'id', ''),
                 'features.web_search',
                 await Config.get('user.permissions'),
@@ -4741,14 +4741,13 @@ async def streaming_chat_response_handler(response, ctx):
             model_capabilities = model.get('info', {}).get('meta', {}).get('capabilities') or {}
             builtin_tools_meta = model.get('info', {}).get('meta', {}).get('builtinTools', {})
             DETECT_CODE_INTERPRETER = (
-                metadata.get('params', {}).get('function_calling') == 'legacy'
-                and bool(features.get('code_interpreter'))
-                and builtin_tools_meta.get('code_interpreter', True)
-                and await Config.get('code_interpreter.enable')
-                and model_capabilities.get('code_interpreter', True)
+                (metadata.get('params', {}).get('function_calling') == 'legacy')
+                and (bool(features.get('code_interpreter')))
+                and (builtin_tools_meta.get('code_interpreter', True))
+                and (await Config.get('code_interpreter.enable'))
+                and (model_capabilities.get('code_interpreter', True))
                 and (
-                    getattr(user, 'role', None) == 'admin'
-                    or await has_permission(
+                    await has_permission(
                         getattr(user, 'id', ''),
                         'features.code_interpreter',
                         await Config.get('user.permissions'),

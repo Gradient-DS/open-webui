@@ -249,8 +249,8 @@ async def test_deletion_entry_points_leave_all_local_data_on_refusal(mirror, mon
         monkeypatch.setattr(acting, 'user_token', AsyncMock(return_value=None))
     else:
         mirror.remote.chat_delete.side_effect = SoevApiError(503, 'upstream_error', 'fictional failure')
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    monkeypatch.setenv('ENABLE_ADMIN_CHAT_ACCESS', str(True).lower())
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(True).lower())
     monkeypatch.setattr(chats, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(folders, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(folders, 'check_folders_permission', AsyncMock())
@@ -406,7 +406,7 @@ async def test_owner_chat_deletion_removes_remote_threads_before_pending_local_c
 
     await seed(mirror, 'chat-fern', ['thread-elm'])
     await seed(mirror, 'child-fern', ['thread-oak'], parent='chat-fern')
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    monkeypatch.setenv('ENABLE_ADMIN_CHAT_ACCESS', str(True).lower())
     monkeypatch.setattr(chats, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(chats.Config, 'get', AsyncMock(return_value={}))
     monkeypatch.setattr(chats, 'stop_item_tasks', AsyncMock())

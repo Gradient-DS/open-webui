@@ -809,11 +809,6 @@ class UsersTable:
             result = await session.execute(select(User.id).where(User.id.in_(user_ids)))
             return list(result.scalars().all())
 
-    async def get_super_admin_user(self, db: AsyncSession | None = None) -> UserModel | None:
-        async with get_async_db_context(db) as session:
-            row = (await session.execute(select(User).where(User.role == 'admin').limit(1))).scalars().first()
-            return UserModel.model_validate(row) if row else None
-
     async def get_active_user_count(self, db: AsyncSession | None = None) -> int:
         async with get_async_db_context(db) as session:
             # Consider user active if last_active_at within the last 3 minutes

@@ -18,12 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 def can_bypass_access_control(user: UserModel | dict) -> bool:
     role = user.get('role') if isinstance(user, dict) else user.role
-    return role == 'admin' and bool(config.BYPASS_ADMIN_ACCESS_CONTROL)
+    return False
 
 
 def can_access_admin_feedback(user: UserModel) -> bool:
     # Feedback retains its legacy policy until the thread feedback contract lands.
-    return user.role == 'admin' and bool(config.ENABLE_ADMIN_CHAT_ACCESS)
+    return False
 
 
 def fill_missing_permissions(permissions: dict[str, Any], default_permissions: dict[str, Any]) -> dict[str, Any]:
@@ -184,7 +184,7 @@ async def has_connection_access(
         # No grants configured → private, admin-only: admins must keep access
         # to connections only they can configure, even when they do not bypass
         # access control globally.
-        return user.role == 'admin'
+        return False
 
     if user_group_ids is None:
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
@@ -238,7 +238,7 @@ async def filter_allowed_access_grants(
     user_id: str,
     user_role: str,
     access_grants: list,
-    public_permission_key: str,
+    public_permission_key: str | None,
     anyone_permission_key: str | None = None,
     db: AsyncSession | None = None,
     admin_needs_wide_permission: bool = False,
@@ -251,13 +251,10 @@ async def filter_allowed_access_grants(
     if not access_grants:
         return access_grants
 
-    admin_exempt = user_role == 'admin' and not admin_needs_wide_permission
-
     if has_anyone_read_access_grant(access_grants) and (
         not anyone_permission_key
         or (
-            not admin_exempt
-            and not await has_permission(
+            not await has_permission(
                 user_id,
                 anyone_permission_key,
                 default_permissions,
@@ -267,17 +264,15 @@ async def filter_allowed_access_grants(
     ):
         access_grants = strip_anyone_access_grants(access_grants)
 
-    if admin_exempt:
-        return access_grants
-
     # Check if user can share publicly
-    if (
-        has_public_read_access_grant(access_grants) or has_public_write_access_grant(access_grants)
-    ) and not await has_permission(
-        user_id,
-        public_permission_key,
-        default_permissions,
-        db=db,
+    if (has_public_read_access_grant(access_grants) or has_public_write_access_grant(access_grants)) and (
+        public_permission_key is None
+        or not await has_permission(
+            user_id,
+            public_permission_key,
+            default_permissions,
+            db=db,
+        )
     ):
         access_grants = [
             grant
@@ -289,9 +284,6 @@ async def filter_allowed_access_grants(
                 == '*'
             )
         ]
-
-    if user_role == 'admin':
-        return access_grants
 
     # Strip individual user sharing if user lacks permission
     if has_user_access_grant(access_grants) and not await has_permission(
@@ -352,7 +344,7 @@ async def has_base_model_access(
             return True
         base_model_info = await Models.get_model_by_id(base_model_id, db=db)
         if base_model_info is None:
-            return user_role == 'admin'
+            return False
         if not (
             user_id == base_model_info.user_id
             or await AccessGrants.has_access(
@@ -414,5 +406,4 @@ async def check_model_access(
             if not await has_base_model_access(user.id, model_info, user_role=user.role, user_group_ids=user_group_ids):
                 raise HTTPException(status_code=403, detail='Model not found')
     else:
-        if user.role != 'admin':
-            raise HTTPException(status_code=403, detail='Model not found')
+        raise HTTPException(status_code=403, detail='Model not found')

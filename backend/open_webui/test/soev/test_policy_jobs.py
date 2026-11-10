@@ -129,7 +129,7 @@ def test_legacy_mode_keeps_the_existing_boundaries(monkeypatch, enabled, url):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('caller', ['model', 'service', 'scim', 'admin', 'preview'])
+@pytest.mark.parametrize('caller', ['model', 'service', 'scim'])
 async def test_all_offboarding_callers_refuse_without_remote_calls_or_local_writes(v2, monkeypatch, caller):
     from fastapi import Request
     from open_webui.models.users import Users
@@ -170,63 +170,6 @@ async def test_all_offboarding_callers_refuse_without_remote_calls_or_local_writ
     assert caught.value.constraint == 'offboarding:console'
     assert db.mock_calls == []
     remote.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_policy_editor_uses_admin_token_and_the_exact_platform_wire(v2, monkeypatch):
-    from fastapi import Request
-    from open_webui.routers import configs
-    from open_webui.soev import acting
-
-    remote = SimpleNamespace(
-        get_retention_policy=AsyncMock(return_value=None), send=AsyncMock(return_value={'version': 1})
-    )
-    writes = AsyncMock()
-    monkeypatch.setattr('open_webui.soev.identity.build_client', lambda: remote)
-    monkeypatch.setattr(configs.Config, 'upsert', writes)
-    monkeypatch.setattr(acting, 'requester_ref', lambda: 'owui:user:admin-fern')
-    monkeypatch.setattr(acting, 'user_token', AsyncMock(return_value='fictional-user-token'))
-    user = SimpleNamespace(id='admin-fern')
-    request = Request({'type': 'http', 'headers': [(b'idempotency-key', b'fictional-policy-key')]})
-    assert await configs.get_data_retention_config(request, user=user) == {'platform_policy': None}
-    form = configs.PlatformRetentionConfigForm(temporary_idle_hours=24, thread_idle_days=None)
-    result = await configs.set_data_retention_config(request, form, user=user)
-    assert result == {'platform_policy': {'version': 1}}
-    remote.get_retention_policy.assert_awaited_once_with(as_user='owui:user:admin-fern')
-    remote.send.assert_awaited_once_with(
-        'PUT',
-        '/v1/retention-policy',
-        {'temporary_idle_hours': 24, 'thread_idle_days': None},
-        as_user='owui:user:admin-fern',
-        idempotency_key='fictional-policy-key',
-    )
-    writes.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('method', ['read', 'write'])
-async def test_policy_editor_refuses_a_missing_admin_token_before_io(v2, monkeypatch, method):
-    from fastapi import Request
-    from open_webui.routers import configs
-    from open_webui.soev import acting
-
-    remote, writes = Mock(), AsyncMock()
-    monkeypatch.setattr('open_webui.soev.identity.build_client', remote)
-    monkeypatch.setattr(configs.Config, 'upsert', writes)
-    monkeypatch.setattr(acting, 'requester_ref', lambda: 'owui:user:admin-fern')
-    monkeypatch.setattr(acting, 'user_token', AsyncMock(return_value=None))
-    request = Request({'type': 'http', 'headers': []})
-    with pytest.raises(SoevApiError):
-        if method == 'read':
-            await configs.get_data_retention_config(request, user=SimpleNamespace(id='admin-fern'))
-        else:
-            await configs.set_data_retention_config(
-                request,
-                configs.PlatformRetentionConfigForm(temporary_idle_hours=None, thread_idle_days=None),
-                user=SimpleNamespace(id='admin-fern'),
-            )
-    remote.assert_not_called()
-    writes.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -290,23 +233,3 @@ async def test_v2_thread_delete_requires_a_completed_204(v2, monkeypatch, status
     else:
         with pytest.raises(SoevApiError):
             await caller.chat_delete('/v1/chat/threads/thread-elm', as_user='owui:user:person-elm')
-
-
-def test_retention_policy_routes_are_admin_only(monkeypatch):
-    """A non-admin never reaches the platform policy: both routes depend on the admin check."""
-    from fastapi import HTTPException
-    from open_webui.routers import configs
-    from open_webui.utils.auth import get_admin_user
-
-    routes = {
-        (method, route.path): route
-        for route in configs.router.routes
-        for method in getattr(route, 'methods', ())
-        if route.path == '/data-retention'
-    }
-    assert set(routes) == {('GET', '/data-retention'), ('POST', '/data-retention')}
-    for route in routes.values():
-        assert get_admin_user in {dependency.call for dependency in route.dependant.dependencies}
-    with pytest.raises(HTTPException) as refused:
-        get_admin_user(SimpleNamespace(role='user'))
-    assert refused.value.status_code == 401

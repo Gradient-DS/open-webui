@@ -248,9 +248,7 @@ def chat_config_updates(data: dict) -> dict:
 
 
 async def require_chat_import_permission(request: Request, user, db: AsyncSession):
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'chat.import', await Config.get('user.permissions'), db=db
-    ):
+    if not await has_permission(user.id, 'chat.import', await Config.get('user.permissions'), db=db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -635,7 +633,7 @@ async def export_chat_stats(
     user=Depends(get_verified_user),
 ):
     # Check if the user has permission to share/export chats
-    if (user.role != 'admin') and (not await Config.get('ui.enable_community_sharing')):
+    if not await Config.get('ui.enable_community_sharing'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -684,7 +682,7 @@ async def export_single_chat_stats(
     Returns ChatStatsExport for the specified chat.
     """
     # Check if the user has permission to share/export chats
-    if (user.role != 'admin') and (not await Config.get('ui.enable_community_sharing')):
+    if not await Config.get('ui.enable_community_sharing'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -730,7 +728,7 @@ async def delete_all_user_chats(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role == 'user' and not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions')):
+    if not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -818,30 +816,6 @@ async def import_chats(
 ############################
 # ChatConfig
 ############################
-
-
-@router.get('/config', response_model=ChatConfigForm)
-async def get_chat_config(user=Depends(get_admin_user)):
-    return await get_chat_config_values()
-
-
-@router.post('/config', response_model=ChatConfigForm)
-async def set_chat_config(form_data: ChatConfigForm, user=Depends(get_admin_user)):
-    threshold = max(1, int(form_data.CONTEXT_COMPACTION_TOKEN_THRESHOLD))
-    token_cap = max(1, int(form_data.CONTEXT_COMPACTION_TOKEN_CAP or threshold))
-    retention_percentage = min(50, max(10, int(form_data.CONTEXT_COMPACTION_RETENTION_PERCENTAGE)))
-    await Config.upsert(
-        chat_config_updates(
-            {
-                **form_data.model_dump(),
-                'CONTEXT_COMPACTION_MODEL': form_data.CONTEXT_COMPACTION_MODEL or '',
-                'CONTEXT_COMPACTION_TOKEN_THRESHOLD': threshold,
-                'CONTEXT_COMPACTION_TOKEN_CAP': token_cap,
-                'CONTEXT_COMPACTION_RETENTION_PERCENTAGE': retention_percentage,
-            }
-        )
-    )
-    return await get_chat_config_values()
 
 
 ############################

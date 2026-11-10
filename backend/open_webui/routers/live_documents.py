@@ -46,13 +46,12 @@ async def attach_onedrive(
     user=Depends(get_verified_user),
 ):
     await capabilities.require(capabilities.LIVE_DOCUMENTS)
-    if user.role != 'admin':
-        cap = await Config.get('rag.file.max_count_per_user')
-        if cap and int(cap) > 0 and await Files.count_files_by_user_id(user.id) >= int(cap):
-            raise HTTPException(
-                status_code=403,
-                detail={'code': 'file_limit_exceeded', 'detail': ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(int(cap))},
-            )
+    cap = await Config.get('rag.file.max_count_per_user')
+    if cap and int(cap) > 0 and await Files.count_files_by_user_id(user.id) >= int(cap):
+        raise HTTPException(
+            status_code=403,
+            detail={'code': 'file_limit_exceeded', 'detail': ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(int(cap))},
+        )
     client = identity.build_client()
     try:
         subject = identity.external_ref(user)

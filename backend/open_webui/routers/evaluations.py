@@ -230,61 +230,9 @@ class LeaderboardResponse(BaseModel):
     entries: list[LeaderboardEntry]
 
 
-@router.get('/leaderboard', response_model=LeaderboardResponse)
-async def get_leaderboard(
-    query: Optional[str] = None,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get model leaderboard with Elo ratings. Query filters by tag similarity."""
-    feedbacks = await Feedbacks.get_feedbacks_for_leaderboard(db=db)
-
-    similarities = None
-    if query and query.strip():
-        similarities = await run_in_threadpool(_compute_similarities, feedbacks, query.strip())
-
-    elo_stats = _calculate_elo(feedbacks, similarities)
-    tags_by_model = _get_top_tags(feedbacks)
-
-    entries = sorted(
-        [
-            LeaderboardEntry(
-                model_id=mid,
-                rating=round(s['rating']),
-                won=s['won'],
-                lost=s['lost'],
-                count=s['won'] + s['lost'],
-                top_tags=tags_by_model.get(mid, []),
-            )
-            for mid, s in elo_stats.items()
-        ],
-        key=lambda e: e.rating,
-        reverse=True,
-    )
-
-    return LeaderboardResponse(entries=entries)
-
-
-@router.get('/leaderboard/{model_id:path}/history', response_model=ModelHistoryResponse)
-async def get_model_history(
-    model_id: str,
-    days: int = 30,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get daily win/loss history for a specific model."""
-    history = await Feedbacks.get_model_evaluation_history(model_id=model_id, days=days, db=db)
-    return ModelHistoryResponse(model_id=model_id, history=history)
-
-
 ############################
 # GetConfig
 ############################
-
-
-@router.get('/config')
-async def get_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(EVALUATION_CONFIG_KEYS)
 
 
 ############################
@@ -306,100 +254,6 @@ class UpdateConfigForm(BaseModel):
     CONVERSATION_FEEDBACK_SCALE_MAX: Optional[int] = None
     CONVERSATION_FEEDBACK_HEADER: Optional[str] = None
     CONVERSATION_FEEDBACK_PLACEHOLDER: Optional[str] = None
-
-
-@router.post('/config')
-async def update_config(
-    request: Request,
-    form_data: UpdateConfigForm,
-    user=Depends(get_admin_user),
-):
-    updates = {}
-    if form_data.ENABLE_EVALUATION_ARENA_MODELS is not None:
-        updates['evaluation.arena.enable'] = form_data.ENABLE_EVALUATION_ARENA_MODELS
-    if form_data.EVALUATION_ARENA_MODELS is not None:
-        updates['evaluation.arena.models'] = form_data.EVALUATION_ARENA_MODELS
-    if form_data.ENABLE_MESSAGE_RATING is not None:
-        updates['ui.enable_message_rating'] = form_data.ENABLE_MESSAGE_RATING
-    if form_data.ENABLE_FEEDBACK_LAYER2 is not None:
-        updates['evaluation.feedback.layer2.enable'] = form_data.ENABLE_FEEDBACK_LAYER2
-    if form_data.FEEDBACK_REASONS is not None:
-        updates['evaluation.feedback.reasons'] = form_data.FEEDBACK_REASONS
-    if form_data.FEEDBACK_TAGS is not None:
-        updates['evaluation.feedback.tags'] = form_data.FEEDBACK_TAGS
-    if form_data.ENABLE_FEEDBACK_LAYER3 is not None:
-        updates['evaluation.feedback.layer3.enable'] = form_data.ENABLE_FEEDBACK_LAYER3
-    if form_data.FEEDBACK_LAYER3_PROMPT is not None:
-        updates['evaluation.feedback.layer3.prompt'] = form_data.FEEDBACK_LAYER3_PROMPT
-    if form_data.ENABLE_FEEDBACK_CATEGORY_TAGS is not None:
-        updates['evaluation.feedback.category_tags.enable'] = form_data.ENABLE_FEEDBACK_CATEGORY_TAGS
-    if form_data.ENABLE_CONVERSATION_FEEDBACK is not None:
-        updates['evaluation.feedback.conversation.enable'] = form_data.ENABLE_CONVERSATION_FEEDBACK
-    if form_data.CONVERSATION_FEEDBACK_SCALE_MAX is not None:
-        updates['evaluation.feedback.conversation.scale_max'] = form_data.CONVERSATION_FEEDBACK_SCALE_MAX
-    if form_data.CONVERSATION_FEEDBACK_HEADER is not None:
-        updates['evaluation.feedback.conversation.header'] = form_data.CONVERSATION_FEEDBACK_HEADER
-    if form_data.CONVERSATION_FEEDBACK_PLACEHOLDER is not None:
-        updates['evaluation.feedback.conversation.placeholder'] = form_data.CONVERSATION_FEEDBACK_PLACEHOLDER
-    await Config.upsert(updates)
-    values = await get_config_values(EVALUATION_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_UPDATED,
-        actor=user,
-        subject_id='evaluation',
-        data={
-            'keys': list(updates.keys()),
-            'arena_enabled': values.get('ENABLE_EVALUATION_ARENA_MODELS'),
-            'arena_model_count': len(values.get('EVALUATION_ARENA_MODELS') or []),
-        },
-    )
-    return values
-
-
-@router.get('/feedbacks/models', response_model=list[str])
-async def get_feedback_model_ids(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    return await Feedbacks.get_distinct_model_ids(db=db)
-
-
-@router.get('/feedbacks/all/ids', response_model=list[FeedbackIdResponse])
-async def get_all_feedback_ids(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    return await Feedbacks.get_all_feedback_ids(db=db)
-
-
-@router.delete('/feedbacks/all')
-async def delete_all_feedbacks(
-    request: Request,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if not can_access_admin_feedback(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    success = await Feedbacks.delete_all_feedbacks(db=db)
-    if success:
-        await publish_event(
-            request,
-            EVENTS.FEEDBACK_DELETED_ALL,
-            actor=user,
-            subject_id='all',
-        )
-    return success
-
-
-@router.get('/feedbacks/all/export', response_model=list[FeedbackModel])
-async def export_all_feedbacks(
-    model_id: Optional[str] = None,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if not config.ENABLE_ADMIN_EXPORT:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    feedbacks = await Feedbacks.get_all_feedbacks(db=db)
-    if model_id:
-        feedbacks = [f for f in feedbacks if f.data and f.data.get('model_id') == model_id]
-    return feedbacks
 
 
 PAGE_ITEM_COUNT = 30
@@ -433,38 +287,6 @@ async def delete_feedbacks(
             subject_type='user',
         )
     return success
-
-
-@router.get('/feedbacks/list', response_model=FeedbackListResponse)
-async def get_feedbacks(
-    order_by: Optional[str] = None,
-    direction: Optional[str] = None,
-    page: Optional[int] = 1,
-    scope: Optional[str] = None,
-    model_id: Optional[str] = None,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if not can_access_admin_feedback(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    limit = PAGE_ITEM_COUNT
-
-    page = max(1, page)
-    skip = (page - 1) * limit
-
-    filter = {}
-    if order_by:
-        filter['order_by'] = order_by
-    if direction:
-        filter['direction'] = direction
-    if scope:
-        filter['scope'] = scope
-    if model_id:
-        filter['model_id'] = model_id
-
-    result = await Feedbacks.get_feedback_items(filter=filter, skip=skip, limit=limit, db=db)
-    return result
 
 
 @router.get('/feedback/conversation/{chat_id}')
