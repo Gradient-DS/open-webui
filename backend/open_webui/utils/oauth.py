@@ -31,6 +31,7 @@ from mcp.shared.auth import (
 from mcp.shared.auth import (
     OAuthMetadata,
 )
+from open_webui import config
 from open_webui.config import (
     DEFAULT_USER_ROLE,
     ENABLE_OAUTH,
@@ -1874,8 +1875,11 @@ class OAuthManager:
                 log.warning('OAuth callback failed, user data is missing')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # Extract the "sub" claim, using custom claim if configured
-            if auth_config.OAUTH_SUB_CLAIM:
+            # Authlib verifies these ID-token claims during the code exchange.
+            # Platform identity never follows a mutable claim or userinfo override.
+            if config.SOEV_API_URL:
+                sub = id_token_claims.get('sub')
+            elif auth_config.OAUTH_SUB_CLAIM:
                 sub = user_data.get(auth_config.OAUTH_SUB_CLAIM)
             else:
                 # Fallback to the default sub claim if not configured
@@ -1948,10 +1952,9 @@ class OAuthManager:
                 log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # [Gradient] An unknown login can attach only through soev-api's person.
+            # [Gradient] Platform account selection must agree with the login's person.
             user = await Users.get_user_by_oauth_sub(provider, sub, db=db)
-            if user is None:
-                user = await attach_person_login(provider, sub, token.get('access_token'), db=db)
+            user = await attach_person_login(provider, sub, token.get('access_token'), user=user, db=db)
 
             if user:
                 provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None

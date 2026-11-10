@@ -595,7 +595,7 @@ unseedable = "auths.py:token_exchange requires an environment-registered OAUTH_P
 key = "oauth_login_provider"
 name = "provider"
 prefix = "/oauth/{provider}"
-description = "utils/oauth.py registers login providers from environment configuration. Callback account selection uses the stored provider/sub, or with soev-api the login token's /v1/me person and user.person_id; email never attaches. Another subject already bound to that provider refuses 403; discovery failures refuse 503 before signup. Unit coverage: test/soev/test_login_attach.py. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
+description = "utils/oauth.py registers login providers from environment configuration. With soev-api configured, callback account selection uses only the verified token sub. Startup refuses custom OAUTH_SUB_CLAIM or oauth.sub_claim settings. The login token's /v1/me person selects an unknown login's account by user.person_id and must agree with a known account's existing person_id before login; email never attaches. Another subject already bound to that provider or a person mismatch refuses 403; discovery failures refuse 503 before signup. Unit coverage: test/soev/test_login_attach.py and test/soev/test_login_subject.py. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 unseedable = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 
 [[parameter]]

@@ -130,6 +130,7 @@ from open_webui.soev import threads as soev_threads
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
+from open_webui.soev.login_attach import validate_login_config
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -525,6 +526,7 @@ async def lifespan(app: FastAPI):
 
     await import_legacy_config_json()
     await seed_registered_defaults()
+    await validate_login_config()
     await initialize_runtime_config(app)
     await migrate_legacy_webhook_config()
     await publish_event(app, EVENTS.SYSTEM_STARTUP_STARTED, source='system')
@@ -3081,7 +3083,9 @@ async def oauth_login_callback(
     """Handle the OAuth provider callback.
 
     Resolution order:
-    1. Match by subject ID bound to the provider.
+    1. Match by subject ID bound to the provider. With soev-api configured, use
+       only the verified token's sub and verify an existing person binding
+       against /v1/me before login; mismatches refuse (403).
     2. With soev-api configured, resolve the login token's person and attach to
        that person's existing account. A different bound subject refuses (403);
        failed discovery refuses with a retryable error (503).

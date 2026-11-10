@@ -74,6 +74,7 @@ OPENID_PROVIDER_URL=https://login.example.invalid/realms/fictional-tenant/.well-
 OAUTH_CLIENT_ID=fictional-owui-client
 OAUTH_CLIENT_SECRET=<client secret>
 OAUTH_SCOPES=openid email profile
+OAUTH_SUB_CLAIM=sub
 ENABLE_LOGIN_FORM=false
 ```
 
@@ -89,6 +90,14 @@ invalid person response refuses with a retryable `503` before signup. No person
 account match keeps the existing signup policy and email-conflict refusal.
 Matching email addresses never link accounts; email merging and its runtime
 configuration have been removed, including support for stale persisted settings.
+With soev-api configured, the account key is always the `sub` from Authlib's
+verified ID-token claims. Startup refuses any `OAUTH_SUB_CLAIM` or persisted
+`oauth.sub_claim` value other than `sub` or unset. A later configuration change
+or userinfo response cannot override the account key. A known provider/sub whose
+account already has `person_id` must also agree with the person returned by
+`/v1/me` for this login token before any session is issued. A mismatch refuses
+with `403`, logged as `oauth_person_mismatch`, without signup or attachment;
+failed discovery refuses with the same retryable `503` as an unknown login.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product

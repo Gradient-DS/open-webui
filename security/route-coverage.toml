@@ -20,10 +20,12 @@
 # --- OAuth: the sealed stack has no identity provider ------------------------
 # Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real
 # surface. An OIDC issuer stub on the CI network would close all seven.
-# Both provider callbacks also require soev-api /v1/me for unknown logins when
-# configured: attach only by user.person_id, refuse provider binding conflicts
-# with 403 and discovery failures with 503. Mocked backend coverage lives in
-# test/soev/test_login_attach.py; the live-stack gap below is unchanged.
+# With soev-api configured, both provider callbacks use only the verified token
+# sub. /v1/me resolves unknown logins and verifies known person-bound accounts:
+# attach only by user.person_id, refuse binding/person conflicts with 403 and
+# discovery failures with 503. Mocked backend coverage lives in
+# test/soev/test_login_attach.py and test/soev/test_login_subject.py; the live-stack
+# gap below is unchanged.
 
 [[waived]]
 id = "GET /oauth/{provider}/login"

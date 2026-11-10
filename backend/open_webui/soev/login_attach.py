@@ -1,4 +1,4 @@
-"""Attach an unknown login only through the person resolved by soev-api."""
+"""Select platform accounts only by immutable subjects and verified persons."""
 
 import logging
 
@@ -7,11 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
 from open_webui.internal.db import get_async_db_context
+from open_webui.models.config import Config
 from open_webui.models.users import User, UserModel
 from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.principal_refs import is_canonical_person_ref
 
 log = logging.getLogger(__name__)
+
+
+async def validate_login_config() -> None:
+    if not config.SOEV_API_URL:
+        return
+    for claim in (config.OAUTH_SUB_CLAIM, await Config.get('oauth.sub_claim', config.OAUTH_SUB_CLAIM)):
+        if claim not in (None, '', 'sub'):
+            raise ValueError(
+                'With SOEV_API_URL configured, OAUTH_SUB_CLAIM and oauth.sub_claim must be "sub" or unset; '
+                'other claims cannot identify a platform account.'
+            )
 
 
 def _refuse_binding(provider: str) -> None:
@@ -36,12 +48,27 @@ async def _discover_person(access_token: str | None) -> str:
 
 
 async def attach_person_login(
-    provider: str, sub: str, access_token: str | None, *, db: AsyncSession | None = None
+    provider: str,
+    sub: str,
+    access_token: str | None,
+    *,
+    user: UserModel | None = None,
+    db: AsyncSession | None = None,
 ) -> UserModel | None:
     if not config.SOEV_API_URL:
-        return None
+        return user
+    if user is not None and user.person_id is None:
+        return user
     person_id = await _discover_person(access_token)
+    if user is not None:
+        if user.person_id != person_id:
+            log.warning('OAuth login denied', extra={'code': 'oauth_person_mismatch', 'provider': provider})
+            raise SoevApiError(403, 'policy_forbids', 'Login refused', 'oauth:person_binding')
+        return user
+    return await _attach_login(provider, sub, person_id, db=db)
 
+
+async def _attach_login(provider: str, sub: str, person_id: str, *, db: AsyncSession | None) -> UserModel | None:
     async with get_async_db_context(db) as session:
         result = (
             await session.execute(
