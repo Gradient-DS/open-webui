@@ -864,7 +864,9 @@ async def test_current_lookup_preserves_reader_projection(thread_http):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('batched', [False, True])
-@pytest.mark.parametrize('upstream,expected,state', [(404, 403, 'no_access'), (503, 503, 'reconnect')])
+@pytest.mark.parametrize(
+    'upstream,expected,state', [(401, 401, 'sign_in'), (404, 403, 'no_access'), (503, 503, 'reconnect')]
+)
 async def test_own_index_refusal_is_private_and_distinct_from_a_missing_chat(
     thread_http, monkeypatch, batched, upstream, expected, state
 ):

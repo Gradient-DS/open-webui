@@ -224,7 +224,7 @@ async def test_non_oidc_or_unowned_sessions_have_no_token(token_app, provider):
     else:
         ctx.session.provider = provider
     response = await ctx.browser.get('/call/json')
-    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert response.status_code == 401 and response.json() == {'detail': {'state': 'sign_in'}}
     assert ctx.requests == []
     ctx.refresh.assert_not_awaited()
     if provider == 'password':
@@ -243,7 +243,7 @@ async def test_api_keys_ignore_an_oidc_session_cookie(token_app, credential):
     else:
         ctx.browser.headers['x-api-key'] = 'sk-fictional'
     response = await ctx.browser.get('/call/json')
-    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert response.status_code == 401 and response.json() == {'detail': {'state': 'sign_in'}}
     assert ctx.requests == []
     ctx.lookup.assert_not_awaited()
 
@@ -284,7 +284,7 @@ async def test_missing_or_failed_refresh_does_not_forward_old_credentials(token_
     else:
         ctx.session.token = {}
     response = await ctx.browser.get('/call/json')
-    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert response.status_code == 401 and response.json() == {'detail': {'state': 'sign_in'}}
     assert ctx.requests == []
 
 

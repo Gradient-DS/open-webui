@@ -14,7 +14,7 @@ from urllib.parse import quote, unquote
 
 import httpx
 
-from open_webui.soev.acting import requester_ref, user_token
+from open_webui.soev.acting import refresh_user_token, requester_ref, user_token
 from open_webui.soev.request_cache import fetch_batch, has_batch_hook, invalidate, memoized
 from open_webui.soev.timing import instrument_client
 from open_webui.utils.telemetry.routes import route_template
@@ -653,17 +653,33 @@ class SoevClient:
         status = None
         route = route_template(path)
         try:
-            response = await _shared_client().request(
-                method,
-                f'{self._base_url}{path}',
-                headers=headers,
-                params=params,
-                json=body,
-                content=content,
-                files=files,
-                data=data,
-                timeout=self._timeout,
-            )
+            for attempt in range(2):
+                response = await _shared_client().request(
+                    method,
+                    f'{self._base_url}{path}',
+                    headers=headers,
+                    params=params,
+                    json=body,
+                    content=content,
+                    files=files,
+                    data=data,
+                    timeout=self._timeout,
+                )
+                rejected = headers.get('X-Soev-User-Token')
+                # Only replay reads; writes and streamed uploads may have side effects.
+                if (
+                    attempt
+                    or response.status_code != 401
+                    or not rejected
+                    or user_access_token is not None
+                    or not (method == 'GET' or (method == 'POST' and path == '/v1/chat/reads'))
+                ):
+                    break
+                refreshed = await refresh_user_token(as_user or requester_ref(), rejected)
+                if not refreshed or refreshed == rejected:
+                    break
+                await response.aclose()
+                headers['X-Soev-User-Token'] = refreshed
             status = response.status_code
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502

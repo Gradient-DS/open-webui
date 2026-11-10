@@ -282,15 +282,23 @@ class ThreadClient:
         if if_match is not None:
             headers['If-Match'] = if_match
         try:
-            response = await _shared_client().request(
-                method,
-                self.base_url + path,
-                headers=headers,
-                params=params,
-                json=body,
-                timeout=self.timeout,
-                follow_redirects=False,
-            )
+            for attempt in range(2):
+                response = await _shared_client().request(
+                    method,
+                    self.base_url + path,
+                    headers=headers,
+                    params=params,
+                    json=body,
+                    timeout=self.timeout,
+                    follow_redirects=False,
+                )
+                if attempt or response.status_code != 401 or method != 'GET':
+                    break
+                refreshed = await acting.refresh_user_token(acting.requester_ref(), token)
+                if not refreshed or refreshed == token:
+                    break
+                await response.aclose()
+                headers['X-Soev-User-Token'] = refreshed
         except httpx.TransportError:
             raise ThreadError(503, 'reconnect') from None
         if response.status_code == 304 and etag is not None:
@@ -399,6 +407,8 @@ class ThreadClient:
                     raise ThreadError(403, 'no_access')
                 return IndexPage.model_validate(result[0])
             except (SoevApiError, ValidationError) as error:
+                if isinstance(error, SoevApiError) and error.status == 401:
+                    raise ThreadError(401, 'sign_in') from None
                 raise ThreadError(error.status if isinstance(error, SoevApiError) else 502, 'reconnect') from None
         return self._parse(
             await self._request(

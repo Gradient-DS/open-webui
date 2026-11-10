@@ -316,6 +316,7 @@ async def test_public_config_keeps_shape_and_refreshes_features(live, monkeypatc
         }
     )
     first = await main.get_app_config(request)
+    assert first['oauth']['required_provider'] == 'oidc'
     assert first['features']['feature_knowledge'] is True
     live.document['values']['feature.knowledge'] = False
     live.now[0] += 60
