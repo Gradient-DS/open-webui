@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 import logging
 from contextlib import suppress
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-from sqlalchemy import select
+from pydantic import AwareDatetime, BaseModel, ConfigDict, field_validator, model_validator
 
-from open_webui.internal.db import get_async_db
-from open_webui.models.users import User
 from open_webui.soev.client import build_service_client
 from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.soev.principal_refs import is_canonical_person_ref
@@ -30,7 +26,7 @@ class Task(BaseModel):
     person: str
     mode: Literal['delete', 'transfer', 'archive']
     target: str | None
-    expires_at: dt.datetime | None
+    expires_at: AwareDatetime | None
 
     @field_validator('person', 'target')
     @classmethod
@@ -52,23 +48,14 @@ class Task(BaseModel):
         return self
 
 
-async def apply(task: Task) -> ParticipantError:
-    """Refuse until local disposal can preserve the platform's thread semantics."""
-    async with get_async_db() as db:
-        if task.mode == 'transfer':
-            target = await db.scalar(select(User.id).where(User.person_id == task.target))
-            if target is None:
-                return 'target_missing'
-        source = await db.scalar(select(User.id).where(User.person_id == task.person))
-        if source is None:
-            return 'source_conflict'
-    # Legacy offboarding deletes chats in transfer mode and uses the former owner's
-    # login for remote writes. Neither operation is authorized by this feed.
-    return 'unsupported_content'
+async def apply(task: Task) -> ParticipantError | None:
+    from open_webui.services.deletion.platform_offboarding import apply as apply_local
+
+    return await apply_local(task)
 
 
 async def poll() -> None:
-    """Acknowledgements carry fixed codes; no account or content is changed locally."""
+    """Acknowledge only a completed local receipt or a fixed failure code."""
     if not v2_enabled():
         return
     client = build_service_client()
