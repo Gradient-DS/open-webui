@@ -5,6 +5,7 @@ import shutil
 import socket
 import sys
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -100,6 +101,7 @@ def template(application, tmp_path_factory):
                     name=principal,
                     email=f'{principal}@acl.invalid',
                     role=principal if principal in ('admin', 'pending') else 'user',
+                    person_id=f'platform:user:{uuid4()}',
                     created_at=1,
                     updated_at=1,
                     last_active_at=1,
