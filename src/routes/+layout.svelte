@@ -49,6 +49,7 @@
 		waitForConnectionRetry
 	} from '$lib/stores/session';
 	import { observeThreadAccount } from '$lib/utils/threadCache';
+	import { threadAPI } from '$lib/apis/threads';
 
 	$: if (
 		typeof window !== 'undefined' &&
@@ -87,7 +88,7 @@
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import SyncStatsModal from '$lib/components/chat/Settings/SyncStatsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import NoAccess from '$lib/components/layout/NoAccess.svelte';
+	import SessionGate from '$lib/components/layout/SessionGate.svelte';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 
 	import dayjs from 'dayjs';
@@ -120,6 +121,45 @@
 
 	let loaded = false;
 	let noAccess = false;
+	/** @type {string | null} */
+	let accessUser = null;
+	let accessReady = false;
+
+	/** @param {string} userId @param {boolean} threadsEnabled */
+	const checkPlatformAccess = async (userId, threadsEnabled) => {
+		try {
+			if (threadsEnabled) await threadAPI(localStorage.token).index();
+			if (accessUser === userId) accessReady = true;
+		} catch (error) {
+			// A concealed refusal (404) means no access too: show that page, never a blank one.
+			// Expired sessions and reconnects are handled by the session boundary.
+			console.error('Error checking platform access:', error);
+			if (accessUser === userId && error?.state === 'unavailable') noAccess = true;
+		}
+	};
+
+	$: if (!$user?.id) {
+		accessUser = null;
+		accessReady = false;
+	}
+
+	// Public config has no thread feature flag. Wait for authenticated config as
+	// well as the user's own index before mounting any authenticated content.
+	$: if (
+		$config?.oauth?.required_provider &&
+		$user?.id &&
+		$config?.features?.enable_v2_threads !== undefined &&
+		accessUser !== $user.id
+	) {
+		accessUser = $user.id;
+		accessReady = false;
+		void checkPlatformAccess($user.id, $config.features.enable_v2_threads);
+	}
+
+	$: sessionReady =
+		loaded &&
+		!$sessionRedirecting &&
+		(!$config?.oauth?.required_provider || !$user || (accessReady && accessUser === $user.id));
 	/** @type {ReturnType<typeof setInterval> | undefined} */
 	let tokenTimer;
 	/** @type {ReturnType<typeof createSessionBoundary>} */
@@ -1143,9 +1183,7 @@
 	</div>
 {/if}
 
-{#if noAccess && !$sessionRedirecting}
-	<NoAccess />
-{:else if loaded && !$sessionRedirecting}
+<SessionGate ready={sessionReady} denied={noAccess && !$sessionRedirecting}>
 	{#if $isApp}
 		<div class="flex flex-row h-screen">
 			<AppSidebar />
@@ -1157,7 +1195,7 @@
 	{:else}
 		<slot />
 	{/if}
-{/if}
+</SessionGate>
 
 {#if $config?.features.enable_community_sharing}
 	<SyncStatsModal bind:show={showSyncStatsModal} eventData={syncStatsEventData} />

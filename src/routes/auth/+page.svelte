@@ -25,7 +25,7 @@
 	import type i18nType from '$lib/i18n';
 
 	import { generateInitialsImage, getUserTimezone } from '$lib/utils';
-	import { resolveAuthPageState, type AuthPageState } from '$lib/utils/authPage';
+	import { authOnboarding, resolveAuthPageState, type AuthPageState } from '$lib/utils/authPage';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
@@ -166,6 +166,7 @@
 	};
 
 	let onboarding = false;
+	$: onboardingEnabled = authOnboarding($config);
 
 	async function setLogoImage() {
 		await tick();
@@ -222,6 +223,11 @@
 		}
 		form = $page.url.searchParams.get('form');
 
+		if ($config?.oauth?.required_provider && !error && !logout) {
+			window.location.href = `${WEBUI_BASE_URL}/oauth/${encodeURIComponent($config.oauth.required_provider)}/login`;
+			return;
+		}
+
 		// Auto-redirect to SSO when OAUTH_AUTO_REDIRECT is enabled and the
 		// deployment is unambiguously SSO-only (single provider, no login form,
 		// no LDAP). Suppressed by ?form=, ?error=, onboarding, trusted-header
@@ -234,7 +240,7 @@
 				$config?.features?.enable_login_form === false &&
 				!$config?.features?.enable_ldap &&
 				!$config?.features?.auth_trusted_header &&
-				!$config?.onboarding &&
+				!onboardingEnabled &&
 				!localStorage.token &&
 				!document.cookie.split('; ').some((c) => c.startsWith('token='))
 			) {
@@ -249,7 +255,7 @@
 		if (($config?.features?.auth_trusted_header ?? false) || $config?.features?.auth === false) {
 			await signInHandler();
 		} else {
-			onboarding = $config?.onboarding ?? false;
+			onboarding = onboardingEnabled;
 		}
 	});
 </script>
@@ -364,7 +370,7 @@
 								>
 									<div class="mb-1">
 										<div class=" text-2xl font-normal">
-											{#if $config?.onboarding ?? false}
+											{#if onboardingEnabled}
 												{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 											{:else if mode === 'ldap'}
 												{$i18n.t(`Sign in to {{WEBUI_NAME}} with LDAP`, {
@@ -379,7 +385,7 @@
 											{/if}
 										</div>
 
-										{#if $config?.onboarding ?? false}
+										{#if onboardingEnabled}
 											<div class="mt-1 text-xs font-normal text-gray-600 dark:text-gray-500">
 												ⓘ {$WEBUI_NAME}
 												{$i18n.t(
@@ -507,7 +513,7 @@
 															? $i18n.t('Sign in')
 															: mode === 'forgot'
 																? $i18n.t('Reset password')
-																: ($config?.onboarding ?? false)
+																: onboardingEnabled
 																	? $i18n.t('Create Admin Account')
 																	: $i18n.t('Create Account')}
 													</div>
@@ -552,7 +558,7 @@
 													</div>
 												{/if}
 
-												{#if mode !== 'forgot' && $config?.features.enable_signup && !($config?.onboarding ?? false)}
+												{#if mode !== 'forgot' && $config?.features.enable_signup && !onboardingEnabled}
 													<div class=" mt-4 text-sm text-center">
 														{mode === 'signin'
 															? $i18n.t("Don't have an account?")
@@ -691,8 +697,7 @@
 											class="flex justify-center items-center text-xs w-full text-center underline"
 											type="button"
 											on:click={() => {
-												if (mode === 'ldap')
-													mode = ($config?.onboarding ?? false) ? 'signup' : 'signin';
+												if (mode === 'ldap') mode = onboardingEnabled ? 'signup' : 'signin';
 												else mode = 'ldap';
 											}}
 										>
