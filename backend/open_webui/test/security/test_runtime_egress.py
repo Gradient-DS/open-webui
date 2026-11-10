@@ -61,11 +61,8 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/web/yandex.py': 'yandex search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/ydc.py': 'ydc search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'routers/auths.py': 'OAuth avatar fetch requires a completed provider login; no OAuth provider is configured.',
-    'routers/configs.py': 'Admin connection verification consumes supplied URLs; off-network destinations are findings.',
-    'routers/functions.py': 'Admin URL imports consume supplied URLs; off-network destinations are findings.',
     'routers/ollama.py': 'Ollama passthrough uses OLLAMA_BASE_URL and OLLAMA_BASE_URLS at stub.',
     'routers/terminals.py': 'No terminal connections configured; supplied connection destinations are findings.',
-    'routers/tools.py': 'Admin URL imports consume supplied URLs; off-network destinations are findings.',
     'services/email/auth.py': 'Missing EMAIL_GRAPH credentials raise before the Microsoft token request.',
     'services/email/graph_mail_client.py': 'Mail token acquisition raises before Graph sendMail when EMAIL_GRAPH credentials are empty.',
     'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
@@ -73,7 +70,6 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
     'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
-    'utils/feedback_report.py': 'Feedback Slack and notification-router URLs both point at stub.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
     'utils/oauth.py': 'All OAuth providers unconfigured; no IdP credentials, sessions, or external tools seeded.',
     'utils/tools.py': 'No external tool servers configured; request-supplied public server URLs are findings.',
@@ -385,8 +381,6 @@ STUB_URLS = {
     'AUDIO_TTS_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'IMAGES_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'WEBHOOK_URL': 'http://stub:8000/webhook',
-    'FEEDBACK_REPORT_SLACK_WEBHOOK_URL': 'http://stub:8000/slack',
-    'FEEDBACK_REPORT_WEBHOOK_URL': 'http://stub:8000/feedback',
 }
 CLOSED_SETTINGS = (
     'ENABLE_OTEL',

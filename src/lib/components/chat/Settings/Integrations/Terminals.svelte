@@ -51,7 +51,6 @@
 </script>
 
 <AddTerminalServerModal
-	direct
 	bind:show={showAddModal}
 	onSubmit={(server: TerminalServerConfig) => addServer(server)}
 />

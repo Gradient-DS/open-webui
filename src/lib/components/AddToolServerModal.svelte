@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { v4 as uuidv4 } from 'uuid';
-
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
@@ -17,11 +15,7 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tags from './common/Tags.svelte';
 	import { getToolServerData } from '$lib/apis';
-	import {
-		verifyToolServerConnection,
-		registerOAuthClient,
-		initiateOAuthRedirect
-	} from '$lib/apis/configs';
+	import { registerOAuthClient, initiateOAuthRedirect } from '$lib/apis/configs';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -34,8 +28,6 @@
 
 	export let show = false;
 	export let edit = false;
-
-	export let direct = false;
 	export let connection = null;
 
 	let inputElement = null;
@@ -189,7 +181,7 @@
 			}
 		}
 
-		if (direct) {
+		{
 			const res = await getToolServerData(
 				auth_type === 'bearer' ? key : localStorage.token,
 				path.includes('://') ? path : `${url}${path.startsWith('/') ? '' : '/'}${path}`
@@ -199,38 +191,6 @@
 
 			if (res) {
 				toast.success($i18n.t('Connection successful'));
-				console.debug('Connection successful', res);
-			}
-		} else {
-			const res = await verifyToolServerConnection(localStorage.token, {
-				url,
-				path,
-				type,
-				auth_type,
-				headers: headers ? JSON.parse(headers) : undefined,
-				key,
-				config: {
-					enable: enable,
-					access_grants: accessGrants
-				},
-				info: {
-					id,
-					name,
-					description,
-					...(oauthAuthTypes.includes(auth_type)
-						? {
-								...(oauthServerUrl ? { oauth_server_url: oauthServerUrl } : {}),
-								...(oauthScope ? { oauth_scope: oauthScope } : {}),
-								oauth_resource_parameter: oauthResourceParameter
-							}
-						: {})
-				}
-			}).catch((err) => {
-				toast.error($i18n.t('Connection failed'));
-			});
-
-			if (res) {
-				toast.success(verifySuccessMessage());
 				console.debug('Connection successful', res);
 			}
 		}
@@ -544,26 +504,9 @@
 								<div class=" text-xs text-gray-500">{$i18n.t('Type')}</div>
 
 								<div class="">
-									{#if !direct}
-										<button
-											on:click={() => {
-												type = ['', 'openapi'].includes(type) ? 'mcp' : 'openapi';
-											}}
-											type="button"
-											class=" text-xs text-gray-700 dark:text-gray-300"
-										>
-											{#if ['', 'openapi'].includes(type)}
-												{$i18n.t('OpenAPI')}
-											{:else if type === 'mcp'}
-												{$i18n.t('MCP')}
-												<span class="text-gray-500">{$i18n.t('Streamable HTTP')}</span>
-											{/if}
-										</button>
-									{:else}
-										<div class="text-xs text-gray-700 dark:text-gray-300">
-											{$i18n.t('OpenAPI')}
-										</div>
-									{/if}
+									<div class="text-xs text-gray-700 dark:text-gray-300">
+										{$i18n.t('OpenAPI')}
+									</div>
 								</div>
 							</div>
 						</div>
@@ -585,28 +528,6 @@
 									/>
 								</div>
 							</div>
-							{#if !direct}
-								<div class="flex flex-col flex-1">
-									<div class="flex justify-between mb-0.5">
-										<label for="enter-id" class={`text-xs text-gray-500`}
-											>{$i18n.t('ID')}
-											{#if type !== 'mcp'}<span class="opacity-50">({$i18n.t('optional')})</span
-												>{/if}</label
-										>
-									</div>
-									<div class="flex flex-1 items-center">
-										<input
-											id="enter-id"
-											class={`w-full flex-1 text-sm font-mono ${inputClass}`}
-											type="text"
-											bind:value={id}
-											placeholder="auto"
-											autocomplete="off"
-											required={type === 'mcp'}
-										/>
-									</div>
-								</div>
-							{/if}
 						</div>
 
 						<div class="flex flex-col w-full mt-1 mb-1.5">
@@ -751,14 +672,6 @@
 
 											<option value="bearer">{$i18n.t('Bearer')}</option>
 											<option value="session">{$i18n.t('Session')}</option>
-
-											{#if !direct}
-												<option value="system_oauth">{$i18n.t('OAuth')}</option>
-												{#if type === 'mcp'}
-													<option value="oauth_2.1">{$i18n.t('OAuth 2.1')}</option>
-													<option value="oauth_2.1_static">{$i18n.t('OAuth 2.1 (Static)')}</option>
-												{/if}
-											{/if}
 										</select>
 									</div>
 
@@ -835,16 +748,6 @@
 								</svg>
 								{$i18n.t('Advanced')}
 							</button>
-
-							{#if !direct}
-								<AccessButton
-									className="mt-2"
-									on:click={() => {
-										showAccessControlModal = true;
-									}}
-									label={$i18n.t('Access Control')}
-								/>
-							{/if}
 						</div>
 
 						{#if showAdvanced}
@@ -956,55 +859,6 @@
 									</div>
 								</div>
 							{/if}
-
-							{#if !direct}
-								<div class="flex gap-2 mt-2">
-									<div class="flex flex-col w-full">
-										<label
-											for="headers-input"
-											class={`mb-0.5 text-xs text-gray-500
-									`}>{$i18n.t('Headers')}</label
-										>
-
-										<div class="flex-1">
-											<Tooltip
-												content={$i18n.t(
-													'Enter additional headers in JSON format (e.g. {"X-Custom-Header": "value"}'
-												)}
-											>
-												<Textarea
-													className="w-full text-sm outline-hidden"
-													bind:value={headers}
-													placeholder={$i18n.t('Enter additional headers in JSON format')}
-													required={false}
-													minSize={30}
-												/>
-											</Tooltip>
-										</div>
-									</div>
-								</div>
-							{/if}
-						{/if}
-
-						{#if !direct}
-							<hr class=" border-gray-100/50 dark:border-gray-700/10 my-2.5 w-full" />
-
-							<div class="flex flex-col w-full mt-2">
-								<label for="function-name-filter-list" class={`mb-1 text-xs text-gray-500`}
-									>{$i18n.t('Function Name Filter List')}</label
-								>
-
-								<div class="flex-1">
-									<input
-										id="function-name-filter-list"
-										class={`w-full text-sm ${inputClass}`}
-										type="text"
-										bind:value={functionNameFilterList}
-										placeholder={$i18n.t('Enter function name filter list (e.g. func1, !func2)')}
-										autocomplete="off"
-									/>
-								</div>
-							</div>
 						{/if}
 					</div>
 

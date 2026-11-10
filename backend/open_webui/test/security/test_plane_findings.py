@@ -63,37 +63,6 @@ def test_the_ollama_anthropic_proxy_refuses_a_body_without_a_model(monkeypatch):
     assert response.status_code == 400, (response.status_code, response.text)
 
 
-def test_accepting_an_invite_stores_a_password_hash_not_a_coroutine(monkeypatch):
-    # invites/{token}/accept called the async get_password_hash without await, so
-    # the account insert bound a coroutine: every invite acceptance answered 500.
-    from open_webui.routers import invites
-
-    invite = SimpleNamespace(
-        revoked_at=None,
-        accepted_at=None,
-        expires_at=4102444800,
-        email='invitee@example.com',
-        name='Invitee',
-        role='user',
-    )
-
-    async def found(*args, **kwargs):
-        return invite
-
-    stored = {}
-
-    async def insert(**kwargs):
-        stored.update(kwargs)
-        return None
-
-    monkeypatch.setattr(invites.Invites, 'get_invite_by_token', found)
-    monkeypatch.setattr(invites.Auths, 'insert_new_auth', insert)
-    monkeypatch.setattr(invites, 'validate_password', lambda password: True)
-    path = '/{token}/accept'
-    _client(_endpoint(invites.router, path), path).post('/t/accept', json={'password': 'Invitee-Passw0rd!'})
-    assert isinstance(stored.get('password'), str), type(stored.get('password'))
-
-
 def test_no_error_message_factory_is_used_uncalled():
     # /openai/audio/speech raised HTTPException(detail=ERROR_MESSAGES.OPENAI_NOT_FOUND):
     # the lambda itself, which the exception handler cannot serialise -- 500.
@@ -126,47 +95,7 @@ def test_a_stored_timezone_that_is_not_a_zone_key_reads_as_utc():
     assert _timezone('Europe/Amsterdam') == ZoneInfo('Europe/Amsterdam')
 
 
-def test_testing_an_unconfigured_email_sender_is_refused(monkeypatch):
-    # configs/email/test answered 500 for "Email Graph API credentials not
-    # configured": the admin's configuration, not a server fault.
-    from open_webui.routers import configs
-    from open_webui.services.email import graph_mail_client
-
-    async def enabled(*keys):
-        return {'email.enable_invites': True, 'email.from_name': 'Attack'}
-
-    async def unconfigured(**kwargs):
-        raise ValueError('Email Graph API credentials not configured')
-
-    monkeypatch.setattr(configs.Config, 'get_many', enabled)
-    monkeypatch.setattr(graph_mail_client, 'send_mail', unconfigured)
-    path = '/email/test'
-    response = _client(_endpoint(configs.router, path), path).post(path)
-    assert response.status_code == 400, (response.status_code, response.text)
-
-
 UNREACHABLE = 'http://127.0.0.1:1/attack.py'
-
-
-@pytest.mark.parametrize('module_name', ['functions', 'tools'])
-def test_loading_code_from_an_unreachable_url_is_refused(module_name):
-    # functions|tools/load/url answered 500 when the admin-supplied URL could not
-    # be fetched: a bad URL, not a server fault.
-    import importlib
-
-    module = importlib.import_module(f'open_webui.routers.{module_name}')
-    path = '/load/url'
-    response = _client(_endpoint(module.router, path), path).post(path, json={'url': UNREACHABLE})
-    assert 400 <= response.status_code < 500, (response.status_code, response.text)
-
-
-def test_verifying_an_unreachable_ollama_connection_is_refused():
-    # ollama/verify turned the client error for an admin-supplied URL into a 500.
-    from open_webui.routers import ollama
-
-    path = '/verify'
-    response = _client(_endpoint(ollama.router, path), path).post(path, json={'url': 'http://127.0.0.1:1', 'key': ''})
-    assert 400 <= response.status_code < 500, (response.status_code, response.text)
 
 
 @pytest.mark.parametrize(
@@ -298,22 +227,6 @@ def test_a_chat_list_sort_by_a_real_column_is_honoured():
     assert str(clause) == str(Chat.title.asc())
 
 
-@pytest.mark.parametrize('field', ['FOLDER_MAX_FILE_COUNT', 'AUTOMATION_MAX_COUNT', 'AUTOMATION_MIN_INTERVAL'])
-def test_a_limit_that_is_not_a_whole_number_is_refused(field):
-    # PLANE-001: auths/admin/config ran int() over three int|str form fields.
-    from open_webui.routers import auths
-
-    payload = {
-        name: (False if info.annotation is bool else '')
-        for name, info in auths.AdminConfig.model_fields.items()
-        if info.is_required()
-    }
-    payload[field] = '[click](file:///etc/passwd)'
-    path = '/admin/config'
-    response = _client(_endpoint(auths.router, path), path).post(path, json=payload)
-    assert response.status_code == 400, (response.status_code, response.text)
-
-
 def test_autocompletion_without_a_prompt_is_refused(monkeypatch):
     # tasks/auto/completions measured the prompt's length before checking it
     # existed: with autocompletion on, a body without one raised TypeError (500).
@@ -328,7 +241,7 @@ def test_autocompletion_without_a_prompt_is_refused(monkeypatch):
     assert response.status_code == 400, (response.status_code, response.text)
 
 
-def test_ollama_embeddings_without_an_input_are_refused():
+def test_ollama_embeddings_without_an_input_are_refused(monkeypatch):
     # With PLANE-004's model check passing, a body with no input reached
     # GenerateEmbedForm, whose ValidationError nobody caught: 500.
     import asyncio
@@ -336,6 +249,8 @@ def test_ollama_embeddings_without_an_input_are_refused():
     from fastapi import HTTPException
 
     from open_webui.utils.embeddings import generate_embeddings
+
+    monkeypatch.setattr('open_webui.utils.embeddings.check_model_access', _nothing)
 
     models = {'m': {'id': 'm', 'owned_by': 'ollama'}}
     request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace(MODELS=models)))

@@ -17,6 +17,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
+from open_webui import config
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
 from open_webui.events import EVENTS, publish_event
@@ -24,7 +25,6 @@ from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
 from open_webui.models.files import Files
-from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
     ModelAccessListResponse,
@@ -37,21 +37,24 @@ from open_webui.models.models import (
     ModelResponse,
     Models,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.chat_variables import get_chat_variables_schema
-from open_webui.utils.models import get_all_models
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.soev import assistant_sharing, knowledge_sharing
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui import config
-from open_webui.utils.access_control import can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
+from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.chat_variables import get_chat_variables_schema
+from open_webui.utils.features import require_platform_feature
+from open_webui.utils.models import get_all_models
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+
+router = APIRouter(
+    dependencies=[Depends(require_platform_feature('feature.models'))],
+)
 
 
 def add_chat_variables_schema(model_dict: dict) -> dict:
@@ -211,21 +214,6 @@ async def get_models(
 ###########################
 
 
-@router.get('/base/tags', response_model=list[str])
-async def get_base_model_tags(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    tags = await Models.get_all_tags(user_id=user.id, is_admin=True, is_base_model=True, db=db)
-    return sorted(tags)
-
-
-@router.get('/base', response_model=list[ModelResponse])
-async def get_base_models(
-    tag: str | None = None,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    return await Models.get_base_models(tag=tag, db=db)
-
-
 ###########################
 # GetModelTags
 ###########################
@@ -254,9 +242,7 @@ async def create_new_model(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create a new workspace model entry."""
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'workspace.models', await Config.get('user.permissions'), db=db
-    ):
+    if not await has_permission(user.id, 'workspace.models', await Config.get('user.permissions'), db=db):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -278,27 +264,26 @@ async def create_new_model(
             detail=ERROR_MESSAGES.MODEL_ID_TAKEN,
         )
 
-    if user.role != 'admin':
-        if not form_data.base_model_id:
+    if not form_data.base_model_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
+    if not request.app.state.MODELS:
+        await get_all_models(request, user=user)
+    for base_model in request.app.state.MODELS.values():
+        base_model_id = base_model.get('id')
+        if base_model.get('preset') or not base_model_id:
+            continue
+
+        if form_data.id == base_model_id or (
+            base_model.get('owned_by') == 'ollama' and form_data.id == base_model_id.split(':', 1)[0]
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.UNAUTHORIZED,
+                detail=ERROR_MESSAGES.MODEL_ID_TAKEN,
             )
-
-        if not request.app.state.MODELS:
-            await get_all_models(request, user=user)
-        for base_model in request.app.state.MODELS.values():
-            base_model_id = base_model.get('id')
-            if base_model.get('preset') or not base_model_id:
-                continue
-
-            if form_data.id == base_model_id or (
-                base_model.get('owned_by') == 'ollama' and form_data.id == base_model_id.split(':', 1)[0]
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=ERROR_MESSAGES.MODEL_ID_TAKEN,
-                )
 
     await _verify_knowledge_file_ownership(
         getattr(form_data.meta, 'knowledge', None) if form_data.meta else None,
@@ -343,7 +328,7 @@ async def export_models(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'workspace.models_export',
         await Config.get('user.permissions'),
@@ -354,10 +339,7 @@ async def export_models(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT:
-        return await Models.get_models(db=db)
-    else:
-        return await Models.get_models(writable_by_user_id=user.id, db=db)
+    return await Models.get_models(writable_by_user_id=user.id, db=db)
 
 
 ############################
@@ -376,7 +358,7 @@ async def import_models(
     form_data: ModelsImportForm = Depends(models_import_body(ModelsImportForm)),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'workspace.models_import',
         await Config.get('user.permissions'),
@@ -458,10 +440,8 @@ async def import_models(
                             )
                             continue
 
-                        if (
-                            user.role != 'admin'
-                            and existing_model.base_model_id
-                            and not model_data.get('base_model_id', existing_model.base_model_id)
+                        if (existing_model.base_model_id) and (
+                            not model_data.get('base_model_id', existing_model.base_model_id)
                         ):
                             log.warning(
                                 'import_models: user %s skipped model %s (cannot clear base model)',
@@ -498,35 +478,34 @@ async def import_models(
                         model_data['params'] = model_data.get('params', {})
                         new_model = ModelForm(**model_data)
 
-                        if user.role != 'admin':
-                            if not new_model.base_model_id:
-                                log.warning(
-                                    'import_models: user %s skipped model %s (no base model set)',
-                                    user.id,
-                                    model_id,
-                                )
-                                continue
+                        if not new_model.base_model_id:
+                            log.warning(
+                                'import_models: user %s skipped model %s (no base model set)',
+                                user.id,
+                                model_id,
+                            )
+                            continue
 
-                            if base_model_ids is None:
-                                base_model_ids = set()
-                                if not request.app.state.MODELS:
-                                    await get_all_models(request, user=user)
-                                for base_model in request.app.state.MODELS.values():
-                                    base_model_id = base_model.get('id')
-                                    if base_model.get('preset') or not base_model_id:
-                                        continue
+                        if base_model_ids is None:
+                            base_model_ids = set()
+                            if not request.app.state.MODELS:
+                                await get_all_models(request, user=user)
+                            for base_model in request.app.state.MODELS.values():
+                                base_model_id = base_model.get('id')
+                                if base_model.get('preset') or not base_model_id:
+                                    continue
 
-                                    base_model_ids.add(base_model_id)
-                                    if base_model.get('owned_by') == 'ollama':
-                                        base_model_ids.add(base_model_id.split(':', 1)[0])
+                                base_model_ids.add(base_model_id)
+                                if base_model.get('owned_by') == 'ollama':
+                                    base_model_ids.add(base_model_id.split(':', 1)[0])
 
-                            if model_id in base_model_ids:
-                                log.warning(
-                                    'import_models: user %s skipped model %s (id belongs to a base model)',
-                                    user.id,
-                                    model_id,
-                                )
-                                continue
+                        if model_id in base_model_ids:
+                            log.warning(
+                                'import_models: user %s skipped model %s (id belongs to a base model)',
+                                user.id,
+                                model_id,
+                            )
+                            continue
 
                         new_model.access_grants = await filter_allowed_access_grants(
                             await Config.get('user.permissions'),
@@ -565,37 +544,6 @@ async def import_models(
 
 class SyncModelsForm(BaseModel):
     models: list[ModelModel] = []
-
-
-@router.post('/sync', response_model=list[ModelModel])
-async def sync_models(
-    request: Request,
-    form_data: SyncModelsForm,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    if configured():
-        existing = list((await knowledge_sharing.assistants_view(None)).values())
-        if any(model.user_id != user.id for model in existing) or any(
-            model.user_id != user.id for model in form_data.models
-        ):
-            raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
-        # One owner context avoids nesting the shared owner lock for a batch.
-        async with assistant_sharing.changing_all(user.id, {model.id: model for model in form_data.models}):
-            models = await Models.sync_models(user.id, form_data.models, db=db)
-    else:
-        models = await Models.sync_models(user.id, form_data.models, db=db)
-    await publish_event(
-        request,
-        EVENTS.MODEL_SYNCED,
-        actor=user,
-        subject_type='model',
-        data={'count': len(models), 'model_ids': [model.id for model in models]},
-    )
-    return models
 
 
 ###########################
@@ -878,7 +826,7 @@ async def update_model_by_id(
         # Should never be stored: a model cannot be based on itself.
         form_data.base_model_id = None
 
-    if user.role != 'admin' and model.base_model_id and not form_data.base_model_id:
+    if (model.base_model_id) and (not form_data.base_model_id):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -928,11 +876,10 @@ async def update_model_access_by_id(
     # Non-preset models (e.g. direct Ollama/OpenAI models) may not have a DB
     # entry yet. Create a minimal one so access grants can be stored.
     if not model:
-        if user.role != 'admin':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
         model = await Models.insert_new_model(
             ModelForm(
                 id=form_data.id,
@@ -1038,25 +985,4 @@ async def delete_model_by_id(
             subject_id=form_data.id,
             data={'name': model.name},
         )
-    return result
-
-
-@router.delete('/delete/all', response_model=bool)
-async def delete_all_models(
-    request: Request, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
-):
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    if configured():
-        existing = list((await knowledge_sharing.assistants_view(None)).values())
-        for model in existing:
-            if model.user_id != user.id and await assistant_sharing.remote_cleanup_needed(model):
-                raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
-        async with assistant_sharing.changing_all(user.id, {}):
-            result = await Models.delete_all_models(db=db)
-    else:
-        result = await Models.delete_all_models(db=db)
-    if result:
-        await publish_event(request, EVENTS.MODEL_DELETED, actor=user, subject_type='model')
     return result

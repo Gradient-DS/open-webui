@@ -7,13 +7,8 @@
 	import { config, models, settings, user } from '$lib/stores';
 	import type { SettingsModalRequest } from '$lib/stores';
 	import { getUserSettings, updateUserSettings } from '$lib/apis/users';
-	import { getBackendConfig, getModels as _getModels } from '$lib/apis';
-	import {
-		isFeatureEnabled,
-		isAdminSettingsEnabled,
-		isAdminSettingsTabEnabled,
-		getFirstAvailableAdminSettingsTab
-	} from '$lib/utils/features';
+	import { getModels as _getModels } from '$lib/apis';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Modal from '../common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
@@ -43,37 +38,12 @@
 	import ChevronLeft from '../icons/ChevronLeft.svelte';
 	import Keyboard from '../icons/Keyboard.svelte';
 	import UsageIcon from '../icons/UsageIcon.svelte';
-	import AdminTabIcon from '$lib/components/admin/Settings/AdminTabIcon.svelte';
-	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
-	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
-	import AdminSystemPrompt from '$lib/components/admin/Settings/SystemPrompt.svelte';
-	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
-	import AdminAnalytics from '$lib/components/admin/Analytics.svelte';
-	import AdminIntegrations from '$lib/components/admin/Settings/Integrations.svelte';
-	import AdminDocuments from '$lib/components/admin/Settings/Documents.svelte';
-	import AdminWebSearch from '$lib/components/admin/Settings/WebSearch.svelte';
-	import AdminCodeExecution from '$lib/components/admin/Settings/CodeExecution.svelte';
-	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
-	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
-
-	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminEmail from '$lib/components/admin/Settings/Email.svelte';
-
-	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminSecurity from '$lib/components/admin/Settings/Security.svelte';
-
-	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminAcceptance from '$lib/components/admin/Settings/Acceptance.svelte';
-
-	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminExternalAgents from '$lib/components/admin/Settings/ExternalAgents.svelte';
 
 	const i18n: Writable<I18n> = getContext('i18n');
 
 	export let show: boolean | string | SettingsModalRequest = false;
 	let modalShow = false;
 	let lastShow: boolean | string | SettingsModalRequest = false;
-	let tabState: Record<string, unknown> | null = null;
 	let personalUiSettings: Record<string, unknown> = {};
 
 	const mergeUiSettings = (
@@ -113,14 +83,14 @@
 	$: if (show !== lastShow) {
 		lastShow = show;
 		if (show && typeof show === 'object') {
-			selectedTab = show.tab;
-			tabState = show.state ?? null;
+			const requestedTab = show.tab;
+			selectedTab = allSettings.some((tab) => tab.id === requestedTab) ? requestedTab : 'general';
 			show = true;
 			lastShow = true;
 			modalShow = true;
 			loadPersonalUiSettings();
 		} else if (typeof show === 'string') {
-			selectedTab = show;
+			selectedTab = allSettings.some((tab) => tab.id === show) ? show : 'general';
 			show = true;
 			lastShow = true;
 			modalShow = true;
@@ -132,7 +102,6 @@
 			}
 			if (!show) {
 				selectedTab = 'general';
-				tabState = null;
 			}
 		}
 	}
@@ -141,7 +110,6 @@
 		show = false;
 		lastShow = false;
 		selectedTab = 'general';
-		tabState = null;
 	}
 
 	interface SettingsTab {
@@ -150,9 +118,6 @@
 		keywords: string[];
 	}
 
-	const isAdminTab = (tabId: string) => tabId.startsWith('admin:');
-	const adminTabSegment = (tabId: string) => tabId.replace('admin:', '');
-	const adminTabPanelId = (tabId: string) => `tab-${tabId.replace(':', '-')}`;
 	const personalSettingGroups: Record<string, string> = {
 		general: 'Basics',
 		interface: 'Basics',
@@ -168,25 +133,7 @@
 		account: 'Profile',
 		about: 'Profile'
 	};
-	const adminSettingGroups: Record<string, string> = {
-		'admin:general': 'System',
-		'admin:acceptance': 'System',
-		'admin:security': 'System',
-		'admin:email': 'System',
-		'admin:models': 'AI',
-		'admin:system-prompt': 'AI',
-		'admin:external-agents': 'AI',
-		'admin:interface': 'Experience',
-		'admin:evaluations': 'Quality',
-		'admin:analytics': 'Quality',
-		'admin:integrations': 'Tools',
-		'admin:documents': 'Tools',
-		'admin:web': 'Tools',
-		'admin:code-execution': 'Tools',
-		'admin:db': 'Data'
-	};
-	const settingGroupTitle = (tabId: string) =>
-		(isAdminTab(tabId) ? adminSettingGroups[tabId] : personalSettingGroups[tabId]) ?? 'General';
+	const settingGroupTitle = (tabId: string) => personalSettingGroups[tabId] ?? 'General';
 	const shouldShowSettingGroup = (tabIds: string[], index: number) =>
 		index === 0 || settingGroupTitle(tabIds[index]) !== settingGroupTitle(tabIds[index - 1]);
 	const settingGroupHeadingClass = (first: boolean) =>
@@ -681,108 +628,9 @@
 		}
 	];
 
-	// [Gradient] Q14 hides admin:authentication; D-Runtime hides admin:subagents.
-	const adminSettings: SettingsTab[] = [
-		{
-			id: 'admin:general',
-			title: 'General',
-			keywords: [
-				'general',
-				'admin',
-				'settings',
-				'version',
-				'update',
-				'community',
-				'authentication',
-				'ldap',
-				'oauth'
-			]
-		},
-		{
-			id: 'admin:acceptance',
-			title: 'Acceptance',
-			keywords: ['acceptance', 'modal', 'terms', 'agreement', 'onboarding']
-		},
-		{
-			id: 'admin:security',
-			title: 'Security',
-			keywords: ['security', '2fa', 'two-factor', 'totp', 'authentication', 'mfa']
-		},
-		{
-			id: 'admin:email',
-			title: 'Email',
-			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
-		},
-		{
-			id: 'admin:models',
-			title: 'Models',
-			keywords: [
-				'models',
-				'pull',
-				'delete',
-				'create',
-				'edit',
-				'modelfile',
-				'gguf',
-				'import',
-				'export'
-			]
-		},
-		{
-			id: 'admin:system-prompt',
-			title: 'System Prompt',
-			keywords: ['system prompt', 'prompt', 'instructions', 'models', 'base models']
-		},
-		{
-			id: 'admin:external-agents',
-			title: 'External Agents',
-			keywords: ['agent', 'external', 'agents', 'ai']
-		},
-		{
-			id: 'admin:interface',
-			title: 'Interface',
-			keywords: ['interface', 'ui', 'appearance', 'banners', 'tasks', 'prompt suggestions', 'tags']
-		},
-		{
-			id: 'admin:evaluations',
-			title: 'Evaluations',
-			keywords: ['evaluations', 'feedback', 'rating', 'arena', 'leaderboard', 'preference']
-		},
-		{
-			id: 'admin:analytics',
-			title: 'Analytics',
-			keywords: ['analytics', 'usage', 'stats', 'dashboard', 'models', 'users', 'messages']
-		},
-		{
-			id: 'admin:integrations',
-			title: 'Integrations',
-			keywords: ['tools', 'integrations', 'plugins', 'extensions', 'functions', 'openapi', 'server']
-		},
-		{
-			id: 'admin:documents',
-			title: 'Documents',
-			keywords: ['documents', 'files', 'rag', 'knowledge', 'upload', 'embedding', 'vector db']
-		},
-		{
-			id: 'admin:web',
-			title: 'Web Search',
-			keywords: ['web search', 'google', 'bing', 'duckduckgo', 'serp', 'searxng', 'tavily', 'exa']
-		},
-		{
-			id: 'admin:code-execution',
-			title: 'Code Execution',
-			keywords: ['code execution', 'python', 'sandbox', 'compiler', 'jupyter', 'interpreter']
-		},
-		{
-			id: 'admin:db',
-			title: 'Database',
-			keywords: ['database', 'export', 'import', 'backup', 'chats', 'users']
-		}
-	];
 	let availableSettings: SettingsTab[] = [];
 	let filteredSettings: string[] = [];
 	let filteredPersonalSettings: string[] = [];
-	let filteredAdminSettings: string[] = [];
 
 	let search = '';
 	let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -792,8 +640,8 @@
 			if (tab.id === 'tools') {
 				return (
 					(isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) &&
-					($user?.role === 'admin' ||
-						($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))
+					$user?.role === 'user' &&
+					$user?.permissions?.features?.direct_tool_servers
 				);
 			}
 
@@ -802,41 +650,25 @@
 			}
 
 			if (tab.id === 'interface') {
-				return $user?.role === 'admin' || ($user?.permissions?.settings?.interface ?? true);
+				return $user?.permissions?.settings?.interface ?? true;
 			}
 
 			if (tab.id === 'personalization') {
 				return (
-					$config?.features?.enable_memories &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.memories ?? true))
+					$config?.features?.enable_memories && ($user?.permissions?.features?.memories ?? true)
 				);
 			}
 
 			return true;
 		});
 
-		// [Gradient] Apply tenant gates before exposing any admin tab.
-		return $user?.role === 'admin' && isAdminSettingsEnabled()
-			? [
-					...personalSettings,
-					...adminSettings.filter((tab) => isAdminSettingsTabEnabled(tab.id.slice(6)))
-				]
-			: personalSettings;
+		return personalSettings;
 	};
 
 	const setFilteredSettings = () => {
 		filteredSettings = availableSettings
 			.filter((tab) => {
-				// [Gradient] Recheck gates when config or search changes.
-				if (
-					isAdminTab(tab.id) &&
-					(!isAdminSettingsEnabled() || !isAdminSettingsTabEnabled(tab.id.slice(6)))
-				)
-					return false;
 				const query = search.toLowerCase().trim();
-				if (tab.id === 'admin:analytics' && !($config?.features.enable_admin_analytics ?? true)) {
-					return false;
-				}
 
 				return (
 					query === '' ||
@@ -845,12 +677,9 @@
 				);
 			})
 			.map((tab) => tab.id);
-		filteredPersonalSettings = filteredSettings.filter((tabId) => !isAdminTab(tabId));
-		filteredAdminSettings = filteredSettings.filter((tabId) => isAdminTab(tabId));
+		filteredPersonalSettings = filteredSettings;
 
-		if ($user?.role !== 'admin' && isAdminTab(selectedTab)) {
-			selectedTab = 'general';
-		} else if (filteredSettings.length > 0 && !filteredSettings.includes(selectedTab)) {
+		if (filteredSettings.length > 0 && !filteredSettings.includes(selectedTab)) {
 			selectedTab = filteredSettings[0];
 		}
 
@@ -871,12 +700,6 @@
 
 	const getModels = async () => {
 		return await _getModels(localStorage.token, null);
-	};
-
-	const adminConfigSaveHandler = async () => {
-		toast.success($i18n.t('Settings saved successfully!'));
-		await tick();
-		await config.set(await getBackendConfig());
 	};
 
 	const searchDebounceHandler = () => {
@@ -908,15 +731,6 @@
 		);
 		tabElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
 	};
-
-	// [Gradient] Validate direct modal requests as well as URL redirects.
-	$: if (isAdminTab(selectedTab) && ($config || $user)) {
-		if ($user?.role !== 'admin' || !isAdminSettingsEnabled()) selectedTab = 'general';
-		else if (!isAdminSettingsTabEnabled(selectedTab.slice(6))) {
-			const first = getFirstAvailableAdminSettingsTab();
-			selectedTab = first ? 'admin:' + first : 'general';
-		}
-	}
 
 	$: if (modalShow && selectedTab) {
 		scrollToSelectedTab();
@@ -1042,7 +856,7 @@
 						</button>
 					{:else if tabId === 'connections'}{:else if tabId === 'tools'}
 						<!-- [Gradient] Both integration types follow their tenant gates. -->
-						{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && ($user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))}
+						{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && $user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers}
 							<button
 								role="tab"
 								aria-controls="tab-tools"
@@ -1151,39 +965,6 @@
 				{/each}
 			{/if}
 
-			{#if $user?.role === 'admin' && filteredAdminSettings.length > 0}
-				<div
-					class="hidden md:block shrink-0 self-stretch h-px mx-1 my-2 bg-gray-100/40 dark:bg-white/[0.025]"
-				></div>
-				<span class="hidden md:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mb-0.5">
-					{$i18n.t('Admin')}
-				</span>
-
-				{#each filteredAdminSettings as tabId, index (tabId)}
-					{#if shouldShowSettingGroup(filteredAdminSettings, index)}
-						<span class={settingGroupHeadingClass(index === 0)}>
-							{$i18n.t(settingGroupTitle(tabId))}
-						</span>
-					{/if}
-
-					{@const tab = adminSettings.find((setting) => setting.id === tabId)}
-					{#if tab}
-						<button
-							role="tab"
-							aria-controls={adminTabPanelId(tab.id)}
-							aria-selected={selectedTab === tab.id}
-							class={tabButtonClass(selectedTab === tab.id)}
-							on:click={() => {
-								selectedTab = tab.id;
-							}}
-						>
-							<AdminTabIcon id={adminTabSegment(tab.id)} className="size-3.5" strokeWidth="2" />
-							<span>{$i18n.t(tab.title)}</span>
-						</button>
-					{/if}
-				{/each}
-			{/if}
-
 			{#if filteredSettings.length === 0}
 				<div class="px-2 py-1 text-xs text-gray-400 dark:text-gray-600">
 					{$i18n.t('No matches')}
@@ -1249,73 +1030,6 @@
 				/>
 			{:else if selectedTab === 'about'}
 				<About />
-			{:else if selectedTab === 'admin:email'}
-				<AdminEmail
-					saveHandler={async () => {
-						toast.success($i18n.t('Settings saved successfully!'));
-
-						await tick();
-						await config.set(await getBackendConfig());
-					}}
-				/>
-			{:else if selectedTab === 'admin:security'}
-				<AdminSecurity
-					saveHandler={async () => {
-						toast.success($i18n.t('Settings saved successfully!'));
-
-						await tick();
-						await config.set(await getBackendConfig());
-					}}
-				/>
-			{:else if selectedTab === 'admin:acceptance'}
-				<AdminAcceptance
-					saveHandler={async () => {
-						toast.success($i18n.t('Settings saved successfully!'));
-
-						await tick();
-						await config.set(await getBackendConfig());
-					}}
-				/>
-			{:else if selectedTab === 'admin:external-agents'}
-				<AdminExternalAgents
-					saveHandler={() => {
-						toast.success($i18n.t('Agent selection saved'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:general'}
-				<AdminGeneral saveHandler={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:models'}
-				<AdminModels bind:tabState />
-			{:else if selectedTab === 'admin:system-prompt'}
-				<AdminSystemPrompt
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:evaluations'}
-				<AdminEvaluations />
-			{:else if selectedTab === 'admin:analytics'}
-				<AdminAnalytics />
-			{:else if selectedTab === 'admin:integrations'}
-				<AdminIntegrations />
-			{:else if selectedTab === 'admin:documents'}
-				<AdminDocuments on:save={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:web'}
-				<AdminWebSearch saveHandler={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:code-execution'}
-				<AdminCodeExecution saveHandler={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:interface'}
-				<AdminInterface
-					on:save={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:db'}
-				<AdminDatabase
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
 			{/if}
 		</div>
 	</div>

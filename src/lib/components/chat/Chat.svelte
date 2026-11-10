@@ -37,7 +37,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { get, type Unsubscriber, type Writable } from 'svelte/store';
+	import { get, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
@@ -46,12 +46,11 @@
 		chatId,
 		config,
 		type Model,
-		models as rawModels, // [Gradient] Registry for selection, before assistant overlays.
+		models as rawModels,
 		tags as allTags,
 		settings,
 		showSidebar,
 		WEBUI_NAME,
-		banners,
 		user,
 		socket,
 		audioQueue,
@@ -88,9 +87,11 @@
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isLLM } from '$lib/utils/assistants';
-	import { refreshChatList, refreshFolderChatLists, markConversationRead } from '$lib/stores/chatList';
-
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import {
+		refreshChatList,
+		refreshFolderChatLists,
+		markConversationRead
+	} from '$lib/stores/chatList';
 
 	import {
 		convertMessagesToHistory,
@@ -102,7 +103,6 @@
 		processDetails,
 		removeAllDetails,
 		getCodeBlockContents,
-		isYoutubeUrl,
 		temporaryChatId,
 		displayFileHandler,
 		getUsageTokenCount
@@ -132,18 +132,11 @@
 	import { canRegenerateResponse } from '$lib/utils/features';
 	import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
 	import type { ProjectionPage, ThreadVersion, VersionKind } from '$lib/apis/threads';
-	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
+	import { processUrl } from '$lib/apis/retrieval';
+	import { getAndUpdateUserLocation, getUserInfoById, updateUserSettings } from '$lib/apis/users';
 	import {
-		getAndUpdateUserLocation,
-		getUserInfoById,
-		getUserSettings,
-		updateUserSettings
-	} from '$lib/apis/users';
-	import {
-		generateQueries,
 		chatAction,
 		generateMoACompletion,
-		stopTask,
 		stopTasksByChatId,
 		getTaskIdsByChatId
 	} from '$lib/apis';
@@ -177,7 +170,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
-	import { getBanners } from '$lib/apis/configs';
+
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
@@ -500,7 +493,7 @@
 		// and a model's default features now set the starting state (setDefaults) instead.
 		webSearchActive = Boolean(
 			$config?.features?.enable_web_search &&
-			($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
+			$user?.permissions?.features?.web_search &&
 			allModelsSupportWebSearch &&
 			!(
 				$config?.features?.feature_strict_data_separation &&
@@ -999,7 +992,12 @@
 		prefetchLiveGrants();
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
-		if (!$config?.features?.enable_v2_threads && $chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
+		if (
+			!$config?.features?.enable_v2_threads &&
+			$chatId &&
+			$chatId !== chatIdProp &&
+			!$temporaryChatEnabled
+		) {
 			noteChatDebug('marking outgoing chat read', { outgoingChatId: $chatId });
 			updateLastReadAt($chatId);
 		}
@@ -1232,8 +1230,7 @@
 			// before anything is sent. OneDrive and mail search ask for consent on their first use.
 			if (!history?.currentId) {
 				const webSearchAllowed =
-					$config?.features?.enable_web_search &&
-					($user?.role === 'admin' || $user?.permissions?.features?.web_search);
+					$config?.features?.enable_web_search && $user?.permissions?.features?.web_search;
 				const always = ($settings?.webSearch ?? null) === 'always';
 				const strict = $config?.features?.feature_strict_data_separation ?? false;
 				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
@@ -1315,7 +1312,7 @@
 					if (
 						model.info?.meta?.capabilities?.['image_generation'] &&
 						$config?.features?.enable_image_generation &&
-						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+						$user?.permissions?.features?.image_generation
 					) {
 						imageGenerationEnabled = model.info.meta.defaultFeatureIds.includes('image_generation');
 					}
@@ -1323,7 +1320,7 @@
 					if (
 						model.info?.meta?.capabilities?.['web_search'] &&
 						$config?.features?.enable_web_search &&
-						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
+						$user?.permissions?.features?.web_search
 					) {
 						// [Gradient] A default-on web search starts on, also under strict separation;
 						// otherwise the chat keeps the starting state set above.
@@ -1335,7 +1332,7 @@
 					if (
 						model.info?.meta?.capabilities?.['code_interpreter'] &&
 						$config?.features?.enable_code_interpreter &&
-						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+						$user?.permissions?.features?.code_interpreter
 					) {
 						codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 					}
@@ -2128,7 +2125,7 @@
 	};
 
 	const uploadWeb = async (urls) => {
-		if ($user?.role !== 'admin' && !($user?.permissions?.chat?.web_upload ?? true)) {
+		if (!($user?.permissions?.chat?.web_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload web content.'));
 			return;
 		}
@@ -2419,7 +2416,7 @@
 			updateLastReadAt($chatId);
 		}
 
-		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+		if ($user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
 
@@ -2432,10 +2429,7 @@
 			}
 		}
 
-		if (
-			$config?.features?.enable_v2_threads ||
-			($user?.role !== 'admin' && !$user?.permissions?.chat?.temporary)
-		) {
+		if ($config?.features?.enable_v2_threads || !$user?.permissions?.chat?.temporary) {
 			await temporaryChatEnabled.set(false);
 		}
 
@@ -2867,7 +2861,7 @@
 					chat?.meta?.assistant_id
 				);
 
-				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
+				if (!($user?.permissions?.chat?.multiple_models ?? true)) {
 					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
 				}
 				if (
@@ -3523,7 +3517,12 @@
 
 		if (done) {
 			message.done = true;
-			if ($config?.features?.enable_v2_threads && $chatId === conversationId && !$temporaryChatEnabled && !message.error) {
+			if (
+				$config?.features?.enable_v2_threads &&
+				$chatId === conversationId &&
+				!$temporaryChatEnabled &&
+				!message.error
+			) {
 				updateLastReadAt(conversationId);
 			}
 			const visibleContent =
@@ -3754,7 +3753,7 @@
 			toast.message($i18n.t('No chat to fork'));
 			return;
 		}
-		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true))) {
+		if (!($user?.permissions?.chat?.import ?? true)) {
 			toast.error($i18n.t('Access prohibited'));
 			return;
 		}
@@ -4230,20 +4229,20 @@
 				image_generation:
 					supportsComposerFeature('image_generation') &&
 					$config?.features?.enable_image_generation &&
-					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+					$user?.permissions?.features?.image_generation
 						? imageGenerationEnabled
 						: false,
 				code_interpreter:
 					supportsComposerFeature('code_interpreter') &&
 					!$selectedTerminalId &&
 					$config?.features?.enable_code_interpreter &&
-					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+					$user?.permissions?.features?.code_interpreter
 						? codeInterpreterEnabled
 						: false,
 				document_writer:
 					supportsComposerFeature('document_writer') &&
 					$config?.features?.enable_document_writer &&
-					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
+					$user?.permissions?.features?.document_writer
 						? documentWriterEnabled
 						: false,
 				// [Gradient] A family known to have no grant is never sent on.
@@ -4706,13 +4705,6 @@
 					toast.error(`${error}`);
 					return null;
 				});
-			} else {
-				for (const taskId of taskIds) {
-					const res = await stopTask(localStorage.token, taskId).catch((error) => {
-						toast.error(`${error}`);
-						return null;
-					});
-				}
 			}
 
 			taskIds = null;

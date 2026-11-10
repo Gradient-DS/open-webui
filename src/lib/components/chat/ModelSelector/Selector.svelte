@@ -13,23 +13,12 @@
 
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
-	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
+	import { deleteModel, getOllamaVersion } from '$lib/apis/ollama';
 	import { deleteModelById } from '$lib/apis/models';
-	import { unloadModel } from '$lib/apis';
-	import { getErrorMessage } from '$lib/apis/chat';
 
-	import {
-		user,
-		MODEL_DOWNLOAD_POOL,
-		mobile,
-		models,
-		temporaryChatEnabled,
-		settings,
-		config,
-		showSettings
-	} from '$lib/stores';
+	import { user, mobile, models, settings, config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
-	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+
 	import { getModels } from '$lib/apis';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -343,28 +332,6 @@
 	).filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
 
 	$: sanitizedSearchValue = searchValue.trim();
-	$: downloadTargets =
-		!selectionOnly && sanitizedSearchValue && $user?.role === 'admin'
-			? [
-					...(ollamaVersion
-						? [
-								{
-									id: 'ollama',
-									label: $i18n.t('Ollama'),
-									poolKey: sanitizedSearchValue,
-									download: $MODEL_DOWNLOAD_POOL[sanitizedSearchValue],
-									actionLabel: $i18n.t(`Pull "{{searchValue}}" from Ollama.com`, {
-										searchValue: searchValue
-									}),
-									type: 'ollama'
-								}
-							]
-						: [])
-				]
-			: [];
-	$: activeDownloadKeys = new Set(
-		downloadTargets.filter((target) => target.download).map((target) => target.poolKey)
-	);
 
 	$: if (
 		selectedTag !== undefined ||
@@ -473,139 +440,8 @@
 		await onSetDefault();
 	};
 
-	const pullModelHandler = async () => {
-		const sanitizedModelTag = searchValue.trim().replace(/^ollama\s+(run|pull)\s+/, '');
-
-		console.log($MODEL_DOWNLOAD_POOL);
-		if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag]) {
-			toast.error(
-				$i18n.t(`Model '{{modelTag}}' is already in queue for downloading.`, {
-					modelTag: sanitizedModelTag
-				})
-			);
-			return;
-		}
-		if (Object.keys($MODEL_DOWNLOAD_POOL).length === 3) {
-			toast.error(
-				$i18n.t('Maximum of 3 models can be downloaded simultaneously. Please try again later.')
-			);
-			return;
-		}
-
-		const [res, controller] = await pullModel(localStorage.token, sanitizedModelTag, '0').catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
-
-		if (res) {
-			const reader = res.body
-				.pipeThrough(new TextDecoderStream())
-				.pipeThrough(splitStream('\n'))
-				.getReader();
-
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL,
-				[sanitizedModelTag]: {
-					...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-					abortController: controller,
-					reader,
-					model: sanitizedModelTag,
-					done: false
-				}
-			});
-
-			while (true) {
-				try {
-					const { value, done } = await reader.read();
-					if (done) break;
-
-					let lines = value.split('\n');
-
-					for (const line of lines) {
-						if (line !== '') {
-							let data = JSON.parse(line);
-							console.log(data);
-							if (data.error) {
-								throw data.error;
-							}
-							if (data.detail) {
-								throw data.detail;
-							}
-
-							if (data.status) {
-								if (data.digest) {
-									let downloadProgress = 0;
-									if (data.completed) {
-										downloadProgress = Math.round((data.completed / data.total) * 1000) / 10;
-									} else {
-										downloadProgress = 100;
-									}
-
-									MODEL_DOWNLOAD_POOL.set({
-										...$MODEL_DOWNLOAD_POOL,
-										[sanitizedModelTag]: {
-											...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-											pullProgress: downloadProgress,
-											digest: data.digest
-										}
-									});
-								} else {
-									toast.success(data.status);
-
-									MODEL_DOWNLOAD_POOL.set({
-										...$MODEL_DOWNLOAD_POOL,
-										[sanitizedModelTag]: {
-											...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-											done: data.status === 'success'
-										}
-									});
-								}
-							}
-						}
-					}
-				} catch (error) {
-					console.log(error);
-					if (typeof error !== 'string') {
-						error = error.message;
-					}
-
-					toast.error(getErrorMessage(error));
-					// opts.callback({ success: false, error, modelName: opts.modelName });
-					break;
-				}
-			}
-
-			if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag].done) {
-				toast.success(
-					$i18n.t(`Model '{{modelName}}' has been successfully downloaded.`, {
-						modelName: sanitizedModelTag
-					})
-				);
-
-				models.set(await getModels(localStorage.token, null));
-			} else {
-				toast.error($i18n.t('Download canceled'));
-			}
-
-			delete $MODEL_DOWNLOAD_POOL[sanitizedModelTag];
-
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-		}
-	};
-
 	const setOllamaVersion = async () => {
 		ollamaVersion = await getOllamaVersion(localStorage.token).catch((error) => false);
-	};
-
-	const downloadModelHandler = (target) => {
-		if (target.type === 'ollama') {
-			pullModelHandler();
-			return;
-		}
 	};
 
 	onMount(() => {
@@ -630,44 +466,6 @@
 			window.visualViewport?.removeEventListener('scroll', schedulePositionUpdate);
 		};
 	});
-
-	const cancelModelPullHandler = async (model: string) => {
-		const { reader, abortController, providerLabel } = $MODEL_DOWNLOAD_POOL[model];
-		if (abortController) {
-			abortController.abort();
-		}
-		if (reader) {
-			await reader.cancel();
-			delete $MODEL_DOWNLOAD_POOL[model];
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-			await deleteModel(localStorage.token, model);
-			toast.success($i18n.t('{{model}} download has been canceled', { model: model }));
-		} else {
-			const displayModel = $MODEL_DOWNLOAD_POOL[model]?.model ?? model;
-			delete $MODEL_DOWNLOAD_POOL[model];
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-			toast.success(
-				$i18n.t('{{model}} download has been canceled', {
-					model: providerLabel ? `${displayModel} (${providerLabel})` : displayModel
-				})
-			);
-		}
-	};
-
-	const unloadModelHandler = async (model: string) => {
-		const res = await unloadModel(localStorage.token, model).catch((error) => {
-			toast.error($i18n.t('Error unloading model: {{error}}', { error }));
-		});
-
-		if (res) {
-			toast.success($i18n.t('Model unloaded successfully'));
-			models.set(await getModels(localStorage.token, null));
-		}
-	};
 
 	let showDeleteConfirm = false;
 	let deleteModelTarget: any = null;
@@ -824,12 +622,7 @@
 								aria-label={$i18n.t('Search In Models')}
 								on:keydown={(e) => {
 									if (e.code === 'Enter') {
-										if (selectedModelIdx >= filteredItems.length) {
-											const target = downloadTargets[selectedModelIdx - filteredItems.length];
-											if (target && !target.download) {
-												downloadModelHandler(target);
-											}
-										} else if (filteredItems[selectedModelIdx]) {
+										if (filteredItems[selectedModelIdx]) {
 											selectItem(filteredItems[selectedModelIdx], selectedModelIdx);
 										}
 										return; // dont need to scroll on selection
@@ -837,7 +630,7 @@
 										e.stopPropagation();
 										selectedModelIdx = Math.min(
 											selectedModelIdx + 1,
-											Math.max(filteredItems.length - 1 + downloadTargets.length, 0)
+											Math.max(filteredItems.length - 1, 0)
 										);
 									} else if (e.code === 'ArrowUp') {
 										e.stopPropagation();
@@ -910,28 +703,13 @@
 							<div class="flex justify-end py-1 pr-[0.95rem]"><ModelProfileLegend /></div>
 						{/if}
 						{#if filteredItems.length === 0}
-							{#if items.length === 0 && $user?.role === 'admin'}
+							<div class="">
 								<div
-									class="my-2 flex w-full flex-col items-start justify-center px-4 py-3 text-start"
+									class="flex min-h-8 items-center rounded-xl px-2 text-[0.8125rem] text-gray-700 dark:text-gray-100"
 								>
-									<div
-										class="mb-0.5 text-xs font-normal leading-4 text-gray-800 dark:text-gray-100"
-									>
-										{$i18n.t('No models available')}
-									</div>
-									<div class="w-full text-[0.6875rem] leading-3.5 text-gray-500 dark:text-gray-400">
-										{$i18n.t('Ask an admin to make a model available.')}
-									</div>
+									{$i18n.t('No results found')}
 								</div>
-							{:else}
-								<div class="">
-									<div
-										class="flex min-h-8 items-center rounded-xl px-2 text-[0.8125rem] text-gray-700 dark:text-gray-100"
-									>
-										{$i18n.t('No results found')}
-									</div>
-								</div>
-							{/if}
+							</div>
 						{:else}
 							<!-- svelte-ignore a11y-no-static-element-interactions -->
 							<div
@@ -954,7 +732,6 @@
 										{index}
 										value={primaryValue}
 										{pinModelHandler}
-										{unloadModelHandler}
 										{deleteModelHandler}
 										{selectionOnly}
 										{compareEnabled}
@@ -967,151 +744,6 @@
 								<div style="height: {(filteredItems.length - visibleEnd) * ITEM_HEIGHT}px;" />
 							</div>
 						{/if}
-
-						{#each downloadTargets as target, targetIndex (target.id)}
-							{#if target.download}
-								<Tooltip
-									content={target.download?.digest && target.download.digest !== 'downloading'
-										? target.download.digest
-										: searchValue}
-									placement="top-start"
-								>
-									<div
-										role="option"
-										aria-selected={selectedModelIdx === filteredItems.length + targetIndex}
-										data-arrow-selected={selectedModelIdx === filteredItems.length + targetIndex}
-										class="flex h-8 w-full select-none items-center gap-2 rounded-xl px-2 text-left text-[0.8125rem] font-normal text-gray-700 outline-hidden transition-colors duration-75 dark:text-gray-100 {selectedModelIdx ===
-										filteredItems.length + targetIndex
-											? ($settings?.highContrastMode ?? false)
-												? 'bg-gray-200 dark:bg-gray-800'
-												: 'bg-gray-50/70 dark:bg-gray-800/60'
-											: ''}"
-									>
-										<Spinner className="size-3 shrink-0 text-gray-400 dark:text-gray-500" />
-										<div class="min-w-0 flex-1 truncate">
-											{$i18n.t('Downloading "{{searchValue}}"', { searchValue: searchValue })}
-										</div>
-										{#if 'pullProgress' in target.download}
-											<div
-												class="shrink-0 text-[0.6875rem] tabular-nums text-gray-500 dark:text-gray-400"
-											>
-												{target.download.pullProgress}%
-											</div>
-										{/if}
-										<button
-											class="focus-ring flex size-4 shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-											aria-label={$i18n.t('Cancel download of {{model}}', { model: searchValue })}
-											on:click|stopPropagation={() => {
-												cancelModelPullHandler(target.poolKey);
-											}}
-										>
-											<svg
-												class="size-2.5"
-												aria-hidden="true"
-												xmlns="http://www.w3.org/2000/svg"
-												width="24"
-												height="24"
-												fill="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													stroke="currentColor"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2.5"
-													d="M6 18 17.94 6M18 18 6.06 6"
-												/>
-											</svg>
-										</button>
-									</div>
-								</Tooltip>
-							{:else}
-								<Tooltip content={target.actionLabel} placement="top-start">
-									<button
-										type="button"
-										role="option"
-										aria-selected={selectedModelIdx === filteredItems.length + targetIndex}
-										data-arrow-selected={selectedModelIdx === filteredItems.length + targetIndex}
-										class="focus-ring flex h-8 w-full cursor-pointer select-none items-center gap-2 rounded-xl px-2 text-left text-[0.8125rem] font-normal text-gray-700 outline-hidden transition-colors duration-75 dark:text-gray-100 {($settings?.highContrastMode ??
-										false)
-											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'hover:bg-gray-50/40 dark:hover:bg-gray-800/40'} {selectedModelIdx ===
-										filteredItems.length + targetIndex
-											? ($settings?.highContrastMode ?? false)
-												? 'bg-gray-200 dark:bg-gray-800'
-												: 'bg-gray-50/70 dark:bg-gray-800/60'
-											: ''}"
-										on:click={() => {
-											downloadModelHandler(target);
-										}}
-									>
-										<Download className="size-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
-										<div class="min-w-0 flex-1 truncate">
-											{$i18n.t('Download "{{searchValue}}"', { searchValue: searchValue })}
-										</div>
-										<div
-											class="shrink-0 truncate text-[0.6875rem] text-gray-500 dark:text-gray-400"
-										>
-											{target.label}
-										</div>
-									</button>
-								</Tooltip>
-							{/if}
-						{/each}
-
-						{#each selectionOnly ? [] : Object.keys($MODEL_DOWNLOAD_POOL).filter((model) => !activeDownloadKeys.has(model)) as model}
-							{@const download = $MODEL_DOWNLOAD_POOL[model]}
-							{@const downloadName = download?.model ?? model}
-							<Tooltip
-								content={download?.digest && download.digest !== 'downloading'
-									? download.digest
-									: downloadName}
-								placement="top-start"
-							>
-								<div
-									class="flex h-8 w-full select-none items-center gap-2 rounded-xl px-2 text-left text-[0.8125rem] font-normal text-gray-700 outline-hidden transition-colors duration-75 dark:text-gray-100"
-								>
-									<Spinner className="size-3 shrink-0 text-gray-400 dark:text-gray-500" />
-									<div class="min-w-0 flex-1 truncate">
-										Downloading "{downloadName}"{download?.providerLabel
-											? ` from ${download.providerLabel}`
-											: ''}
-									</div>
-									{#if 'pullProgress' in download}
-										<div
-											class="shrink-0 text-[0.6875rem] tabular-nums text-gray-500 dark:text-gray-400"
-										>
-											{download.pullProgress}%
-										</div>
-									{/if}
-									<button
-										class="focus-ring flex size-4 shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-										aria-label={$i18n.t('Cancel download of {{model}}', { model: downloadName })}
-										on:click|stopPropagation={() => {
-											cancelModelPullHandler(model);
-										}}
-									>
-										<svg
-											class="size-2.5"
-											aria-hidden="true"
-											xmlns="http://www.w3.org/2000/svg"
-											width="24"
-											height="24"
-											fill="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke="currentColor"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2.5"
-												d="M6 18 17.94 6M18 18 6.06 6"
-											/>
-										</svg>
-									</button>
-								</div>
-							</Tooltip>
-						{/each}
 					</div>
 
 					{#if showSetDefault}

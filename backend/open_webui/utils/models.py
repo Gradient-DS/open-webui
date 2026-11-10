@@ -15,18 +15,17 @@ from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
-from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama
 from open_webui.socket.utils import RedisDict
 from open_webui.soev import model_catalog
-from open_webui.utils.access_control import has_access, has_base_model_access
+from open_webui.utils.access_control import can_bypass_access_control, has_access, has_base_model_access
+from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
-    get_functions_cache,
     get_function_module_from_cache,
+    get_functions_cache,
 )
-from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -162,6 +161,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
         enabled_filter_ids = set()
 
     custom_models = await Models.get_all_models()
+    custom_models, catalog_settings = await model_catalog.configured_rows(custom_models, base_models)
 
     # Single O(1) lookup: Ollama base names first, then exact IDs (exact wins).
     base_model_lookup = {}
@@ -173,7 +173,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
     existing_ids = {m['id'] for m in models}
 
     for custom_model in custom_models:
-        if custom_model.base_model_id is None:
+        if custom_model.base_model_id is None or custom_model.id in catalog_settings:
             # Override applied directly to a base model (shares the same ID)
             model = base_model_lookup.get(custom_model.id)
 
@@ -265,7 +265,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             models.append(model)
 
     # [Gradient] Catalog meta survives an admin's model row; each model gets its own copy.
-    model_catalog.apply_catalog(models, base_models)
+    model_catalog.apply_catalog(models, base_models, names={key: row.name for key, row in catalog_settings.items()})
 
     # Process action_ids to get the actions
     def get_action_items_from_module(function, module):
@@ -560,10 +560,7 @@ async def get_filtered_models(models, user, db=None):
                     or model['id'] in accessible_model_ids
                 ):
                     filtered_models.append(model)
-            elif user.role == 'admin':
-                # No DB entry means no access control configured yet;
-                # only admins can see unconfigured models.
-                filtered_models.append(model)
+            pass
 
         return filtered_models
     else:

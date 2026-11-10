@@ -19,6 +19,7 @@ async def remember(request, form_data, user, model):
 def memories(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(middleware, 'add_memory_context', remember)
     monkeypatch.setattr(middleware, 'get_system_oauth_token', AsyncMock(return_value=None))
+    monkeypatch.setattr(middleware, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(middleware.Config, 'get', AsyncMock(return_value=True))
 
 

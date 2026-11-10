@@ -2,7 +2,6 @@
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
-	import Sortable from 'sortablejs';
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -15,7 +14,6 @@
 	import {
 		WEBUI_NAME,
 		config,
-		mobile,
 		models as _models,
 		pinnedModels,
 		settings,
@@ -100,7 +98,7 @@
 				id: 'models-import',
 				label: $i18n.t('Import JSON'),
 				onClick: () => modelsImportInputElement?.click(),
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.models_import
+				visible: $user?.permissions?.workspace?.models_import
 			},
 			{
 				id: 'models-export',
@@ -108,7 +106,7 @@
 				onClick: async () => {
 					await downloadModels(models);
 				},
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.models_export
+				visible: $user?.permissions?.workspace?.models_export
 			}
 		]);
 	}

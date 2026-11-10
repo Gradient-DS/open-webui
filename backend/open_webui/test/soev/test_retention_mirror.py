@@ -10,8 +10,8 @@ import pytest_asyncio
 from open_webui import config, env
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat, ChatFile, Chats
-from open_webui.models.config import Config
 from open_webui.models.files import File
+from open_webui.models.runtime_state import RuntimeState
 from open_webui.soev import acting, agent_threads, retention
 from open_webui.soev.client import SoevApiError
 from sqlalchemy import select
@@ -51,7 +51,7 @@ async def mirror(mirror_url, monkeypatch):
                         File,
                         ChatFile,
                         ChatMessage,
-                        Config,
+                        RuntimeState,
                         SharedChat,
                         Folder,
                         AutomationRun,
@@ -160,7 +160,7 @@ async def test_failed_local_cleanup_does_not_advance_cursor(mirror, monkeypatch)
         await retention.poll_deletions()
     assert await chat_ids(mirror, live=True) == {'chat-fern'}
     async with mirror.sessions() as db:
-        assert await db.get(Config, retention._key()) is None
+        assert await db.get(RuntimeState, retention._key()) is None
     mirror.remote.chat_delete.assert_not_called()
 
 
@@ -198,7 +198,7 @@ async def test_every_remote_failure_refuses_before_local_changes(mirror, status)
         await agent_threads.delete_chats_threads('fern', ['chat-fern'])
     assert await chat_ids(mirror) == {'chat-fern'}
     async with mirror.sessions() as db:
-        assert await db.get(Config, retention._key()) is None
+        assert await db.get(RuntimeState, retention._key()) is None
 
 
 @pytest.mark.asyncio
@@ -249,8 +249,8 @@ async def test_deletion_entry_points_leave_all_local_data_on_refusal(mirror, mon
         monkeypatch.setattr(acting, 'user_token', AsyncMock(return_value=None))
     else:
         mirror.remote.chat_delete.side_effect = SoevApiError(503, 'upstream_error', 'fictional failure')
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    monkeypatch.setenv('ENABLE_ADMIN_CHAT_ACCESS', str(True).lower())
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(True).lower())
     monkeypatch.setattr(chats, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(folders, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(folders, 'check_folders_permission', AsyncMock())
@@ -284,7 +284,7 @@ async def test_deletion_entry_points_leave_all_local_data_on_refusal(mirror, mon
         assert (await db.get(Chat, 'child-fern')).deleted_at is None
         assert await db.get(ChatMessage, 'chat-fern-a0') is not None
         assert await db.get(Folder, 'folder-fern') is not None
-        assert await db.get(Config, retention._key()) is None
+        assert await db.get(RuntimeState, retention._key()) is None
     stop_tasks.assert_not_called()
     publish.assert_not_called()
     mirror.remote.get.assert_not_called()
@@ -406,8 +406,9 @@ async def test_owner_chat_deletion_removes_remote_threads_before_pending_local_c
 
     await seed(mirror, 'chat-fern', ['thread-elm'])
     await seed(mirror, 'child-fern', ['thread-oak'], parent='chat-fern')
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    monkeypatch.setenv('ENABLE_ADMIN_CHAT_ACCESS', str(True).lower())
     monkeypatch.setattr(chats, 'has_permission', AsyncMock(return_value=True))
+    monkeypatch.setattr(chats.Config, 'get', AsyncMock(return_value={}))
     monkeypatch.setattr(chats, 'stop_item_tasks', AsyncMock())
     monkeypatch.setattr(chats, 'publish_event', AsyncMock())
     monkeypatch.setattr(Chats, 'delete_orphan_tags_for_user', AsyncMock())
@@ -438,7 +439,7 @@ async def test_cursor_survives_secret_rotation_and_feed_failure(mirror, monkeypa
         await retention.poll_deletions()
     assert mirror.remote.get.call_args.kwargs == {'params': {'limit': 100, 'after': 'thread-elm'}}
     async with mirror.sessions() as db:
-        assert (await db.get(Config, retention._key())).value['cursor'] == 'thread-elm'
+        assert (await db.get(RuntimeState, retention._key())).value['cursor'] == 'thread-elm'
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,7 @@ async def check_calendar_permission(request: Request, user):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
-    if user.role != 'admin' and not await has_permission(user.id, 'features.calendar', config.get('user.permissions')):
+    if not await has_permission(user.id, 'features.calendar', config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -55,8 +55,7 @@ async def _user_has_automations(request: Request, user) -> bool:
     config = await Config.get_many('automations.enable', 'user.permissions')
     if not config.get('automations.enable', False):
         return False
-    if user.role == 'admin':
-        return True
+    pass
     return await has_permission(user.id, 'features.automations', config.get('user.permissions'))
 
 

@@ -9,8 +9,13 @@ from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def shared_client_lifecycle():
+async def shared_client_lifecycle(monkeypatch):
+    from open_webui.soev import product_config
     from open_webui.soev.client import close_client
+
+    monkeypatch.setattr(product_config, '_backend', None)
+    monkeypatch.setattr(product_config, '_snapshot', None)
+    monkeypatch.setattr(product_config, '_expires_at', 0.0)
 
     await close_client()
     yield

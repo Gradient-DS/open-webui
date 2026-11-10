@@ -2,10 +2,10 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
 
-	import { getContext, tick } from 'svelte';
+	import { getContext } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { config, mobile, models, settings, user } from '$lib/stores';
+	import { config, models, settings } from '$lib/stores';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
@@ -132,7 +132,7 @@
 	<div class="flex flex-col flex-1 gap-0.5 min-w-0">
 		<div class="flex items-center gap-2 min-w-0">
 			<div class="flex items-center min-w-fit">
-				<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
+				<Tooltip content={''} placement="top-start">
 					<img
 						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&lang=${$i18n.language}`}
 						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
@@ -348,25 +348,6 @@
 			<ModelProfile {profile} />
 		{/if}
 		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
-			{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
-				<Tooltip
-					content={`${$i18n.t('Eject')}`}
-					className="flex-shrink-0 group-hover/item:opacity-100 opacity-0 "
-				>
-					<button
-						class="focus-ring flex"
-						aria-label={$i18n.t('Eject model')}
-						on:click={(e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							unloadModelHandler(item.value);
-						}}
-					>
-						<ArrowUpTray className="size-3" />
-					</button>
-				</Tooltip>
-			{/if}
-
 			{#if !selectionOnly}
 				<ModelItemMenu
 					bind:show={showMenu}

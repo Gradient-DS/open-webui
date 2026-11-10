@@ -6,12 +6,12 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from . import model_path, plane, test_shapes
+from . import model_path, plane, seeds, test_shapes
 
 offline = test_shapes.offline
 
 CHAT = 'POST /api/v1/chat/completions'
-PARAMETERS = {('/api/v1/analytics/models/{model_id}/overview', 'model_id'): 'live-model'}
+PARAMETERS = seeds.Resolved(fixtures={'model': 'live-model'})
 
 
 def response(chunks, *, status=200, content_type='text/event-stream'):
@@ -57,11 +57,7 @@ def test_committed_model_surface():
 def test_committed_model_routes_run_with_the_current_seed_parameters(offline):
     actor = Mock()
     actor.request.side_effect = lambda *a, **kw: response([b'data: [DONE]\n\n'])
-    path, name = next(iter(PARAMETERS))
-    assert path in model_path.SPEC['paths']
-    from . import seeds
-
-    assert seeds.parameter_for(path, name)['key'] == 'model'
+    assert PARAMETERS.fixtures['model'] == 'live-model'
     result = model_path.drive_model_paths(actor, PARAMETERS, payloads=['fictional probe'], full=False)
     assert {item['route'] for item in result.responses} == set(model_path.targets())
     assert set(result.tally.entered) == set(model_path.targets())

@@ -30,6 +30,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
+from fastapi.routing import APIRoute
+from open_webui import config
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
@@ -37,14 +39,33 @@ from open_webui.models.files import FileForm, Files
 from open_webui.models.skill_files import SkillFileListResponse, SkillFiles
 from open_webui.models.skills import Skills
 from open_webui.models.users import Users
+from open_webui.soev.policy_jobs import v2_enabled
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
+from open_webui.utils.features import require_feature
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
+from starlette.routing import Match
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+
+async def require_skill_files():
+    if v2_enabled():
+        await require_feature('skills')()
+        await require_feature('skill_files')()
+
+
+class SkillFileRoute(APIRoute):
+    """Keep route declarations stable while preserving the legacy mount boundary."""
+
+    def matches(self, scope):
+        if not v2_enabled() and not config.FEATURE_SKILL_FILES:
+            return Match.NONE, {}
+        return super().matches(scope)
+
+
+router = APIRouter(route_class=SkillFileRoute, dependencies=[Depends(require_skill_files)])
 
 # Path rules (see brief). A segment is one or more of these characters; the
 # full path is segments joined by '/'.

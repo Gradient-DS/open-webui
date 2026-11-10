@@ -1,4 +1,4 @@
-"""Platform offboarding is console-owned; legacy requests keep typed options."""
+"""Retired offboarding routes refuse every identity without local deletion."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -46,14 +46,8 @@ def api(request, monkeypatch):
 
 
 def assert_console_refusal(api, response):
-    assert response.status_code == 403, response.text
-    assert response.json() == {
-        'detail': {
-            'code': 'policy_forbids',
-            'constraint': 'offboarding:console',
-            'detail': 'Offboarding happens in the soev console',
-        }
-    }
+    assert response.status_code == 404, response.text
+    assert response.json() == {'detail': 'Not Found'}
     api.first_user.assert_not_awaited()
     api.offboard.assert_not_awaited()
     api.disconnect.assert_not_awaited()
@@ -73,35 +67,18 @@ def test_mode_and_archive_parameters(api, mode):
     if mode == 'transfer':
         params.append(('transfer_to', 'lark'))
     result = api.browser.delete('/api/v1/users/fern', params=params)
-    if api.platform:
-        assert_console_refusal(api, result)
-        return
-    assert result.status_code == 200
-    options = api.offboard.await_args.kwargs['options']
-    assert options.mode == mode
-    assert options.transfer_to == ('lark' if mode == 'transfer' else None)
-    assert options.archive_retention_days == 8
-    assert options.never_delete
-    assert options.confirm_shared_deletion == ['native', 'assistant']
+    assert_console_refusal(api, result)
 
 
 def test_plain_delete_defaults_to_delete(api):
     result = api.browser.delete('/api/v1/users/fern')
-    if api.platform:
-        assert_console_refusal(api, result)
-        return
-    assert result.status_code == 200
-    assert api.offboard.await_args.kwargs['options'].mode == 'delete'
+    assert_console_refusal(api, result)
 
 
 @pytest.mark.parametrize('params', [{'mode': 'unknown'}, {'archive_retention_days': 0}])
 def test_invalid_queries_never_call_offboarding(api, params):
     result = api.browser.delete('/api/v1/users/fern', params=params)
-    if api.platform:
-        assert_console_refusal(api, result)
-        return
-    assert result.status_code == 422
-    api.offboard.assert_not_awaited()
+    assert_console_refusal(api, result)
 
 
 @pytest.mark.parametrize('api', ['platform'], indirect=True)
@@ -117,8 +94,8 @@ def test_platform_refusal_does_not_depend_on_actor_or_target(api, actor, role, m
 
 
 @pytest.mark.parametrize('api', ['platform'], indirect=True)
-def test_platform_offboarding_still_requires_authentication(api):
+def test_retired_offboarding_is_absent_without_authentication(api):
     del api.app.dependency_overrides[get_current_user]
     response = api.browser.delete('/api/v1/users/fern')
-    assert response.status_code == 401
+    assert response.status_code == 404
     api.offboard.assert_not_awaited()

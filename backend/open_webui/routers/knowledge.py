@@ -9,10 +9,12 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from open_webui import config
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
+    KNOWLEDGE_MAX_FILE_COUNT,
     RAG_EMBEDDING_CONTENT_PREFIX,
 )
 from open_webui.constants import ERROR_MESSAGES
@@ -20,8 +22,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
-from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files
+from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files, FileUpdateForm
 from open_webui.models.groups import Groups
 from open_webui.models.knowledge import (
     KNOWLEDGE_SORTABLE_FIELDS,
@@ -32,8 +33,8 @@ from open_webui.models.knowledge import (
     KnowledgeResponse,
     Knowledges,
     KnowledgeUserResponse,
+    is_synced_kb,  # [Gradient]
 )
-from open_webui.models.files import FileUpdateForm
 from open_webui.models.models import ModelForm, Models
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import (
@@ -42,24 +43,24 @@ from open_webui.routers.retrieval import (
     process_file,
     process_files_batch,
 )
-from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
-from open_webui.models.knowledge import is_synced_kb  # [Gradient]
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.soev.availability import SoevNotConfigured, SoevRoute, require_soev
-from open_webui.utils.features import require_feature
-from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.storage.provider import Storage
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from fastapi.concurrency import run_in_threadpool
+from open_webui.utils.features import require_feature, require_platform_feature
 from open_webui.utils.json_codec import JSONCodec
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(route_class=SoevRoute, dependencies=[Depends(require_soev)])
+
+router = APIRouter(
+    route_class=SoevRoute, dependencies=[Depends(require_soev), Depends(require_platform_feature('feature.knowledge'))]
+)
 
 ############################
 # getKnowledgeBases
@@ -340,9 +341,7 @@ async def create_new_knowledge(
     # Database operations (has_permission, filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
     # This prevents holding a connection during embed_knowledge_base_metadata()
     # which makes external embedding API calls (1-5+ seconds).
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'workspace.knowledge', await Config.get('user.permissions')
-    ):
+    if not await has_permission(user.id, 'workspace.knowledge', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -399,131 +398,9 @@ async def create_new_knowledge(
 ############################
 
 
-@router.post('/reindex', response_model=bool)
-async def reindex_knowledge_files(
-    request: Request,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
-    knowledge_bases = await Knowledges.get_knowledge_bases(db=db)
-    knowledge_base_files = [
-        (knowledge_base, await Knowledges.get_files_by_id(knowledge_base.id, db=db))
-        for knowledge_base in knowledge_bases
-    ]
-    total_files = sum(len(files) for _, files in knowledge_base_files)
-    processed_files = 0
-    failed_files = []
-    start_time = time.monotonic()
-
-    log.info('Starting reindexing for %s knowledge bases (%s files)', len(knowledge_bases), total_files)
-
-    for kb_idx, (knowledge_base, files) in enumerate(knowledge_base_files, start=1):
-        try:
-            try:
-                if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=knowledge_base.id):
-                    await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge_base.id)
-            except Exception as e:
-                log.error(f'Error deleting collection {knowledge_base.id}: {str(e)}')
-                continue  # Skip, don't raise
-
-            for file in files:
-                processed_files += 1
-                eta = ''
-                if processed_files > 1:
-                    elapsed = time.monotonic() - start_time
-                    remaining_files = total_files - processed_files + 1
-                    eta = f', ETA: {round(elapsed / (processed_files - 1) * remaining_files)}s'
-
-                log.info(
-                    'Reindexing knowledge base %s/%s file %s/%s%s: %s',
-                    kb_idx,
-                    len(knowledge_bases),
-                    processed_files,
-                    total_files,
-                    eta,
-                    file.filename,
-                )
-
-                try:
-                    # Force the KB add path to use stored SQL content instead of stale file-{id} chunks.
-                    # process_file recreates file-{id} only when that stored content exists.
-                    file_collection = f'file-{file.id}'
-                    if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                        await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-
-                    await process_file(
-                        request,
-                        ProcessFileForm(file_id=file.id, collection_name=knowledge_base.id),
-                        user=user,
-                        db=db,
-                    )
-                except SoevNotConfigured:
-                    raise
-                except Exception as e:
-                    log.error(f'Error processing file {file.filename} (ID: {file.id}): {str(e)}')
-                    failed_files.append({'file_id': file.id, 'error': str(e)})
-                    continue
-
-        except SoevNotConfigured:
-            raise
-        except Exception as e:
-            log.error(f'Error processing knowledge base {knowledge_base.id}: {str(e)}')
-            # Don't raise, just continue
-            continue
-
-    if failed_files:
-        log.warning(f'Failed to process {len(failed_files)} files')
-        for failed in failed_files:
-            log.warning(f'File ID: {failed["file_id"]}, Error: {failed["error"]}')
-
-    log.info('Reindexing completed in %ss.', round(time.monotonic() - start_time))
-    await publish_event(
-        request,
-        EVENTS.KNOWLEDGE_REINDEXED,
-        actor=user,
-        subject_id='all',
-        data={'count': len(knowledge_bases)},
-    )
-    return True
-
-
 ############################
 # ReindexKnowledgeBases
 ############################
-
-
-@router.post('/metadata/reindex', response_model=dict)
-async def reindex_knowledge_base_metadata_embeddings(
-    request: Request,
-    user=Depends(get_admin_user),
-):
-    """Batch embed all existing knowledge bases. Admin only.
-
-    NOTE: We intentionally do NOT use Depends(get_async_session) here.
-    This endpoint loops through ALL knowledge bases and calls embed_knowledge_base_metadata()
-    for each one, making N external embedding API calls. Holding a session during
-    this entire operation would exhaust the connection pool.
-    """
-    knowledge_bases = await Knowledges.get_knowledge_bases()
-    log.info('Reindexing embeddings for %s knowledge bases', len(knowledge_bases))
-    try:
-        await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=KNOWLEDGE_BASES_COLLECTION)
-    except Exception as e:
-        log.debug(e)
-
-    success_count = 0
-    for kb in knowledge_bases:
-        if await embed_knowledge_base_metadata(request, kb.id, kb.name, kb.description):
-            success_count += 1
-
-    log.info('Embedding reindex complete: %s/%s', success_count, len(knowledge_bases))
-    return {'total': len(knowledge_bases), 'success': success_count}
 
 
 ############################
@@ -1571,53 +1448,6 @@ async def add_files_to_knowledge_batch(
 ############################
 # ExportKnowledgeById
 ############################
-
-
-@router.get('/{id}/export')
-async def export_knowledge_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    """
-    Export a knowledge base as a zip file containing .txt files.
-    Admin only.
-    """
-
-    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
-    if not knowledge:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-    if not (
-        can_bypass_access_control(user)
-        or knowledge.user_id == user.id
-        or await AccessGrants.has_access(user.id, 'knowledge', id, 'read', db=db)
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    files = await Knowledges.get_files_by_id(id, db=db)
-
-    # Create zip file in memory
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for file in files:
-            content = file.data.get('content', '') if file.data else ''
-            if content:
-                # Use original filename with .txt extension
-                filename = file.filename
-                if not filename.endswith('.txt'):
-                    filename = f'{filename}.txt'
-                zf.writestr(filename, content)
-
-    zip_buffer.seek(0)
-
-    # Sanitize knowledge name for filename
-    safe_name = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in knowledge.name)
-    zip_filename = f'{safe_name}.zip'
-
-    return StreamingResponse(
-        zip_buffer,
-        media_type='application/zip',
-        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{quote(zip_filename, safe='')}"},
-    )
 
 
 ############################

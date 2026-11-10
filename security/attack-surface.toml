@@ -15,9 +15,7 @@
 # dependencies. {token} is fresh on EVERY resolve_parameters call, in bodies,
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
-# actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
-# Configuration setup enables the creation gates it names, and integration/
-# terminal setup merges existing configuration. Resolution is serial.
+# Product bootstrap supplies creation permissions. Resolution is serial.
 #
 # Handler references below are relative to backend/open_webui. These describe
 # existence, not guaranteed authorization, body validity, or coverage. Machine
@@ -27,9 +25,8 @@
 # the router refuses before looking up a resource. [[control]] pins that refusal.
 # backed_by="soev-solutions" seeds and field setup run only with RUNTIME_SOEV_BACKED=drive.
 
-# Full export snapshots protect every pass and every mutating request, without
-# selecting keys or excluding routes. Startup recovers interrupted snapshots and
-# corpus values from older runs before resolving any fixtures.
+# Compare the complete public configuration around every pass and mutation.
+# Any change fails the sweep; no local management writer remains to restore it.
 preserve_configuration = true
 # Config.upsert validates oauth.sub_claim for every writer (including imports)
 # before any database or in-memory defaults change. Platform mode accepts only
@@ -44,81 +41,32 @@ required_drive_routes = [
   "GET /api/v1/chats/{id}",
   "GET /api/v1/knowledge/{id}/files",
   "GET /api/v1/cloud-sync/policy",
-  "GET /api/v1/configs/data-retention",
-  "GET /api/v1/groups/id/{id}/preview",
   "POST /api/v1/cloud-sync/connections/{connection_id}/authorize",
   "POST /api/v1/knowledge/{id}/file/move",
   "POST /api/v1/knowledge/{id}/file/remove",
   "POST /api/v1/knowledge/{id}/file/update",
-  "POST /api/v1/tasks/image_prompt/completions",
+  "POST /api/v1/tasks/image_prompt/completions"
 ]
 
-# Prepared DarkChatRoute handlers preserve the legacy dependency tree's admin
-# gate in every domain. Admin-only content refusals below describe admitted
-# admins; non-admins receive get_admin_user's 401 sign_in before dispatch.
+# Caller-index 404s return 403 no_access without content; individual chat 404s stay unavailable.
 
-[[parameter]]
-key = "user_preview"
-name = "user_id"
-prefix = "/api/v1/users/{user_id}/preview"
-description = "Preview the authenticated admin's own resource inventory. Platform resource reads require that person's live login; an admin role never impersonates the disposable account target. Stranger/admin-gate assertions remain on this route."
-seeded_by = "seed_admin_user"
+[[fixture]]
+key = "console_eligibility"
+description = "Read the caller's fresh platform console decision without inspecting its local role."
+seeded_by = "seed_console_access"
 depends_on = []
-actor = "admin"
+actor = "user"
 fresh = false
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/analytics/models/{model_id}/overview"
-status = 409
-detail = "unavailable"
-json = { state = "unavailable" }
-reason = "The prepared platform provides tenant usage, not the retired local per-model feedback/chat joins. Refuse before local content access."
-
-# Configuration a tenant admin can switch on at runtime but the stack cannot set
-# from its environment. Applied after configuration recovery and before any
-# pass snapshots, so every restore keeps it. Chart values only seed
-# PersistentConfig, so each key here is production surface; route-coverage.toml
-# states the rule.
-[stack_configuration]
-# Five tenants run self-signup. The first signup turns signup off in-process
-# (routers/auths.py:signup), and identity bootstrap is that signup, so an
-# ENABLE_SIGNUP environment variable cannot keep it on.
-"ui.enable_signup" = true
-# PersistentConfig; the model-path pass drives tasks/auto/completions as a control.
-"task.autocomplete.enable" = true
-
-[[parameter]]
-key = "namespace"
-name = "namespace"
-prefix = "/api/v1/configs/namespace/{namespace}"
-description = "routers/configs.py:import_config/get_config_namespace. Enable creation gates through HTTP before dependent seeds; create a unique namespace marker."
-seeded_by = "prepare_configuration"
-depends_on = []
-actor = "admin"
-config = { "folders.enable" = true, "memories.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
 
 [[parameter]]
 key = "user"
 name = "user_id"
 prefix = "/api/v1/users/{user_id}"
-description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target. GET /api/v1/users/{user_id}/shared-data is an admin-only, read-only offboarding inventory of that user's shared KB and assistant ids and kinds, never content. It reuses this user target and has no sharing allowance. Without soev-api only local shared assistants are inventoried."
-via = "POST /api/v1/auths/add"
-body = { "email" = "attack-fixture-{token}@example.com", "name" = "Attack fixture {token}", "password" = "Attack-Fixture-Passw0rd!", "role" = "user" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "oauth_session_user"
-name = "user_id"
-prefix = "/api/v1/users/{user_id}/oauth/sessions"
-description = "routers/users.py:get_user_oauth_sessions_by_id is admin-gated and owner-only. Read the authenticated admin's own session metadata; OIDC login supplies their session. The broader disposable user target remains separate for account operations. Cross-user reads must still refuse."
-seeded_by = "seed_admin_user"
+description = "The requesting user's own directory record; management and deletion routes are removed."
+seeded_by = "seed_request_user"
 depends_on = []
-actor = "admin"
+actor = "user"
 fresh = false
-
 [[parameter]]
 key = "folder"
 name = "id"
@@ -127,30 +75,20 @@ description = "routers/folders.py:create_folder rejects duplicate sibling names.
 via = "POST /api/v1/folders/"
 body = { "name" = "attack-{token}" }
 extract = "id"
-actor = "admin"
-depends_on = ["namespace"]
-
-[[parameter]]
-key = "model"
-name = "model_id"
-prefix = "/api/v1/analytics/models/{model_id}"
-description = "Select the soev-api catalog default through /api/config and register a publicly readable model override for the security pass. Direct Ollama routes use the separate upstream_model from ollama_index."
-seeded_by = "seed_model"
+actor = "user"
 depends_on = []
-fresh = false
-actor = "admin"
 
 [[parameter]]
 key = "chat"
 v2_seeded_by = "seed_chat"
 name = "id"
 prefix = "/api/v1/chats/{id}"
-description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve, under a user message: resuming reads the assistant message's parentId and answered 409 without one. Use the admin folder owner; create_new_chat validates folder ownership even for admins. Drive mode reserves a soev_react thread and completes a real turn before assigning the folder; no fabricated history is sent."
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve, under a user message: resuming reads the assistant message's parentId and answered 409 without one. Use the ordinary folder owner; create_new_chat validates folder ownership even for admins. Drive mode reserves a soev_react thread and completes a real turn before assigning the folder; no fabricated history is sent."
 via = "POST /api/v1/chats/new"
 body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "user_{token}" = { "id" = "user_{token}", "role" = "user", "content" = "Attack fixture question.", "childrenIds" = ["message_{token}"] }, "message_{token}" = { "id" = "message_{token}", "parentId" = "user_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [], "output" = [{ "type" = "function_call", "call_id" = "call_{token}", "name" = "attack_tool", "status" = "pending" }] } } } } }
 extract = "id"
 depends_on = ["folder", "model"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "chat_fork"
@@ -163,18 +101,18 @@ via = "POST /api/v1/chats/new"
 body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-fork-{token}", "models" = ["{model}"], "history" = { "currentId" = "fork_{token}", "messages" = { "fork_{token}" = { "id" = "fork_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fork message.", "done" = true, "childrenIds" = [] } } } } }
 extract = "id"
 depends_on = ["folder", "model"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "chat_message"
 v2_seeded_by = "seed_chat_message"
 name = "message_id"
 prefix = "/api/v1/chats/{id}/messages/{message_id}"
-description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; Read as the admin chat owner. Drive mode reads the committed message position; its identity is (thread id, position)."
+description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; Read as the ordinary chat owner. Drive mode reads the committed message position; its identity is (thread id, position)."
 via = "GET /api/v1/chats/{chat}"
 extract = "chat.history.currentId"
 depends_on = ["chat"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "share"
@@ -185,7 +123,7 @@ description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot 
 via = "POST /api/v1/chats/{chat}/share"
 extract = "share_id"
 depends_on = ["chat", "chat_message", "folder", "group"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "shared_clone"
@@ -216,29 +154,11 @@ description = "routers/chats.py:get_chats_by_folder_id uses Folders.id; the seed
 same_as = "folder"
 
 [[parameter]]
-key = "archive_user"
-name = "user_id"
-prefix = "/api/v1/archives/user/{user_id}"
-description = "A living user's snapshot is an owner-only read of their chats. Use the authenticated admin's own id; the disposable user target is reserved for account operations."
-seeded_by = "seed_admin_user"
-depends_on = []
-actor = "admin"
-fresh = false
-
-[[parameter]]
 key = "task_chat"
 name = "chat_id"
 prefix = "/api/tasks/chat/{chat_id}"
 description = "Handler reads the same Chats.id created by chats.new."
 same_as = "chat"
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/tasks/chat/{chat_id}/stop"
-status = 409
-detail = "unavailable"
-json = { detail = "unavailable" }
-reason = "The seeded chat has completed its turn. The platform deliberately returns 409 thread_active when cancellation has no cancellable run; ThreadClient preserves the conflict without exposing upstream details. Other users must still be refused by platform ownership."
 
 [[parameter]]
 key = "chat_stats"
@@ -255,20 +175,6 @@ description = "Handler reads the same Chats.id created by chats.new."
 same_as = "chat"
 
 [[parameter]]
-key = "leaderboard_model"
-name = "model_id"
-prefix = "/api/v1/evaluations/leaderboard/{model_id}"
-description = "routers/evaluations.py leaderboard history uses the model registry identifier."
-same_as = "model"
-
-[[parameter]]
-key = "event_webhook"
-name = "webhook_id"
-prefix = "/api/events/webhooks/{webhook_id}"
-description = "main.py:create_event_webhook returns upsert_event_webhook id. Disabled during fixture creation to avoid notification traffic."
-unseedable = "main.py:create_event_webhook rejects every URL reachable from the sealed CI stack. upsert_event_webhook validates the target through retrieval/web/utils.py:validate_url, which refuses any host resolving to a non-global address unless ENABLE_LOCAL_WEB_FETCH is on. In-network hosts (stub, s3) resolve to private Docker addresses and are refused; external hosts do not resolve at all, because the network is internal:true with no DNS. Enabling ENABLE_LOCAL_WEB_FETCH would seed this parameter by disabling the SSRF guard the gate exists to observe, and would diverge from production, which leaves it unset (verified in soev-gitops and the chart, 2026-09-08). Recorded rather than worked around: this route is unseedable precisely because the guard works."
-
-[[parameter]]
 backed_by = "soev-solutions"
 key = "knowledge"
 name = "id"
@@ -277,7 +183,7 @@ description = "routers/knowledge.py:create_new_knowledge creates a soev-api KB w
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "attack-{token}", "description" = "Attack platform knowledge" }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -288,19 +194,19 @@ description = "knowledge/{id}/reset is destructive and runs after the DELETE gro
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "attack-reset-{token}", "description" = "Attack knowledge for reset" }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
 key = "directory"
 name = "dir_id"
 prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
-description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the admin-owned soev-api KB."
+description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the caller-owned soev-api KB."
 via = "POST /api/v1/knowledge/{knowledge}/dirs/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
 depends_on = ["knowledge"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "file"
@@ -311,17 +217,17 @@ via = "POST /api/v1/files/"
 extract = "id"
 files = [{ "field" = "file", "filename" = "attack-{token}.txt", "content" = "Attack file {token}", "content_type" = "text/plain" }]
 query = { "process" = false }
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "filename"
 name = "file_name"
 prefix = "/api/v1/files/{id}/content/{file_name}"
-description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the admin file owner."
+description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the ordinary file owner."
 via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "note"
@@ -331,7 +237,7 @@ description = "routers/notes.py:create_new_note returns the inserted NoteModel. 
 via = "POST /api/v1/notes/create"
 body = { "title" = "attack-{token}", "data" = { "content" = "Attack note" } }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "calendar_delete"
@@ -341,8 +247,8 @@ description = "routers/calendar.py:delete_calendar refuses the user's default ca
 via = "POST /api/v1/calendars/create"
 body = { "name" = "attack-delete-{token}" }
 extract = "id"
-depends_on = ["namespace"]
-actor = "admin"
+depends_on = []
+actor = "user"
 
 [[parameter]]
 key = "calendar"
@@ -352,8 +258,8 @@ description = "routers/calendar.py:create_calendar requires calendar.enable and 
 via = "POST /api/v1/calendars/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
-depends_on = ["namespace"]
-actor = "admin"
+depends_on = []
+actor = "user"
 
 [[parameter]]
 key = "event"
@@ -364,7 +270,7 @@ via = "POST /api/v1/calendars/events/create"
 body = { "calendar_id" = "{calendar}", "title" = "attack-{token}", "start_at" = 2000000000000000000, "end_at" = 2000003600000000000 }
 extract = "id"
 depends_on = ["calendar"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "automation"
@@ -375,31 +281,18 @@ description = "routers/automations.py:create_new_automation validates rrule. Ina
 via = "POST /api/v1/automations/create"
 body = { "name" = "attack-{token}", "data" = { "prompt" = "Attack automation", "model_id" = "{model}", "rrule" = "FREQ=DAILY;INTERVAL=30" }, "is_active" = false }
 extract = "id"
-depends_on = ["namespace", "model"]
-actor = "admin"
+depends_on = ["model"]
+actor = "user"
 
 [[parameter]]
 key = "group"
-v2_seeded_by = "seed_group"
 fresh = false
 name = "id"
 prefix = "/api/v1/groups/id/{id}"
 description = "routers/groups.py:create_new_group returns GroupResponse.id. Drive mode reads the existing platform mirror; identity and membership writes are console-only."
-via = "POST /api/v1/groups/create"
-body = { "name" = "attack-{token}", "description" = "Attack group" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "function"
-v2_refused_value = "attack_function_{token}"
-name = "id"
-prefix = "/api/v1/functions/id/{id}"
-description = "routers/functions.py:create_new_function loads the Action class, then inserts Functions.id. Valves classes make valves routes address actual schemas."
-via = "POST /api/v1/functions/create"
-body = { "id" = "attack_function_{token}", "name" = "Attack action", "content" = "from pydantic import BaseModel\n\nclass Action:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    async def action(self, body: dict) -> dict:\n        return body\n", "meta" = {  } }
-extract = "id"
-actor = "admin"
+seeded_by = "seed_group"
+depends_on = []
+actor = "user"
 
 [[parameter]]
 key = "active_function"
@@ -407,9 +300,9 @@ v2_refused_value = "attack_active_{token}"
 name = "id"
 prefix = "/api/v1/functions/id/{id}/valves/user"
 description = "routers/functions.py:update_function_user_valves_by_id answers 400 'Function is not active' for an inactive function, and FunctionForm has no is_active: a function is created off. seed_active_function creates an Action and turns it on with /toggle, which the passes drive against the shared {function} only, so this one stays active through every pass."
-seeded_by = "seed_active_function"
+seeded_by = "seed_refused_target"
 depends_on = []
-actor = "admin"
+actor = "user"
 content = """
 from pydantic import BaseModel
 
@@ -439,7 +332,7 @@ description = "routers/tools.py:create_new_tools requires an identifier and a lo
 via = "POST /api/v1/tools/create"
 body = { "id" = "attack_tool_{token}", "name" = "Attack tool", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "skill"
@@ -449,7 +342,16 @@ description = "routers/skills.py:create_new_skill inserts the requested lowercas
 via = "POST /api/v1/skills/create"
 body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content" }
 extract = "id"
-actor = "admin"
+actor = "user"
+
+[[parameter]]
+key = "skill_bundle"
+name = "id"
+prefix = "/api/v1/skills/id/{id}/files"
+description = "Seed a private skill with separate inline text files for read/edit, move and removal. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
+seeded_by = "seed_skill_bundle"
+depends_on = []
+actor = "user"
 
 [[parameter]]
 key = "prompt"
@@ -459,17 +361,17 @@ description = "routers/prompts.py:create_new_prompt and models/prompts.py:insert
 via = "POST /api/v1/prompts/create"
 body = { "command" = "attack-{token}", "name" = "Attack prompt", "content" = "Attack prompt {token}" }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "prompt_history"
 name = "history_id"
 prefix = "/api/v1/prompts/id/{prompt_id}/history/{history_id}"
-description = "The initial version_id points to this prompt's existing PromptHistory row; do not alias it to the prompt id. Read as the admin prompt owner."
+description = "The initial version_id points to this prompt's existing PromptHistory row; do not alias it to the prompt id. Read as the ordinary prompt owner."
 via = "GET /api/v1/prompts/id/{prompt}"
 extract = "version_id"
 depends_on = ["prompt"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "memory"
@@ -479,85 +381,48 @@ description = "routers/memories.py:add_memory inserts Memory.id and embeds it th
 via = "POST /api/v1/memories/add"
 body = { "content" = "Attack memory {token}" }
 extract = "id"
-actor = "admin"
-depends_on = ["namespace"]
+actor = "user"
+depends_on = []
 
 [[parameter]]
 key = "feedback"
 v2_seeded_by = "seed_feedback"
 name = "id"
 prefix = "/api/v1/evaluations/feedback/{id}"
-description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate. Drive mode commits a platform rating and verifies its owner readback. The individual legacy feedback id is an explicit refusal probe."
+description = "Platform feedback accepts configured reason and tag IDs with an authored comment. The drive seed uses the fictional accuracy reason and language tag from platform bootstrap and proves owner readback. Feedback metadata grants no chat-read authority; workspace administration stays within that workspace and tenant-scoped administration stays within the tenant. The individual legacy feedback id remains a refusal probe."
 via = "POST /api/v1/evaluations/feedback"
 body = { "type" = "rating", "data" = { "rating" = 1, "model_id" = "{model}" }, "meta" = { "chat_id" = "{chat}" } }
 extract = "id"
 depends_on = ["chat", "model", "chat_message"]
-actor = "admin"
-
-[[parameter]]
-key = "archive"
-v2_refused_value = "attack_archive_{token}"
-name = "archive_id"
-prefix = "/api/v1/archives/{archive_id}"
-description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after the admin snapshots their own data. Archival does not delete its target user. Prepared threads deliberately have no legacy snapshot/export contract; v2_refused_value drives that explicit boundary."
-via = "POST /api/v1/archives/user/{archive_user}"
-body = { "reason" = "Attack archive {token}" }
-extract = "archive_id"
-actor = "admin"
-depends_on = ["namespace", "archive_user"]
-
-[[parameter]]
-key = "invite"
-name = "id"
-prefix = "/api/v1/invites/{id}"
-description = "routers/invites.py:create_invite returns InviteResponse.id and token; send_email=false plants the row without sending mail."
-via = "POST /api/v1/invites/"
-body = { "email" = "attack-invite-{token}@example.com", "name" = "Attack invite", "role" = "user", "send_email" = false }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "invite_token"
-name = "token"
-prefix = "/api/v1/invites/{token}"
-description = "A separate pending invite keeps token accept/validate independent from id delete/resend. Creation returns the raw token over HTTP."
-via = "POST /api/v1/invites/"
-body = { "email" = "attack-invite-token-{token}@example.com", "name" = "Attack token invite", "role" = "user", "send_email" = false }
-extract = "token"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 key = "ollama_index"
 name = "url_idx"
 prefix = "/ollama"
-description = "GET config and a real model-list probe establish index 0. The aggregate tags endpoint populates OLLAMA_MODELS for unload and provides a model on that connection for direct provider routes, independently of the soev catalog."
+description = "Read the caller-visible aggregate tags and select the model connection index it reports; never read deployment secrets or connection configuration."
 seeded_by = "seed_ollama_connection"
 depends_on = []
 provides = ["upstream_model"]
-actor = "admin"
-config_via = "/ollama/config"
-urls_field = "OLLAMA_BASE_URLS"
-probe = "/ollama/api/tags/0"
+actor = "user"
 fresh = false
 
 [[parameter]]
 key = "terminal"
 name = "server_id"
 prefix = "/api/v1/terminals/{server_id}"
-description = "routers/configs.py:import_config registers a fresh terminal_server.connections entry; terminals.py:proxy_terminal selects it by id. The dedicated terminal config endpoint has an environment feature gate that is off in CI; config import and the proxy are reachable. Merge existing connections and verify the stub OpenAPI through the proxy."
-seeded_by = "seed_terminal"
+description = "Terminal servers are disabled on the platform route. Probe the fixed feature refusal before any connection lookup."
+seeded_by = "seed_refused_target"
 depends_on = []
-actor = "admin"
-url = "http://stub:8000"
+actor = "user"
 
 [[parameter]]
 key = "terminal_path"
 name = "path"
 prefix = "/api/v1/terminals/{server_id}/{path}"
-description = "terminals.py proxies a relative upstream path; openapi.json exists on the CI stub and is checked through the newly registered connection."
+description = "Use a valid relative path to reach the terminal feature refusal without looking up a deployment connection."
 seeded_by = "upstream_path"
 depends_on = ["terminal"]
-probe = "/api/v1/terminals/{terminal}/openapi.json"
 value = "openapi.json"
 fresh = false
 
@@ -565,7 +430,7 @@ fresh = false
 key = "cache"
 name = "path"
 prefix = "/cache/{path}"
-description = "routers/export.py:trigger_data_export -> get_export_status creates exports/<user>/<file>.zip under CACHE_DIR. Use the fresh disposable user session from auths.add so repeat passes cannot reuse an old export."
+description = "routers/export.py:trigger_data_export -> get_export_status creates exports/<user>/<file>.zip under CACHE_DIR. Use the caller session so repeat passes cannot reuse an old export."
 unseedable = "The only cache file the API creates is a data export, and services/export/service.py reads knowledge through soev-api, so without soev-api the export fails and never becomes ready. Not a soev route: GET /cache/{path} is waived in route-coverage.toml until the export works without soev-api."
 
 # Removed 2026-09-08: this entry seeded GET /api/v1/retrieval/ef/{text}, which
@@ -611,14 +476,6 @@ description = "main.py:oauth_client_authorize requires a registered OAuth client
 unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 
 [[parameter]]
-key = "task"
-name = "task_id"
-prefix = "/api/tasks/stop/{task_id}"
-description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh assistant inherits the readable catalog fixture with public read access and no function/filter. Its streaming user message carries the CI stub's owui_attack_task_hold marker. The stub holds only that response with empty heartbeat chunks for at most one hour, until cancellation disconnects it. Seed late, cancel after the pass, and re-seed each pass. Prepared threads run on their HTTP stream and do not register Redis task ids. Drive mode still creates and verifies the readable assistant, then probes the retired id dispatcher for exact 409 unavailable."
-seeded_by = "seed_task"
-depends_on = ["model", "chat", "prompt_history", "terminal_path"]
-
-[[parameter]]
 backed_by = "soev-solutions"
 key = "removable_knowledge"
 name = "id"
@@ -627,7 +484,7 @@ description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400
 seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["removable_file"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -638,17 +495,7 @@ description = "The positive update control needs a settled file untouched by ear
 seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["update_file"]
-actor = "admin"
-
-[[parameter]]
-key = "totp_user"
-name = "user_id"
-prefix = "/api/v1/users/{user_id}/2fa"
-description = "routers/users.py:admin_disable_user_2fa answers 400 '2FA is not enabled for this user' unless the user enrolled. seed_totp_user adds a user and enrols TOTP with that user's own session (setup, then enable with the code computed from the returned secret). Not the shared {user}: it is also the exporter, which signs in with its password, and an enrolled account answers that with a 2FA challenge."
-seeded_by = "seed_totp_user"
-depends_on = []
-password = "Attack-Fixture-Passw0rd!"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -660,18 +507,18 @@ seeded_by = "seed_cloud_connection"
 depends_on = []
 provides = ["cloud_grant"]
 fresh = false
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Read policy with the admin's policy:read door, then seed a separate pending Outlook mail connection so this control cannot revoke OneDrive live-grant and schedule fixtures. soev-api keeps one connection per owner and provider; later passes reuse the pending connection."
+description = "Starting consent suspends an enabled connection. Read the caller's policy, then seed a separate pending Outlook mail connection so this control cannot revoke OneDrive live-grant and schedule fixtures. soev-api keeps one connection per owner and provider; later passes reuse the pending connection."
 seeded_by = "seed_cloud_authorize_connection"
 depends_on = []
 fresh = false
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -682,7 +529,7 @@ description = "The family selects the live capability on the consented CI connec
 seeded_by = "seed_cloud_family"
 depends_on = ["cloud_connection"]
 fresh = false
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -693,7 +540,7 @@ description = "Use a separate KB, created as OneDrive: a KB's source kind is fix
 via = "POST /api/v1/knowledge/create"
 body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -705,7 +552,7 @@ via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
 body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-retry-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-retry-schedule-{token}" }
 extract = "id"
 depends_on = ["cloud_connection", "cloud_knowledge"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -717,7 +564,7 @@ via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
 body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-schedule-{token}" }
 extract = "id"
 depends_on = ["cloud_connection", "cloud_knowledge"]
-actor = "admin"
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -728,23 +575,86 @@ description = "routers/meetings.py stores meetings exclusively as soev-api chat 
 via = "POST /api/v1/meetings"
 body = { input = { type = "start", title = "attack-meeting-{token}", consent = { text_version = "ci-fixture-v1", at = "2026-01-01T00:00:00Z" } } }
 extract = "id"
-actor = "admin"
+actor = "user"
+
+[[parameter]]
+key = "notification_target"
+name = "target_id"
+prefix = "/api/v1/notifications/targets/{target_id}"
+unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, s3) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
 
 [[parameter]]
 backed_by = "soev-solutions"
-key = "agent_thread"
+key = "platform_thread"
 name = "thread_id"
-prefix = "/api/v1/agent-threads/{thread_id}"
-description = "routers/agent_threads.py reads a soev-api chat thread the caller owns; a meeting id is such a thread, started by the admin."
+prefix = "/api/v1/threads/{thread_id}"
+description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the caller-owned meeting thread. Private drive runs enable ENABLE_V2_THREADS in the sealed stack."
 same_as = "meeting"
+
+# The v2 router dependency refuses these before loading or looking up any function.
+# Probe fictional ids; legacy mode continues to install and exercise real fixtures.
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread_versions"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}/versions"
+description = "Owner-only conversation versions read; readers receive the same 404 as a missing thread. Requires ENABLE_V2_THREADS and uses the caller-owned meeting thread."
+same_as = "meeting"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "platform_thread_read"
+name = "thread_id"
+prefix = "/api/v1/threads/{thread_id}/read"
+description = "Marks the authenticated caller's conversation watermark using server time after authorizing the current projection. Shared readers update only their own state; an unrelated caller receives the same 404 as a missing chat. Requires ENABLE_V2_THREADS and reuses the caller-owned meeting thread. No request body or writable fields."
+same_as = "meeting"
+
+[[parameter]]
+key = "disabled_oauth_client"
+name = "client_id"
+prefix = "/oauth/clients/{client_id}/authorize"
+backed_by = "soev-solutions"
+seeded_by = "seed_disabled_oauth_client"
+depends_on = []
+description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id drives this boundary for every authenticated actor."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/tasks/chat/{chat_id}/stop"
+status = 409
+detail = "unavailable"
+json = { detail = "unavailable" }
+reason = "The seeded chat has completed its turn. The platform deliberately returns 409 thread_active when cancellation has no cancellable run; ThreadClient preserves the conflict without exposing upstream details. Other users must still be refused by platform ownership."
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files"
+description = "Create a new inline file in the owned skill; file_id and content are mutually exclusive."
+json = { path = "fictional-create.txt", content = "Fictional new skill file." }
+
+[[field]]
+route = "PUT /api/v1/skills/id/{id}/files"
+description = "Edit the seeded file without consuming the files used by move and remove controls."
+json = { path = "fictional-edit.txt", content = "Fictional edited skill file." }
+
+[[field]]
+route = "GET /api/v1/skills/id/{id}/files/content"
+description = "Read the seeded private file through its skill path and the caller's session."
+params = { path = "fictional-edit.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/move"
+description = "Move the dedicated seed file without consuming read/edit or remove controls."
+json = { from_path = "fictional-move.txt", to_path = "fictional-moved.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/remove"
+description = "Remove the dedicated seed file from the owned skill."
+json = { path = "fictional-remove.txt" }
 
 [[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
-
-[[destructive]]
-id = "DELETE /api/v1/files/all"
-reason = "Deletes every uploaded file and resets vector storage. Run after individual file and knowledge controls."
 
 [[destructive]]
 id = "DELETE /api/v1/chats/"
@@ -755,10 +665,6 @@ id = "DELETE /api/v1/chats/share/all"
 reason = "Removes every shared chat of the caller, including per-chat share fixtures."
 
 [[destructive]]
-id = "DELETE /api/v1/models/delete/all"
-reason = "Deletes the model registry; individual model controls must run first."
-
-[[destructive]]
 id = "DELETE /api/v1/auths/api_key"
 reason = "Deletes the caller API key and invalidates an API-key driving identity."
 
@@ -767,22 +673,12 @@ id = "POST /api/v1/auths/update/password"
 reason = "Changes the caller password, and since v0.11.3 revokes every token that identity holds (routers/auths.py:489). The driving bearer dies at once, not merely the old credential."
 
 [[destructive]]
-id = "DELETE /api/v1/users/{user_id}"
-reason = "Admin-only offboarding removes the target account after deleting, transferring or archiving its resources (mode=delete|transfer|archive). transfer_to selects the new owner; delete requires confirm_shared_deletion to exactly match the shared KB and assistant ids returned by GET /api/v1/users/{user_id}/shared-data. Primary-admin and self deletion are refused. Schedule with a disposable identity after ordinary targets."
-
-[[destructive]]
 id = "POST /api/v1/knowledge/{id}/reset"
 reason = "Wipes the KB's files and, by default (include_directories=true), its directories, so every later request against the seeded directory reads 404. Measured: DELETE /api/v1/knowledge/{id}/dirs/{dir_id}/delete answered 404 in every pass because reset ran first."
 
 [[destructive]]
 id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Deletes the caller provider session, removing OAuth credentials needed by later provider requests."
-
-[[parameter]]
-key = "notification_target"
-name = "target_id"
-prefix = "/api/v1/notifications/targets/{target_id}"
-unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, s3) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
 
 [[field]]
 route = "POST /api/v1/auths/oauth/{provider}/token/exchange"
@@ -877,11 +773,6 @@ description = "Toggle resolves the actual registered model from the required id 
 params = { id = "{model}" }
 
 [[field]]
-route = "POST /api/v1/retrieval/delete"
-description = "routers/retrieval.py:delete_entries_from_collection checks write access to the collection first (403 otherwise, admins included without the bypass). The seeded file's own collection is the caller's; file_id names that file."
-json = { collection_name = "file-{file}", file_id = "{file}" }
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/meetings/audio"
 v2 = { params = { name = "attack-{token}.wav", thread_id = "{meeting}" } }
@@ -903,11 +794,6 @@ params = { "id" = "{model}" }
 route = "GET /api/v1/prompts/id/{prompt_id}/history/diff"
 description = "models/prompt_history.py:compute_diff returns None unless both ids are history rows of this prompt. The same row on both sides is a valid, empty diff. Reachable since PLANE-017: history/{history_id} was registered first and answered for diff."
 params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
-
-[[field]]
-route = "POST /api/models/unload"
-description = "main.py:unload_model walks the model's base_model_id chain to an upstream model and answers 404 for an unknown id."
-json = { "model" = "{upstream_model}" }
 
 [[field]]
 route = "POST /api/v1/calendars/events/create"
@@ -960,7 +846,6 @@ v2 = { setup = [] }
 description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
 json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
 setup = [
-    { via = "POST /api/v1/auths/add", body = { "email" = "attack-signin-{token}@example.com", "name" = "Attack signin {token}", "password" = "Attack-Signin-Passw0rd!", "role" = "user" } },
 ]
 
 [[field]]
@@ -968,7 +853,7 @@ route = "GET /api/v1/models/model/profile/image"
 description = "routers/models.py:get_model_profile_image serves only a data:image URL inline; everything else, the seeded model's default included, is a 302 to a static image, and a redirect cannot vouch for coverage. Setup creates a model with a 1x1 PNG data URL."
 params = { "id" = "attack-image-{token}" }
 setup = [
-    { via = "POST /api/v1/models/create", body = { "id" = "attack-image-{token}", "name" = "Attack image {token}", "meta" = { "profile_image_url" = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" }, "params" = {} } },
+    { via = "POST /api/v1/models/create", body = { "id" = "attack-image-{token}", "name" = "Attack image {token}", "base_model_id" = "{model}", "meta" = { "profile_image_url" = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" }, "params" = {} } },
 ]
 
 [[field]]
@@ -1028,24 +913,8 @@ json = { "version_id" = "{prompt_history}" }
 
 [[field]]
 route = "POST /api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action answers 400 'Model not found' without a registered model and reads chat_id, id and session_id from the body for its event emitter; main.py:chat_action checks chat_id against the caller's chats. The seeded model, the admin's chat and a message id reach the Action."
+description = "utils/actions.py:chat_action answers 400 'Model not found' without a registered model and reads chat_id, id and session_id from the body for its event emitter; main.py:chat_action checks chat_id against the caller's chats. The seeded model, the caller's chat and a message id reach the Action."
 json = { "model" = "{model}", "chat_id" = "{chat}", "id" = "message_{token}", "session_id" = "attack-{token}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /api/v1/functions/id/{id}/update"
-description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Action code updates it in place."
-json = { "id" = "{function}", "name" = "Attack action", "content" = '''from pydantic import BaseModel
-
-class Action:
-    class Valves(BaseModel):
-        label: str = "seed"
-    class UserValves(BaseModel):
-        label: str = "seed"
-    def __init__(self):
-        self.valves = self.Valves()
-    async def action(self, body: dict) -> dict:
-        return body
-''' }
 
 [[field]]
 route = "POST /api/v1/tools/id/{id}/update"
@@ -1102,25 +971,6 @@ route = "POST /api/v1/audio/transcriptions"
 description = "Multipart: an audio part. routers/audio.py:transcription refuses a content type outside audio.stt.supported_content_types, which defaults to audio/* and video/webm. CI runs speech-to-text on the stub (CI-005)."
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
 
-[[field]]
-route = "POST /ollama/models/upload"
-description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
-files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
-
-[[field]]
-route = "POST /ollama/models/upload/{url_idx}"
-description = "The indexed upload has the same multipart contract as the default upstream route."
-files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
-
-# ---------------------------------------------------------------------------
-# Sharing by design
-#
-# Second-account answers the crossuser pass would report, which the application
-# serves to every verified user on purpose. Each declaration names the route,
-# the violation kinds it allows (owner-marker, resource-id, same-object, write;
-# an unrefused administrator operation is never sharing) and why. Anything else
-# the pass sees on the route is still a violation.
-
 [[shared]]
 route = "GET /api/v1/users/{user_id}/info"
 allow = ["owner-marker", "resource-id", "same-object"]
@@ -1152,46 +1002,6 @@ reason = "routers/functions.py:update_function_user_valves_by_id writes the call
 route = "GET /api/v1/groups/id/{id}/info"
 allow = ["owner-marker", "resource-id", "same-object"]
 reason = "routers/groups.py:get_group_info_by_id serves a group's name, description and member count to any verified user, for the access-control picker."
-
-[[shared]]
-route = "GET /api/v1/invites/{token}/validate"
-allow = ["owner-marker", "same-object"]
-reason = "Unauthenticated on purpose: the token in the path is the credential, and the invitee sees who invited them before signing up."
-
-[[shared]]
-route = "GET /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object"]
-reason = "The seeded terminal server is an admin-registered connection with no access grant, which terminals.py serves to every user; the answer comes from the shared backend."
-
-[[shared]]
-route = "OPTIONS /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object", "write"]
-reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
-
-[[shared]]
-route = "PATCH /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object", "write"]
-reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
-
-[[shared]]
-route = "POST /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object", "write"]
-reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
-
-[[shared]]
-route = "PUT /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object", "write"]
-reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
-
-[[shared]]
-route = "DELETE /api/v1/terminals/{server_id}/{path}"
-allow = ["same-object", "write"]
-reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
-
-[[shared]]
-route = "POST /api/v1/invites/{token}/accept"
-allow = ["owner-marker", "write"]
-reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."
 
 [[shared]]
 route = "POST /ollama/api/chat/{url_idx}"
@@ -1226,18 +1036,6 @@ detail = "identity:platform_login"
 reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
 
 [[control]]
-route = "POST /api/v1/invites/{token}/accept"
-status = 410
-detail = "already been used"
-reason = "The invite token is single-use, and the second account's request, sent first, used it: the 410 proves it cannot be replayed."
-
-[[control]]
-route = "POST /ollama/models/download/{url_idx}"
-status = 400
-detail = "allowed hosts"
-reason = "The model download refuses a file URL outside the allowed hosts, and the stub is not one: a guard working."
-
-[[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"
 status = 404
 detail = "Not an attendee of this event"
@@ -1249,90 +1047,9 @@ status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
 
-[[parameter]]
-backed_by = "soev-solutions"
-key = "platform_thread"
-name = "thread_id"
-prefix = "/api/v1/threads/{thread_id}"
-description = "soev/thread_routes.py reads threads (current=true resolves the owned current version) and forks them (version forks require kind=regenerate or edit); reuse the admin-owned meeting thread. Private drive runs enable ENABLE_V2_THREADS in the sealed stack."
-same_as = "meeting"
-
-# The v2 router dependency refuses these before loading or looking up any function.
-# Probe fictional ids; legacy mode continues to install and exercise real fixtures.
-
 [[control]]
 runtime_soev_backed = "drive"
 route = "GET /api/v1/functions/"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/create"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/export"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "DELETE /api/v1/functions/id/{id}/delete"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/toggle"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/toggle/global"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/update"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves/spec"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/valves/update"
 status = 403
 detail = "Custom functions are disabled under v2"
 reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
@@ -1360,27 +1077,6 @@ reason = "The private sweep observed functions/create returning 403 after #535; 
 
 [[control]]
 runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/list"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/load/url"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/sync"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
 all_actors = true
 route = "POST /api/chat/actions/{action_id}"
 status = 409
@@ -1396,22 +1092,6 @@ status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
 reason = "soev/chat_routes.chat sends sharing routes to thread_sharing.dispatch; its explicit method/route allowlist omits POST /shared/{id}/access/update and returns 409 unavailable after require_login, before ownership or grant mutation."
-
-[[parameter]]
-backed_by = "soev-solutions"
-key = "platform_thread_versions"
-name = "thread_id"
-prefix = "/api/v1/threads/{thread_id}/versions"
-description = "Owner-only conversation versions read; readers receive the same 404 as a missing thread. Requires ENABLE_V2_THREADS and uses the admin-owned meeting thread."
-same_as = "meeting"
-
-[[parameter]]
-backed_by = "soev-solutions"
-key = "platform_thread_read"
-name = "thread_id"
-prefix = "/api/v1/threads/{thread_id}/read"
-description = "Marks the authenticated caller's conversation watermark using server time after authorizing the current projection. Shared readers update only their own state; an unrelated caller receives the same 404 as a missing chat. Requires ENABLE_V2_THREADS and reuses the admin-owned meeting thread. No request body or writable fields."
-same_as = "meeting"
 
 [[field]]
 backed_by = "soev-solutions"
@@ -1438,15 +1118,6 @@ v2 = { headers = { "Content-Type" = "application/json" } }
 route = "DELETE /api/v1/chats/{id}/share"
 description = "Prepared thread mutation requires JSON and the authenticated bearer."
 v2 = { headers = { "Content-Type" = "application/json" } }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "DELETE /api/v1/archives/{archive_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1479,50 +1150,6 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 runtime_soev_backed = "drive"
 all_actors = true
 route = "DELETE /api/v1/evaluations/feedbacks"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "DELETE /api/v1/evaluations/feedbacks/all"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "DELETE /api/v1/groups/id/{id}/delete"
-status = 403
-detail = "platform_groups_read_only"
-json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
-reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "DELETE /api/v1/users/{user_id}"
-status = 403
-detail = "offboarding:console"
-json = { "detail" = { "code" = "policy_forbids", "constraint" = "offboarding:console", "detail" = "Offboarding happens in the soev console" } }
-reason = "policy_jobs.py: the console owns offboarding, including inventories. No administrator exception."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/archives/{archive_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/archives/{archive_id}/export"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
@@ -1584,38 +1211,6 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 
 [[control]]
 runtime_soev_backed = "drive"
-route = "GET /api/v1/evaluations/feedbacks/all/export"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/evaluations/feedbacks/all/ids"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/evaluations/feedbacks/models"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/evaluations/leaderboard/{model_id}/history"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "The legacy get_admin_user gate is preserved by DarkChatRoute: non-admins receive 401 sign_in before dispatch. Admitted admins receive the exact prepared-content refusal; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
 all_actors = true
 route = "GET /api/v1/notes/{id}/chat"
 status = 409
@@ -1627,42 +1222,6 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 runtime_soev_backed = "drive"
 all_actors = true
 route = "GET /api/v1/notes/{id}/chats"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/users/{user_id}/shared-data"
-status = 403
-detail = "offboarding:console"
-json = { "detail" = { "code" = "policy_forbids", "constraint" = "offboarding:console", "detail" = "Offboarding happens in the soev console" } }
-reason = "policy_jobs.py: the console owns offboarding, including inventories. No administrator exception."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "PATCH /api/v1/archives/{archive_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/tasks/stop/{task_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/archives/user/{user_id}"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
@@ -1752,38 +1311,6 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 [[control]]
 runtime_soev_backed = "drive"
 all_actors = true
-route = "POST /api/v1/groups/create"
-status = 403
-detail = "platform_groups_read_only"
-json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
-reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
-
-[[field]]
-route = "POST /api/v1/groups/id/{id}/update"
-description = "Admin positive control for product settings only. routers/groups.py:require_group_update protects console identity/membership; get_admin_user deliberately returns 401 ACCESS_PROHIBITED for user/intruder settings writes."
-v2 = { json = { permissions = { chat = { file_upload = false } }, data = { config = { share = false } } } }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/groups/id/{id}/users/add"
-status = 403
-detail = "platform_groups_read_only"
-json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
-reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/groups/id/{id}/users/remove"
-status = 403
-detail = "platform_groups_read_only"
-json = { "detail" = { "code" = "platform_groups_read_only", "detail" = "Groups are managed in the platform console." } }
-reason = "group_policy.py: console-owned group identity and membership; reads still use an existing mirrored group."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
 route = "POST /api/v1/notes/{id}/chat"
 status = 409
 detail = "unavailable"
@@ -1816,7 +1343,7 @@ v2 = { json = { thread_id = "{chat}", position = "{chat_message}", rating = 1 },
 
 [[field]]
 route = "POST /api/v1/chats/{id}/folder"
-description = "soev/chat_routes.organize requires exactly the folder_id key, even though the legacy ChatFolderIdForm makes it optional. The seeded folder and chat have the same admin owner."
+description = "soev/chat_routes.organize requires exactly the folder_id key, even though the legacy ChatFolderIdForm makes it optional. The seeded folder and chat have the same ordinary owner."
 json = { folder_id = "{folder}" }
 
 [[field]]
@@ -1864,10 +1391,267 @@ status = 403
 detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
 reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
 
+[[field]]
+route = "POST /api/v1/feedback/report"
+description = "Fictional report positive control; requires bug_reports.enabled and an explicitly configured disposable public HTTPS receiver in soev-api. Uses the owner login; delivery failure is a failed control."
+json = { category = "bug", description = "Fictional sweep delivery control", "context.route" = "/fictional", "context.trace_id" = "fictional-trace" }
+
+[[field]]
+route = "POST /api/v1/auths/signup"
+description = "Platform signup refuses before user creation or first-user promotion; identities come from the login provider."
+v2 = { json = { email = "fictional-signup-{token}@example.invalid", password = "Fictional-Signup-Passw0rd!", name = "Fictional signup" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /oauth/clients/{client_id}/authorize"
+status = 403
+detail = "The requested action has been restricted as a security measure."
+json = { detail = "The requested action has been restricted as a security measure." }
+reason = "Platform tool servers are disabled; refuse authorization before OAuth registration can persist product configuration."
+
 [[control]]
 runtime_soev_backed = "drive"
 all_actors = true
 route = "POST /api/v1/auths/signup"
 status = 403
 detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+json = { detail = "You do not have permission to access this resource. Please contact your administrator for assistance." }
 reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
+
+[[fixture]]
+key = "model"
+seeded_by = "seed_model"
+depends_on = []
+actor = "user"
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/terminals/"
+status = 403
+detail = "Feature is unavailable"
+reason = "The platform feature dependency refuses terminal proxies before any connection lookup."
+
+
+[[control]]
+route = "DELETE /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "GET /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "HEAD /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "OPTIONS /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "PATCH /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "POST /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[[control]]
+route = "PUT /api/v1/terminals/{server_id}/{path}"
+status = 403
+detail = "Feature is unavailable"
+all_actors = true
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+
+[removed]
+reason = "Local administration moved to the management console."
+routes = [
+  "DELETE /api/events/webhooks/{webhook_id}",
+  "DELETE /api/v1/archives/{archive_id}",
+  "DELETE /api/v1/evaluations/feedbacks/all",
+  "DELETE /api/v1/files/all",
+  "DELETE /api/v1/functions/id/{id}/delete",
+  "DELETE /api/v1/groups/id/{id}/delete",
+  "DELETE /api/v1/invites/{id}",
+  "DELETE /api/v1/models/delete/all",
+  "DELETE /api/v1/users/{user_id}",
+  "DELETE /ollama/api/delete",
+  "DELETE /ollama/api/delete/{url_idx}",
+  "DELETE /ollama/api/push",
+  "DELETE /ollama/api/push/{url_idx}",
+  "GET /api/events",
+  "GET /api/events/webhooks",
+  "GET /api/models/base",
+  "GET /api/tasks",
+  "GET /api/v1/agent-threads/{thread_id}/trace",
+  "GET /api/v1/analytics/daily",
+  "GET /api/v1/analytics/models",
+  "GET /api/v1/analytics/models/{model_id}/overview",
+  "GET /api/v1/analytics/summary",
+  "GET /api/v1/analytics/tokens",
+  "GET /api/v1/analytics/users",
+  "GET /api/v1/archives/",
+  "GET /api/v1/archives/admin/config",
+  "GET /api/v1/archives/{archive_id}",
+  "GET /api/v1/archives/{archive_id}/export",
+  "GET /api/v1/auths/admin/config",
+  "GET /api/v1/auths/admin/config/ldap",
+  "GET /api/v1/auths/admin/config/ldap/server",
+  "GET /api/v1/auths/admin/config/oauth",
+  "GET /api/v1/auths/admin/details",
+  "GET /api/v1/chats/config",
+  "GET /api/v1/configs/2fa",
+  "GET /api/v1/configs/code_execution",
+  "GET /api/v1/configs/data-retention",
+  "GET /api/v1/configs/email",
+  "GET /api/v1/configs/export",
+  "GET /api/v1/configs/external_agents",
+  "GET /api/v1/configs/integrations",
+  "GET /api/v1/configs/invite_content",
+  "GET /api/v1/configs/models",
+  "GET /api/v1/configs/namespace/{namespace}",
+  "GET /api/v1/configs/subagents",
+  "GET /api/v1/configs/system_prompt",
+  "GET /api/v1/configs/terminal_servers",
+  "GET /api/v1/configs/tool_servers",
+  "GET /api/v1/evaluations/config",
+  "GET /api/v1/evaluations/feedbacks/all/export",
+  "GET /api/v1/evaluations/feedbacks/all/ids",
+  "GET /api/v1/evaluations/feedbacks/list",
+  "GET /api/v1/evaluations/feedbacks/models",
+  "GET /api/v1/evaluations/leaderboard",
+  "GET /api/v1/evaluations/leaderboard/{model_id}/history",
+  "GET /api/v1/files/{id}/content/html",
+  "GET /api/v1/functions/export",
+  "GET /api/v1/functions/id/{id}",
+  "GET /api/v1/functions/id/{id}/valves",
+  "GET /api/v1/functions/id/{id}/valves/spec",
+  "GET /api/v1/functions/list",
+  "GET /api/v1/groups/id/{id}",
+  "GET /api/v1/groups/id/{id}/export",
+  "GET /api/v1/groups/id/{id}/preview",
+  "GET /api/v1/invites/",
+  "GET /api/v1/invites/{token}/validate",
+  "GET /api/v1/knowledge/{id}/export",
+  "GET /api/v1/models/base",
+  "GET /api/v1/models/base/tags",
+  "GET /api/v1/retrieval/config",
+  "GET /api/v1/users/",
+  "GET /api/v1/users/all",
+  "GET /api/v1/users/default/permissions",
+  "GET /api/v1/users/default/permissions/defaults",
+  "GET /api/v1/users/{user_id}",
+  "GET /api/v1/users/{user_id}/2fa/status",
+  "GET /api/v1/users/{user_id}/groups",
+  "GET /api/v1/users/{user_id}/oauth/sessions",
+  "GET /api/v1/users/{user_id}/preview",
+  "GET /api/v1/users/{user_id}/shared-data",
+  "GET /ollama/api/ps",
+  "GET /ollama/api/tags",
+  "GET /ollama/api/tags/{url_idx}",
+  "GET /ollama/api/version",
+  "GET /ollama/api/version/{url_idx}",
+  "GET /ollama/config",
+  "GET /ollama/v1/models",
+  "GET /ollama/v1/models/{url_idx}",
+  "PATCH /api/v1/archives/{archive_id}",
+  "POST /api/events/webhooks",
+  "POST /api/models/unload",
+  "POST /api/tasks/stop/{task_id}",
+  "POST /api/v1/archives/admin/config",
+  "POST /api/v1/archives/user/{user_id}",
+  "POST /api/v1/auths/add",
+  "POST /api/v1/auths/admin/config",
+  "POST /api/v1/auths/admin/config/ldap",
+  "POST /api/v1/auths/admin/config/ldap/server",
+  "POST /api/v1/auths/admin/config/oauth",
+  "POST /api/v1/chats/config",
+  "POST /api/v1/configs/2fa",
+  "POST /api/v1/configs/banners",
+  "POST /api/v1/configs/code_execution",
+  "POST /api/v1/configs/data-retention",
+  "POST /api/v1/configs/data-retention/test",
+  "POST /api/v1/configs/email",
+  "POST /api/v1/configs/email/test",
+  "POST /api/v1/configs/external_agents",
+  "POST /api/v1/configs/greeting_template",
+  "POST /api/v1/configs/import",
+  "POST /api/v1/configs/integrations",
+  "POST /api/v1/configs/invite_content",
+  "POST /api/v1/configs/models",
+  "POST /api/v1/configs/oauth/clients/register",
+  "POST /api/v1/configs/subagents",
+  "POST /api/v1/configs/suggestions",
+  "POST /api/v1/configs/system_prompt",
+  "POST /api/v1/configs/terminal_servers",
+  "POST /api/v1/configs/terminal_servers/lifecycle",
+  "POST /api/v1/configs/terminal_servers/policy",
+  "POST /api/v1/configs/terminal_servers/refresh",
+  "POST /api/v1/configs/terminal_servers/verify",
+  "POST /api/v1/configs/tool_servers",
+  "POST /api/v1/configs/tool_servers/verify",
+  "POST /api/v1/evaluations/config",
+  "POST /api/v1/functions/create",
+  "POST /api/v1/functions/id/{id}/toggle",
+  "POST /api/v1/functions/id/{id}/toggle/global",
+  "POST /api/v1/functions/id/{id}/update",
+  "POST /api/v1/functions/id/{id}/valves/update",
+  "POST /api/v1/functions/load/url",
+  "POST /api/v1/functions/sync",
+  "POST /api/v1/groups/create",
+  "POST /api/v1/groups/id/{id}/update",
+  "POST /api/v1/groups/id/{id}/users",
+  "POST /api/v1/groups/id/{id}/users/add",
+  "POST /api/v1/groups/id/{id}/users/remove",
+  "POST /api/v1/invites/",
+  "POST /api/v1/invites/{id}/resend",
+  "POST /api/v1/invites/{token}/accept",
+  "POST /api/v1/knowledge/metadata/reindex",
+  "POST /api/v1/knowledge/reindex",
+  "POST /api/v1/memories/reindex",
+  "POST /api/v1/models/sync",
+  "POST /api/v1/retrieval/config/update",
+  "POST /api/v1/retrieval/delete",
+  "POST /api/v1/retrieval/reset/db",
+  "POST /api/v1/retrieval/reset/uploads",
+  "POST /api/v1/tasks/config/update",
+  "POST /api/v1/tools/load/url",
+  "POST /api/v1/users/default/permissions",
+  "POST /api/v1/users/{user_id}/2fa/disable",
+  "POST /api/v1/users/{user_id}/update",
+  "POST /api/v1/utils/code/format",
+  "POST /ollama/api/copy",
+  "POST /ollama/api/copy/{url_idx}",
+  "POST /ollama/api/create",
+  "POST /ollama/api/create/{url_idx}",
+  "POST /ollama/api/pull",
+  "POST /ollama/api/pull/{url_idx}",
+  "POST /ollama/api/unload",
+  "POST /ollama/config/update",
+  "POST /ollama/models/download",
+  "POST /ollama/models/download/{url_idx}",
+  "POST /ollama/models/upload",
+  "POST /ollama/models/upload/{url_idx}",
+  "POST /ollama/verify",
+  "PUT /api/events/webhooks/{webhook_id}"
+]

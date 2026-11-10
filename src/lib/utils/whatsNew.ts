@@ -77,8 +77,7 @@ export function newModels(
 	});
 }
 
-const allowed = (user: User, permission: string) =>
-	user?.role === 'admin' || !!user?.permissions?.features?.[permission];
+const allowed = (user: User, permission: string) => !!user?.permissions?.features?.[permission];
 
 /** Which composer tools have Auto for this user: the same gates as their composer buttons. */
 export function autoModeTools(features: Features, user: User) {

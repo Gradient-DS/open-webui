@@ -42,7 +42,7 @@ def platform(monkeypatch, platform_capabilities):
         lambda **kwargs: SoevClient('https://platform.invalid', 'ci-key'),
     )
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.invalid')
-    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr(meetings, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr(live_documents.Config, 'get', AsyncMock(return_value=0))
     monkeypatch.setattr(
         live_documents.ingest,

@@ -49,7 +49,7 @@ from open_webui.utils.access_control import can_bypass_access_control, has_permi
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.features import feature_enabled
 from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
@@ -991,21 +991,17 @@ async def _web_search_allowed(user_id: str) -> bool:
     user = await Users.get_user_by_id(user_id)
     if user is None:
         return False
-    return user.role == 'admin' or await has_permission(
-        user.id, 'features.web_search', await Config.get('user.permissions')
-    )
+    return await has_permission(user.id, 'features.web_search', await Config.get('user.permissions'))
 
 
 async def _documents_allowed(user_id: str) -> bool:
     """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
-    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+    if not await feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
         return False
     user = await Users.get_user_by_id(user_id)
     if user is None:
         return False
-    return user.role == 'admin' or await has_permission(
-        user.id, 'features.document_writer', await Config.get('user.permissions')
-    )
+    return await has_permission(user.id, 'features.document_writer', await Config.get('user.permissions'))
 
 
 # [Claude] What a notice above the answer calls a skipped item, by language: named, or unnamed.
@@ -2190,12 +2186,9 @@ async def _regenerated_input(
     turn: AgentTurn, source: dict, model: str | None, *, edited_text: str | None = None
 ) -> dict:
     user = await Users.get_user_by_id(turn.metadata['user_id'])
-    if user is None or (
-        edited_text is None
-        and not (
-            user.role == 'admin'
-            or await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))
-        )
+    if (user is None) or (
+        (edited_text is None)
+        and (not (await has_permission(user.id, 'chat.regenerate_response', await Config.get('user.permissions'))))
     ):
         raise threads.ThreadError(403, 'unavailable')
     if (

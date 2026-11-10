@@ -48,7 +48,7 @@
 
 	$: canUseWebhooks =
 		($config?.features as any)?.enable_user_webhooks &&
-		($user?.role === 'admin' || ($user?.permissions?.features?.webhooks ?? false));
+		($user?.permissions?.features?.webhooks ?? false);
 
 	$: if (canUseWebhooks && !loadedTargets) {
 		void loadTargets();

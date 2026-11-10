@@ -54,7 +54,7 @@
 		</div>
 	{/if}
 
-	{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
+	{#if isFeatureEnabled('chat_controls') && ($user?.permissions.chat?.controls ?? true)}
 		<div class="space-y-1 dark:text-gray-200 text-sm py-0.5 px-0.5">
 			{#if isChatControlSectionEnabled('files')}
 				<Collapsible
@@ -98,7 +98,7 @@
 				</Collapsible>
 			{/if}
 
-			{#if isChatControlSectionEnabled('valves') && ($user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true))}
+			{#if isChatControlSectionEnabled('valves') && ($user?.permissions.chat?.valves ?? true)}
 				<Collapsible
 					bind:open={showValves}
 					onChange={setOpen('valves')}
@@ -113,7 +113,7 @@
 				</Collapsible>
 			{/if}
 
-			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt') && ($user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true))}
+			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt') && ($user?.permissions.chat?.system_prompt ?? true)}
 				<Collapsible
 					title={$i18n.t('System Prompt')}
 					bind:open={showSystemPrompt}
@@ -135,7 +135,7 @@
 				</Collapsible>
 			{/if}
 
-			{#if isChatControlSectionEnabled('params') && ($user?.role === 'admin' || ($user?.permissions.chat?.params ?? true))}
+			{#if isChatControlSectionEnabled('params') && ($user?.permissions.chat?.params ?? true)}
 				<Collapsible
 					title={$i18n.t('Advanced Params')}
 					bind:open={showAdvancedParams}
@@ -146,7 +146,7 @@
 				>
 					<div class="pt-1 pb-1 text-xs" slot="content">
 						<div>
-							<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
+							<AdvancedParams admin={false} custom={true} bind:params />
 						</div>
 					</div>
 				</Collapsible>

@@ -2,20 +2,11 @@
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 
-	import { getAdminDetails, getLogoutRedirectUrl, userSignOut } from '$lib/apis/auths';
-	import { onMount, tick, getContext } from 'svelte';
+	import { getLogoutRedirectUrl, userSignOut } from '$lib/apis/auths';
+	import { getContext } from 'svelte';
 	import { config } from '$lib/stores';
 
 	const i18n = getContext('i18n');
-
-	let adminDetails = null;
-
-	onMount(async () => {
-		adminDetails = await getAdminDetails(localStorage.token).catch((err) => {
-			console.error(err);
-			return null;
-		});
-	});
 </script>
 
 <div class="fixed w-full h-full flex z-999">
@@ -46,16 +37,10 @@
 						)}
 					{:else}
 						{$i18n.t('Your account status is currently pending activation.')}{'\n'}{$i18n.t(
-							'To access the WebUI, please reach out to the administrator. Admins can manage user statuses from the Admin Panel.'
+							'Contact your organisation to activate your account.'
 						)}
 					{/if}
 				</div>
-
-				{#if adminDetails}
-					<div class="mt-4 text-sm font-normal text-center">
-						<div>{$i18n.t('Admin')}: {adminDetails.name} ({adminDetails.email})</div>
-					</div>
-				{/if}
 
 				<div class=" mt-6 mx-auto relative group w-fit">
 					<button

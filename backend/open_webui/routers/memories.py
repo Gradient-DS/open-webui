@@ -43,7 +43,7 @@ async def check_memories_permission(user):
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'features.memories', config.get('user.permissions')):
+    if not await has_permission(user.id, 'features.memories', config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -457,38 +457,6 @@ async def read_memory_path(
 ############################
 # ReindexMemoryVectorDB
 ############################
-@router.post('/reindex')
-async def reindex_memories_from_vector_db(
-    request: Request,
-    user=Depends(get_admin_user),
-):
-    memories = await Memories.get_memories()
-    memories = memories or []
-    memories_by_user_id = {}
-    for memory in memories:
-        memories_by_user_id.setdefault(memory.user_id, []).append(memory)
-
-    users_result = await Users.get_users()
-    users = users_result.get('users', []) if users_result else []
-    total_memories = 0
-
-    for memory_user in users:
-        total_memories += await reindex_memory_vectors_for_user(
-            request,
-            memory_user.id,
-            memories=memories_by_user_id.get(memory_user.id, []),
-            user=user if model_catalog.is_v2() else memory_user,
-        )
-
-    await publish_event(
-        request,
-        EVENTS.MEMORY_RESET,
-        actor=user,
-        subject_id='all',
-        subject_type='user',
-        data={'count': total_memories, 'user_count': len(users), 'reindex': True},
-    )
-    return {'status': True, 'total_users': len(users), 'total_memories': total_memories}
 
 
 @router.post('/reset', response_model=bool)

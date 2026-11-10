@@ -257,109 +257,12 @@ class ConnectionVerificationForm(BaseModel):
     key: str | None = None
 
 
-@router.post('/verify')
-async def verify_connection(
-    form_data: ConnectionVerificationForm,
-    user=Depends(get_admin_user),
-):
-    """Verify that an Ollama backend at *form_data.url* is reachable."""
-    try:
-        session = await get_session()
-        headers: dict = {}
-        if form_data.key:
-            headers['Authorization'] = f'Bearer {form_data.key}'
-        if ENABLE_FORWARD_USER_INFO_HEADERS and user:
-            headers = include_user_info_headers(headers, user)
-
-        async with session.get(
-            f'{form_data.url}/api/version',
-            headers=headers,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=_MODEL_LIST_TIMEOUT,
-        ) as r:
-            if r.status != 200:
-                detail = f'HTTP Error: {r.status}'
-                res = await r.json(loads=JSONCodec.loads)
-                if 'error' in res:
-                    detail = f'External Error: {res["error"]}'
-                raise HTTPException(status_code=400, detail=detail)
-
-            return await r.json(loads=JSONCodec.loads)
-    except HTTPException:
-        raise
-    except aiohttp.ClientError as exc:
-        # The connection being verified is unreachable or malformed: that is the answer, not a fault.
-        log.exception(f'Client error: {exc}')
-        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
-    except Exception as exc:
-        log.exception(f'Unexpected error: {exc}')
-        raise HTTPException(status_code=500, detail=f'Unexpected error: {exc}')
-
-
-@router.get('/config')
-async def get_config(
-    request: Request,
-    user=Depends(get_admin_user),
-) -> dict:
-    """Return the current Ollama connection configuration."""
-    return await get_ollama_config_values()
-
-
 class OllamaConfigForm(BaseModel):
     """Payload for updating the Ollama connection configuration."""
 
     ENABLE_OLLAMA_API: bool | None = None
     OLLAMA_BASE_URLS: list[str]
     OLLAMA_API_CONFIGS: dict
-
-
-@router.post('/config/update')
-async def update_config(
-    request: Request,
-    form_data: OllamaConfigForm,
-    user=Depends(get_admin_user),
-) -> dict:
-    """Persist updated Ollama connection settings."""
-    valid_keys = {str(i) for i in range(len(form_data.OLLAMA_BASE_URLS))}
-    api_configs = {k: v for k, v in form_data.OLLAMA_API_CONFIGS.items() if k in valid_keys}
-
-    await Config.upsert(
-        {
-            'ollama.enable': form_data.ENABLE_OLLAMA_API,
-            'ollama.base_urls': form_data.OLLAMA_BASE_URLS,
-            'ollama.api_configs': api_configs,
-        }
-    )
-
-    await get_all_models.cache.clear()
-    redis = getattr(request.app.state, 'redis', None)
-    if redis is not None:
-        await redis.delete(BASE_MODELS_CACHE_KEY)
-    request.app.state.BASE_MODELS = []
-    request.app.state.OLLAMA_MODELS = {}
-    models = getattr(request.app.state, 'MODELS', None)
-    if hasattr(models, 'clear'):
-        models.clear()
-    else:
-        request.app.state.MODELS = {}
-
-    await publish_event(
-        request,
-        EVENTS.MODEL_PROVIDER_CONFIG_UPDATED,
-        actor=user,
-        subject_id='ollama',
-        subject_type='model.provider_config',
-        data={
-            'provider': 'ollama',
-            'enabled': form_data.ENABLE_OLLAMA_API,
-            'base_url_count': len(form_data.OLLAMA_BASE_URLS),
-        },
-    )
-    return {
-        'ENABLE_OLLAMA_API': form_data.ENABLE_OLLAMA_API,
-        'OLLAMA_BASE_URLS': form_data.OLLAMA_BASE_URLS,
-        'OLLAMA_API_CONFIGS': api_configs,
-    }
 
 
 def merge_models_lists(model_lists) -> list[dict]:
@@ -454,7 +357,7 @@ async def get_all_models(request: Request, user: UserModel | None = None):
 
     # Annotate with expiry info from loaded-model state
     try:
-        loaded = await get_ollama_loaded_models(request, user=user, skip_idxs=failed_idxs)
+        loaded = await _loaded_models(request, user=user, skip_idxs=failed_idxs)
         expires_map = {m['model']: m['expires_at'] for m in loaded['models'] if 'expires_at' in m}
         for m in models_dict['models']:
             if m['model'] in expires_map:
@@ -467,56 +370,10 @@ async def get_all_models(request: Request, user: UserModel | None = None):
     return models_dict
 
 
-async def get_filtered_models(models, user, db=None):
-    """Return only the models the given *user* is allowed to access."""
-    model_ids = [m['model'] for m in models.get('models', [])]
-    model_infos = {mi.id: mi for mi in await Models.get_models_by_ids(model_ids, db=db)}
-    user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id, db=db)}
-
-    accessible_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user.id,
-        resource_type='model',
-        resource_ids=list(model_infos.keys()),
-        permission='read',
-        user_group_ids=user_group_ids,
-        db=db,
-    )
-    return [
-        m
-        for m in models.get('models', [])
-        if (mi := model_infos.get(m['model'])) and (user.id == mi.user_id or mi.id in accessible_ids)
-    ]
-
-
-@router.get('/api/tags')
-@router.get('/api/tags/{url_idx}', dependencies=[Depends(get_admin_user)])
-async def get_ollama_tags(
+async def _loaded_models(
     request: Request,
-    url_idx: int | None = None,
-    user=Depends(get_verified_user),
-):
-    """List Ollama model tags, optionally from a specific backend."""
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    if url_idx is None:
-        result = await get_all_models(request, user=user)
-    else:
-        url = (await Config.get('ollama.base_urls', []))[url_idx]
-        key = get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {})))
-        result = await send_request(f'{url}/api/tags', 'GET', key=key, user=user)
-
-    if user.role == 'user' and not BYPASS_MODEL_ACCESS_CONTROL:
-        result['models'] = await get_filtered_models(result, user)
-
-    return result
-
-
-@router.get('/api/ps')
-async def get_ollama_loaded_models(
-    request: Request,
-    user=Depends(get_admin_user),
-    skip_idxs: set[int] | None = None,
+    user: UserModel | None,
+    skip_idxs: set[int],
 ) -> dict:
     """List models currently loaded in Ollama memory across all backends."""
     if not await Config.get('ollama.enable'):
@@ -551,42 +408,25 @@ async def get_ollama_loaded_models(
     return {'models': merge_models_lists(r.get('models', []) if r else None for r in responses)}
 
 
-@router.get('/api/version')
-@router.get('/api/version/{url_idx}', dependencies=[Depends(get_admin_user)])
-async def get_ollama_versions(
-    request: Request,
-    user=Depends(get_verified_user),
-    url_idx: int | None = None,
-):
-    """Return the lowest Ollama version across all configured backends."""
-    if not await Config.get('ollama.enable'):
-        return {'version': False}
+async def get_filtered_models(models, user, db=None):
+    """Return only the models the given *user* is allowed to access."""
+    model_ids = [m['model'] for m in models.get('models', [])]
+    model_infos = {mi.id: mi for mi in await Models.get_models_by_ids(model_ids, db=db)}
+    user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id, db=db)}
 
-    if url_idx is not None:
-        url = (await Config.get('ollama.base_urls', []))[url_idx]
-        return await send_request(f'{url}/api/version', 'GET')
-
-    # Fan-out to every enabled backend
-    tasks = []
-    for idx, url in enumerate(await Config.get('ollama.base_urls', [])):
-        api_config = (await Config.get('ollama.api_configs', {})).get(
-            str(idx),
-            (await Config.get('ollama.api_configs', {})).get(url, {}),
-        )
-        if api_config.get('enable', True):
-            tasks.append(send_get_request(f'{url}/api/version', api_config.get('key')))
-
-    raw = await asyncio.gather(*tasks)
-    valid = [r for r in raw if r is not None]
-
-    if not valid:
-        raise HTTPException(status_code=500, detail=ERROR_MESSAGES.OLLAMA_NOT_FOUND)
-
-    lowest = min(
-        valid,
-        key=lambda v: tuple(map(int, re.sub(r'^v|-.*', '', v['version']).split('.'))),
+    accessible_ids = await AccessGrants.get_accessible_resource_ids(
+        user_id=user.id,
+        resource_type='model',
+        resource_ids=list(model_infos.keys()),
+        permission='read',
+        user_group_ids=user_group_ids,
+        db=db,
     )
-    return {'version': lowest['version']}
+    return [
+        m
+        for m in models.get('models', [])
+        if (mi := model_infos.get(m['model'])) and (user.id == mi.user_id or mi.id in accessible_ids)
+    ]
 
 
 class ModelNameForm(BaseModel):
@@ -596,129 +436,12 @@ class ModelNameForm(BaseModel):
     model_config = ConfigDict(extra='allow')
 
 
-@router.post('/api/unload')
-async def unload_model(
-    request: Request,
-    form_data: ModelNameForm,
-    user=Depends(get_admin_user),
-):
-    form_data = form_data.model_dump(exclude_none=True)
-    model = form_data.get('model', form_data.get('name'))
-
-    if not model:
-        raise HTTPException(status_code=400, detail='Missing name of the model to unload.')
-
-    # Refresh/load models if needed, get mapping from name to URLs
-    await get_all_models(request, user=user)
-    models = request.app.state.OLLAMA_MODELS
-
-    if model not in models:
-        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(model))
-    url_indices = models[model]['urls']
-
-    # Send unload to ALL url_indices
-    results = []
-    errors = []
-    for idx in url_indices:
-        url = (await Config.get('ollama.base_urls', []))[idx]
-        api_config = (await Config.get('ollama.api_configs', {})).get(
-            str(idx), (await Config.get('ollama.api_configs', {})).get(url, {})
-        )
-        key = get_api_key(idx, url, (await Config.get('ollama.api_configs', {})))
-
-        prefix_id = api_config.get('prefix_id', None)
-        if prefix_id and model.startswith(f'{prefix_id}.'):
-            model = model[len(f'{prefix_id}.') :]
-
-        payload = {'model': model, 'keep_alive': 0, 'prompt': ''}
-
-        try:
-            res = await send_request(
-                f'{url}/api/generate',
-                payload=JSONCodec.dumps(payload),
-                key=key,
-                user=user,
-            )
-            results.append({'url_idx': idx, 'success': True, 'response': res})
-        except Exception as e:
-            log.exception(f'Failed to unload model on node {idx}: {e}')
-            errors.append({'url_idx': idx, 'success': False, 'error': str(e)})
-
-    if len(errors) > 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f'Failed to unload model on {len(errors)} nodes: {errors}',
-        )
-
-    return {'status': True}
-
-
-@router.post('/api/pull')
-@router.post('/api/pull/{url_idx}')
-async def pull_model(
-    request: Request,
-    form_data: ModelNameForm,
-    url_idx: int = 0,
-    user=Depends(get_admin_user),
-):
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    form_data = form_data.model_dump(exclude_none=True)
-    form_data['model'] = form_data.get('model', form_data.get('name'))
-
-    url = (await Config.get('ollama.base_urls', []))[url_idx]
-    log.info('url: %s', url)
-
-    # Admins may pull from any registry
-    return await send_request(
-        f'{url}/api/pull',
-        payload=JSONCodec.dumps({**form_data, 'insecure': True}),
-        key=get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {}))),
-        user=user,
-        stream=True,
-        passthrough=True,
-    )
-
-
 class PushModelForm(BaseModel):
     """Payload for pushing a model to a registry."""
 
     model: str
     insecure: bool | None = None
     stream: bool | None = None
-
-
-@router.delete('/api/push')
-@router.delete('/api/push/{url_idx}')
-async def push_model(
-    request: Request,
-    form_data: PushModelForm,
-    url_idx: int | None = None,
-    user=Depends(get_admin_user),
-):
-    """Push a local model to a remote registry."""
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    if url_idx is None:
-        await get_all_models(request, user=user)
-        models = request.app.state.OLLAMA_MODELS
-        if form_data.model not in models:
-            raise HTTPException(status_code=400, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(form_data.model))
-        url_idx = models[form_data.model]['urls'][0]
-
-    url = (await Config.get('ollama.base_urls', []))[url_idx]
-    log.debug('url: %s', url)
-
-    return await send_request(
-        f'{url}/api/push',
-        payload=form_data.model_dump_json(exclude_none=True).encode(),
-        key=get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {}))),
-        user=user,
-        stream=True,
-        passthrough=True,
-    )
 
 
 class CreateModelForm(BaseModel):
@@ -730,116 +453,11 @@ class CreateModelForm(BaseModel):
     model_config = ConfigDict(extra='allow')
 
 
-@router.post('/api/create')
-@router.post('/api/create/{url_idx}')
-async def create_model(
-    request: Request,
-    form_data: CreateModelForm,
-    url_idx: int = 0,
-    user=Depends(get_admin_user),
-):
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    log.debug('form_data: %s', form_data)
-    url = (await Config.get('ollama.base_urls', []))[url_idx]
-
-    return await send_request(
-        f'{url}/api/create',
-        payload=form_data.model_dump_json(exclude_none=True).encode(),
-        key=get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {}))),
-        user=user,
-        stream=True,
-        passthrough=True,
-    )
-
-
 class CopyModelForm(BaseModel):
     """Payload for duplicating an existing model under a new name."""
 
     source: str
     destination: str
-
-
-@router.post('/api/copy')
-@router.post('/api/copy/{url_idx}')
-async def copy_model(
-    request: Request,
-    form_data: CopyModelForm,
-    url_idx: int | None = None,
-    user=Depends(get_admin_user),
-):
-    """Duplicate an existing model under a new name."""
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    if url_idx is None:
-        await get_all_models(request, user=user)
-        models = request.app.state.OLLAMA_MODELS
-        if form_data.source not in models:
-            raise HTTPException(status_code=400, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(form_data.source))
-        url_idx = models[form_data.source]['urls'][0]
-
-    url = (await Config.get('ollama.base_urls', []))[url_idx]
-    key = get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {})))
-
-    await send_request(
-        f'{url}/api/copy',
-        payload=form_data.model_dump_json(exclude_none=True).encode(),
-        key=key,
-        user=user,
-    )
-    await publish_event(
-        request,
-        EVENTS.MODEL_PROVIDER_MODEL_CREATED,
-        actor=user,
-        subject_id=form_data.destination,
-        data={'provider': 'ollama', 'source': form_data.source, 'url_idx': url_idx},
-    )
-    return True
-
-
-@router.delete('/api/delete')
-@router.delete('/api/delete/{url_idx}')
-async def delete_model(
-    request: Request,
-    form_data: ModelNameForm,
-    url_idx: int | None = None,
-    user=Depends(get_admin_user),
-):
-    """Remove a model from an Ollama backend."""
-    if not await Config.get('ollama.enable'):
-        raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
-
-    payload = form_data.model_dump(exclude_none=True)
-    payload['model'] = payload.get('model', payload.get('name'))
-    model = payload.get('model')
-
-    if url_idx is None:
-        await get_all_models(request, user=user)
-        models = request.app.state.OLLAMA_MODELS
-        if model not in models:
-            raise HTTPException(status_code=400, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(model))
-        url_idx = models[model]['urls'][0]
-
-    url = (await Config.get('ollama.base_urls', []))[url_idx]
-    key = get_api_key(url_idx, url, (await Config.get('ollama.api_configs', {})))
-
-    await send_request(
-        f'{url}/api/delete',
-        'DELETE',
-        payload=JSONCodec.dumps(payload),
-        key=key,
-        user=user,
-    )
-    await publish_event(
-        request,
-        EVENTS.MODEL_PROVIDER_MODEL_DELETED,
-        actor=user,
-        subject_id=model,
-        data={'provider': 'ollama', 'url_idx': url_idx},
-    )
-    return True
 
 
 @router.post('/api/show')
@@ -1072,7 +690,7 @@ class GenerateChatCompletionForm(BaseModel):
 async def validate_ollama_backend_idx(request: Request, model: str, url_idx: int | None, user) -> None:
     # A caller-supplied url_idx must point to a backend the model is actually
     # served from; the None path is already constrained to that allow-list.
-    if url_idx is None or user is None or getattr(user, 'role', None) == 'admin':
+    if (url_idx is None) or (user is None):
         return
     models = request.app.state.OLLAMA_MODELS
     if not models or model not in models:
@@ -1496,45 +1114,6 @@ async def generate_responses(
     )
 
 
-@router.get('/v1/models')
-@router.get('/v1/models/{url_idx}', dependencies=[Depends(get_admin_user)])
-async def get_openai_models(
-    request: Request,
-    url_idx: int | None = None,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-) -> dict:
-    """List models in the OpenAI-compatible format."""
-    if url_idx is None:
-        model_list = await get_all_models(request, user=user)
-        raw_models = model_list['models']
-    else:
-        url = (await Config.get('ollama.base_urls', []))[url_idx]
-        model_list = await send_request(f'{url}/api/tags', 'GET')
-        raw_models = model_list.get('models', [])
-
-    now_ts = int(time.time())
-    models = [{'id': m['model'], 'object': 'model', 'created': now_ts, 'owned_by': 'openai'} for m in raw_models]
-
-    if user.role == 'user' and not BYPASS_MODEL_ACCESS_CONTROL:
-        model_ids = [m['id'] for m in models]
-        model_infos = {mi.id: mi for mi in await Models.get_models_by_ids(model_ids, db=db)}
-        user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id, db=db)}
-        accessible_ids = await AccessGrants.get_accessible_resource_ids(
-            user_id=user.id,
-            resource_type='model',
-            resource_ids=list(model_infos.keys()),
-            permission='read',
-            user_group_ids=user_group_ids,
-            db=db,
-        )
-        models = [
-            m for m in models if (mi := model_infos.get(m['id'])) and (user.id == mi.user_id or mi.id in accessible_ids)
-        ]
-
-    return {'data': models, 'object': 'list'}
-
-
 class UrlForm(BaseModel):
     """Form carrying a single URL string."""
 
@@ -1607,125 +1186,3 @@ async def download_file_stream(
                     yield f'data: {JSONCodec.dumps({"done": done, "blob": f"sha256:{hashed}", "name": file_name})}\n\n'
                 else:
                     raise RuntimeError('Ollama: Could not create blob, Please try again.')
-
-
-@router.post('/models/download')
-@router.post('/models/download/{url_idx}')
-async def download_model(
-    request: Request,
-    form_data: UrlForm,
-    url_idx: int | None = None,
-    user=Depends(get_admin_user),
-):
-    """Download a GGUF model from HuggingFace or GitHub and register it with Ollama."""
-    allowed_hosts = ['https://huggingface.co/', 'https://github.com/']
-    if not any(form_data.url.startswith(host) for host in allowed_hosts):
-        raise HTTPException(
-            status_code=400,
-            detail='Invalid file_url. Only URLs from allowed hosts are permitted.',
-        )
-
-    url = (await Config.get('ollama.base_urls', []))[url_idx if url_idx is not None else 0]
-    file_name = parse_huggingface_url(form_data.url)
-
-    if not file_name:
-        return None
-
-    file_path = os.path.join(UPLOAD_DIR, file_name)
-    return StreamingResponse(
-        download_file_stream(url, form_data.url, file_path, file_name),
-    )
-
-
-@router.post('/models/upload')
-@router.post('/models/upload/{url_idx}')
-async def upload_model(
-    request: Request,
-    file: UploadFile = File(...),
-    url_idx: int | None = None,
-    user=Depends(get_admin_user),
-):
-    """Upload a local model file, push it as a blob, and create the model in Ollama."""
-    ollama_url = (await Config.get('ollama.base_urls', []))[url_idx if url_idx is not None else 0]
-
-    filename = os.path.basename(file.filename)
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    # Stage 1: persist the uploaded file to disk
-    chunk_size = AIOHTTP_FILE_STREAM_CHUNK_SIZE
-
-    async with aiofiles.open(file_path, 'wb') as out_f:
-        while chunk := await file.read(chunk_size):
-            await out_f.write(chunk)
-
-    async def file_process_stream():
-        nonlocal ollama_url
-        total_size = os.path.getsize(file_path)
-        log.info('Total Model Size: %s', total_size)
-
-        # Stage 2: hash the file and emit SSE progress
-        file_hash = await asyncio.to_thread(calculate_sha256, file_path, chunk_size)
-        log.info('Model Hash: %s', file_hash)
-
-        try:
-            bytes_read = 0
-            async with aiofiles.open(file_path, 'rb') as f:
-                while chunk := await f.read(chunk_size):
-                    bytes_read += len(chunk)
-                    progress = round(bytes_read / total_size * 100, 2)
-                    event = JSONCodec.dumps({'progress': progress, 'total': total_size, 'completed': bytes_read})
-                    yield f'data: {event}\n\n'
-
-            session = await get_session()
-            blob_url = f'{ollama_url}/api/blobs/sha256:{file_hash}'
-
-            async def blob_chunks():
-                async with aiofiles.open(file_path, 'rb') as blob_file:
-                    while chunk := await blob_file.read(chunk_size):
-                        yield chunk
-
-            async with session.post(
-                blob_url,
-                data=blob_chunks(),
-                headers={'Content-Length': str(total_size)},
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=get_client_timeout(),
-            ) as resp:
-                if not resp.ok:
-                    raise Exception('Ollama: Could not create blob, Please try again.')
-
-            log.info('Uploaded to /api/blobs')
-            await asyncio.to_thread(os.remove, file_path)
-
-            # Stage 4: create the model
-            model, _ext = os.path.splitext(filename)
-            log.info('Created Model: %s', model)
-
-            create_payload = {
-                'model': model,
-                'files': {filename: f'sha256:{file_hash}'},
-            }
-            log.info('Model Payload: %s', create_payload)
-
-            async with session.post(
-                f'{ollama_url}/api/create',
-                headers={'Content-Type': 'application/json'},
-                data=JSONCodec.dumps(create_payload),
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=get_client_timeout(),
-            ) as create_resp:
-                if create_resp.ok:
-                    log.info('API SUCCESS!')
-                    event = JSONCodec.dumps(
-                        {'done': True, 'blob': f'sha256:{file_hash}', 'name': filename, 'model_created': model}
-                    )
-                    yield f'data: {event}\n\n'
-                else:
-                    resp_text = await create_resp.text()
-                    raise Exception(f'Failed to create model in Ollama. {resp_text}')
-
-        except Exception as exc:
-            yield f'data: {JSONCodec.dumps({"error": str(exc)})}\n\n'
-
-    return StreamingResponse(file_process_stream(), media_type='text/event-stream')

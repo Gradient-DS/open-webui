@@ -3,7 +3,7 @@
 	import { getLanguages } from '$lib/i18n';
 	const dispatch = createEventDispatcher();
 
-	import { config, models, settings, theme, user } from '$lib/stores';
+	import { config, settings, theme, user } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
@@ -261,7 +261,7 @@
 
 		<!-- [Gradient] Tenant feature gate. -->
 		{#if isFeatureEnabled('system_prompt')}
-			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
+			{#if ($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true)}
 				<UserSettingSection title={$i18n.t('System Prompt')}>
 					<UserSettingField description={$i18n.t('Set the default system prompt for new chats.')}>
 						<Textarea
@@ -275,7 +275,7 @@
 			{/if}
 		{/if}
 
-		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
+		{#if ($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true)}
 			<UserSettingSection title={$i18n.t('Advanced Parameters')}>
 				<UserSettingRow description={$i18n.t('Show or hide custom generation parameters.')}>
 					<span slot="label">{$i18n.t('Model parameters')}</span>
@@ -290,7 +290,7 @@
 				</UserSettingRow>
 
 				{#if showAdvanced}
-					<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
+					<AdvancedParams admin={false} custom={true} bind:params />
 				{/if}
 			</UserSettingSection>
 		{/if}

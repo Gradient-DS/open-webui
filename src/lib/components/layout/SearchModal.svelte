@@ -536,7 +536,7 @@
 		actions = [
 			...actions,
 			...(($config?.features?.enable_notes ?? false) &&
-			($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+			($user?.permissions?.features?.notes ?? true)
 				? [
 						{
 							label: $i18n.t('Create a new note'),
@@ -816,7 +816,7 @@
 												</button>
 											</Tooltip>
 
-											{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+											{#if $user?.permissions?.chat?.delete ?? true}
 												<Tooltip content={$i18n.t('Delete')}>
 													<button
 														class="self-center dark:hover:text-white transition"

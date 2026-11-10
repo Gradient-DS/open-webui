@@ -482,10 +482,7 @@ async def install_tool_and_function_dependencies():
                 all_dependencies += f'{dependencies}, '
         for tool in tool_list:
             # Only install requirements for admin tools
-            if tool.user and tool.user.role == 'admin':
-                frontmatter = extract_frontmatter(replace_imports(tool.content))
-                if dependencies := frontmatter.get('requirements'):
-                    all_dependencies += f'{dependencies}, '
+            pass
 
         # `pip install` via subprocess can block for a long time; offload it.
         await asyncio.to_thread(install_frontmatter_requirements, all_dependencies.strip(', '))

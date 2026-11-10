@@ -58,7 +58,7 @@
 		type Model,
 		mobile,
 		settings,
-		models as rawModels, // [Gradient] Pickers use the unmodified LLM registry.
+		models as rawModels,
 		config,
 		showCallOverlay,
 		tools,
@@ -236,10 +236,9 @@
 	$: canToggleTemporary =
 		!embedded &&
 		!chatId &&
-		($_user?.role === 'admin' ||
-			($_user?.role === 'user' &&
-				($_user?.permissions?.chat?.temporary ?? true) &&
-				!($_user?.permissions?.chat?.temporary_enforced ?? false)));
+		$_user?.role === 'user' &&
+		($_user?.permissions?.chat?.temporary ?? true) &&
+		!($_user?.permissions?.chat?.temporary_enforced ?? false);
 
 	export let prompt = '';
 	export let files: ChatAttachment[] = [];
@@ -858,8 +857,7 @@
 		'terminal',
 		modelCapabilitiesById
 	);
-	$: hasDirectToolServerAccess =
-		$_user?.role === 'admin' || ($_user?.permissions?.features?.direct_tool_servers ?? true);
+	$: hasDirectToolServerAccess = $_user?.permissions?.features?.direct_tool_servers ?? true;
 	$: showTerminalSelector =
 		terminalCapableModels.length > 0 &&
 		(($terminalServers ?? []).some((t) => t.id) ||
@@ -884,27 +882,27 @@
 	$: showWebSearchButton =
 		selectedModelIds.length === webSearchCapableModels.length &&
 		$config?.features?.enable_web_search &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.web_search);
+		$_user?.permissions?.features?.web_search;
 
 	let showImageGenerationButton = false;
 	$: showImageGenerationButton =
 		selectedModelIds.length === imageGenerationCapableModels.length &&
 		$config?.features?.enable_image_generation &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
+		$_user?.permissions?.features?.image_generation;
 
 	let showCodeInterpreterButton = false;
 	$: showCodeInterpreterButton =
 		!$selectedTerminalId &&
 		selectedModelIds.length === codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
+		$_user?.permissions?.features?.code_interpreter;
 
 	let showDocumentWriterButton = false;
 	$: showDocumentWriterButton =
 		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
 			documentWriterCapableModels.length &&
 		$config?.features?.enable_document_writer &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
+		$_user?.permissions?.features?.document_writer;
 
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
@@ -1006,8 +1004,8 @@
 		: fileUploadCapableModels;
 	$: inputMenuFileUploadEnabled =
 		inputMenuFileUploadCapableModels.length === selectedModelIds.length &&
-		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
-	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
+		$_user?.permissions?.chat?.file_upload;
+	$: webUploadEnabled = $_user?.permissions?.chat?.web_upload ?? true;
 
 	$: documentWriterTooltip = pinnedStateTooltip(
 		$i18n.t('Document writer'),
@@ -1212,7 +1210,7 @@
 	};
 
 	const uploadFileHandler = async (file, process = true, itemData = {}, existingItemId = null) => {
-		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
+		if (!($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			if (existingItemId) {
 				files = files.filter((item) => item?.itemId !== existingItemId);
@@ -1774,9 +1772,7 @@
 					canCompact: () => !!history?.currentId && contextCompactionEnabled,
 					compactDisabled: () => isActive,
 					canStatus: () => !!history?.currentId,
-					canFork: () =>
-						!!history?.currentId &&
-						($_user?.role === 'admin' || ($_user?.permissions?.chat?.import ?? true)),
+					canFork: () => !!history?.currentId && ($_user?.permissions?.chat?.import ?? true),
 					forkDisabled: () => isActive,
 					canTemporary: () => canToggleTemporary,
 					temporaryEnabled: () => $temporaryChatEnabled === true,
@@ -3023,7 +3019,7 @@
 									{:else}
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 											<!-- [Gradient] Tenant voice gate includes dictation. -->
-											{#if isFeatureEnabled('voice') && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
+											{#if isFeatureEnabled('voice') && ($_user?.permissions?.chat?.stt ?? true)}
 												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
@@ -3064,7 +3060,7 @@
 											{/if}
 										{/if}
 
-										{#if isFeatureEnabled('voice_call') && !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if isFeatureEnabled('voice_call') && !embedded && prompt === '' && files.length === 0 && ($_user?.permissions?.chat?.call ?? true)}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>

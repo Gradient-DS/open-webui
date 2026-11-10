@@ -518,6 +518,10 @@ class ModelsTable:
             return tags_set
 
     async def get_model_by_id(self, id: str, db: AsyncSession | None = None) -> ModelModel | None:
+        from open_webui.soev import model_catalog
+
+        if model_catalog.is_v2() and await model_catalog.is_catalog_model(id):
+            return await model_catalog.model_settings(id)
         try:
             async with get_async_db_context(db) as db:
                 model = await db.get(Model, id)

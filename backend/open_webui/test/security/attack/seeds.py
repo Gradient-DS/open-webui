@@ -1,7 +1,7 @@
 """Resolve route-scoped fixtures over HTTP; never import the application.
 
 Call once per pass, serially, using ensure_identities() from identities.py.
-Feature-gated fixtures use the admin; integration fixtures use the caller.
+All fixtures use the ordinary caller and its platform permissions.
 The result is keyed by (OpenAPI path template, parameter), never just name.
 Unseedable entries remain in SURFACE and are deliberately absent from results.
 """
@@ -23,7 +23,6 @@ import requests
 
 from . import oidc
 from .client import AttackClient, AuthenticationError, json_body, totp_code
-from .configuration import recover_configuration
 from .diagnostics import timed
 from .identities import create_oidc_identity
 
@@ -150,7 +149,7 @@ def ordinary_targets(spec=SPEC, surface=SURFACE):
 
 
 def dependency_order(surface):
-    entries = surface['parameter']
+    entries = [*surface['parameter'], *surface.get('fixture', [])]
     by_key = {p['key']: p for p in entries}
     if len(by_key) != len(entries):
         raise ValueError('Duplicate seed key')
@@ -228,17 +227,9 @@ class SeedContext:
             raise RuntimeError(f'{parameter["key"]}: does not declare that it provides {name}')
         self.values[name] = _extract({'value': value}, 'value', name=name, via=parameter['key'])
 
-    def request(self, method, path, *, actor=None, password_identity=False, **kwargs):
+    def request(self, method, path, *, actor=None, **kwargs):
         if is_destructive(method, path, self.surface):
             raise RuntimeError(f'Destructive route cannot seed fixtures: {method} {path}')
-        if oidc.enabled() and not password_identity and method == 'POST' and path == '/api/v1/auths/add':
-            with create_oidc_identity(self.admin, **kwargs['json']) as client:
-                return {
-                    **client.identity,
-                    'token': client.token,
-                    'token_type': 'Bearer',
-                    'oauth_session_id': client.oauth_session_id,
-                }
         response = (actor or self.client).request(method, path, **kwargs)
         if not 200 <= response.status_code < 300:
             raise RuntimeError(f'Seeding {method} {path} failed (HTTP {response.status_code})')
@@ -278,122 +269,58 @@ class SeedContext:
         raise RuntimeError(f'Seeding file {file_id} did not complete within {timeout}s')
 
 
-def prepare_configuration(ctx, parameter):
-    namespace = f'attack_{ctx.token}'
-    updates = {f'{namespace}.marker': ctx.token, **parameter['config']}
-    ctx.request('POST', '/api/v1/configs/import', actor=ctx.admin, json={'config': updates})
-    body = ctx.request('GET', f'/api/v1/configs/namespace/{namespace}', actor=ctx.admin)
-    if body.get(f'{namespace}.marker') != ctx.token:
-        raise RuntimeError('Seeding configuration namespace did not persist')
-    return namespace
+def seed_disabled_oauth_client(ctx, parameter):
+    return 'mcp:fictional-disabled'
 
 
-def connection_index(ctx, parameter):
-    body = ctx.request('GET', parameter['config_via'], actor=ctx.admin)
-    urls = body.get(parameter['urls_field'])
-    if not isinstance(urls, list) or not urls or not isinstance(urls[0], str) or not urls[0]:
-        raise RuntimeError(f'{parameter["key"]}: no configured upstream connection')
-    ctx.request('GET', parameter['probe'], actor=ctx.admin)
-    return '0'
+def seed_refused_target(ctx, parameter):
+    return 'fictional-retired-' + ctx.token
 
 
-def seed_admin_user(ctx, parameter):
-    return ctx.admin.identity['id']
+def seed_request_user(ctx, parameter):
+    return ctx.client.identity['id']
+
+
+def seed_console_access(ctx, parameter):
+    payload = ctx.request('GET', '/api/v1/auths/console-access', actor=ctx.client)
+    if set(payload) != {'console_url'} or not (
+        payload['console_url'] is None or isinstance(payload['console_url'], str)
+    ):
+        raise RuntimeError('Invalid caller console eligibility')
+    return 'allowed' if payload['console_url'] is not None else 'unavailable'
 
 
 def seed_ollama_connection(ctx, parameter):
-    index = connection_index(ctx, parameter)
-    # The aggregate endpoint also populates OLLAMA_MODELS, used by /api/models/unload.
-    body = ctx.request('GET', '/ollama/api/tags', actor=ctx.admin)
-    model = next((item for item in body.get('models', []) if int(index) in item.get('urls', [])), None)
-    model_id = _extract(model, 'model', name='upstream_model', via='GET /ollama/api/tags')
-    ctx.provide(parameter, 'upstream_model', model_id)
-    return index
+    body = ctx.request('GET', '/ollama/api/tags', actor=ctx.client)
+    model = next((entry for entry in body.get('models', []) if entry.get('urls')), None)
+    if model is None:
+        raise RuntimeError('No caller-readable Ollama connection is available')
+    ctx.provide(parameter, 'upstream_model', model['model'])
+    return str(model['urls'][0])
 
 
 def upstream_path(ctx, parameter):
-    ctx.request('GET', ctx.fill(parameter['probe'], parameter, path=True), actor=ctx.admin)
     return parameter['value']
 
 
-def seed_terminal(ctx, parameter):
-    # The dedicated terminal config endpoints require FEATURE_TERMINAL_SERVERS,
-    # but the proxy itself reads this config without that UI feature gate.
-    body = ctx.request('GET', '/api/v1/configs/export', actor=ctx.admin)
-    connections = body.get('terminal_server.connections') or []
-    server_id = f'attack-{ctx.token}'
-    # An empty access_grants list means private (utils/access_control:156), and
-    # BYPASS_ADMIN_ACCESS_CONTROL is false here to match production, so even the
-    # admin cannot see an ungranted connection and list_terminal_servers filters
-    # it out. Grant read explicitly rather than relying on the admin role.
-    connections.append(
-        {
-            'id': server_id,
-            'name': server_id,
-            'url': parameter['url'],
-            'auth_type': 'none',
-            'config': {'access_grants': [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}]},
-        }
-    )
-    ctx.request(
-        'POST', '/api/v1/configs/import', actor=ctx.admin, json={'config': {'terminal_server.connections': connections}}
-    )
-    servers = ctx.request('GET', '/api/v1/terminals/', actor=ctx.admin)
-    if not any(server.get('id') == server_id for server in servers):
-        raise RuntimeError('Terminal connection was not registered')
-    ctx.request('GET', f'/api/v1/terminals/{server_id}/openapi.json', actor=ctx.admin)
-    return server_id
-
-
 def seed_export(ctx, parameter):
-    # /auths/add returns a real session for the newly created disposable user.
-    token = _extract(ctx.payloads['user'], 'token', name='export identity', via='POST /api/v1/auths/add')
-    with AttackClient(ctx.client.base_url, token=token) as exporter:
-        if oidc.enabled():
-            exporter.oauth_session_id = ctx.payloads['user']['oauth_session_id']
-        exporter.verify_identity(user_id=ctx.values['user'], role='user')
-        ctx.request('POST', '/api/v1/export/data', actor=exporter)
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            body = ctx.request('GET', '/api/v1/export/data/status', actor=exporter)
-            if body.get('status') == 'ready':
-                path = _extract(body, 'export_path', name=parameter['key'], via='GET export status')
-                if not path.startswith(f'exports/{ctx.values["user"]}/'):
-                    raise RuntimeError('Export path belongs to a different user')
-                return path
-            time.sleep(0.2)
+    ctx.request('POST', '/api/v1/export/data', actor=ctx.client)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        body = ctx.request('GET', '/api/v1/export/data/status', actor=ctx.client)
+        if body.get('status') == 'ready':
+            path = _extract(body, 'export_path', name=parameter['key'], via='GET export status')
+            if not path.startswith(f'exports/{ctx.client.user_id}/'):
+                raise RuntimeError('Export path belongs to a different user')
+            return path
+        time.sleep(0.2)
     raise RuntimeError('Export did not become ready within 60 seconds')
 
 
-def register_readable_model(ctx, model_id):
-    # Registry discovery alone has no Models row; chat requires one even for
-    # admins when BYPASS_ADMIN_ACCESS_CONTROL is false. This endpoint creates
-    # the base-model row if absent and replaces its grants on subsequent passes.
-    grant = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
-    body = ctx.request(
-        'POST',
-        '/api/v1/models/model/access/update',
-        actor=ctx.admin,
-        json={'id': model_id, 'access_grants': [grant]},
-    )
-    if body.get('id') != model_id or not any(
-        all(item.get(key) == value for key, value in grant.items()) for item in body.get('access_grants', [])
-    ):
-        raise RuntimeError(f'Model {model_id} did not acquire public read access')
-    # The owner control for POST /models/model/toggle deactivates this row, and an
-    # inactive override hides its base model from the registry (utils/models.py).
-    if body.get('is_active') is False:
-        toggled = ctx.request('POST', '/api/v1/models/model/toggle', actor=ctx.admin, params={'id': model_id})
-        if toggled.get('is_active') is not True:
-            raise RuntimeError(f'Model {model_id} could not be reactivated')
-
-
 def catalog_default_model(ctx, parameter):
-    # Drive mode runs the v2 runtime, where soev-api's catalog is the only source of
-    # registry models (utils/models.py:get_all_base_models); upstream ids never list.
-    # /api/config names the catalog default (soev/model_catalog.default_models) even
-    # while an earlier pass's toggle has hidden it from /api/models.
-    default = ctx.request('GET', '/api/config', actor=ctx.admin).get('default_models')
+    # The sweep requires one product-configured catalog model; an empty selection
+    # cannot establish a positive model control.
+    default = ctx.request('GET', '/api/config', actor=ctx.client).get('default_models')
     if not isinstance(default, str) or not default or ',' in default:
         raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {default!r}')
     return default
@@ -401,8 +328,29 @@ def catalog_default_model(ctx, parameter):
 
 def seed_model(ctx, parameter):
     model_id = catalog_default_model(ctx, parameter)
-    register_readable_model(ctx, model_id)
+    registry = ctx.request('GET', '/api/models', actor=ctx.client)
+    if model_id not in {model['id'] for model in registry.get('data', [])}:
+        raise RuntimeError('Configured model is not available to the ordinary caller')
     return model_id
+
+
+def seed_skill_bundle(ctx, parameter):
+    skill_id = f'fictional-skill-{ctx.token}'
+    created = ctx.request(
+        'POST',
+        '/api/v1/skills/create',
+        actor=ctx.client,
+        json={'id': skill_id, 'name': skill_id, 'content': 'Fictional skill instructions.'},
+    )
+    skill_id = _extract(created, 'id', name=parameter['key'], via='POST /api/v1/skills/create')
+    for path in ('fictional-edit.txt', 'fictional-move.txt', 'fictional-remove.txt'):
+        ctx.request(
+            'POST',
+            f'/api/v1/skills/id/{skill_id}/files',
+            actor=ctx.client,
+            json={'path': path, 'content': 'Fictional skill file.'},
+        )
+    return skill_id
 
 
 def seed_chat(ctx, parameter):
@@ -411,14 +359,14 @@ def seed_chat(ctx, parameter):
     created = ctx.request(
         'POST',
         '/api/v1/chats/new',
-        actor=ctx.admin,
+        actor=ctx.client,
         json={'agent': 'soev_react', 'input': {'text': 'A fictional regression conversation.'}},
     )
     chat_id = _extract(created, 'id', name=parameter['key'], via='POST /api/v1/chats/new')
     ctx.request(
         'POST',
         '/api/chat/completions',
-        actor=ctx.admin,
+        actor=ctx.client,
         json={
             'model': ctx.values['model'],
             'chat_id': chat_id,
@@ -427,18 +375,18 @@ def seed_chat(ctx, parameter):
             'messages': [{'role': 'user', 'content': 'A fictional regression conversation.'}],
         },
     )
-    page = ctx.request('GET', f'/api/v1/chats/{chat_id}', actor=ctx.admin)
+    page = ctx.request('GET', f'/api/v1/chats/{chat_id}', actor=ctx.client)
     finished = [message for message in page.get('messages', []) if message.get('finished')]
     if not finished:
         raise RuntimeError('Chat turn produced no committed messages')
     for name in parameter.get('provides', []):
         ctx.provide(parameter, name, str(max(message['position'] for message in finished)))
-    ctx.request('POST', f'/api/v1/chats/{chat_id}/folder', actor=ctx.admin, json={'folder_id': ctx.values['folder']})
+    ctx.request('POST', f'/api/v1/chats/{chat_id}/folder', actor=ctx.client, json={'folder_id': ctx.values['folder']})
     return chat_id
 
 
 def seed_chat_message(ctx, parameter):
-    page = ctx.request('GET', f'/api/v1/chats/{ctx.values["chat"]}', actor=ctx.admin)
+    page = ctx.request('GET', f'/api/v1/chats/{ctx.values["chat"]}', actor=ctx.client)
     if runtime_soev_backed() != 'drive':
         return _extract(page, 'chat.history.currentId', name=parameter['key'], via='GET chat')
     return str(max(message['position'] for message in page['messages'] if message['finished']))
@@ -453,26 +401,28 @@ def seed_chat_share(ctx, parameter):
             'audience': {'kind': 'group', 'id': 'platform:group:' + ctx.values['group']},
             'at': int(ctx.values['chat_message']),
         }
-    shared = ctx.request('POST', f'/api/v1/chats/{ctx.values["chat"]}/share', actor=ctx.admin, **kwargs)
+    shared = ctx.request('POST', f'/api/v1/chats/{ctx.values["chat"]}/share', actor=ctx.client, **kwargs)
     return _extract(shared, 'share_id', name=parameter['key'], via='POST chat/share')
 
 
 def seed_group(ctx, parameter):
     if runtime_soev_backed() != 'drive':
         return _seed_endpoint(ctx, parameter)
-    groups = ctx.request('GET', '/api/v1/groups/', actor=ctx.admin)
+    groups = ctx.request('GET', '/api/v1/groups/', actor=ctx.client)
     return _extract(groups, '0.id', name=parameter['key'], via='GET groups/')
 
 
 def seed_feedback(ctx, parameter):
     comment = f'Fictional feedback {ctx.token}'
-    response = ctx.admin.request(
+    response = ctx.client.request(
         'POST',
         '/api/v1/evaluations/feedback',
         json={
             'thread_id': ctx.values['chat'],
             'position': int(ctx.values['chat_message']),
             'rating': 1,
+            'reason': 'accuracy',
+            'tags': ['language'],
             'comment': comment,
             'comment_authored': True,
         },
@@ -482,9 +432,13 @@ def seed_feedback(ctx, parameter):
             raise RuntimeError(f'Platform feedback was not committed: HTTP {response.status_code}')
     finally:
         response.close()
-    page = ctx.request('GET', f'/api/v1/evaluations/feedback/conversation/{ctx.values["chat"]}', actor=ctx.admin)
+    page = ctx.request('GET', f'/api/v1/evaluations/feedback/conversation/{ctx.values["chat"]}', actor=ctx.client)
     if not any(
-        item.get('thread_id') == ctx.values['chat'] and item.get('comment') == comment and item.get('rating') == 1
+        item.get('thread_id') == ctx.values['chat']
+        and item.get('comment') == comment
+        and item.get('rating') == 1
+        and item.get('reason') == 'accuracy'
+        and item.get('tags') == ['language']
         for item in page.get('items', [])
     ):
         raise RuntimeError('Platform feedback could not be read back by its owner')
@@ -493,147 +447,30 @@ def seed_feedback(ctx, parameter):
     return f'attack_feedback_probe_{ctx.token}'
 
 
-def _create_active_function(ctx, parameter, function_id):
-    # FunctionForm has no is_active: a function is created off and /toggle turns
-    # it on. The toggle is an ordinary route the passes drive against the shared
-    # {function}, so an always-active function must be one it never targets.
-    body = ctx.request(
-        'POST',
-        '/api/v1/functions/create',
-        actor=ctx.admin,
-        json={'id': function_id, 'name': function_id, 'meta': {}, 'content': parameter['content']},
-    )
-    if _extract(body, 'id', name=parameter['key'], via='POST functions/create') != function_id:
-        raise RuntimeError(f'{parameter["key"]}: function creation returned a different function')
-    enabled = ctx.request('POST', f'/api/v1/functions/id/{function_id}/toggle', actor=ctx.admin)
-    if enabled.get('is_active') is not True:
-        raise RuntimeError(f'{parameter["key"]}: function was not activated')
-    return function_id
-
-
-def seed_active_function(ctx, parameter):
-    function_id = _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
-    # utils/actions.py:chat_action runs only an action the model surfaces, admins included
-    # unless they bypass access control; a global action is surfaced on every model.
-    made_global = ctx.request('POST', f'/api/v1/functions/id/{function_id}/toggle/global', actor=ctx.admin)
-    if made_global.get('is_global') is not True:
-        raise RuntimeError(f'{parameter["key"]}: function was not made global')
-    # The model registry is cached; rebuilding it attaches the action to the seeded model.
-    ctx.request('GET', '/api/models', actor=ctx.admin)
-    return function_id
-
-
-def seed_totp_user(ctx, parameter):
-    # A user of its own: the shared {user} is also the exporter, which signs in
-    # with its password, and an enrolled account answers that with a 2FA challenge.
-    body = ctx.request(
-        'POST',
-        '/api/v1/auths/add',
-        actor=ctx.admin,
-        password_identity=True,
-        json={
-            'email': f'attack-totp-{ctx.token}@example.com',
-            'name': f'Attack TOTP {ctx.token}',
-            'password': parameter['password'],
-            'role': 'user',
-        },
-    )
-    user_id = _extract(body, 'id', name=parameter['key'], via='POST /api/v1/auths/add')
-    token = _extract(body, 'token', name=parameter['key'], via='POST /api/v1/auths/add')
-    with AttackClient(ctx.client.base_url, token=token) as enrolee:
-        enrolee.verify_identity(user_id=user_id, role='user')
-        setup = ctx.request('POST', '/api/v1/auths/2fa/totp/setup', actor=enrolee)
-        secret = _extract(setup, 'secret', name=parameter['key'], via='POST /api/v1/auths/2fa/totp/setup')
-        enabled = ctx.request(
-            'POST',
-            '/api/v1/auths/2fa/totp/enable',
-            actor=enrolee,
-            json={'password': parameter['password'], 'secret': secret, 'code': totp_code(secret)},
-        )
-    if enabled.get('totp_enabled') is not True:
-        raise RuntimeError(f'{parameter["key"]}: TOTP enrolment did not take effect')
-    return user_id
-
-
-def seed_task(ctx, parameter):
-    model_id = f'attack_task_{ctx.token}'
-    # An ordinary assistant stays available under v2; no installed code or filters.
-    ctx.request(
-        'POST',
-        '/api/v1/models/create',
-        actor=ctx.admin,
-        json={
-            'id': model_id,
-            'name': model_id,
-            'base_model_id': ctx.values['model'],
-            'meta': {},
-            'params': {},
-        },
-    )
-    register_readable_model(ctx, model_id)
-    registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
-    if not any(model.get('id') == model_id for model in registry.get('data', [])):
-        raise RuntimeError('Task model did not appear in the model registry')
-    if runtime_soev_backed() == 'drive':
-        # Prepared turns live on their HTTP stream; the legacy Redis task-id
-        # dispatcher is not used. Keep a readable assistant and drive its retired
-        # stop route with an explicit probe, pinned by the refusal inventory.
-        return f'attack_task_probe_{ctx.token}'
-    # For a normal persisted chat, main.py only needs a nonempty session_id
-    # to select background mode; it does not require a connected Socket.IO peer.
-    chat_id = ctx.values['chat']
-    result = ctx.request(
-        'POST',
-        '/api/chat/completions',
-        actor=ctx.admin,
-        json={
-            'model': model_id,
-            'chat_id': chat_id,
-            'id': f'task_message_{ctx.token}',
-            'session_id': f'attack_{ctx.token}',
-            'stream': True,
-            'messages': [{'role': 'user', 'content': f'owui_attack_task_hold:{ctx.token}'}],
-        },
-    )
-    task_id = _extract(result, 'task_ids.0', name=parameter['key'], via='POST /api/chat/completions')
-    try:
-        # A returned id alone may already have completed. Check after the
-        # background coroutine has had time to fail or reach the held upstream.
-        for _ in range(3):
-            active = ctx.request('GET', f'/api/tasks/chat/{quote(chat_id, safe="")}', actor=ctx.admin)
-            if task_id not in active.get('task_ids', []):
-                raise RuntimeError('Task completed before it could be used as a stop target')
-            time.sleep(0.1)
-    except Exception:
-        ctx.admin.request('POST', f'/api/tasks/stop/{quote(task_id, safe="")}')
-        raise
-    return task_id
-
-
 def seed_knowledge_file(ctx, parameter):
     # Removal and asynchronous reprocessing each need their own settled file.
     label = f'attack-{parameter["key"]}-{ctx.token}'
     upload = ctx.request(
         'POST',
         '/api/v1/files/',
-        actor=ctx.admin,
+        actor=ctx.client,
         params={'process': False},
         files=[('file', (f'{label}.txt', label, 'text/plain'))],
     )
     file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
     # file/add refuses a file with no extracted content.
-    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
+    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.client, json={'file_id': file_id}, timeout=120)
     knowledge = ctx.request(
         'POST',
         '/api/v1/knowledge/create',
-        actor=ctx.admin,
+        actor=ctx.client,
         json={'name': label, 'description': 'Attack knowledge with an isolated processed file'},
     )
     knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
     added = ctx.request(
         'POST',
         f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
-        actor=ctx.admin,
+        actor=ctx.client,
         json={'file_id': file_id},
         timeout=120,
     )
@@ -649,7 +486,7 @@ def seed_cloud_family(ctx, parameter):
 
 
 def seed_cloud_connection(ctx, parameter):
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.client, json={'provider': 'onedrive'})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
     # soev-api keeps one connection per owner and provider: a later pass gets the
     # consented connection back, without an authorize URL, and needs no new consent.
@@ -675,7 +512,7 @@ def seed_cloud_connection(ctx, parameter):
                 raise RuntimeError('Consent fixture returned invalid JSON') from None
             if not isinstance(accepted, dict) or accepted.get('id') != connection:
                 raise RuntimeError('Consent fixture did not acknowledge this connection')
-    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.client)
     ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
 
@@ -684,33 +521,31 @@ def seed_cloud_authorize_connection(ctx, parameter):
     # Authorizing an enabled connection suspends it, so this control needs a pending
     # connection that is not the consented OneDrive fixture. With one connection per owner
     # and provider that takes another provider; Outlook mail where the platform offers it.
-    policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.admin)
+    policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.client)
     if 'outlook_mail' not in policy.get('providers_enabled', []):
         raise RuntimeError('Authorize control requires a separate Outlook mail connection')
     provider = 'outlook_mail'
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.client, json={'provider': provider})
     return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
 
 _SEEDERS = {
     function.__name__: function
     for function in (
-        prepare_configuration,
-        connection_index,
-        seed_admin_user,
+        seed_disabled_oauth_client,
+        seed_request_user,
+        seed_console_access,
+        seed_refused_target,
         seed_ollama_connection,
         upstream_path,
-        seed_terminal,
         seed_export,
         seed_model,
+        seed_skill_bundle,
         seed_chat,
         seed_chat_message,
         seed_chat_share,
         seed_group,
         seed_feedback,
-        seed_task,
-        seed_active_function,
-        seed_totp_user,
         seed_cloud_connection,
         seed_cloud_authorize_connection,
         seed_cloud_family,
@@ -733,18 +568,9 @@ def _seed_endpoint(ctx, p):
         ]
     if 'query' in p:
         kwargs['params'] = ctx.fill(p['query'], p)
-    body = ctx.request(method, path, actor=ctx.admin if p.get('actor') == 'admin' else ctx.client, **kwargs)
+    body = ctx.request(method, path, actor=ctx.client, **kwargs)
     ctx.payloads[p['key']] = body
     return _extract(body, ctx.fill(p['extract'], p), name=p['key'], via=p['via'])
-
-
-def apply_stack_configuration(ctx):
-    """Turn on what the stack's environment cannot; see [stack_configuration] in the surface."""
-    wanted = ctx.surface['stack_configuration']
-    applied = ctx.request('POST', '/api/v1/configs/import', actor=ctx.admin, json={'config': wanted})
-    missing = {key: applied.get(key) for key, value in wanted.items() if applied.get(key) != value}
-    if missing:
-        raise RuntimeError(f'Stack configuration did not take effect: {missing}')
 
 
 class Resolved(dict):
@@ -753,9 +579,10 @@ class Resolved(dict):
     A dict, so every caller that only wants path parameters is unaffected.
     """
 
-    def __init__(self, *args, fields=None, failures=None, blocked=None, **kwargs):
+    def __init__(self, *args, fields=None, failures=None, blocked=None, fixtures=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields = fields or {}
+        self.fixtures = fixtures or {}
         self.failures = failures or {}
         self.blocked = blocked or {}
 
@@ -789,7 +616,7 @@ def resolve_fields(ctx, *, entries=None):
         for step in entry.get('setup', []):
             method, path = step['via'].split(' ', 1)
             ctx.request(
-                method, _fill_field(path, ctx, path=True), actor=ctx.admin, json=_fill_field(step.get('body', {}), ctx)
+                method, _fill_field(path, ctx, path=True), actor=ctx.client, json=_fill_field(step.get('body', {}), ctx)
             )
         resolved = {
             kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form', 'headers') if kind in entry
@@ -832,11 +659,6 @@ def resolve_parameters(
 ):
     ordered = selected_parameters(surface)
     ctx = SeedContext(client, admin or client, surface)
-    if surface.get('preserve_configuration'):
-        recover_configuration(ctx.admin)
-    # After recovery: an interrupted pass's snapshot would otherwise turn it back off.
-    if surface.get('stack_configuration'):
-        apply_stack_configuration(ctx)
     failures, blocked = {}, {}
     for p in ordered:
         key = p['key']
@@ -877,4 +699,4 @@ def resolve_parameters(
             failures[entry['route']] = str(error)
             blocked[entry['route']] = str(error)
             print(f'Sweep seed failed: {entry["route"]}: {error}', flush=True)
-    return Resolved(resolved, fields=fields, failures=failures, blocked=blocked)
+    return Resolved(resolved, fields=fields, failures=failures, blocked=blocked, fixtures=dict(ctx.values))

@@ -83,7 +83,7 @@ class FakeStack:
         user = self.identities.holder(token)
         assert user is not None
         if path == '/api/v1/configs/2fa':
-            assert user['role'] == 'admin'
+            assert user['role'] == 'user'
             self.two_fa_config.update(payload)
             return JSONResponse(self.two_fa_config)
         if user.get('oauth'):
@@ -226,30 +226,30 @@ def stack(monkeypatch):
 def test_provision_and_form_login_capture_bearer_and_isolate_cookies(stack):
     oidc.provision(identities.ADMIN_EMAIL, identities.PASSWORD, 'Attack admin')
     oidc.provision(identities.ADMIN_EMAIL, identities.PASSWORD, 'Attack admin')
-    with login(identities.ADMIN_EMAIL, identities.PASSWORD, base_url='http://app', role='admin') as client:
+    with login(identities.ADMIN_EMAIL, identities.PASSWORD, base_url='http://app', role='user') as client:
         assert client.token.startswith('jwt-')
         assert not client.session.cookies
         assert client.identity['email'] == identities.ADMIN_EMAIL
         assert client.request('GET', '/api/v1/memories/').status_code == 200
         assert client.oauth_session_id in stack.oauth_sessions
         client.reauthenticate(identities.ADMIN_EMAIL, identities.PASSWORD)
-        assert client.identity['role'] == 'admin'
+        assert client.identity['role'] == 'user'
     assert sum(method == 'POST' and path == '/admin/realms/fictional/users' for _, method, path, _ in stack.calls) == 1
     assert not any(path == '/api/v1/auths/signin' for _, _, path, _ in stack.calls)
 
 
-def test_oidc_identities_repair_roles_email_password_damage_and_revocation(stack, tmp_path):
+def test_oidc_identities_survive_local_password_damage_and_revocation(stack, tmp_path):
     path = tmp_path / 'identities.json'
-    with_clients = identities.ensure_identities('http://app', state_path=path)
+    with_clients = identities.ensure_identities('http://app')
     ids = [c.user_id for c in with_clients.clients]
     with_clients.close()
     user = stack.identities.users[ids[1]]
-    user.update(email='fictional-damaged@example.com', role='pending', password='fictional-damaged')
+    user.update(password='fictional-damaged')
     stack.identities.tokens.clear()
-    repaired = identities.ensure_identities('http://app', state_path=path)
+    repaired = identities.ensure_identities('http://app')
     try:
         assert [c.user_id for c in repaired.clients] == ids
-        assert [c.identity['role'] for c in repaired.clients] == ['admin', 'user', 'user']
+        assert [c.identity['role'] for c in repaired.clients] == ['user', 'user', 'user']
         assert repaired.user.identity['email'] == identities.USER_EMAIL
         assert len(stack.users) == 3
         assert not any('attack-signin-' in u['email'] for u in stack.identities.users.values())
@@ -261,29 +261,22 @@ def test_oidc_identities_repair_roles_email_password_damage_and_revocation(stack
 
 
 def test_disposable_and_seed_identities_use_oidc(stack, tmp_path):
-    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
+    actors = identities.ensure_identities('http://app')
     try:
         with plane._throwaway(actors.admin) as disposable:
-            assert disposable.identity['role'] == 'admin'
+            assert disposable.identity['role'] == 'user'
         with crossuser._actor(actors.admin, actors.user, True) as disposable:
             assert disposable.identity['role'] == 'user'
-        ctx = seeds.SeedContext(actors.user, actors.admin, seeds.SURFACE)
-        body = ctx.request(
-            'POST',
-            '/api/v1/auths/add',
-            actor=actors.admin,
-            json={
-                'email': 'fictional-export@example.com',
-                'password': 'Fictional-Password!',
-                'name': 'Attack export',
-                'role': 'user',
-            },
-        )
-        ctx.payloads['user'] = body
-        ctx.values['user'] = body['id']
-        assert seeds.seed_export(ctx, {'key': 'export'}).startswith(f'exports/{body["id"]}/')
-        with login(body['email'], 'Fictional-Password!', base_url='http://app', role='user') as exporter:
-            assert exporter.user_id == body['id']
+        with identities.create_oidc_identity(
+            actors.user,
+            email='fictional-export@example.invalid',
+            password='Fictional-Password!',
+            name='Fictional export',
+            role='user',
+        ) as exporter:
+            ctx = seeds.SeedContext(exporter, actors.admin, seeds.SURFACE)
+            assert seeds.seed_export(ctx, {'key': 'export'}).startswith(f'exports/{exporter.user_id}/')
+            assert exporter.identity['role'] == 'user'
         assert not any(p == '/api/v1/auths/add' for _, _, p, _ in stack.calls)
     finally:
         actors.close()
@@ -292,58 +285,12 @@ def test_disposable_and_seed_identities_use_oidc(stack, tmp_path):
 def test_password_endpoint_negative_probe_remains_enabled_in_oidc_mode(stack, tmp_path):
     from .test_live_client import test_wrong_password_is_a_loud_400
 
-    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
+    actors = identities.ensure_identities('http://app')
     try:
         test_wrong_password_is_a_loud_400(actors)
         assert oidc.enabled()
         assert stack.identities.attempts == {identities.USER_EMAIL: 1}
         actors.user.verify_identity(email=identities.USER_EMAIL, role='user')
-    finally:
-        actors.close()
-
-
-def test_totp_seed_keeps_a_password_identity_in_oidc_mode(stack, tmp_path):
-    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
-    try:
-        stack.two_fa_config['ENABLE_2FA'] = True
-        ctx = seeds.SeedContext(actors.user, actors.admin, seeds.SURFACE, token='fictional-totp')
-        parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'totp_user')
-        user_id = seeds.seed_totp_user(ctx, parameter)
-        assert user_id not in {c.user_id for c in actors.clients}
-        assert user_id in stack.totp_secrets
-        assert not stack.identities.users[user_id].get('oauth')
-        assert 'attack-totp-fictional-totp@example.com' not in stack.users
-        setup_calls = [headers for _, _, path, headers in stack.calls if path == '/api/v1/auths/2fa/totp/setup']
-        assert len(setup_calls) == 1
-        assert 'cookie' not in setup_calls[0]
-    finally:
-        actors.close()
-
-
-@pytest.mark.parametrize('challenge', ['requires_2fa', 'requires_2fa_setup'])
-@pytest.mark.parametrize('oidc_mode', [False, True])
-def test_password_2fa_probe_uses_a_password_identity(stack, tmp_path, monkeypatch, challenge, oidc_mode):
-    from .test_live_client import test_real_2fa_signin_success_status_is_rejected
-
-    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
-    actors = identities.ensure_identities('http://app', state_path=tmp_path / 'identities.json')
-    try:
-        original_config = dict(stack.two_fa_config)
-        original_users = set(stack.identities.users)
-        test_real_2fa_signin_success_status_is_rejected(actors, challenge)
-        assert oidc.enabled() is oidc_mode
-        assert stack.two_fa_config == original_config
-        assert not stack.totp_secrets
-        if oidc_mode:
-            (user_id,) = set(stack.identities.users) - original_users
-        else:
-            assert set(stack.identities.users) == original_users
-            user_id = actors.intruder.user_id
-        local_user = stack.identities.users[user_id]
-        assert local_user['role'] == 'user'
-        assert not local_user.get('oauth')
-        assert local_user['email'] not in stack.users
-        actors.intruder.verify_identity(email=identities.INTRUDER_EMAIL, role='user')
     finally:
         actors.close()
 
@@ -361,7 +308,7 @@ def test_failed_oidc_never_falls_back_to_password_login(stack, failure):
     else:
         setattr(stack, failure, failure not in {'callback_token', 'callback_session'})
     with pytest.raises(AuthenticationError):
-        login(identities.ADMIN_EMAIL, password, base_url='http://app', role='admin')
+        login(identities.ADMIN_EMAIL, password, base_url='http://app', role='user')
     assert not any(p == '/api/v1/auths/signin' for _, _, p, _ in stack.calls)
 
 
@@ -429,21 +376,3 @@ def test_oidc_reference_is_only_sent_with_the_actors_own_bearer(stack, headers):
             assert bearer_only.request('GET', '/api/v1/memories/').status_code == 403
         assert client.request('GET', '/api/v1/memories/').status_code == 200
         assert not client.session.cookies
-
-
-def test_oidc_recovery_preserves_the_server_session_reference(stack, tmp_path):
-    path = tmp_path / 'identities.json'
-    first = identities.ensure_identities('http://app', state_path=path)
-    first.close()
-    state = json.loads(path.read_text())
-    session_id = state['recovery_oauth_session_id']
-    assert session_id in stack.oauth_sessions
-    offset = len(stack.calls)
-    second = identities.ensure_identities('http://app', state_path=path)
-    try:
-        host, method, route, headers = stack.calls[offset]
-        assert (host, method, route) == ('app', 'GET', '/api/v1/auths/')
-        assert headers['cookie'] == f'oauth_session_id={session_id}'
-        assert second.user.request('GET', '/api/v1/memories/').status_code == 200
-    finally:
-        second.close()

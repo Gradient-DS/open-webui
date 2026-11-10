@@ -130,12 +130,6 @@ class TaskConfigForm(BaseModel):
     VOICE_MODE_PROMPT_TEMPLATE: str | None
 
 
-@router.post('/config/update')
-async def update_task_config(request: Request, form_data: TaskConfigForm, user=Depends(get_admin_user)):
-    await Config.upsert(config_updates(form_data.model_dump(), TASK_CONFIG_KEYS))
-    return await get_config_values(TASK_CONFIG_KEYS)
-
-
 @router.post('/title/completions')
 async def generate_title(
     request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)

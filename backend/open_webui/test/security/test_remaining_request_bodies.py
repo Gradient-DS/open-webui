@@ -52,7 +52,7 @@ def mount(application):
     from open_webui.internal.db import get_async_session
     from open_webui.utils.auth import get_admin_user, get_verified_user
 
-    def create(path, role='admin'):
+    def create(path, role='user'):
         route = next(route for route in application.routes if route.path == path and 'POST' in route.methods)
         app = FastAPI()
         app.add_api_route(path, route.endpoint, methods=['POST'], response_model=None)
@@ -97,8 +97,8 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
     monkeypatch.setattr(module.AccessGrants, 'set_access_grants', saved)
     if hasattr(module, 'publish_event'):
         monkeypatch.setattr(module, 'publish_event', AsyncMock())
-    if module_name == 'chats':
-        # Chat sharing binds admins too; grant chat.share and public sharing here.
+    if module_name in ACCESS_PATHS:
+        # Payload controls explicitly grant sharing permissions.
         from open_webui.utils import access_control
 
         monkeypatch.setattr(module, 'has_permission', AsyncMock(return_value=True))
@@ -110,84 +110,16 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
     if module_name == 'notes':
         monkeypatch.setattr(table, 'get_pinned_note_ids', AsyncMock(return_value=[]))
     path = ACCESS_PATHS[module_name]
-    payload = {'access_grants': copy.deepcopy(GRANTS), **EXTRA}
+    grants = copy.deepcopy(GRANTS)
+    if module_name == 'folders':
+        grants[1]['principal_id'] = 'fictional-reader'
+    payload = {'access_grants': grants, **EXTRA}
     with mount(path) as client:
         response = client.post(path.replace('{id}', 'resource-1').replace('{prompt_id}', 'resource-1'), json=payload)
     assert response.status_code == 200, response.text
     saved.assert_awaited_once()
-    assert saved.await_args.args[2] == GRANTS
+    assert saved.await_args.args[2] == grants
     assert 'id' not in saved.await_args.args[2][1]
-
-
-def test_model_import_preserves_partial_update_and_nested_extensions(mount, monkeypatch):
-    from open_webui.models.models import ModelForm
-    from open_webui.routers import models
-
-    existing = ModelForm(id='research-model', name='Original name', meta={}, params={}, access_grants=GRANTS)
-    # The import names the stored model's owner as the owner its files must belong to.
-    object.__setattr__(existing, 'user_id', 'research-owner')
-    monkeypatch.setattr(models.Models, 'get_models_by_ids', AsyncMock(return_value=[existing]))
-    monkeypatch.setattr(models, '_verify_knowledge_file_ownership', AsyncMock())
-    monkeypatch.setattr(models, 'publish_event', AsyncMock())
-    # The fixture model has no owner; overwriting it is the explicit admin bypass.
-    monkeypatch.setattr(models, 'can_bypass_access_control', lambda user: True)
-    filtered = AsyncMock()
-    monkeypatch.setattr(models, 'filter_allowed_access_grants', filtered)
-    updated = AsyncMock()
-    monkeypatch.setattr(models.Models, 'update_model_by_id', updated)
-    payload = {
-        'models': [
-            {
-                'id': 'research-model',
-                'meta': {'description': 'Research assistant', 'extension': EXTRA},
-                'params': {'temperature': '0.70', 'extension': EXTRA},
-                **EXTRA,
-            }
-        ],
-        **EXTRA,
-    }
-    with mount('/api/v1/models/import') as client:
-        response = client.post('/api/v1/models/import', json=payload)
-    assert response.status_code == 200, response.text
-    assert response.json() is True
-    updated.assert_awaited_once()
-    form = updated.await_args.args[1]
-    assert form.name == 'Original name'
-    assert form.access_grants == GRANTS
-    assert form.meta.description == 'Research assistant'
-    assert form.meta.model_extra['extension'] == EXTRA
-    assert form.params.model_extra == payload['models'][0]['params']
-    filtered.assert_not_awaited()  # Inserting an access_grants default would change existing ACLs.
-
-
-def test_integration_config_keeps_dynamic_slugs_and_provider_extensions(mount, monkeypatch):
-    from open_webui.routers import configs
-
-    providers = {
-        'research-docs': {
-            'name': 'Research documents',
-            'description': 'Team library',
-            'service_account_id': 'service-user',
-            'max_files_per_kb': '250',
-            'custom_metadata_fields': [{'key': 'project', 'label': 'Project', 'required': True, **EXTRA}],
-            **EXTRA,
-        },
-        'another-provider': {'name': 'Secondary'},
-    }
-    old = {'removed': {'service_account_id': 'old-service-user'}}
-    monkeypatch.setattr(configs.Config, 'get', AsyncMock(side_effect=[old, providers]))
-    saved = AsyncMock()
-    bound, unbound = AsyncMock(), AsyncMock()
-    monkeypatch.setattr(configs.Config, 'upsert', saved)
-    monkeypatch.setattr(configs, '_bind_service_account', bound)
-    monkeypatch.setattr(configs, '_unbind_service_account', unbound)
-    with mount('/api/v1/configs/integrations') as client:
-        response = client.post('/api/v1/configs/integrations', json={'providers': providers, **EXTRA})
-    assert response.status_code == 200, response.text
-    assert response.json() == {'providers': providers}
-    saved.assert_awaited_once_with({'integrations.providers': providers})
-    bound.assert_awaited_once_with('service-user', 'research-docs')
-    unbound.assert_awaited_once_with('old-service-user')
 
 
 def test_user_info_merge_keeps_extra_keys(mount, monkeypatch):
@@ -222,8 +154,7 @@ def test_user_settings_keep_nested_values_and_permission_filter(role, temperatur
         **EXTRA,
     }
     expected = copy.deepcopy(payload)
-    if role == 'user':
-        expected['ui'].pop('toolServers')
+    expected['ui'].pop('toolServers')
     monkeypatch.setattr(users.Config, 'get', AsyncMock(return_value={}))
 
     # Keyed on the permission rather than call order: v0.11.3 added a
@@ -263,16 +194,6 @@ def test_access_grant_strings_are_derived(path, committed_spec):
 @pytest.mark.parametrize(
     ('path', 'expected'),
     [
-        (
-            '/api/v1/models/import',
-            {
-                'models[].id',
-                'models[].name',
-                'models[].meta.description',
-                'models[].params.system',
-                'models[].access_grants[].principal_id',
-            },
-        ),
         ('/api/v1/users/user/info/update', {'location', 'integration_provider'}),
         (
             '/api/v1/users/user/settings/update',
@@ -291,16 +212,3 @@ def test_known_nested_strings_are_derived(path, expected, committed_spec):
     from openapi_surface import writable_string_fields
 
     assert expected <= set(writable_string_fields(committed_spec)[f'POST {path}'])
-
-
-def test_integration_provider_schema_is_typed_without_invented_slugs(committed_spec):
-    from openapi_surface import writable_string_fields
-
-    schemas = committed_spec['components']['schemas']
-    providers = schemas['IntegrationsConfigBody']['properties']['providers']
-    assert 'properties' not in providers
-    assert providers['additionalProperties'] == {'$ref': '#/components/schemas/IntegrationProviderInput'}
-    assert {'name', 'description', 'service_account_id', 'custom_metadata_fields'} <= set(
-        schemas['IntegrationProviderInput']['properties']
-    )
-    assert 'POST /api/v1/configs/integrations' not in writable_string_fields(committed_spec)

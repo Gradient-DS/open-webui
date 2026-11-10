@@ -24,8 +24,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from open_webui import config
 from open_webui.routers import skill_files as skill_files_router_module
 from open_webui.utils.auth import get_optional_verified_user, get_verified_user
+
+
+@pytest.fixture(autouse=True)
+def enable_legacy_skill_files(monkeypatch):
+    monkeypatch.setattr(config, 'FEATURE_SKILL_FILES', True)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
