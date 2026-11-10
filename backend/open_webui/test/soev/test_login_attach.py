@@ -108,8 +108,9 @@ async def test_different_subject_for_same_provider_and_person_is_forbidden(perso
 
 
 @pytest.mark.asyncio
-async def test_known_subject_without_person_uses_normal_login_without_person_discovery(person_login):
+async def test_standalone_known_subject_uses_normal_login_without_person_discovery(person_login, monkeypatch):
     ctx = person_login
+    monkeypatch.setattr(config, 'SOEV_API_URL', '')
     await migrated_user(ctx, person=None, binding={'google': {'sub': 'subject-fern'}})
     ctx.platform.response = httpx.Response(503)
     assert_logged_in(await ctx.callback(), ctx, 'fern')

@@ -1,18 +1,23 @@
 """Select platform accounts only by immutable subjects and verified persons."""
 
 import logging
+import time
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import String, cast, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_db_context
+from open_webui.models.auths import Auth, Auths
 from open_webui.models.config import Config
 from open_webui.models.users import User, UserModel
 from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.principal_refs import is_canonical_person_ref
+from open_webui.utils.validate import validate_profile_image_url
 
 log = logging.getLogger(__name__)
 _PLATFORM_SUB_CLAIMS = (None, '', 'sub')
@@ -88,18 +93,106 @@ async def attach_person_login(
     *,
     user: UserModel | None = None,
     db: AsyncSession | None = None,
-) -> UserModel | None:
+) -> tuple[UserModel | None, str | None]:
     if not platform_mode():
-        return user
-    if user is not None and user.person_id is None:
-        return user
+        return user, None
     person_id = await _discover_person(access_token)
     if user is not None:
+        if user.person_id is None:
+            user = await _bind_person(user, person_id, provider, db=db)
         if user.person_id != person_id:
-            log.warning('OAuth login denied', extra={'code': 'oauth_person_mismatch', 'provider': provider})
-            raise SoevApiError(403, 'policy_forbids', 'Login refused', 'oauth:person_binding')
-        return user
-    return await _attach_login(provider, sub, person_id, db=db)
+            _refuse_person(provider)
+        return user, person_id
+    return await _attach_login(provider, sub, person_id, db=db), person_id
+
+
+def _refuse_person(provider: str) -> None:
+    log.warning('OAuth login denied', extra={'code': 'oauth_person_mismatch', 'provider': provider})
+    raise SoevApiError(403, 'policy_forbids', 'Login refused', 'oauth:person_binding')
+
+
+async def _bind_person(user: UserModel, person_id: str, provider: str, *, db: AsyncSession | None) -> UserModel:
+    async with get_async_db_context(db) as session:
+        try:
+            async with session.begin_nested():
+                await session.execute(
+                    update(User).where(User.id == user.id, User.person_id.is_(None)).values(person_id=person_id)
+                )
+                stored = await session.scalar(
+                    select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
+                )
+                if stored is None or stored.person_id != person_id:
+                    _refuse_person(provider)
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            _refuse_person(provider)
+        return UserModel.model_validate(stored)
+
+
+def require_verified_person(user: UserModel, person_id: str | None) -> None:
+    if platform_mode() and (not is_canonical_person_ref(person_id) or user.person_id != person_id):
+        _refuse_person('oidc')
+
+
+async def insert_oauth_account(
+    *,
+    provider: str,
+    sub: str,
+    person_id: str | None,
+    email: str,
+    password: str,
+    name: str,
+    profile_image_url: str,
+    role: str,
+    oauth: dict,
+    db: AsyncSession | None = None,
+) -> UserModel | None:
+    if not platform_mode():
+        return await Auths.insert_new_auth(
+            email=email,
+            password=password,
+            name=name,
+            profile_image_url=profile_image_url,
+            role=role,
+            oauth=oauth,
+            db=db,
+        )
+    if not is_canonical_person_ref(person_id):
+        _refuse_person(provider)
+    try:
+        picture = validate_profile_image_url(profile_image_url)
+    except ValueError:
+        picture = '/user.png'
+    async with get_async_db_context(db) as session:
+        try:
+            async with session.begin_nested():
+                user_id = str(uuid.uuid4())
+                now = int(time.time())
+                user = User(
+                    id=user_id,
+                    email=email,
+                    name=name,
+                    role=role,
+                    profile_image_url=picture,
+                    oauth=oauth,
+                    person_id=person_id,
+                    last_active_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add_all([Auth(id=user_id, email=email, password=password, active=True), user])
+                await session.flush()
+            await session.commit()
+            return UserModel.model_validate(user)
+        except IntegrityError:
+            await session.rollback()
+            # A concurrent signup can win on person_id even if the email changed.
+            user = await _attach_login(provider, sub, person_id, db=session)
+            if user is None:
+                log.warning('OAuth signup denied', extra={'code': 'oauth_email_conflict', 'provider': provider})
+                raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED) from None
+            return user
 
 
 async def _attach_login(provider: str, sub: str, person_id: str, *, db: AsyncSession | None) -> UserModel | None:

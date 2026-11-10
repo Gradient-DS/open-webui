@@ -98,6 +98,13 @@ account already has `person_id` must also agree with the person returned by
 `/v1/me` for this login token before any session is issued. A mismatch refuses
 with `403`, logged as `oauth_person_mismatch`, without signup or attachment;
 failed discovery refuses with the same retryable `503` as an unknown login.
+Every platform callback verifies `/v1/me`, including a known provider/sub whose
+account has no person yet. That account binds the verified person before login;
+if another account already holds the person, login refuses with `403`. New OAuth
+accounts insert their credential and verified person binding in one transaction.
+Concurrent creation resolves through the unique `user.person_id`, never email;
+a losing insert leaves no credential or unbound account. No platform OAuth
+session is issued without the verified person persisted on its account.
 Runtime OAuth settings updates also refuse a custom `oauth.sub_claim` with `403`
 before writing any configuration. OAuth token exchange is always refused with
 `403` when soev-api is configured, including when `ENABLE_OAUTH_TOKEN_EXCHANGE`
