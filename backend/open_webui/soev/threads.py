@@ -154,7 +154,7 @@ class FeedbackCount(WireModel):
     agent: str
     rating: Literal[-1, 1]
     count: int = Field(ge=0)
-    period: str | None
+    period: str
 
 
 class FeedbackSummary(WireModel):

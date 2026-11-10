@@ -60,10 +60,10 @@ async def poll() -> None:
         return
     client = build_service_client()
     pending = await client.get('/v1/offboarding')
-    if not isinstance(pending, list):
+    if not isinstance(pending.get('items'), list):
         message = 'Invalid offboarding feed'
         raise ValueError(message)
-    tasks = tuple(Task.model_validate(row) for row in pending)
+    tasks = tuple(Task.model_validate(row) for row in pending['items'])
     if len({task.id for task in tasks}) != len(tasks):
         message = 'Duplicate offboarding jobs'
         raise ValueError(message)

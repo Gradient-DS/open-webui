@@ -351,7 +351,9 @@ async def test_expired_archive_refuses_before_mutation_but_completed_receipt_rep
 
 @pytest.mark.asyncio
 async def test_pull_replays_success_after_lost_ack_without_repeating_local_effects(product, monkeypatch):
-    remote = SimpleNamespace(get=AsyncMock(return_value=[task('transfer').model_dump(mode='json')]), send=AsyncMock())
+    remote = SimpleNamespace(
+        get=AsyncMock(return_value={'items': [task('transfer').model_dump(mode='json')]}), send=AsyncMock()
+    )
     monkeypatch.setattr(offboarding, 'build_service_client', lambda: remote)
     monkeypatch.setattr(offboarding, 'v2_enabled', lambda: True)
     remote.send.side_effect = RuntimeError('fictional lost acknowledgement')

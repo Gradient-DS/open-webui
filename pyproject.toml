@@ -323,6 +323,7 @@ ignore-words-list = 'ans'
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.26.0,<5",
     "pytest-asyncio>=1.0.0",
     "ruff>=0.15.5",
 ]

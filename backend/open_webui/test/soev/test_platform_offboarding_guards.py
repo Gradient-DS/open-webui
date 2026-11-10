@@ -39,7 +39,7 @@ async def test_prepared_threads_refuse_before_receipt_or_external_effects(monkey
 @pytest.mark.parametrize('mode', ['delete', 'transfer', 'archive'])
 async def test_pull_acknowledges_prepared_thread_refusal(monkeypatch, mode):
     work = task(mode)
-    remote = SimpleNamespace(get=AsyncMock(return_value=[work.model_dump(mode='json')]), send=AsyncMock())
+    remote = SimpleNamespace(get=AsyncMock(return_value={'items': [work.model_dump(mode='json')]}), send=AsyncMock())
     monkeypatch.setattr(threads, 'enabled', lambda: True)
     monkeypatch.setattr(offboarding, 'v2_enabled', lambda: True)
     monkeypatch.setattr(offboarding, 'build_service_client', lambda: remote)

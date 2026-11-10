@@ -21,7 +21,7 @@ def task(mode='delete'):
 
 @pytest.fixture
 def feed(monkeypatch):
-    remote = SimpleNamespace(get=AsyncMock(return_value=[task()]), send=AsyncMock())
+    remote = SimpleNamespace(get=AsyncMock(return_value={'items': [task()]}), send=AsyncMock())
     participant = AsyncMock(return_value=None)
     monkeypatch.setattr(offboarding, 'apply', participant)
     monkeypatch.setattr(offboarding, 'build_service_client', lambda: remote)
@@ -37,7 +37,7 @@ async def test_each_mode_acknowledges_only_participant_result(feed, mode, monkey
     legacy_call = AsyncMock()
     monkeypatch.setattr(legacy, 'offboard_user', legacy_call)
     remote, participant = feed
-    remote.get.return_value = [task(mode)]
+    remote.get.return_value = {'items': [task(mode)]}
     await offboarding.poll()
     await offboarding.poll()
     assert remote.send.await_count == 2
@@ -53,7 +53,7 @@ async def test_each_mode_acknowledges_only_participant_result(feed, mode, monkey
 @pytest.mark.asyncio
 async def test_transfer_target_without_owui_user_is_reported(feed):
     remote, participant = feed
-    remote.get.return_value = [task('transfer')]
+    remote.get.return_value = {'items': [task('transfer')]}
     participant.return_value = 'target_missing'
     await offboarding.poll()
     assert remote.send.await_args.args[2] == {'error': 'target_missing'}
@@ -71,11 +71,11 @@ async def test_absent_source_is_not_silently_acknowledged(feed):
 @pytest.mark.asyncio
 async def test_stale_or_duplicate_work_never_reaches_legacy_deletion(feed):
     remote, participant = feed
-    remote.get.return_value = []
+    remote.get.return_value = {'items': []}
     await offboarding.poll()
     remote.send.assert_not_awaited()
     participant.assert_not_awaited()
-    remote.get.return_value = [task(), task()]
+    remote.get.return_value = {'items': [task(), task()]}
     with pytest.raises(ValueError, match='Duplicate offboarding jobs'):
         await offboarding.poll()
     remote.send.assert_not_awaited()

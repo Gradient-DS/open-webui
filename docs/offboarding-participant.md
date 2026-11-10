@@ -1,6 +1,7 @@
 # Offboarding participant
 
-The platform worker pulls `GET /v1/offboarding` as the OWUI product credential and
+The platform worker pulls `GET /v1/offboarding` as the OWUI product credential,
+requires an object with an `items` list (empty when no work is pending), and
 acknowledges each task through `POST /v1/offboarding/{id}/acknowledgement`. Its
 lifespan matches the existing soev loops. Task data contains immutable platform
 person references, mode, target and fixed archive expiry, without contact data.
