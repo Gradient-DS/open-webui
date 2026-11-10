@@ -30,7 +30,7 @@ async def speech_client(stub, monkeypatch):
     app.add_exception_handler(client.SoevApiError, soev_api_error_handler)
     actor = SimpleNamespace(id='fictional-owner', role='admin')
     app.dependency_overrides[get_verified_user] = lambda: actor
-    monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr(audio, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr(audio, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(audio.Config, 'get', AsyncMock(return_value={}))
     monkeypatch.setattr(audio, 'publish_event', AsyncMock())

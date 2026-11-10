@@ -20,8 +20,11 @@ def test_no_route_is_answered_by_an_earlier_one(monkeypatch, tmp_path):
     # config.py empties STATIC_DIR on import; outside the image that is the
     # repository's static assets (see scripts/security/export_openapi.py).
     monkeypatch.setenv('STATIC_DIR', str(tmp_path))
+    from open_webui import config
     from open_webui.main import app
 
+    # Enable the legacy matcher so every declared skill-file route is checked.
+    monkeypatch.setattr(config, 'FEATURE_SKILL_FILES', True)
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     shadowed = []
     for route in routes:

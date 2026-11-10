@@ -187,6 +187,8 @@ services:
       FEEDBACK_REPORT_SLACK_WEBHOOK_URL: "http://stub:8000/slack"
       FEEDBACK_REPORT_WEBHOOK_URL: "http://stub:8000/feedback"
       ENABLE_FEEDBACK_REPORTING: "True"
+      # Snapshot declaration; the runtime value comes from tenant product configuration.
+      bug_reports.enabled (platform product configuration): "requires tenant configuration"
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: "searxng"
       SEARXNG_QUERY_URL: "http://stub:8000/search"
