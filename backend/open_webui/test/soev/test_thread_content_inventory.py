@@ -116,6 +116,16 @@ def test_v2_has_no_unguarded_local_content_writer():
                 node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == name
             )
             statements = definition.body
+            if file == 'utils/subagents.py':
+                preamble = {
+                    'process_pending_internal_messages': ['if platform_mode():\n    return'],
+                    'delegate': [
+                        'if background:\n    refuse_automations()',
+                        "refuse_background_credentials('subagent')",
+                    ],
+                }[name]
+                assert [ast.unparse(statement) for statement in statements[: len(preamble)]] == preamble
+                statements = statements[len(preamble) :]
             first = (
                 statements[1]
                 if isinstance(statements[0], ast.Expr) and isinstance(statements[0].value, ast.Constant)

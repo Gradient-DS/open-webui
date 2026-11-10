@@ -17,10 +17,13 @@ from open_webui.models.auths import Auths
 from open_webui.models.config import Config
 from open_webui.models.recovery_codes import RecoveryCodes
 from open_webui.models.users import Users
+from open_webui.soev.login_attach import refuse_platform_login
+from open_webui.soev.sessions import require_session
 from open_webui.utils.auth import (
     create_token,
     decode_token,
     get_current_user,
+    is_valid_token,
     verify_password,
 )
 from open_webui.utils.redis import get_redis_client
@@ -67,10 +70,17 @@ async def get_2fa_setup_user(request: Request):
     if purpose not in (None, '2fa_setup_pending'):
         raise HTTPException(status_code=401, detail='Invalid token type')
 
+    if purpose == '2fa_setup_pending':
+        refuse_platform_login('2fa_setup')
+    if not await is_valid_token(data, getattr(request.app.state, 'redis', None)):
+        raise HTTPException(status_code=401, detail='Invalid or expired token')
+
     user = await Users.get_user_by_id(data['id'])
     if not user:
         raise HTTPException(status_code=401, detail='User not found')
 
+    if purpose is None:
+        require_session(user, data)
     request.state.is_2fa_setup_token = purpose == '2fa_setup_pending'
     return user
 
@@ -175,6 +185,7 @@ async def enable_totp(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Verify a TOTP code against the provided secret, then enable 2FA and return recovery codes."""
+    refuse_platform_login('2fa_setup')
     if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
@@ -260,6 +271,7 @@ async def verify_2fa(
     Accepts a partial JWT token (purpose=2fa_pending) via Authorization header.
     Returns a full session on success.
     """
+    refuse_platform_login('2fa_verify')
     # Extract partial token from Authorization header
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
@@ -278,6 +290,9 @@ async def verify_2fa(
     user_id = data.get('id')
     if not user_id:
         raise HTTPException(status_code=401, detail='Invalid token')
+
+    if not await is_valid_token(data, getattr(request.app.state, 'redis', None)):
+        raise HTTPException(status_code=401, detail='Invalid or expired token')
 
     # Rate limit by user_id
     if totp_verify_rate_limiter.is_limited(user_id):

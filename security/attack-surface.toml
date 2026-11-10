@@ -1483,6 +1483,22 @@ detail = "Feature is unavailable"
 all_actors = true
 reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
 
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/verify"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. Local TOTP and recovery-code login completion refuse before token/account lookup, code consumption or session issuance, including when agent routing is disabled."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/totp/enable"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. A partial setup token is refused by the dependency before account lookup, and a full session reaches the same refusal before local enrollment writes or session issuance. Standalone partial-token completion remains supported with revocation checks."
+
 [removed]
 reason = "Local administration moved to the management console."
 routes = [

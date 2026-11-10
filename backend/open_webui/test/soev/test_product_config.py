@@ -296,12 +296,24 @@ async def test_public_config_keeps_shape_and_refreshes_features(live, monkeypatc
     main = importlib.import_module('open_webui.main')
 
     monkeypatch.setattr(main, 'decode_token', lambda _: {'id': 'fictional-user'})
+    monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
     monkeypatch.setattr(
-        main.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='fictional-user', role='user'))
+        main.Users,
+        'get_user_by_id',
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id='fictional-user', role='user', person_id='platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'
+            )
+        ),
     )
     monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='fictional/amber'))
     request = Request(
-        {'type': 'http', 'path': '/api/config', 'headers': [(b'authorization', b'Bearer fictional-token')]}
+        {
+            'type': 'http',
+            'path': '/api/config',
+            'headers': [(b'authorization', b'Bearer fictional-token')],
+            'app': SimpleNamespace(state=SimpleNamespace(redis=None)),
+        }
     )
     first = await main.get_app_config(request)
     assert first['features']['feature_knowledge'] is True
