@@ -50,6 +50,8 @@ required_drive_routes = [
   "POST /api/v1/tasks/image_prompt/completions",
 ]
 
+# Caller-index 404s return 403 no_access (no content); individual chat 404s stay
+# unavailable. Existing owner seeds and cross-user controls still require access.
 # Prepared DarkChatRoute handlers preserve the legacy dependency tree's admin
 # gate in every domain. Admin-only content refusals below describe admitted
 # admins; non-admins receive get_admin_user's 401 sign_in before dispatch.

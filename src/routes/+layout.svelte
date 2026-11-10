@@ -89,6 +89,7 @@
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import SyncStatsModal from '$lib/components/chat/Settings/SyncStatsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import NoAccess from '$lib/components/layout/NoAccess.svelte';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 	import { getUserSettings } from '$lib/apis/users';
 	import dayjs from 'dayjs';
@@ -120,6 +121,7 @@
 	const bc = new BroadcastChannel('active-tab-channel');
 
 	let loaded = false;
+	let noAccess = false;
 	/** @type {ReturnType<typeof setInterval> | undefined} */
 	let tokenTimer;
 	/** @type {ReturnType<typeof createSessionBoundary>} */
@@ -801,6 +803,11 @@
 			token: () => localStorage.getItem('token'),
 			expiresAt: () => $user?.expires_at ?? undefined,
 			waitForRetry: waitForConnectionRetry,
+			onNoAccess: () => {
+				noAccess = true;
+				toast.dismiss();
+				retryConnection();
+			},
 			reload: () => window.location.reload(),
 			onExpire: () => {
 				const login = sessionLoginPath(new URL(window.location.href));
@@ -1138,13 +1145,13 @@
 	{$i18n.t('Skip to main content')}
 </a>
 
-{#if showRefresh}
+{#if showRefresh && !noAccess}
 	<div class=" py-5">
 		<Spinner className="size-5" />
 	</div>
 {/if}
 
-{#if $connectionRetryCount && !$sessionRedirecting}
+{#if $connectionRetryCount && !$sessionRedirecting && !noAccess}
 	<div
 		role="status"
 		class="fixed bottom-4 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
@@ -1154,7 +1161,9 @@
 	</div>
 {/if}
 
-{#if loaded && !$sessionRedirecting}
+{#if noAccess && !$sessionRedirecting}
+	<NoAccess />
+{:else if loaded && !$sessionRedirecting}
 	{#if $isApp}
 		<div class="flex flex-row h-screen">
 			<AppSidebar />

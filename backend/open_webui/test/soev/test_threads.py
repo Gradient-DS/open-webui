@@ -860,3 +860,69 @@ async def test_current_lookup_preserves_reader_projection(thread_http):
     result = await client.projection('fictional-thread', current=True)
     assert result.page.model_dump(include=set(shared)) == shared
     assert len(requests) == 1 and requests[0].url.params['current'] == 'true'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('batched', [False, True])
+@pytest.mark.parametrize('upstream,expected,state', [(404, 403, 'no_access'), (503, 503, 'reconnect')])
+async def test_own_index_refusal_is_private_and_distinct_from_a_missing_chat(
+    thread_http, monkeypatch, batched, upstream, expected, state
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from open_webui.soev import identity
+    from open_webui.soev.client import SoevClient, _shared_client
+    from open_webui.soev.request_cache import batch_hook
+    from open_webui.soev.thread_routes import create_thread_router
+    from open_webui.utils.auth import get_verified_user
+
+    requests, responses, client = thread_http
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    monkeypatch.setattr(threads, 'build_client', lambda: client)
+    monkeypatch.setattr(identity, 'build_client', lambda: SoevClient('https://soev.invalid', 'fictional-product-key'))
+    records = AsyncMock(return_value=[])
+    app = FastAPI()
+    app.include_router(create_thread_router(records), prefix='/api/v1/threads')
+    app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fern')
+    problem = {'code': 'not_found' if upstream == 404 else 'service_unavailable', 'detail': 'Fictional refusal'}
+    responses.append(
+        httpx.Response(200, json={'results': [{'status': upstream, 'body': problem}]})
+        if batched
+        else httpx.Response(upstream, json=problem)
+    )
+
+    async def dispatch(reads, fetch):
+        return await fetch(reads)
+
+    async with type(_shared_client())(
+        transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid'
+    ) as browser:
+        with batch_hook(dispatch) if batched else nullcontext():
+            result = await browser.get('/api/v1/threads')
+        assert result.status_code == expected
+        assert result.json() == {'state': state}
+        assert result.headers['cache-control'] == 'private, no-store'
+        assert result.headers['vary'] == 'Authorization, Cookie'
+        records.assert_not_awaited()
+        if batched:
+            assert requests[0].url.path == '/v1/chat/reads'
+            assert json.loads(requests[0].content)['reads'][0]['resource'] == 'thread_index'
+        else:
+            assert requests[0].url.path == '/v1/threads'
+        assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login-token'
+        responses.append(httpx.Response(404, json={'code': 'not_found'}))
+        missing = await browser.get('/api/v1/threads/fictional-deleted')
+        assert missing.status_code == 404
+        assert missing.json() == {'state': 'unavailable'}
+
+
+@pytest.mark.asyncio
+async def test_missing_chat_batch_still_maps_to_none(thread_http):
+    from open_webui.soev.client import SoevClient
+
+    _, responses, _ = thread_http
+    responses.append(httpx.Response(200, json={'results': [{'status': 404, 'body': {'code': 'not_found'}}]}))
+    api = SoevClient('https://soev.invalid', 'fictional-product-key')
+    assert await api.read_many([{'resource': 'thread', 'thread_id': 'fictional-deleted'}]) == [None]

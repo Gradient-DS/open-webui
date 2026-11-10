@@ -18,6 +18,7 @@ const fixture = () => {
 	const fetch = vi.fn<typeof globalThis.fetch>();
 	const waitForRetry = vi.fn<typeof waitForConnectionRetry>().mockResolvedValue();
 	const reload = vi.fn();
+	const onNoAccess = vi.fn();
 	const onExpire = vi.fn(() => {
 		session.token = null;
 	});
@@ -28,6 +29,7 @@ const fixture = () => {
 		token: () => session.token,
 		expiresAt: () => session.expiresAt,
 		onExpire,
+		onNoAccess,
 		reload,
 		waitForRetry
 	});
@@ -36,7 +38,7 @@ const fixture = () => {
 			...init,
 			headers: { Authorization: 'Bearer session-token' }
 		});
-	return { session, fetch, waitForRetry, reload, onExpire, boundary, request };
+	return { session, fetch, waitForRetry, reload, onExpire, onNoAccess, boundary, request };
 };
 
 beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => {}));
@@ -48,6 +50,32 @@ afterEach(() => {
 });
 
 describe('session request boundary', () => {
+	it('shows no access once, retires concurrent requests, and leaves sign-out available', async () => {
+		const f = fixture();
+		const completed = vi.fn();
+		const rejected = vi.fn();
+		f.fetch.mockResolvedValue(json(403, { state: 'no_access' }));
+		for (let index = 0; index < 3; index++) void f.request().then(completed, rejected);
+		await vi.waitFor(() => expect(f.onNoAccess).toHaveBeenCalledOnce());
+		void f.request().then(completed, rejected);
+		expect(f.fetch).toHaveBeenCalledTimes(3);
+		expect(f.waitForRetry).not.toHaveBeenCalled();
+		expect(f.onExpire).not.toHaveBeenCalled();
+		expect(f.session.token).toBe('session-token');
+		expect(completed).not.toHaveBeenCalled();
+		expect(rejected).not.toHaveBeenCalled();
+		f.fetch.mockResolvedValue(json(200));
+		expect((await f.boundary.fetch('/api/v1/auths/signout', { method: 'POST' })).ok).toBe(true);
+	});
+
+	it.each([404, 403])('preserves ordinary resource refusals (%s)', async (status) => {
+		const f = fixture();
+		f.fetch.mockResolvedValue(json(status, { state: 'unavailable' }));
+		expect((await f.request('/chats/fictional-deleted')).status).toBe(status);
+		expect(f.onNoAccess).not.toHaveBeenCalled();
+		expect(f.waitForRetry).not.toHaveBeenCalled();
+	});
+
 	it('signs out once for concurrent projection sign-in failures without rejecting to callers', async () => {
 		const f = fixture();
 		f.fetch.mockImplementation(async () => json(401, { state: 'sign_in' }));

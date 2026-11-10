@@ -1921,3 +1921,50 @@ async def test_sweep_folder_control_succeeds_and_still_refuses_revoked_access(da
     revoked = await dark_api.browser.post(path, **request)
     assert revoked.status_code == 404, revoked.text
     assert dark_api.records.writes == writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path', ['', 'list', 'list?include_sidebar=true'])
+@pytest.mark.parametrize('upstream,expected,state', [(404, 403, 'no_access'), (503, 503, 'reconnect')])
+async def test_chat_index_access_state_reaches_the_browser(dark_api, monkeypatch, path, upstream, expected, state):
+    from open_webui.soev import chat_routes, identity
+    from open_webui.soev import client as transport
+    from open_webui.soev.request_cache import batch_hook
+
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                'results': [
+                    {
+                        'status': upstream,
+                        'body': {
+                            'code': 'not_found' if upstream == 404 else 'service_unavailable',
+                            'detail': 'Fictional',
+                        },
+                    }
+                ]
+            },
+        )
+
+    async def dispatch(reads, fetch):
+        return await fetch(reads)
+
+    monkeypatch.setattr(chat_routes, 'prime_sidebar_access', AsyncMock(return_value=True))
+    monkeypatch.setattr(identity, 'build_client', lambda: transport.SoevClient('https://soev.invalid', 'fictional-key'))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as upstream_http:
+        monkeypatch.setattr(transport, '_shared_client', lambda: upstream_http)
+        with batch_hook(dispatch):
+            response = await dark_api.browser.get('/api/v1/chats/' + path)
+    assert response.status_code == expected
+    assert response.json() == {'state': state}
+    assert response.headers['cache-control'] == 'private, no-store'
+    assert response.headers['vary'] == 'Authorization, Cookie'
+    assert len(calls) == 1
+    assert calls[0].url.path == '/v1/chat/reads'
+    assert json.loads(calls[0].content)['reads'][0]['resource'] == 'thread_index'
+    assert calls[0].headers['X-Soev-User-Token'] == 'fictional-login'
+    dark_api.legacy.assert_not_awaited()
