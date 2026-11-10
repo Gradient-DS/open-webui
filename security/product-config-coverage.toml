@@ -43,3 +43,10 @@ classification = "private_skill_content"
 rule = "Both product skill gates apply. Writes require the owner's authority or a write grant; content reads retain skill-scoped token and read-grant checks."
 proof = "backend/open_webui/test/apps/webui/routers/test_skill_file_scoped_token.py"
 seed = "backend/open_webui/test/security/attack/seeds.py:seed_skill_bundle"
+
+[bug_reports]
+routes = ["POST /api/v1/feedback/report"]
+classification = "authenticated_bug_report"
+rule = "Forwards strict bounded context to soev-api with the requesting person login. No local webhook, identity enrichment or content logging. Platform tenant admission, mode authority and delivery policy apply."
+proof = "backend/open_webui/test/apps/webui/routers/test_feedback_report.py"
+seed = "security/attack-surface.toml:POST /api/v1/feedback/report"

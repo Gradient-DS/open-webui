@@ -2489,21 +2489,6 @@ CONVERSATION_FEEDBACK_HEADER = ''
 
 CONVERSATION_FEEDBACK_PLACEHOLDER = ''
 
-ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False').lower() == 'true'
-
-FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
-
-# Notification-router endpoint. Takes precedence over the Slack webhook above:
-# when set, the event is POSTed here and the Slack card is skipped. An in-cluster
-# URL, not a secret — so it comes from the ConfigMap, not the tenant vault.
-FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
-
-FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (
-    os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true'
-)
-
-FEEDBACK_REPORT_TRACE_URL_TEMPLATE = os.environ.get('FEEDBACK_REPORT_TRACE_URL_TEMPLATE', '')
-
 ENABLE_DATA_EXPORT = os.environ.get('ENABLE_DATA_EXPORT', 'True').lower() == 'true'
 
 DATA_EXPORT_RETENTION_HOURS = int(os.environ.get('DATA_EXPORT_RETENTION_HOURS', '24'))
@@ -3066,11 +3051,6 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
     'features.enable_data_warnings': ENABLE_DATA_WARNINGS,
-    'feedback_report.enable': ENABLE_FEEDBACK_REPORTING,
-    'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
-    'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-    'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
-    'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,

@@ -181,3 +181,25 @@ def test_fanout_flags_are_read_query_selectors():
         assert 'requestBody' not in operation
         flag = next(parameter for parameter in operation['parameters'] if parameter['name'] == name)
         assert flag['in'] == 'query' and flag['schema']['type'] == 'boolean'
+
+
+def test_bug_report_schema_forbids_extra_content_and_bounds_every_context_field(surface):
+    operations, _, _ = surface
+    assert 'POST /api/v1/feedback/report' in operations
+    spec = json.loads((REPO / 'security/openapi.json').read_text())
+    schemas = spec['components']['schemas']
+    form, context = schemas['FeedbackReportForm'], schemas['FeedbackReportContext']
+    assert form['additionalProperties'] is False
+    assert context['additionalProperties'] is False
+    assert set(form['properties']) == {'category', 'description', 'context'}
+    assert set(context['properties']) == {
+        'route',
+        'app_version',
+        'user_agent',
+        'error_message',
+        'error_detail',
+        'model',
+        'chat_id',
+        'trace_id',
+    }
+    assert all(any(part.get('maxLength', 0) > 0 for part in field['anyOf']) for field in context['properties'].values())

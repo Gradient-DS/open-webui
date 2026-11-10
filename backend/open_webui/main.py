@@ -1025,9 +1025,7 @@ app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
-# [Gradient] Product feedback reporting API.
-# Mounted unconditionally — gated in-handler on the feedback_report.enable
-# config flag so it can be toggled at runtime without a pod restart.
+# Bug report admission and delivery policy live in soev-api.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
 
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
@@ -2418,7 +2416,7 @@ async def get_app_config(request: Request):
         'evaluation.feedback.conversation.scale_max',
         'evaluation.feedback.conversation.header',
         'evaluation.feedback.conversation.placeholder',
-        'feedback_report.enable',
+        'bug_reports.enabled',
         'google_drive.client_id',
         'google_drive.api_key',
         'onedrive.enable_personal',
@@ -2519,7 +2517,7 @@ async def get_app_config(request: Request):
                     'conversation_feedback_scale_max': config.get('evaluation.feedback.conversation.scale_max'),
                     'conversation_feedback_header': config.get('evaluation.feedback.conversation.header'),
                     'conversation_feedback_placeholder': config.get('evaluation.feedback.conversation.placeholder'),
-                    'enable_feedback_report': config.get('feedback_report.enable'),  # [Gradient]
+                    'enable_feedback_report': config.get('bug_reports.enabled'),  # [Gradient]
                     'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
                     'enable_user_status': config.get('users.enable_status'),
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,

@@ -149,12 +149,6 @@ class Config(Base):
             return False
         if key.startswith(_ENV_AUTHORITATIVE_KEY_PREFIXES):
             return False
-        # Same carve-out, same reason: the notify-router endpoint is chart-driven
-        # with no admin toggle. Tenants have all booted, so seed_defaults would
-        # pin the empty string and wiring the router later would never take
-        # effect. Sibling feedback_report.* keys stay persistent (admin-toggleable).
-        if key == 'feedback_report.webhook_url':
-            return False
         if key.startswith('oauth.') and not cls.OAUTH_PERSISTENT_ENABLED:
             return False
         return True

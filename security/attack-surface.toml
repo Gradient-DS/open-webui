@@ -1838,3 +1838,8 @@ json = { folder_id = "{folder}" }
 route = "POST /api/v1/chats/{id}"
 description = "Prepared metadata writes accept title/tags/features, not the legacy history dictionary."
 v2 = { json = { title = "Fictional conversation {token}" } }
+
+[[field]]
+route = "POST /api/v1/feedback/report"
+description = "Fictional report positive control; requires bug_reports.enabled and an explicitly configured disposable public HTTPS receiver in soev-api. Uses the owner login; delivery failure is a failed control."
+json = { category = "bug", description = "Fictional sweep delivery control", "context.route" = "/fictional", "context.trace_id" = "fictional-trace" }

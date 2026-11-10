@@ -1446,3 +1446,12 @@ def test_fanout_view_controls_use_the_new_queries_and_existing_owned_resources()
     assert fields['GET /api/v1/chats/{id}']['params'] == {'include_versions': True, 'current': True}
     assert fields['GET /api/v1/knowledge/{id}/files']['params'] == {'include_context': True}
     assert seeds.parameter_for('/api/v1/knowledge/{id}/files', 'id')['key'] == 'knowledge'
+
+
+def test_bug_report_has_an_authenticated_positive_control_and_no_waiver():
+    route = 'POST /api/v1/feedback/report'
+    field = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    assert field['json']['category'] == 'bug'
+    assert set(field['json']) == {'category', 'description', 'context.route', 'context.trace_id'}
+    assert route in seeds.ordinary_targets()
+    assert route not in seeds.SOEV_BACKED

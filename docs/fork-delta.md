@@ -261,22 +261,14 @@ so model-written documents are never rendered on the server. Its PDF is the brow
 print of a sanitised, CSP-locked frame (`documentPrint.ts`) with Inter inlined as a
 `data:` font and page numbers in the footer.
 
-## Feedback report → Slack / notification router
+## Bug report forwarding
 
-An in-app feedback form posts a structured event out of the tenant. Why: pilot
-tenants needed a zero-friction path from "this answer was wrong" to the team,
-without granting anyone access to the tenant's chat DB.
-
-Gated by `ENABLE_FEEDBACK_REPORTING` (`config.py:2809` area, default `False`).
-Two mutually exclusive sinks, not a fallback chain:
-`FEEDBACK_REPORT_WEBHOOK_URL` (in-cluster notification router — a URL, not a
-secret, so it lives in the ConfigMap) takes precedence, and when it is set the
-Slack card is skipped entirely; otherwise `FEEDBACK_REPORT_SLACK_WEBHOOK_URL`
-(a secret) receives a Slack card. `FEEDBACK_REPORT_INCLUDE_USER_IDENTITY`
-(default `True`) and `FEEDBACK_REPORT_TRACE_URL_TEMPLATE` shape the payload.
-Files: `backend/open_webui/routers/feedback_report.py`,
-`backend/open_webui/utils/feedback_report.py`,
-`src/lib/components/feedback/FeedbackModal.svelte`, `src/lib/apis/feedback/`.
+The existing in-app form posts to `/api/v1/feedback/report`, which forwards the
+strict, bounded metadata to soev-api `/v1/bug-reports` with the requesting
+person login. soev-api owns identity inclusion, destination, secret header,
+SSRF protection, retries and content-free audit. OWUI has no direct webhook
+delivery or `feedback_report.*` configuration. `/api/config` reads the
+`bug_reports.enabled` product feature.
 
 ## Sidebar pin pill in the simple assistant editor
 

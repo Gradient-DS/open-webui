@@ -303,20 +303,6 @@ openWebui:
     # app's own list of that release's new models; an empty list announces none.
     whatsNewModels: {}
 
-    # Feedback Reporting (product feedback — user-menu link + error reports).
-    # Opt-in: off by default; a tenant enables it explicitly. PersistentConfig
-    # seeds the initial value; the admin UI wins thereafter. The Slack webhook
-    # is a credential — see secrets below.
-    enableFeedbackReporting: "False"
-    feedbackReportIncludeUserIdentity: "True"
-    # Grafana/Tempo Explore URL with a {trace_id} placeholder — when set, an
-    # error report's Slack card gets a "View trace in Tempo" deep link.
-    feedbackReportTraceUrlTemplate: ""
-    # Notification router, e.g. "http://notify-router.shared-services.svc:8080/feedback".
-    # When set it WINS over the Slack webhook and the card is skipped; the router
-    # fans out to Linear (bugs/errors/ideas) or Slack (questions/other).
-    feedbackReportWebhookUrl: ""
-
     # Welcome message (PersistentConfig — seed only; admins can toggle in UI)
     enableWelcomeMessage: "False"
 
@@ -961,10 +947,6 @@ secrets:
   # Email Graph API (leave empty to disable email invites)
   emailGraphClientSecret: ""
 
-  # Feedback Reporting Slack webhook — shared central #feedback channel.
-  # Leave empty to disable Slack delivery (the JSON log line still emits).
-  feedbackReportSlackWebhookUrl: ""
-
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
 
@@ -1027,7 +1009,6 @@ externalSecrets:
     fields:
       s3AccessKeyId: false
       emailGraphClientSecret: false
-      feedbackReportSlackWebhookUrl: false
       microsoftClientSecret: false
       googleClientSecret: false
       googleDriveApiKey: false

@@ -73,7 +73,6 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
     'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
-    'utils/feedback_report.py': 'Feedback Slack and notification-router URLs both point at stub.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
     'utils/oauth.py': 'All OAuth providers unconfigured; no IdP credentials, sessions, or external tools seeded.',
     'utils/tools.py': 'No external tool servers configured; request-supplied public server URLs are findings.',
@@ -385,8 +384,6 @@ STUB_URLS = {
     'AUDIO_TTS_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'IMAGES_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'WEBHOOK_URL': 'http://stub:8000/webhook',
-    'FEEDBACK_REPORT_SLACK_WEBHOOK_URL': 'http://stub:8000/slack',
-    'FEEDBACK_REPORT_WEBHOOK_URL': 'http://stub:8000/feedback',
 }
 CLOSED_SETTINGS = (
     'ENABLE_OTEL',
