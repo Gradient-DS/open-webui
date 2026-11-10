@@ -11,6 +11,7 @@ from open_webui.models.config import Config
 from open_webui.routers.auths import SessionUserResponse
 from open_webui.models.invites import AcceptInviteForm, InviteForm, InviteModel, Invites
 from open_webui.models.users import Users
+from open_webui.soev.login_attach import refuse_platform_login
 
 from open_webui.utils.auth import (
     create_token,
@@ -234,6 +235,7 @@ async def accept_invite(
     token: str,
     form_data: AcceptInviteForm,
 ):
+    refuse_platform_login('invite_acceptance')
     invite = await Invites.get_invite_by_token(token)
 
     if not invite:

@@ -644,8 +644,9 @@ actor = "admin"
 key = "totp_user"
 name = "user_id"
 prefix = "/api/v1/users/{user_id}/2fa"
-description = "routers/users.py:admin_disable_user_2fa answers 400 '2FA is not enabled for this user' unless the user enrolled. seed_totp_user adds a user and enrols TOTP with that user's own session (setup, then enable with the code computed from the returned secret). Not the shared {user}: it is also the exporter, which signs in with its password, and an enrolled account answers that with a 2FA challenge."
+description = "Standalone: seed_totp_user adds a separate user and enrolls TOTP with its own session, preserving the exporter's password login. Platform: Keycloak owns MFA and local enrollment refuses; use the authenticated OIDC admin for status and drive the explicit not-enrolled disable control without creating a local password account."
 seeded_by = "seed_totp_user"
+v2_seeded_by = "seed_admin_user"
 depends_on = []
 password = "Attack-Fixture-Passw0rd!"
 actor = "admin"
@@ -1189,6 +1190,7 @@ allow = ["same-object", "write"]
 reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
 
 [[shared]]
+runtime_soev_backed = "waive"
 route = "POST /api/v1/invites/{token}/accept"
 allow = ["owner-marker", "write"]
 reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."
@@ -1226,6 +1228,7 @@ detail = "identity:platform_login"
 reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
 
 [[control]]
+runtime_soev_backed = "waive"
 route = "POST /api/v1/invites/{token}/accept"
 status = 410
 detail = "already been used"
@@ -1871,3 +1874,44 @@ route = "POST /api/v1/auths/signup"
 status = 403
 detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
 reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
+
+# Platform sessions come only from the verified Keycloak callback. Standalone
+# account seeds still use local issuers; OIDC-mode seeds provision through the
+# disposable identity provider (SeedContext.request), never auths/add.
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/auths/add"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "sessions/login_attach: even an authenticated admin cannot create a local account and session in platform mode. The login guard runs before lookup, password hashing or any account write. The existing admin dependency rejects other roles before the handler."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/invites/{token}/accept"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Platform invite acceptance refuses before invite lookup, account creation, invite consumption or cookie/session issuance. Standalone invite acceptance and its single-use replay control remain covered in waive mode."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/verify"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. Local TOTP and recovery-code login completion refuse before token/account lookup, code consumption or session issuance, including when agent routing is disabled."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/2fa/totp/enable"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Keycloak owns MFA in platform mode. A partial setup token is refused by the dependency before account lookup, and a full session reaches the same refusal before local enrollment writes or session issuance. Standalone partial-token completion remains supported with revocation checks."
+
+[[control]]
+runtime_soev_backed = "drive"
+route = "POST /api/v1/users/{user_id}/2fa/disable"
+status = 400
+detail = "2FA is not enabled for this user"
+reason = "The OIDC admin target has no local TOTP enrollment: Keycloak owns MFA and local enrollment cannot be seeded in platform mode. Standalone mode retains the dedicated enrolled password user and successful disable assertion."

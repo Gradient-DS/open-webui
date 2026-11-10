@@ -1366,6 +1366,7 @@ async def add_user(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('add_user')
     admin_user = user
     if not validate_email_format(form_data.email.lower()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)

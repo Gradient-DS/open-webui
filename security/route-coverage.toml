@@ -27,6 +27,11 @@
 # discovery failures with 503. Mocked backend coverage lives in
 # test/soev/test_login_attach.py and test/soev/test_login_subject.py; the live-stack
 # gap below is unchanged.
+# Platform session boundaries also require a full JWT and a canonical person
+# binding for HTTP, websockets and API-key owners (soev/sessions.py). Invite
+# acceptance, auths/add and local 2FA completion are explicit platform 403
+# refusals, recorded as controls in attack-surface.toml, without new waivers.
+# Backend coverage: test/soev/test_session_boundary.py and test_session_issuers.py.
 
 [[waived]]
 id = "GET /oauth/{provider}/login"
