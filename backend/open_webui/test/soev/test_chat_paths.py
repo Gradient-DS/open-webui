@@ -180,9 +180,13 @@ def fake_api(request, calls, state, visible, feedback):
         return httpx.Response(200, json={'thread_id': 'fictional-child' if state['forks'] == 1 else 'fictional-clone'})
     if path.endswith('/feedback'):
         body = json.loads(request.content)
-        assert set(body) == {'rating', 'position', 'comment', 'comment_authored'}
+        assert set(body) == {'rating', 'position', 'comment', 'comment_authored', 'reason', 'tags'}
         feedback.append(
             {
+                'id': 'fictional-feedback',
+                'position': body['position'],
+                'reason': body['reason'],
+                'tags': body['tags'],
                 'thread_id': 'fictional-thread',
                 'rating': body['rating'],
                 'model': 'fictional-model',
@@ -350,6 +354,9 @@ def fake_metrics(path, state, feedback):
                 'unknown_outputs': 1,
                 'known_tokens': {'prompt_tokens': 7, 'completion_tokens': 3, 'total_tokens': 10},
                 'tokens': None,
+                'by_model': [],
+                'by_person': [],
+                'by_period': [],
             },
         )
     if path == '/v1/feedback':
@@ -364,6 +371,7 @@ def fake_metrics(path, state, feedback):
                         'model': 'fictional-model',
                         'agent': 'fictional-agent',
                         'rating': 1,
+                        'period': '2026-10-25',
                         'count': len(feedback) if state['admin'] else min(1, len(feedback)),
                     }
                 ],
@@ -780,7 +788,12 @@ async def test_platform_delete_completes_before_removing_record(dark_api):
 @pytest.mark.asyncio
 async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api):
     rating = {'thread_id': 'fictional-thread', 'position': 2, 'rating': 1}
-    for extra in [{'snapshot': {}}, {'model': 'fictional-forged'}, {'tags': []}, {'comment': 'Fictional unasserted'}]:
+    for extra in [
+        {'snapshot': {}},
+        {'model': 'fictional-forged'},
+        {'tags': ['invalid id']},
+        {'comment': 'Fictional unasserted'},
+    ]:
         response = await dark_api.browser.post('/api/v1/evaluations/feedback', json={**rating, **extra})
         assert response.status_code == 422
     for comment in [None, 'Fictional written comment']:
@@ -788,22 +801,48 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
             '/api/v1/evaluations/feedback',
             json={
                 **rating,
+                'reason': 'accuracy',
+                'tags': ['language'],
                 **({'comment': comment, 'comment_authored': True} if comment else {}),
             },
         )
         assert response.status_code == 204, response.text
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/user')
     assert len(listed.json()['items']) == 1
+    assert listed.json()['items'][0]['reason'] == 'accuracy'
+    assert listed.json()['items'][0]['tags'] == ['language']
     dark_api.state['admin'] = True
     dark_api.user.role = 'admin'
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert len(listed.json()['items']) == 2
-    assert set(listed.json()['items'][1]) == {'thread_id', 'rating', 'model', 'agent', 'time', 'comment'}
+    assert set(listed.json()['items'][1]) == {
+        'id',
+        'thread_id',
+        'position',
+        'rating',
+        'reason',
+        'tags',
+        'model',
+        'agent',
+        'time',
+        'comment',
+    }
     summary = await dark_api.browser.get('/api/v1/evaluations/leaderboard')
     assert summary.json()['items'][0]['count'] == 2
     dark_api.state['status'] = 403
     denied = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
     assert denied.status_code == 404 and 'secret' not in denied.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_platform_feedback_ids_preserve_400_without_upstream_details(dark_api):
+    dark_api.state['status'] = 400
+    response = await dark_api.browser.post(
+        '/api/v1/evaluations/feedback',
+        json={'thread_id': 'fictional-thread', 'position': 2, 'rating': 1, 'reason': 'unknown', 'tags': []},
+    )
+    assert response.status_code == 400
+    assert 'secret' not in response.text
 
 
 @pytest.mark.asyncio
@@ -959,6 +998,10 @@ async def test_per_thread_feedback_filters_all_authorized_records(dark_api):
         dark_api.feedback.append(
             {
                 'thread_id': thread_id,
+                'id': f'fictional-feedback-{thread_id}',
+                'position': 2,
+                'reason': None,
+                'tags': [],
                 'rating': 1,
                 'model': 'fictional-model',
                 'agent': 'fictional-agent',

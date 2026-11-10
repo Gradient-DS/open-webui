@@ -2,8 +2,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { createEventDispatcher, onMount, getContext } from 'svelte';
-	import { config, models, tags as _tags } from '$lib/stores';
-	import Tags from '$lib/components/common/Tags.svelte';
+	import { config, models } from '$lib/stores';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 
@@ -14,48 +13,8 @@
 	export let message;
 	export let show = false;
 
-	const DEFAULT_LIKE_REASONS = [
-		'accurate_information',
-		'followed_instructions_perfectly',
-		'showcased_creativity',
-		'positive_attitude',
-		'attention_to_detail',
-		'thorough_explanation',
-		'other'
-	];
-	const DEFAULT_DISLIKE_REASONS = [
-		'dont_like_the_style',
-		'too_verbose',
-		'not_helpful',
-		'not_factually_correct',
-		'didnt_fully_follow_instructions',
-		'refused_when_it_shouldnt_have',
-		'being_lazy',
-		'other'
-	];
-
-	// Reason label map for config-driven tags
-	const REASON_LABELS: Record<string, string> = {
-		accurate_information: 'Accurate information',
-		followed_instructions_perfectly: 'Followed instructions perfectly',
-		showcased_creativity: 'Showcased creativity',
-		positive_attitude: 'Positive attitude',
-		attention_to_detail: 'Attention to detail',
-		thorough_explanation: 'Thorough explanation',
-		dont_like_the_style: "Don't like the style",
-		too_verbose: 'Too verbose',
-		not_helpful: 'Not helpful',
-		not_factually_correct: 'Not factually correct',
-		didnt_fully_follow_instructions: "Didn't fully follow instructions",
-		refused_when_it_shouldnt_have: "Refused when it shouldn't have",
-		being_lazy: 'Being lazy',
-		other: 'Other'
-	};
-
 	let tags = [];
 
-	let reasons = [];
-	let reasonLabels: Record<string, string> = {};
 	let selectedReason = null;
 	let comment = '';
 
@@ -67,32 +26,12 @@
 	$: layer3Enabled = $config?.features?.enable_feedback_layer3 ?? true;
 	$: layer3Prompt = $config?.features?.feedback_layer3_prompt || '';
 
-	$: {
-		const positiveTags = $config?.features?.feedback_layer2_positive_tags ?? [];
-		const negativeTags = $config?.features?.feedback_layer2_negative_tags ?? [];
-
-		if (message?.annotation?.rating === 1) {
-			if (positiveTags.length > 0) {
-				reasons = positiveTags.map((t: { key: string; label: string }) => t.key);
-				reasonLabels = Object.fromEntries(
-					positiveTags.map((t: { key: string; label: string }) => [t.key, t.label])
-				);
-			} else {
-				reasons = DEFAULT_LIKE_REASONS;
-				reasonLabels = REASON_LABELS;
-			}
-		} else if (message?.annotation?.rating === -1) {
-			if (negativeTags.length > 0) {
-				reasons = negativeTags.map((t: { key: string; label: string }) => t.key);
-				reasonLabels = Object.fromEntries(
-					negativeTags.map((t: { key: string; label: string }) => [t.key, t.label])
-				);
-			} else {
-				reasons = DEFAULT_DISLIKE_REASONS;
-				reasonLabels = REASON_LABELS;
-			}
-		}
-	}
+	type Definition = { id: string; labels: { nl: string; en: string } };
+	$: language = $i18n.language.startsWith('nl') ? 'nl' : 'en';
+	$: definitions = ($config?.features?.feedback_reasons ?? []) as Definition[];
+	$: tagDefinitions = ($config?.features?.feedback_tags ?? []) as Definition[];
+	$: reasons = definitions.map((item) => item.id);
+	$: reasonLabels = Object.fromEntries(definitions.map((item) => [item.id, item.labels[language]]));
 
 	$: if (message) {
 		init();
@@ -128,12 +67,6 @@
 	});
 
 	const saveHandler = () => {
-		console.log('saveHandler');
-		// if (!selectedReason) {
-		// 	toast.error($i18n.t('Please select a reason'));
-		// 	return;
-		// }
-
 		dispatch('save', {
 			reason: selectedReason,
 			comment: comment,
@@ -221,10 +154,10 @@
 								? 'bg-gray-100 dark:bg-gray-800'
 								: ''} transition rounded-xl"
 							on:click={() => {
-								selectedReason = reason;
+                                selectedReason = selectedReason === reason ? null : reason;
 							}}
 						>
-							{reasonLabels[reason] ? $i18n.t(reasonLabels[reason]) : reason}
+                            {reasonLabels[reason]}
 						</button>
 					{/each}
 				</div>
@@ -252,20 +185,21 @@
 	<div class="mt-2 gap-1.5 flex justify-between">
 		{#if categoryTagsEnabled}
 			<div class="flex items-end group">
-				<Tags
-					{tags}
-					suggestionTags={$_tags ?? []}
-					on:delete={(e) => {
-						tags = tags.filter(
-							(tag) =>
-								tag.name.replaceAll(' ', '_').toLowerCase() !==
-								e.detail.replaceAll(' ', '_').toLowerCase()
-						);
-					}}
-					on:add={(e) => {
-						tags = [...tags, { name: e.detail }];
-					}}
-				/>
+				{#each tagDefinitions as definition (definition.id)}
+					<label class="flex items-center gap-1 text-xs">
+						<input
+							type="checkbox"
+							checked={tags.some((tag) => tag.name === definition.id)}
+							disabled={tags.length >= 16 && !tags.some((tag) => tag.name === definition.id)}
+							on:change={(event) => {
+								tags = event.currentTarget.checked
+									? [...tags, { name: definition.id }]
+									: tags.filter((tag) => tag.name !== definition.id);
+							}}
+						/>
+						{definition.labels[language]}
+					</label>
+				{/each}
 			</div>
 		{:else}
 			<div></div>

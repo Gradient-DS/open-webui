@@ -5,6 +5,8 @@ export type ThreadRating = {
 	position: number;
 	rating: -1 | 1;
 	comment?: string;
+	reason?: string | null;
+	tags?: string[];
 };
 
 export const submitThreadRating = async (token: string, rating: ThreadRating): Promise<void> => {
@@ -16,6 +18,8 @@ export const submitThreadRating = async (token: string, rating: ThreadRating): P
 			thread_id: rating.thread_id,
 			position: rating.position,
 			rating: rating.rating,
+			reason: rating.reason ?? null,
+			tags: rating.tags ?? [],
 			...(rating.comment ? { comment: rating.comment, comment_authored: true } : {})
 		})
 	});
@@ -23,6 +27,10 @@ export const submitThreadRating = async (token: string, rating: ThreadRating): P
 };
 
 export type FeedbackItem = {
+	id: string;
+	position: number;
+	reason: string | null;
+	tags: string[];
 	thread_id: string;
 	rating: -1 | 1;
 	model: string;

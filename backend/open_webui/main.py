@@ -2510,8 +2510,8 @@ async def get_app_config(request: Request):
                     'enable_message_rating': config.get('ui.enable_message_rating'),
                     # [Gradient] Feedback layers
                     'enable_feedback_layer2': config.get('evaluation.feedback.layer2.enable'),
-                    'feedback_layer2_positive_tags': config.get('evaluation.feedback.layer2.positive_tags'),
-                    'feedback_layer2_negative_tags': config.get('evaluation.feedback.layer2.negative_tags'),
+                    'feedback_reasons': config.get('evaluation.feedback.reasons'),
+                    'feedback_tags': config.get('evaluation.feedback.tags'),
                     'enable_feedback_layer3': config.get('evaluation.feedback.layer3.enable'),
                     'feedback_layer3_prompt': config.get('evaluation.feedback.layer3.prompt'),
                     'enable_feedback_category_tags': config.get('evaluation.feedback.category_tags.enable'),

@@ -494,6 +494,8 @@ def seed_feedback(ctx, parameter):
             'thread_id': ctx.values['chat'],
             'position': int(ctx.values['chat_message']),
             'rating': 1,
+            'reason': 'accuracy',
+            'tags': ['language'],
             'comment': comment,
             'comment_authored': True,
         },
@@ -505,7 +507,11 @@ def seed_feedback(ctx, parameter):
         response.close()
     page = ctx.request('GET', f'/api/v1/evaluations/feedback/conversation/{ctx.values["chat"]}', actor=ctx.admin)
     if not any(
-        item.get('thread_id') == ctx.values['chat'] and item.get('comment') == comment and item.get('rating') == 1
+        item.get('thread_id') == ctx.values['chat']
+        and item.get('comment') == comment
+        and item.get('rating') == 1
+        and item.get('reason') == 'accuracy'
+        and item.get('tags') == ['language']
         for item in page.get('items', [])
     ):
         raise RuntimeError('Platform feedback could not be read back by its owner')

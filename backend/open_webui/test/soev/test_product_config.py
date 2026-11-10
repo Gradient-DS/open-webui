@@ -31,6 +31,23 @@ def document():
     }
 
 
+@pytest.mark.parametrize('key', ['evaluation.feedback.reasons', 'evaluation.feedback.tags'])
+def test_feedback_vocabulary_requires_stable_ids_and_bilingual_labels(key):
+    payload = document()
+    definition = {'id': 'accuracy', 'labels': {'nl': 'Juistheid', 'en': 'Accuracy'}}
+    payload['values'][key] = [definition]
+    assert product_config._validate(payload)['values'][key] == [definition]
+    for invalid in (
+        [definition, definition],
+        [{'id': 'invalid id', 'labels': definition['labels']}],
+        [{'id': 'accuracy', 'labels': {'en': 'Accuracy'}}],
+        [definition] * 65,
+    ):
+        payload['values'][key] = invalid
+        with pytest.raises(ValueError, match='feedback definition'):
+            product_config._validate(payload)
+
+
 @pytest_asyncio.fixture
 async def live(monkeypatch):
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://fictional-api.invalid')

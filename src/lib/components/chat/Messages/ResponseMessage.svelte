@@ -165,7 +165,13 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
-		annotation?: { type: string; rating: number };
+		annotation?: {
+			type?: string;
+			rating: number;
+			reason?: string | null;
+			tags?: string[];
+			comment?: string;
+		};
 	}
 
 	export let chatId = '';
@@ -895,14 +901,18 @@
 			if (value !== -1 && value !== 1) return;
 			feedbackLoading = true;
 			try {
-				const comment = (details as { comment?: string } | null)?.comment;
+				const fields = details as { comment?: string; reason?: string; tags?: string[] } | null;
+				const comment = fields?.comment;
 				await submitThreadRating(localStorage.token, {
 					thread_id: chatId,
 					position: message.position,
 					rating: value,
+					reason: fields?.reason || null,
+					tags: fields?.tags ?? [],
 					...(comment ? { comment } : {})
 				});
 				threadRating = value;
+				message = { ...message, annotation: { ...message.annotation, rating: value, ...fields } };
 				if (!details) showRateComment = true;
 			} catch {
 				toast.error($i18n.t('This chat is unavailable'));

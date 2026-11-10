@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from copy import deepcopy
 from pathlib import Path
 from time import monotonic
@@ -83,6 +84,9 @@ def _validate(payload: Any) -> dict:
         allowed = tuple(kind for part in SETTINGS[key].split('|') for kind in kinds[part])
         if type(value) not in allowed:
             raise ValueError('Invalid product setting type')
+    for key in ('evaluation.feedback.reasons', 'evaluation.feedback.tags'):
+        if key in values:
+            _validate_feedback(values[key])
     if 'models.overrides' in values:
         _validate_overrides(values['models.overrides'])
     return payload
@@ -147,3 +151,21 @@ async def get_many(*keys: str) -> dict:
 
 async def permissions() -> dict:
     return _permissions(await refresh())
+
+
+def _validate_feedback(definitions: list) -> None:
+    ids = set()
+    for definition in definitions:
+        if (
+            not isinstance(definition, dict)
+            or set(definition) != {'id', 'labels'}
+            or not isinstance(definition['id'], str)
+            or re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', definition['id']) is None
+            or definition['id'] in ids
+            or len(definitions) > 64
+            or not isinstance(definition['labels'], dict)
+            or set(definition['labels']) != {'nl', 'en'}
+            or any(not isinstance(label, str) or not 1 <= len(label) <= 120 for label in definition['labels'].values())
+        ):
+            raise ValueError('Invalid feedback definition')
+        ids.add(definition['id'])

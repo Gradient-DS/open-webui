@@ -518,7 +518,7 @@ key = "feedback"
 v2_seeded_by = "seed_feedback"
 name = "id"
 prefix = "/api/v1/evaluations/feedback/{id}"
-description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate. Drive mode commits a platform rating and verifies its owner readback. The individual legacy feedback id is an explicit refusal probe."
+description = "Platform feedback accepts configured reason and tag IDs with an authored comment. The drive seed uses the fictional accuracy reason and language tag from platform bootstrap and proves owner readback. Feedback metadata grants no chat-read authority; workspace administration stays within that workspace and tenant-scoped administration stays within the tenant. The individual legacy feedback id remains a refusal probe."
 via = "POST /api/v1/evaluations/feedback"
 body = { "type" = "rating", "data" = { "rating" = 1, "model_id" = "{model}" }, "meta" = { "chat_id" = "{chat}" } }
 extract = "id"

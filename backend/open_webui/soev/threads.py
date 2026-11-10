@@ -132,6 +132,10 @@ class SharePage(WireModel):
 
 
 class FeedbackItem(WireModel):
+    id: str
+    position: int
+    reason: str | None
+    tags: list[str]
     thread_id: str
     rating: Literal[-1, 1]
     model: str
@@ -150,6 +154,7 @@ class FeedbackCount(WireModel):
     agent: str
     rating: Literal[-1, 1]
     count: int = Field(ge=0)
+    period: str | None
 
 
 class FeedbackSummary(WireModel):
@@ -168,6 +173,16 @@ class UsageMetrics(WireModel):
     unknown_outputs: int = Field(ge=0)
     known_tokens: Tokens
     tokens: Tokens | None
+
+
+class UsageBreakdown(UsageMetrics):
+    key: str | None
+
+
+class UsageInsights(UsageMetrics):
+    by_model: list[UsageBreakdown]
+    by_person: list[UsageBreakdown]
+    by_period: list[UsageBreakdown]
 
 
 class Organization(WireModel):
@@ -283,8 +298,9 @@ class ThreadClient:
         status = response.status_code
         if status == 412:
             raise ThreadError(412, 'reconnect')
-        if status in {401, 403, 404, 409, 422}:
-            mapped = {
+        if status in {400, 401, 403, 404, 409, 422}:
+            mapped: dict[int, ThreadState] = {
+                400: 'invalid_request',
                 401: 'sign_in',
                 403: 'unavailable',
                 404: 'unavailable',
@@ -480,6 +496,8 @@ class ThreadClient:
         rating: int,
         comment: str | None = None,
         comment_authored: bool = False,
+        reason: str | None = None,
+        tags: list[str],
     ) -> None:
         if position <= 0 or type(rating) is not int or rating not in {-1, 1}:
             raise ThreadError(422, 'invalid_request')
@@ -488,7 +506,14 @@ class ThreadClient:
         response = await self._request(
             'POST',
             f'/v1/threads/{_identifier(thread_id)}/feedback',
-            body={'position': position, 'rating': rating, 'comment': comment, 'comment_authored': comment_authored},
+            body={
+                'position': position,
+                'rating': rating,
+                'comment': comment,
+                'comment_authored': comment_authored,
+                'reason': reason,
+                'tags': tags,
+            },
         )
         if response.status_code != 204:
             raise ThreadError(502, 'reconnect')
@@ -513,8 +538,8 @@ class ThreadClient:
             FeedbackSummary,
         )
 
-    async def usage(self) -> UsageMetrics:
-        return self._parse(await self._request('GET', '/v1/threads/usage'), UsageMetrics)
+    async def usage(self) -> UsageInsights:
+        return self._parse(await self._request('GET', '/v1/threads/usage'), UsageInsights)
 
 
 def enabled() -> bool:

@@ -993,6 +993,8 @@ def test_v2_feedback_seed_requires_committed_owner_readback(readable):
                 {
                     'thread_id': 'fictional-thread',
                     'rating': 1,
+                    'reason': 'accuracy',
+                    'tags': ['language'],
                     'comment': 'Fictional feedback fictional',
                 }
             ]
@@ -1012,6 +1014,8 @@ def test_v2_feedback_seed_requires_committed_owner_readback(readable):
             'thread_id': 'fictional-thread',
             'position': 7,
             'rating': 1,
+            'reason': 'accuracy',
+            'tags': ['language'],
             'comment': 'Fictional feedback fictional',
             'comment_authored': True,
         },

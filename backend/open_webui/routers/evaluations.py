@@ -38,8 +38,8 @@ EVALUATION_CONFIG_KEYS = {
     # silently vanish from the API response.
     'ENABLE_MESSAGE_RATING': 'ui.enable_message_rating',
     'ENABLE_FEEDBACK_LAYER2': 'evaluation.feedback.layer2.enable',
-    'FEEDBACK_LAYER2_POSITIVE_TAGS': 'evaluation.feedback.layer2.positive_tags',
-    'FEEDBACK_LAYER2_NEGATIVE_TAGS': 'evaluation.feedback.layer2.negative_tags',
+    'FEEDBACK_REASONS': 'evaluation.feedback.reasons',
+    'FEEDBACK_TAGS': 'evaluation.feedback.tags',
     'ENABLE_FEEDBACK_LAYER3': 'evaluation.feedback.layer3.enable',
     'FEEDBACK_LAYER3_PROMPT': 'evaluation.feedback.layer3.prompt',
     'ENABLE_FEEDBACK_CATEGORY_TAGS': 'evaluation.feedback.category_tags.enable',
@@ -297,8 +297,8 @@ class UpdateConfigForm(BaseModel):
     EVALUATION_ARENA_MODELS: Optional[list[dict]] = None
     ENABLE_MESSAGE_RATING: Optional[bool] = None
     ENABLE_FEEDBACK_LAYER2: Optional[bool] = None
-    FEEDBACK_LAYER2_POSITIVE_TAGS: Optional[list[dict]] = None
-    FEEDBACK_LAYER2_NEGATIVE_TAGS: Optional[list[dict]] = None
+    FEEDBACK_REASONS: list[dict] | None = None
+    FEEDBACK_TAGS: list[dict] | None = None
     ENABLE_FEEDBACK_LAYER3: Optional[bool] = None
     FEEDBACK_LAYER3_PROMPT: Optional[str] = None
     ENABLE_FEEDBACK_CATEGORY_TAGS: Optional[bool] = None
@@ -323,10 +323,10 @@ async def update_config(
         updates['ui.enable_message_rating'] = form_data.ENABLE_MESSAGE_RATING
     if form_data.ENABLE_FEEDBACK_LAYER2 is not None:
         updates['evaluation.feedback.layer2.enable'] = form_data.ENABLE_FEEDBACK_LAYER2
-    if form_data.FEEDBACK_LAYER2_POSITIVE_TAGS is not None:
-        updates['evaluation.feedback.layer2.positive_tags'] = form_data.FEEDBACK_LAYER2_POSITIVE_TAGS
-    if form_data.FEEDBACK_LAYER2_NEGATIVE_TAGS is not None:
-        updates['evaluation.feedback.layer2.negative_tags'] = form_data.FEEDBACK_LAYER2_NEGATIVE_TAGS
+    if form_data.FEEDBACK_REASONS is not None:
+        updates['evaluation.feedback.reasons'] = form_data.FEEDBACK_REASONS
+    if form_data.FEEDBACK_TAGS is not None:
+        updates['evaluation.feedback.tags'] = form_data.FEEDBACK_TAGS
     if form_data.ENABLE_FEEDBACK_LAYER3 is not None:
         updates['evaluation.feedback.layer3.enable'] = form_data.ENABLE_FEEDBACK_LAYER3
     if form_data.FEEDBACK_LAYER3_PROMPT is not None:

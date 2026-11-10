@@ -15023,36 +15023,6 @@
             ],
             "title": "Evaluation Arena Models"
           },
-          "FEEDBACK_LAYER2_NEGATIVE_TAGS": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback Layer2 Negative Tags"
-          },
-          "FEEDBACK_LAYER2_POSITIVE_TAGS": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback Layer2 Positive Tags"
-          },
           "FEEDBACK_LAYER3_PROMPT": {
             "anyOf": [
               {
@@ -15063,6 +15033,36 @@
               }
             ],
             "title": "Feedback Layer3 Prompt"
+          },
+          "FEEDBACK_REASONS": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Reasons"
+          },
+          "FEEDBACK_TAGS": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Tags"
           }
         },
         "title": "UpdateConfigForm",

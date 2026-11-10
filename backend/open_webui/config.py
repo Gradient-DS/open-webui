@@ -2475,10 +2475,6 @@ KNOWLEDGE_MAX_FILE_COUNT = int(os.environ.get('KNOWLEDGE_MAX_FILE_COUNT', '250')
 
 ENABLE_FEEDBACK_LAYER2 = os.environ.get('ENABLE_FEEDBACK_LAYER2', 'True').lower() == 'true'
 
-FEEDBACK_LAYER2_POSITIVE_TAGS = []
-
-FEEDBACK_LAYER2_NEGATIVE_TAGS = []
-
 ENABLE_FEEDBACK_LAYER3 = os.environ.get('ENABLE_FEEDBACK_LAYER3', 'True').lower() == 'true'
 
 FEEDBACK_LAYER3_PROMPT = ''
@@ -3065,8 +3061,8 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.conversation.placeholder': CONVERSATION_FEEDBACK_PLACEHOLDER,
     'evaluation.feedback.conversation.scale_max': CONVERSATION_FEEDBACK_SCALE_MAX,
     'evaluation.feedback.layer2.enable': ENABLE_FEEDBACK_LAYER2,
-    'evaluation.feedback.layer2.negative_tags': FEEDBACK_LAYER2_NEGATIVE_TAGS,
-    'evaluation.feedback.layer2.positive_tags': FEEDBACK_LAYER2_POSITIVE_TAGS,
+    'evaluation.feedback.reasons': [],
+    'evaluation.feedback.tags': [],
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
     'features.enable_data_warnings': ENABLE_DATA_WARNINGS,

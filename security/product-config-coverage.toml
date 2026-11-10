@@ -16,6 +16,13 @@ rule = "Only permissions.<path> leaves apply. Authentication and administrator d
 proof = "backend/open_webui/test/soev/test_product_config.py:test_permission_endpoints_use_product_leaves"
 seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
 
+[feedback]
+routes = ["GET /api/config", "GET /api/v1/evaluations/config", "POST /api/v1/evaluations/config", "POST /api/v1/evaluations/feedback", "GET /api/v1/evaluations/feedbacks/list", "GET /api/v1/evaluations/feedback/conversation/{chat_id}"]
+classification = "configured_feedback_metadata"
+rule = "Stable reason/tag IDs and nl/en labels are customer product content. Platform rating writes validate IDs; listing delegates workspace and tenant isolation to soev-api. Feedback grants no chat-read authority."
+proof = "backend/open_webui/test/soev/test_chat_paths.py:test_feedback_allowlist_authored_comment_and_admin_exception"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_feedback"
+
 [features]
 prefixes = ["/api/v1/knowledge", "/api/v1/prompts", "/api/v1/models", "/api/v1/skills", "/api/v1/notes", "/api/v1/tools", "/api/v1/terminals", "/api/v1/audio", "/api/v1/meetings"]
 classification = "feature_and_resource_authority"
