@@ -43,8 +43,9 @@ async def test_images_refused_without_platform_calls(monkeypatch, platform_capab
 @pytest.mark.asyncio
 @pytest.mark.parametrize('present', [False, True])
 @pytest.mark.parametrize('enabled', [False, True])
-async def test_frontend_config_flags(monkeypatch, platform_capabilities, chat_http, present, enabled):
+async def test_frontend_config_flags(monkeypatch, platform_capabilities, request, present, enabled):
     main = importlib.import_module('open_webui.main')
+    chat_http = request.getfixturevalue('chat_http')
 
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://soev.invalid')
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
