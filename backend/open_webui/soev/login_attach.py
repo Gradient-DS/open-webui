@@ -54,6 +54,11 @@ def refuse_unsafe_sub_claim(claim: str | None) -> None:
         raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 
+def validate_config_updates(updates: dict) -> None:
+    if 'oauth.sub_claim' in updates:
+        refuse_unsafe_sub_claim(updates['oauth.sub_claim'])
+
+
 async def validate_login_config() -> None:
     if not platform_mode():
         return

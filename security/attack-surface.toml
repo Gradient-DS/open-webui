@@ -31,6 +31,9 @@
 # selecting keys or excluding routes. Startup recovers interrupted snapshots and
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
+# Config.upsert validates oauth.sub_claim for every writer (including imports)
+# before any database or in-memory defaults change. Platform mode accepts only
+# sub or unset; an unsafe batch refuses 403 without applying any other setting.
 
 # Required owner controls for sweep12's previously unentered operations.
 # The image-prompt operation has an exact all-actor refusal below; its supported

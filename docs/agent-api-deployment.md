@@ -109,6 +109,9 @@ Runtime OAuth settings updates also refuse a custom `oauth.sub_claim` with `403`
 before writing any configuration. OAuth token exchange is always refused with
 `403` when soev-api is configured, including when `ENABLE_OAUTH_TOKEN_EXCHANGE`
 is enabled; it logs `oauth_platform_token_exchange_refused` and issues no session.
+`Config.upsert` enforces the same claim policy for every caller, including config
+imports, before any database or in-memory defaults are changed. A rejected batch
+does not partially apply its other settings.
 `SOEV_API_URL` also refuses local password sign-in, forgot-password, reset-token
 validation and password reset with logged `403` responses before account lookup.
 Keycloak owns login and recovery. This boundary applies even when

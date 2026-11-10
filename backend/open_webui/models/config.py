@@ -214,6 +214,9 @@ class Config(Base):
     @staticmethod
     async def upsert(updates: dict) -> None:
         """Upsert multiple config key-value pairs. Raises on failure."""
+        from open_webui.soev.login_attach import validate_config_updates
+
+        validate_config_updates(updates)
         persistent_updates = {}
         for key, value in updates.items():
             value = _json_value(value)
