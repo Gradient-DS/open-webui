@@ -2247,7 +2247,7 @@ async def get_app_config(request: Request):
             user = sessions.session_user(await Users.get_user_by_id(data['id']), data)
 
     onboarding = False
-    if user is None:
+    if user is None and not sessions.platform_mode():
         onboarding = not await Users.has_users()
 
     license_metadata = getattr(app.state, 'LICENSE_METADATA', None)

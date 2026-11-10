@@ -1,5 +1,10 @@
 export type AuthPageState = 'loading' | 'redirecting' | 'form';
 
+export const authOnboarding = (config?: {
+	onboarding?: boolean;
+	oauth?: { required_provider?: string | null };
+}): boolean => Boolean(config?.onboarding && !config?.oauth?.required_provider);
+
 type AuthPageSession<T> = {
 	hasSession: boolean;
 	logout: boolean;

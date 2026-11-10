@@ -1,5 +1,6 @@
 <script>
 	import { getContext } from 'svelte';
+	import { config } from '$lib/stores';
 	const i18n = getContext('i18n');
 
 	export let show = true;
@@ -32,12 +33,14 @@
 		});
 	}
 
-	$: if (show && videoElement) {
+	$: visible = show && !$config?.oauth?.required_provider;
+
+	$: if (visible && videoElement) {
 		playBackgroundVideo();
 	}
 </script>
 
-{#if show}
+{#if visible}
 	<div class="relative h-screen max-h-[100dvh] w-full overflow-hidden text-white">
 		<div class="fixed top-6 left-6 z-50 sm:top-10 sm:left-10">
 			<!-- LICENSE covers this Open WebUI onboarding logo.
