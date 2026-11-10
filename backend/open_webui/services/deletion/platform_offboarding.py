@@ -19,7 +19,6 @@ from open_webui.models.automations import Automation
 from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat, ChatFile
-from open_webui.models.config import Config
 from open_webui.models.data_warnings import DataWarningLog
 from open_webui.models.feedbacks import Feedback
 from open_webui.models.files import File
@@ -36,6 +35,7 @@ from open_webui.models.password_reset import PasswordResetToken
 from open_webui.models.prompt_history import PromptHistory
 from open_webui.models.prompts import Prompt
 from open_webui.models.recovery_codes import RecoveryCode
+from open_webui.models.runtime_state import RuntimeState
 from open_webui.models.tags import Tag
 from open_webui.models.tools import Tool
 from open_webui.models.user_archives import UserArchive
@@ -85,10 +85,10 @@ def _key(person: str) -> str:
     return 'soev.offboarding.' + hashlib.sha256(person.encode()).hexdigest()
 
 
-async def _locked(db: AsyncSession, person: str) -> Config | None:
+async def _locked(db: AsyncSession, person: str) -> RuntimeState | None:
     if db.bind.dialect.name == 'postgresql':
         await db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:key,0))'), {'key': _key(person)})
-    return await db.scalar(select(Config).where(Config.key == _key(person)).with_for_update())
+    return await db.scalar(select(RuntimeState).where(RuntimeState.key == _key(person)).with_for_update())
 
 
 async def apply(task: Task) -> Error | None:
@@ -120,8 +120,8 @@ async def apply(task: Task) -> Error | None:
                 await _external(db, source, target if task.mode == 'transfer' else None)
                 await _local(db, source, target, task)
                 await db.execute(
-                    update(Config)
-                    .where(Config.key == _key(task.person))
+                    update(RuntimeState)
+                    .where(RuntimeState.key == _key(task.person))
                     .values(
                         value={**state.model_dump(mode='json'), 'state': 'completed'},
                     )
@@ -137,7 +137,7 @@ async def _prepare(task: Task) -> Error | None:
     async with get_async_db() as db:
         receipt = await _locked(db, task.person)
         job_key = 'soev.offboarding.job.' + hashlib.sha256(task.id.encode()).hexdigest()
-        bound = await db.get(Config, job_key)
+        bound = await db.get(RuntimeState, job_key)
         if bound is not None and bound.value['digest'] != _digest(task):
             return 'source_conflict'
         if receipt is not None:
@@ -157,9 +157,9 @@ async def _prepare(task: Task) -> Error | None:
         if await _unsupported_content(db, source.id, task.mode == 'transfer'):
             return 'unsupported_content'
         source.role = 'pending'
-        db.add(Config(key=job_key, value={'digest': _digest(task)}))
+        db.add(RuntimeState(key=job_key, value={'digest': _digest(task)}))
         db.add(
-            Config(
+            RuntimeState(
                 key=_key(task.person),
                 value={
                     'job': task.id,

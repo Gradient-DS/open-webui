@@ -15,7 +15,6 @@ from open_webui.models.access_grants import AccessGrant
 from open_webui.models.auths import Auth
 from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee
 from open_webui.models.chats import Chat
-from open_webui.models.config import Config
 from open_webui.models.files import File
 from open_webui.models.folders import Folder
 from open_webui.models.functions import Function
@@ -24,6 +23,7 @@ from open_webui.models.memories import Memory
 from open_webui.models.models import Model
 from open_webui.models.notes import Note
 from open_webui.models.prompts import Prompt
+from open_webui.models.runtime_state import RuntimeState
 from open_webui.models.tags import Tag
 from open_webui.models.tools import Tool
 from open_webui.models.users import User
@@ -269,7 +269,7 @@ async def test_each_mode_commits_only_owned_local_rows_and_replays_receipt(produ
             assert own_chat is None and own_folder is None
         assert (await db.get(Chat, 'chat-' + OTHER)).user_id == OTHER
         assert (await db.get(Folder, 'folder-' + OTHER)).user_id == OTHER
-        assert (await db.get(Config, local._key(work.person))).value['state'] == 'completed'
+        assert (await db.get(RuntimeState, local._key(work.person))).value['state'] == 'completed'
     assert 'fictional-other-object' in product.blobs
     assert OTHER in product.memory and 'file-' + OTHER in product.files
     if mode != 'transfer':
@@ -284,7 +284,7 @@ async def test_missing_target_and_source_refuse_without_mutation(product):
     assert not product.effects
     async with product.sessions() as db:
         assert (await db.get(User, SOURCE)).role == 'user'
-        assert await db.get(Config, local._key(person_ref('cobalt'))) is None
+        assert await db.get(RuntimeState, local._key(person_ref('cobalt'))) is None
 
 
 @pytest.mark.asyncio
@@ -305,7 +305,7 @@ async def test_cleanup_failure_keeps_rows_and_retry_does_not_repeat_committed_ex
     async with product.sessions() as db:
         assert (await db.get(User, SOURCE)).role == 'pending'
         assert await db.get(Note, 'note-' + SOURCE) is not None
-        assert (await db.get(Config, local._key(person_ref('cobalt')))).value['state'] == 'prepared'
+        assert (await db.get(RuntimeState, local._key(person_ref('cobalt')))).value['state'] == 'prepared'
     assert await offboarding.apply(task()) is None
     assert product.effects == first
 

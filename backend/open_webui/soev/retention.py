@@ -14,7 +14,7 @@ from open_webui import config
 from open_webui.internal.db import get_async_db
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chats
-from open_webui.models.config import Config
+from open_webui.models.runtime_state import RuntimeState
 from open_webui.soev.client import build_service_client
 from open_webui.soev.identity import credential_id_from_key
 from open_webui.soev.policy_jobs import v2_enabled
@@ -33,13 +33,13 @@ def _key() -> str:
 
 
 @asynccontextmanager
-async def _state() -> AsyncIterator[tuple[AsyncSession, Config]]:
+async def _state() -> AsyncIterator[tuple[AsyncSession, RuntimeState]]:
     async with _lock, get_async_db() as db:
         if db.bind.dialect.name == 'postgresql':
             await db.execute(text('SELECT pg_advisory_xact_lock(734268103)'))
-        row = await db.get(Config, _key())
+        row = await db.get(RuntimeState, _key())
         if row is None:
-            row = Config(key=_key(), value={'cursor': None, 'deleted': []})
+            row = RuntimeState(key=_key(), value={'cursor': None, 'deleted': []})
         yield db, row
         db.add(row)
         await db.commit()
@@ -53,7 +53,7 @@ async def remember_deleted(thread_ids: Collection[str]) -> None:
 
 async def known_deleted() -> set[str]:
     async with get_async_db() as db:
-        row = await db.get(Config, _key())
+        row = await db.get(RuntimeState, _key())
         return set(row.value['deleted']) if row else set()
 
 

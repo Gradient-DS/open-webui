@@ -9,10 +9,10 @@ import pytest_asyncio
 from open_webui.internal.db import Base
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat, ChatFile
-from open_webui.models.config import Config
 from open_webui.models.feedbacks import Feedback
 from open_webui.models.files import File
 from open_webui.models.knowledge import Knowledge, KnowledgeFile
+from open_webui.models.runtime_state import RuntimeState
 from open_webui.models.users import User
 from open_webui.services.deletion import platform_offboarding as local
 from open_webui.soev import offboarding, threads
@@ -163,7 +163,7 @@ async def test_owned_content_disposition_preserves_other_people(content_store, m
             assert own is None
         else:
             assert own.user_id == (TARGET if mode == 'transfer' else 'platform:svc:archive-offboarding-fictional-job')
-        assert (await db.get(Config, local._key(task(mode).person))).value['state'] == 'completed'
+        assert (await db.get(RuntimeState, local._key(task(mode).person))).value['state'] == 'completed'
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_foreign_content_dependencies_refuse_before_any_effect(content_sto
         assert (await db.get(User, SOURCE)).role == 'user'
         assert (await db.get(Chat, 'chat-' + SOURCE)).user_id == SOURCE
         assert await db.get(File, 'file-' + SOURCE) is not None
-        assert await db.get(Config, local._key(task(mode).person)) is None
+        assert await db.get(RuntimeState, local._key(task(mode).person)) is None
         table = (
             ChatMessage
             if dependency == 'chat-message'
@@ -245,7 +245,7 @@ async def test_prepared_receipt_rechecks_foreign_dependencies(content_store, mod
     async with content_store.sessions() as db:
         assert (await db.get(ChatMessage, 'fictional-late-message')).user_id == OTHER
         assert (await db.get(Chat, 'chat-' + SOURCE)).user_id == SOURCE
-        assert (await db.get(Config, local._key(work.person))).value['state'] == 'prepared'
+        assert (await db.get(RuntimeState, local._key(work.person))).value['state'] == 'prepared'
 
 
 @pytest.mark.asyncio
@@ -282,4 +282,4 @@ async def test_receipt_binding_changes_refuse_before_effects(content_store, bind
     content_store.external.assert_not_awaited()
     async with content_store.sessions() as db:
         assert (await db.get(Chat, 'chat-' + SOURCE)).user_id == SOURCE
-        assert (await db.get(Config, local._key(work.person))).value['state'] == 'prepared'
+        assert (await db.get(RuntimeState, local._key(work.person))).value['state'] == 'prepared'
