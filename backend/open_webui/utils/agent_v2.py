@@ -34,6 +34,7 @@ from open_webui.soev import (
     acting,
     agent_threads,
     assistant_files,
+    provisioned_knowledge,
     identity,
     ingest,
     live_documents,
@@ -264,18 +265,20 @@ async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]],
 
 
 async def _knowledge(
-    metadata: dict[str, Any], folder: list[dict[str, Any]] = ()
+    metadata: dict[str, Any], folder: list[dict[str, Any]] = (), sources: list[str] = ()
 ) -> tuple[list[dict[str, str]], list[Skipped]]:
-    """The selected knowledge bases with their current name and description, read at send time, and the ones the
-    API does not show the user: deleted for everyone, or hidden from them. The folder's come after the chat's and the
-    assistant's, read as the user too."""
-    keys = _knowledge_keys(metadata, folder)
+    """Read current knowledge as the caller, with provisioned sources last.
+
+    Only explicitly attached knowledge produces unavailable-item notices.
+    """
+    selected = _knowledge_keys(metadata, folder)
+    keys = list(dict.fromkeys([*selected, *sources]))
     if not keys:
         return [], []
     user_id = None if acting.requester_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     skipped = []
-    if missing := [key for key in keys if key not in described]:
+    if missing := [key for key in selected if key not in described]:
         existing = await Knowledges.existing_knowledge(missing)
         chosen = {
             item['id']: item.get('name')
@@ -2265,7 +2268,10 @@ async def _sent(
     try:
         chats: list[dict[str, str]] = []
         folder, skipped_folders = await _folder_items(metadata)
-        knowledge, skipped = await _knowledge(metadata, folder)
+        sources = await provisioned_knowledge.chosen(
+            metadata.get('features'), user_id=None if acting.requester_ref() else metadata['user_id']
+        )
+        knowledge, skipped = await _knowledge(metadata, folder, sources)
         attachments = await _attachments(metadata, folder)
         texts, skipped_texts = await _texts(entries, metadata['user_id'], chats=chats, organizations=turn.organizations)
         more_texts, skipped_more_texts = await _more_texts(

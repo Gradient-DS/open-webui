@@ -49,6 +49,7 @@ def platform_capabilities(monkeypatch):
         capabilities.CLOUD_SYNC,
         capabilities.MEETINGS,
         capabilities.IMAGES,
+        capabilities.PROVISIONED_KNOWLEDGE,
     }
 
     async def refresh():

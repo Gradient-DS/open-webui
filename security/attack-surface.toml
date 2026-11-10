@@ -32,6 +32,10 @@
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
 
+# Read-only caller-scoped list; no resource seed or writable fields.
+# Platform provisioning and the capability are configured in the console.
+# Public CI has no platform; route-coverage.toml records that boundary.
+
 # Required owner controls for sweep12's previously unentered operations.
 # The image-prompt operation has an exact all-actor refusal below; its supported
 # title-task control uses the same seeded chat, model and authenticated owner.

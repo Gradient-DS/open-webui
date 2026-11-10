@@ -20,6 +20,26 @@ describe('input items', () => {
 		]);
 	});
 
+	it('lists each data source after the data sources menu, in the knowledge section', () => {
+		const order = inputItemOrder(['a'], ['source-x', 'source-y']);
+		expect(order.slice(order.indexOf('reference_chats') + 1, order.indexOf('live_mail'))).toEqual([
+			'provisioned_knowledge',
+			'provisioned_knowledge:source-x',
+			'provisioned_knowledge:source-y'
+		]);
+	});
+
+	it('shows a data source that is on or pinned, never one no longer listed', () => {
+		const order = inputItemOrder([], ['source-x', 'source-y']);
+		expect(
+			barItemIds({
+				order,
+				pinned: ['provisioned_knowledge:source-y', 'provisioned_knowledge:gone-source'],
+				states: { 'provisioned_knowledge:source-x': 'on' }
+			})
+		).toEqual(['provisioned_knowledge:source-x', 'provisioned_knowledge:source-y']);
+	});
+
 	it('maps tool states and booleans to off / on', () => {
 		expect(itemState('auto')).toBe('on');
 		expect(itemState('off')).toBe('off');

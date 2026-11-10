@@ -20,6 +20,13 @@ SURFACE_PATH = ROOT / 'security/attack-surface.toml'
 METHODS = {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'}
 
 
+def test_provisioned_knowledge_list_needs_no_resource_seed_or_body():
+    path = '/api/v1/provisioned-knowledge/'
+    operation = SPEC['paths'][path]['get']
+    assert not operation.get('parameters') and 'requestBody' not in operation
+    assert all(entry['route'] != f'GET {path}' for entry in seeds.SURFACE.get('field', []))
+
+
 def path_parameters():
     for path, item in SPEC['paths'].items():
         for method, operation in item.items():

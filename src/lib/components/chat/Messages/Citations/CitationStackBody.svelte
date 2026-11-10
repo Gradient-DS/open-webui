@@ -21,6 +21,7 @@
 	export let showPercentage = false;
 	export let showRelevance = true;
 	export let previewAvailable = true;
+	export let previewType: string | undefined = undefined;
 	export let preview = true;
 	export let showDocumentNote = false;
 	let expanded = true;
@@ -117,6 +118,7 @@
 				{mergedDocuments}
 				{activeSnippetIdx}
 				{previewAvailable}
+				{previewType}
 			/>
 		{/key}
 	</div>

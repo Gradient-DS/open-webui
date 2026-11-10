@@ -53,6 +53,17 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
+	import {
+		PROVISIONED_KNOWLEDGE_PIN_PREFIX,
+		requestedProvisionedKnowledge,
+		toggleProvisionedKnowledge
+	} from '$lib/utils/provisionedKnowledge';
+	import {
+		provisionedKnowledge,
+		loadProvisionedKnowledge
+	} from '$lib/utils/provisionedKnowledgeStore';
+	import PinButton from './InputMenu/PinButton.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -99,7 +110,7 @@
 	export let uploadOneDriveHandler: () => void;
 	// [Gradient] Assistant-builder restrictions and strict data-separation state. Item keys
 	// match the pin ids (see MessageInput/inputItems.ts): 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
-	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'tools', 'skills',
+	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'provisioned_knowledge', 'tools', 'skills',
 	// 'filters', 'web_search', 'image_generation', 'code_interpreter', 'document_writer'.
 	// Null shows every globally enabled item.
 	export let restrictTo: string[] | null = null;
@@ -117,6 +128,8 @@
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
+	// Provisioned collections enabled for this chat.
+	export let selectedProvisionedKnowledgeIds: string[] = [];
 	export let toggleFilters: ToggleFilter[] = [];
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
@@ -194,6 +207,9 @@
 	$: if (show && $config?.features?.enable_onedrive_business) {
 		void prepareBusinessDocumentPicker().catch(() => {});
 	}
+	$: if (show && $config?.features?.enable_provisioned_knowledge) {
+		void loadProvisionedKnowledge(localStorage.token);
+	}
 	let tab = '';
 	// Opened straight into a submenu from a pinned composer button: no back row.
 	let directTab = false;
@@ -262,6 +278,14 @@
 		oneDriveBusiness;
 	$: showKnowledge = itemAllowed('knowledge') && isFeatureEnabled('knowledge');
 	$: showReferenceChats = itemAllowed('reference_chats') && isFeatureEnabled('reference_chats');
+	$: showProvisionedKnowledge =
+		itemAllowed('provisioned_knowledge') &&
+		!!$config?.features?.enable_provisioned_knowledge &&
+		($provisionedKnowledge ?? []).length > 0;
+	$: provisionedKnowledgeOn = requestedProvisionedKnowledge(
+		selectedProvisionedKnowledgeIds,
+		$provisionedKnowledge
+	).length;
 
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
@@ -291,7 +315,7 @@
 		showMeetings ||
 		showGoogleDrive ||
 		showOneDrive;
-	$: anyKnowledge = showKnowledge || showReferenceChats;
+	$: anyKnowledge = showKnowledge || showReferenceChats || showProvisionedKnowledge;
 	$: anyTools =
 		showLiveMail ||
 		showLiveDocuments ||
@@ -812,6 +836,29 @@
 						</MenuItem>
 					{/if}
 
+					{#if showProvisionedKnowledge}
+						<MenuItem
+							label={$i18n.t('Data sources')}
+							pinId="provisioned_knowledge"
+							submenu
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'provisioned_knowledge';
+							}}
+						>
+							<Database slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if provisionedKnowledgeOn > 0}
+									<span class="shrink-0 text-xs text-gray-500"
+										>{$i18n.t('{{COUNT}} on', { COUNT: provisionedKnowledgeOn })}</span
+									>
+								{/if}
+							</svelte:fragment>
+						</MenuItem>
+					{/if}
+
 					<!-- ═══ Tools ═══ -->
 					{#if anyTools || toolsLoading}
 						{#if anyContext || anyKnowledge}
@@ -1155,6 +1202,8 @@
 										{$i18n.t('Files')}
 									{:else if tab === 'chats'}
 										{$i18n.t('Reference chats')}
+									{:else if tab === 'provisioned_knowledge'}
+										{$i18n.t('Data sources')}
 									{:else if tab === 'tool_permissions'}
 										{$i18n.t('Tool Permissions')}
 									{:else if tab === 'tools'}
@@ -1179,6 +1228,56 @@
 						<Files {onSelect} />
 					{:else if tab === 'chats'}
 						<Chats {onSelect} />
+					{:else if tab === 'provisioned_knowledge'}
+						<!-- Enabled collections are available for the model to search. -->
+						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+							{#if $provisionedKnowledge === null}
+								<div class="py-4">
+									<Spinner />
+								</div>
+							{:else}
+								<div class="flex flex-col gap-0.5">
+									{#each $provisionedKnowledge as source (source.id)}
+										{@const on = selectedProvisionedKnowledgeIds.includes(source.id)}
+										<button
+											type="button"
+											class="flex w-full gap-2 items-center px-2 py-1 text-[0.8125rem] font-normal text-left cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/60"
+											class:opacity-50={internalBlocked}
+											aria-disabled={internalBlocked}
+											aria-pressed={on}
+											aria-label={stateAriaLabel(
+												source.name,
+												on,
+												on
+													? $i18n.t('The model decides whether to search this data source')
+													: $i18n.t(TOOL_OFF_DESCRIPTION)
+											)}
+											on:click={() => {
+												if (internalBlocked) return;
+												selectedProvisionedKnowledgeIds = toggleProvisionedKnowledge(
+													selectedProvisionedKnowledgeIds,
+													source.id
+												);
+											}}
+										>
+											<div class="shrink-0 flex items-center justify-center size-3.5">
+												<Database className="size-3.5" />
+											</div>
+											<div class="flex-1 min-w-0">
+												<div class="truncate">{source.name}</div>
+												{#if source.description}
+													<div class="text-xs text-gray-500 line-clamp-1">{source.description}</div>
+												{/if}
+											</div>
+											<div class="shrink-0" inert>
+												<Switch state={on} />
+											</div>
+											<PinButton itemId={`${PROVISIONED_KNOWLEDGE_PIN_PREFIX}${source.id}`} />
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					{:else if tab === 'tool_permissions'}
 						<div class="space-y-1">
 							{#each toolApprovalModes as mode}

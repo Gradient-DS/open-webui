@@ -50,6 +50,7 @@
 	export let selectedToolIds = [];
 	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
+	export let selectedProvisionedKnowledgeIds: string[] = [];
 	export let pendingOAuthTools = [];
 
 	export let showCommands = false;
@@ -266,6 +267,7 @@
 						bind:selectedToolIds
 						bind:selectedSkillIds
 						bind:selectedFilterIds
+						bind:selectedProvisionedKnowledgeIds
 						bind:imageGenerationEnabled
 						bind:liveDocumentsState
 						bind:liveMailState

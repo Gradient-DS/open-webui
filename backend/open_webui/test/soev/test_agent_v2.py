@@ -290,6 +290,50 @@ async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: C
     assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
 
 
+@pytest.mark.asyncio
+async def test_switched_on_provisioned_knowledge_are_sent_as_knowledge_after_the_selected(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_v2.provisioned_knowledge, 'allowed', AsyncMock(return_value=True))
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_collection(chat.api, 'publications', 'Publicaties', 'Onderzoek')
+    seed_collection(chat.api, 'kb-private', 'Ordinary knowledge')
+    seed_collection(chat.api, 'ds:legacy', 'Legacy prefix')
+    seed_hidden_collection(chat.api, 'hidden-source', 'Hidden')
+    for key in ('publications', 'hidden-source'):
+        chat.api.collections[key]['provisioning'] = 'provisioned'
+    await chat.turn(
+        'question',
+        'a1',
+        files=[{'type': 'collection', 'id': 'kb-a'}],
+        features={
+            'provisioned_knowledge': [
+                'publications',
+                'kb-private',
+                'ds:legacy',
+                'hidden-source',
+                'gone-source',
+                'publications',
+            ]
+        },
+    )
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [
+        {'key': 'kb-a', 'name': 'Contracten'},
+        {'key': 'publications', 'name': 'Publicaties', 'description': 'Onderzoek'},
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+async def test_provisioned_knowledge_are_dropped_while_the_gate_is_closed(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_v2.provisioned_knowledge, 'allowed', AsyncMock(return_value=False))
+    seed_collection(chat.api, 'publications', 'Publicaties')
+    await chat.turn('question', 'a1', features={'provisioned_knowledge': ['publications']})
+    assert chat.mutations()[-1][1]['input']['knowledge'] == []
+
+
 def seed_hidden_collection(api: FakeSoevApi, key: str, name: str) -> None:
     """A knowledge base that exists, readable by OWUI's service principal but not by the user."""
     seed_collection(api, key, name)

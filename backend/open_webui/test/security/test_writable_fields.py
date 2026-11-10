@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 530 operations. Audit bodies across all
-# OpenAPI methods (534 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 531 operations. Audit bodies across all
+# OpenAPI methods (535 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (530, 534), (
-        f'Expected 530 five-method operations / 534 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (531, 535), (
+        f'Expected 531 five-method operations / 535 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -47,6 +47,15 @@ def test_chat_share_access_has_no_writable_fields(surface, path):
     assert not fields.get(route)
     assert not queries.get(route)
     assert [(parameter['in'], parameter['name']) for parameter in operations[route]['parameters']] == [('path', 'id')]
+
+
+def test_provisioned_knowledge_has_no_caller_selected_subject_or_body(surface):
+    operations, fields, queries = surface
+    route = 'GET /api/v1/provisioned-knowledge/'
+    assert 'requestBody' not in operations[route]
+    assert not fields.get(route) and not queries.get(route)
+    assert not operations[route].get('parameters')
+    assert operations[route]['security'] == [{'HTTPBearer': []}]
 
 
 def test_conversation_read_has_no_client_selected_user_or_timestamp(surface):

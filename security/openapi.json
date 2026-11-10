@@ -11777,6 +11777,29 @@
         "title": "ProviderMetadataField",
         "type": "object"
       },
+      "ProvisionedKnowledge": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ProvisionedKnowledge",
+        "type": "object"
+      },
       "PushModelForm": {
         "description": "Payload for pushing a model to a registry.",
         "properties": {
@@ -36824,6 +36847,37 @@
         "summary": "Get Prompt Tags",
         "tags": [
           "prompts"
+        ]
+      }
+    },
+    "/api/v1/provisioned-knowledge/": {
+      "get": {
+        "description": "List as the caller; return 404 while the feature is unavailable.",
+        "operationId": "list_provisioned_knowledge_api_v1_provisioned_knowledge__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProvisionedKnowledge"
+                  },
+                  "title": "Response List Provisioned Knowledge Api V1 Provisioned Knowledge  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Provisioned Knowledge",
+        "tags": [
+          "provisioned-knowledge"
         ]
       }
     },

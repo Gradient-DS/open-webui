@@ -1,3 +1,4 @@
+import { provisionedKnowledgeIds } from './provisionedKnowledge';
 import { liveDocumentState } from './toolState';
 
 const featureKeys = {
@@ -9,7 +10,8 @@ const featureKeys = {
 	documentWriterEnabled: 'document_writer',
 	selectedToolIds: 'tool_ids',
 	selectedSkillIds: 'skill_ids',
-	selectedFilterIds: 'filter_ids'
+	selectedFilterIds: 'filter_ids',
+	selectedProvisionedKnowledgeIds: 'provisioned_knowledge'
 } as const;
 
 export type ComposerPreferences = {
@@ -22,6 +24,7 @@ export type ComposerPreferences = {
 	selectedToolIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
+	selectedProvisionedKnowledgeIds: string[];
 };
 
 export function composerPreferences(
@@ -38,7 +41,8 @@ export function composerPreferences(
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
 		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
-		selectedFilterIds: [...(values.selectedFilterIds ?? [])]
+		selectedFilterIds: [...(values.selectedFilterIds ?? [])],
+		selectedProvisionedKnowledgeIds: provisionedKnowledgeIds(values.selectedProvisionedKnowledgeIds)
 	};
 }
 

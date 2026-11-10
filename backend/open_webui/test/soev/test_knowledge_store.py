@@ -1555,3 +1555,21 @@ async def test_create_returns_the_creator_even_before_person_binding(env, monkey
     monkeypatch.setattr(env.client, 'send', create)
     result = await env.store.insert_new_knowledge('alice', env.models.KnowledgeForm(name='New', description=''))
     assert result.user_id == 'alice'
+
+
+@pytest.mark.asyncio
+async def test_provisioned_collections_list_apart_from_knowledge_and_only_where_readable(env):
+    await seed(env, 'publications', name='Publications')
+    env.api.collections['publications'].update(visibility='public', provisioning='provisioned')
+    await seed(env, 'internal-source', owner='bob', name='Internal')
+    env.api.collections['internal-source']['provisioning'] = 'provisioned'
+    await seed(env, 'ds:ordinary', name='Ordinary knowledge')
+    env.api.collections['ds:ordinary']['provisioning'] = None
+    expected = {'kb', 'ds:ordinary'}
+    assert {item.id for item in await env.store.get_knowledge_bases()} == expected
+    assert {item.id for item in (await env.store.search_knowledge_bases('alice', {})).items} == expected
+    assert {item.id for item in await env.store.get_knowledge_bases_by_user_id('alice', 'read')} == expected
+    assert await env.store.accessible_collection_ids('alice', ['kb', 'publications']) == {'kb'}
+    env.api.requests.clear()
+    assert [row['key'] for row in await env.store.provisioned_knowledge('carol')] == ['publications']
+    assert all(request.headers.get('X-Soev-User-Token') for request in env.api.requests)

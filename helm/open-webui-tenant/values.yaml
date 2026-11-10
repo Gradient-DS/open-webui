@@ -351,6 +351,10 @@ openWebui:
     # assistant's instructions; "false" hides the item and 404s the route.
     enableAgentTraceDownload: "false"
 
+    # Platform collections with provisioning=provisioned, selected per chat.
+    # Also needs the soev-api provisioned_knowledge capability.
+    enableProvisionedKnowledge: "false"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"

@@ -220,6 +220,9 @@ data:
   # Agent trace download (admins)
   ENABLE_AGENT_TRACE_DOWNLOAD: {{ .Values.openWebui.config.enableAgentTraceDownload | default "false" | quote }}
 
+  # Provisioned knowledge in the chat composer
+  ENABLE_PROVISIONED_KNOWLEDGE: {{ .Values.openWebui.config.enableProvisionedKnowledge | default "false" | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}

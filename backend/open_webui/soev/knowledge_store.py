@@ -163,14 +163,15 @@ class SoevKnowledgeTable:
                 return None
             raise
 
-    async def _collections(self, *, user_id=None, as_service=False):
+    async def _collections(self, *, user_id=None, as_service=False, provisioned=False):
         return await memoized(
-            ('collections', self, self._user_ref(user_id), as_service),
-            lambda: self._load_collections(user_id=user_id, as_service=as_service),
+            ('collections', self, self._user_ref(user_id), as_service, provisioned),
+            lambda: self._load_collections(user_id=user_id, as_service=as_service, provisioned=provisioned),
         )
 
-    async def _load_collections(self, *, user_id=None, as_service=False):
+    async def _load_collections(self, *, user_id=None, as_service=False, provisioned=False):
         from open_webui.soev import ingest
+        from open_webui.soev.provisioned_knowledge import is_provisioned
 
         access_reads = await self._access_reads(user_id=user_id, as_service=as_service)
         collections, jobs, *access_pages = await self._read_catalog_pages(
@@ -199,9 +200,14 @@ class SoevKnowledgeTable:
                 and not ingest.is_attachments_collection(row['key'])
                 and not ingest.is_assistant_collection(row['key'])
                 and not ingest.is_folder_collection(row['key'])
+                and is_provisioned(row) is provisioned
             ]
         )
         return await self._with_access_jobs(visible, user_id=user_id, as_service=as_service, job_pages=access_pages)
+
+    async def provisioned_knowledge(self, user_id=None):
+        rows = await self._collections(user_id=user_id, provisioned=True)
+        return sorted(rows, key=lambda row: (_sort_value(row['name']), row['key']))
 
     async def _access_markers(self, *, user_id=None, as_service=False):
         from open_webui.soev import knowledge_access_jobs
@@ -606,10 +612,19 @@ class SoevKnowledgeTable:
         if not members:
             return None
         collection, document = members[0]
+        row = _catalog_file_row(document, user_id)
+        row['meta']['soev_collection_key'] = collection['key']
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
-        return _catalog_file_row(document, user_id), self._client.stream_response(
-            path, as_user=self._user_ref(user_id), range_header=range_header
-        )
+        return row, self._client.stream_response(path, as_user=self._user_ref(user_id), range_header=range_header)
+
+    async def catalog_rendition(self, collection_key, source_id, *, user_id):
+        path = self._path(collection_key) + '/documents/' + quote(source_id, safe='') + '/content'
+        try:
+            return await self._client.get_text(path, as_user=self._user_ref(user_id))
+        except SoevApiError as error:
+            if error.status == 404 or (error.status == 409 and error.code == 'rendition_missing'):
+                return None
+            raise
 
     async def _source_references(self, source_id, *, user_id=None, as_service=False):
         return await memoized(
