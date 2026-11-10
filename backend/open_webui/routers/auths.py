@@ -60,6 +60,7 @@ from open_webui.models.users import (
     Users,
     UserStatus,
 )
+from open_webui.soev.login_attach import refuse_platform_token_exchange, refuse_unsafe_sub_claim
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
@@ -1729,6 +1730,7 @@ async def get_oauth_config(request: Request, user=Depends(get_admin_user)):
 
 @router.post('/admin/config/oauth', response_model=OAuthConfigResponse)
 async def update_oauth_config(request: Request, form_data: OAuthConfigForm, user=Depends(get_admin_user)):
+    refuse_unsafe_sub_claim(form_data.OAUTH_SUB_CLAIM)
     await Config.upsert(oauth_config_updates(form_data.model_dump(exclude_none=True)))
     return await get_oauth_config_values()
 
@@ -1852,6 +1854,7 @@ async def token_exchange(
     Exchange an external OAuth provider token for an OpenWebUI JWT.
     This endpoint is disabled by default. Set ENABLE_OAUTH_TOKEN_EXCHANGE=True to enable.
     """
+    refuse_platform_token_exchange()
     if not ENABLE_OAUTH_TOKEN_EXCHANGE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

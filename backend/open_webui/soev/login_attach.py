@@ -2,10 +2,12 @@
 
 import logging
 
+from fastapi import HTTPException
 from sqlalchemy import String, cast, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_db_context
 from open_webui.models.config import Config
 from open_webui.models.users import User, UserModel
@@ -13,13 +15,26 @@ from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.principal_refs import is_canonical_person_ref
 
 log = logging.getLogger(__name__)
+_PLATFORM_SUB_CLAIMS = (None, '', 'sub')
+
+
+def refuse_platform_token_exchange() -> None:
+    if config.SOEV_API_URL:
+        log.warning('OAuth token exchange denied', extra={'code': 'oauth_platform_token_exchange_refused'})
+        raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
+
+def refuse_unsafe_sub_claim(claim: str | None) -> None:
+    if config.SOEV_API_URL and claim not in _PLATFORM_SUB_CLAIMS:
+        log.warning('OAuth configuration denied', extra={'code': 'oauth_unsafe_sub_claim_refused'})
+        raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 
 async def validate_login_config() -> None:
     if not config.SOEV_API_URL:
         return
     for claim in (config.OAUTH_SUB_CLAIM, await Config.get('oauth.sub_claim', config.OAUTH_SUB_CLAIM)):
-        if claim not in (None, '', 'sub'):
+        if claim not in _PLATFORM_SUB_CLAIMS:
             raise ValueError(
                 'With SOEV_API_URL configured, OAUTH_SUB_CLAIM and oauth.sub_claim must be "sub" or unset; '
                 'other claims cannot identify a platform account.'

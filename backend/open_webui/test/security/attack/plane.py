@@ -64,6 +64,7 @@ from .seeds import (
     parameter_for,
     route_waived,
     runtime_soev_backed,
+    seed_enabled,
 )
 
 
@@ -414,7 +415,7 @@ def _fill(path, parameters):
     def substitute(match):
         name = match.group(1)
         declaration = parameter_for(path, name)
-        if 'unseedable' in declaration:
+        if 'unseedable' in declaration and not seed_enabled(declaration):
             raise UnseedableRoute(declaration['unseedable'])
         value = parameters[path, name]
         if not isinstance(value, str) or not value.strip():

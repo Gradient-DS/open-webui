@@ -62,7 +62,8 @@ def route_waived(route):
 
 
 def seed_enabled(entry):
-    return 'unseedable' not in entry and not backed_seed_waived(entry)
+    refusal_probe = runtime_soev_backed() == 'drive' and 'v2_refused_value' in entry
+    return ('unseedable' not in entry or refusal_probe) and not backed_seed_waived(entry)
 
 
 def selected_parameters(surface=SURFACE):
@@ -839,7 +840,7 @@ def resolve_parameters(
     failures, blocked = {}, {}
     for p in ordered:
         key = p['key']
-        if 'unseedable' in p:
+        if not seed_enabled(p):
             continue
         dependencies = [name for name in _dependencies(p) if name in failures]
         if dependencies:

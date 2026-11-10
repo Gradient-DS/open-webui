@@ -98,6 +98,10 @@ account already has `person_id` must also agree with the person returned by
 `/v1/me` for this login token before any session is issued. A mismatch refuses
 with `403`, logged as `oauth_person_mismatch`, without signup or attachment;
 failed discovery refuses with the same retryable `503` as an unknown login.
+Runtime OAuth settings updates also refuse a custom `oauth.sub_claim` with `403`
+before writing any configuration. OAuth token exchange is always refused with
+`403` when soev-api is configured, including when `ENABLE_OAUTH_TOKEN_EXCHANGE`
+is enabled; it logs `oauth_platform_token_exchange_refused` and issues no session.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product

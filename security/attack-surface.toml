@@ -586,10 +586,11 @@ unseedable = "auths.py:delete_oauth_session_by_provider requires an OAuthSession
 
 [[parameter]]
 key = "oauth_exchange_provider"
+v2_refused_value = "attack-oidc-provider"
 name = "provider"
 prefix = "/api/v1/auths/oauth/{provider}"
-description = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
-unseedable = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
+description = "With SOEV_API_URL configured, auths.py:token_exchange refuses 403 before feature flags, rate limiting, provider lookup, token inspection or session creation; login_attach.py logs oauth_platform_token_exchange_refused. Drive mode uses an explicit fictional provider to probe this all-actor boundary without an issuer. Standalone exchange still requires an environment-registered provider and issuer token."
+unseedable = "Standalone auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer. In drive mode v2_refused_value probes the unconditional platform refusal instead."
 
 [[parameter]]
 key = "oauth_login_provider"
@@ -778,6 +779,19 @@ key = "notification_target"
 name = "target_id"
 prefix = "/api/v1/notifications/targets/{target_id}"
 unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, s3) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
+
+[[field]]
+route = "POST /api/v1/auths/oauth/{provider}/token/exchange"
+description = "An explicit fictional access token exercises the platform exchange refusal; no provider token or session is required."
+json = { token = "fictional-exchange-token" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/oauth/{provider}/token/exchange"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "Platform logins use the OAuth callback with immutable sub and /v1/me person verification. Token exchange is unavailable with SOEV_API_URL configured, even when its feature flag is enabled; no account lookup, provider request or session is allowed."
 
 [[field]]
 backed_by = "soev-solutions"

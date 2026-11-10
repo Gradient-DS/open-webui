@@ -19,7 +19,8 @@
 
 # --- OAuth: the sealed stack has no identity provider ------------------------
 # Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real
-# surface. An OIDC issuer stub on the CI network would close all seven.
+# surface. The platform exchange refusal is driven without an issuer. An OIDC
+# issuer stub would close the remaining callbacks and standalone exchange gap.
 # With soev-api configured, both provider callbacks use only the verified token
 # sub. /v1/me resolves unknown logins and verifies known person-bound accounts:
 # attach only by user.person_id, refuse binding/person conflicts with 403 and
@@ -49,7 +50,8 @@ reason = "Never attempted: every owner pass skips it because `client_id` is decl
 
 [[waived]]
 id = "POST /api/v1/auths/oauth/{provider}/token/exchange"
-reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_exchange_provider). auths.py:token_exchange needs an environment-registered OAUTH_PROVIDERS entry and an access token from its issuer; neither can be created through the application's HTTP API. Closes with an OIDC issuer stub."
+runtime_soev_backed = "waive"
+reason = "Standalone mode only: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_exchange_provider). auths.py:token_exchange needs an environment-registered OAUTH_PROVIDERS entry and an access token from its issuer; neither can be created through the application's HTTP API. Closes with an OIDC issuer stub. With soev-api configured, drive mode probes the explicit 403 refusal with a fictional provider and token; it has no waiver."
 
 [[waived]]
 id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
