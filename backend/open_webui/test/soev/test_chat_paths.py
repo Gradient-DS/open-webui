@@ -180,9 +180,13 @@ def fake_api(request, calls, state, visible, feedback):
         return httpx.Response(200, json={'thread_id': 'fictional-child' if state['forks'] == 1 else 'fictional-clone'})
     if path.endswith('/feedback'):
         body = json.loads(request.content)
-        assert set(body) == {'rating', 'position', 'comment', 'comment_authored'}
+        assert set(body) == {'rating', 'position', 'comment', 'comment_authored', 'reason', 'tags'}
         feedback.append(
             {
+                'id': 'fictional-feedback',
+                'position': body['position'],
+                'reason': body['reason'],
+                'tags': body['tags'],
                 'thread_id': 'fictional-thread',
                 'rating': body['rating'],
                 'model': 'fictional-model',
@@ -350,6 +354,9 @@ def fake_metrics(path, state, feedback):
                 'unknown_outputs': 1,
                 'known_tokens': {'prompt_tokens': 7, 'completion_tokens': 3, 'total_tokens': 10},
                 'tokens': None,
+                'by_model': [],
+                'by_person': [],
+                'by_period': [],
             },
         )
     if path == '/v1/feedback':
@@ -364,6 +371,7 @@ def fake_metrics(path, state, feedback):
                         'model': 'fictional-model',
                         'agent': 'fictional-agent',
                         'rating': 1,
+                        'period': '2026-10-25',
                         'count': len(feedback) if state['admin'] else min(1, len(feedback)),
                     }
                 ],
@@ -464,7 +472,6 @@ async def dark_api(monkeypatch):
         ('GET', '/notes/fictional-note/chat'),
         ('GET', '/notes/fictional-note/chats'),
         ('POST', '/notes/fictional-note/chat'),
-        ('GET', '/evaluations/feedbacks/all/export'),
         ('DELETE', '/evaluations/feedbacks'),
     ],
 )
@@ -778,9 +785,14 @@ async def test_platform_delete_completes_before_removing_record(dark_api):
 
 
 @pytest.mark.asyncio
-async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api):
+async def test_feedback_allowlist_preserves_authored_comments(dark_api):
     rating = {'thread_id': 'fictional-thread', 'position': 2, 'rating': 1}
-    for extra in [{'snapshot': {}}, {'model': 'fictional-forged'}, {'tags': []}, {'comment': 'Fictional unasserted'}]:
+    for extra in [
+        {'snapshot': {}},
+        {'model': 'fictional-forged'},
+        {'tags': ['invalid id']},
+        {'comment': 'Fictional unasserted'},
+    ]:
         response = await dark_api.browser.post('/api/v1/evaluations/feedback', json={**rating, **extra})
         assert response.status_code == 422
     for comment in [None, 'Fictional written comment']:
@@ -788,97 +800,27 @@ async def test_feedback_allowlist_authored_comment_and_admin_exception(dark_api)
             '/api/v1/evaluations/feedback',
             json={
                 **rating,
+                'reason': 'accuracy',
+                'tags': ['language'],
                 **({'comment': comment, 'comment_authored': True} if comment else {}),
             },
         )
         assert response.status_code == 204, response.text
     listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/user')
     assert len(listed.json()['items']) == 1
-    dark_api.state['admin'] = True
-    dark_api.user.role = 'admin'
-    listed = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
-    assert len(listed.json()['items']) == 2
-    assert set(listed.json()['items'][1]) == {'thread_id', 'rating', 'model', 'agent', 'time', 'comment'}
-    summary = await dark_api.browser.get('/api/v1/evaluations/leaderboard')
-    assert summary.json()['items'][0]['count'] == 2
-    dark_api.state['status'] = 403
-    denied = await dark_api.browser.get('/api/v1/evaluations/feedbacks/list')
-    assert denied.status_code == 404 and 'secret' not in denied.text
+    assert listed.json()['items'][0]['reason'] == 'accuracy'
+    assert listed.json()['items'][0]['tags'] == ['language']
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('route', ['feedbacks/list', 'leaderboard'])
-@pytest.mark.parametrize('role', ['user', 'pending'])
-@pytest.mark.parametrize('platform_admin', [False, True])
-async def test_evaluation_admin_routes_refuse_nonadmins_before_platform_access(dark_api, route, role, platform_admin):
-    dark_api.state['admin'] = platform_admin
-    dark_api.user.id, dark_api.user.role = 'fictional-lark', role
-    response = await dark_api.browser.get(f'/api/v1/evaluations/{route}')
-    assert response.status_code == 401
-    assert response.json() == {'state': 'sign_in'}
-    assert response.headers['cache-control'] == 'private, no-store'
-    assert dark_api.calls == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('role', ['user', 'pending'])
-async def test_every_replaced_admin_route_refuses_nonadmins_before_dispatch(dark_api, role):
-    import re
-
-    from open_webui.soev.chat_routes import DarkChatRoute
-    from open_webui.utils.auth import get_admin_user
-
-    dark_api.user.role = role
-    dark_api.state['admin'] = True
-    routes = [
-        route
-        for route in dark_api.app.routes
-        if isinstance(route, DarkChatRoute) and route.applies() and get_admin_user in dependency_calls(route.dependant)
-    ]
-    assert routes
-    for route in routes:
-        target = re.sub(r'\{[^}]+\}', 'fictional-target', route.path)
-        for method in route.methods:
-            response = await dark_api.browser.request(method, target)
-            assert response.status_code == 401, (method, route.path, response.text)
-            assert response.json() == {'state': 'sign_in'}
-            assert response.headers['cache-control'] == 'private, no-store'
-    assert dark_api.calls == []
-    assert dark_api.records.writes == []
-
-
-@pytest.mark.asyncio
-async def test_replaced_admin_content_refusals_keep_their_exact_inventory_contract(dark_api):
-    import re
-    import tomllib
-    from pathlib import Path
-
-    from open_webui.soev.chat_routes import DarkChatRoute
-    from open_webui.utils.auth import get_admin_user
-
-    surface = tomllib.loads((Path(__file__).resolve().parents[4] / 'security/attack-surface.toml').read_text())
-    controls = {entry['route']: entry for entry in surface['control']}
-    dark_api.user.role = 'admin'
-    checked = []
-    for route in dark_api.app.routes:
-        if not isinstance(route, DarkChatRoute) or not route.applies():
-            continue
-        if get_admin_user not in dependency_calls(route.dependant):
-            continue
-        template = re.sub(r':[^}]+(?=})', '', route.path)
-        for method in route.methods:
-            declaration = controls.get(f'{method} {template}')
-            if declaration is None:
-                continue
-            assert not declaration.get('all_actors'), template
-            response = await dark_api.browser.request(method, re.sub(r'\{[^}]+\}', 'fictional-target', route.path))
-            assert response.status_code == declaration['status'] == 409
-            assert response.json() == declaration['json'] == {'state': 'unavailable'}
-            assert response.headers['cache-control'] == 'private, no-store'
-            checked.append(f'{method} {template}')
-    assert checked
-    assert dark_api.calls == []
-    assert dark_api.records.writes == []
+async def test_unknown_platform_feedback_ids_preserve_400_without_upstream_details(dark_api):
+    dark_api.state['status'] = 400
+    response = await dark_api.browser.post(
+        '/api/v1/evaluations/feedback',
+        json={'thread_id': 'fictional-thread', 'position': 2, 'rating': 1, 'reason': 'unknown', 'tags': []},
+    )
+    assert response.status_code == 400
+    assert 'secret' not in response.text
 
 
 @pytest.mark.asyncio
@@ -959,6 +901,10 @@ async def test_per_thread_feedback_filters_all_authorized_records(dark_api):
         dark_api.feedback.append(
             {
                 'thread_id': thread_id,
+                'id': f'fictional-feedback-{thread_id}',
+                'position': 2,
+                'reason': None,
+                'tags': [],
                 'rating': 1,
                 'model': 'fictional-model',
                 'agent': 'fictional-agent',

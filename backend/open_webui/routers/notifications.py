@@ -35,9 +35,7 @@ async def _check_notifications_access(user) -> None:
     if not await Config.get('ui.enable_user_webhooks'):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'features.webhooks', await Config.get('user.permissions')
-    ):
+    if not await has_permission(user.id, 'features.webhooks', await Config.get('user.permissions')):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 

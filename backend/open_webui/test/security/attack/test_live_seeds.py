@@ -6,7 +6,7 @@ from urllib.parse import quote
 import pytest
 
 from . import seeds
-from .test_seeds import LIVE_READS, path_parameters, stop_seed_task
+from .test_seeds import LIVE_READS, path_parameters
 
 
 @pytest.fixture(scope='module')
@@ -19,11 +19,7 @@ def live_seeds():
         resolved = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
         yield identities, resolved
     finally:
-        try:
-            if resolved is not None:
-                stop_seed_task(identities.admin, resolved)
-        finally:
-            identities.close()
+        identities.close()
 
 
 def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
@@ -43,12 +39,11 @@ def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(l
     # Look the value up by a path the spec actually contains. The surface entry's
     # `prefix` is a longest-prefix matcher, not a route: resolve_parameters keys its
     # result by real path templates, so using a prefix here raises KeyError.
-    model_id = resolved['/api/v1/analytics/models/{model_id}/overview', 'model_id']
+    model_id = resolved.fixtures['model']
     registry = client.request('GET', '/api/models', params={'refresh': True})
     assert registry.status_code == 200, registry.text
     ids = {model['id'] for model in registry.json()['data']}
     assert model_id in ids
-    assert any(model.startswith('attack_task_') for model in ids)
     result = client.request(
         'POST',
         '/api/chat/completions',
@@ -68,19 +63,16 @@ def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(l
 def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
     identities, first = live_seeds
     second = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
-    try:
-        for pair, value in first.items():
-            p = seeds.parameter_for(*pair)
-            if 'same_as' not in p and p.get('fresh', True):
-                if seeds.runtime_soev_backed() == 'drive' and p['key'] == 'chat_message':
-                    # Positions are scoped to a thread; position 7 in a new
-                    # thread is a different message, never a reused fixture.
-                    parent = (pair[0], 'id')
-                    assert (second[parent], second[pair]) != (first[parent], value)
-                else:
-                    assert second[pair] != value, f'{p["key"]} reused a previous pass fixture'
-    finally:
-        stop_seed_task(identities.admin, second)
+    for pair, value in first.items():
+        p = seeds.parameter_for(*pair)
+        if 'same_as' not in p and p.get('fresh', True):
+            if seeds.runtime_soev_backed() == 'drive' and p['key'] == 'chat_message':
+                # Positions are scoped to a thread; position 7 in a new
+                # thread is a different message, never a reused fixture.
+                parent = (pair[0], 'id')
+                assert (second[parent], second[pair]) != (first[parent], value)
+            else:
+                assert second[pair] != value, f'{p["key"]} reused a previous pass fixture'
 
 
 @pytest.mark.parametrize('template', LIVE_READS)
@@ -91,21 +83,19 @@ def test_live_ids_address_real_resources(live_seeds, template):
     if seeds.route_waived(f'GET {template}'):
         pytest.skip('soev-solutions resource is waived in this runtime mode')
     path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
-    result = identities.admin.request('GET', path)
+    result = identities.user.request('GET', path)
     refusal = expected_refusals().get(f'GET {template}')
     if refusal:
         assert refused_as_expected(refusal, result.status_code, result.text), (template, result.text)
         return
     assert result.status_code == 200, f'{template}: HTTP {result.status_code}: {result.text[:200]}'
-    if template.endswith('/validate'):
-        assert result.json()['email'].startswith('attack-invite-token-')
 
 
 def test_live_chat_history_message_is_in_its_parent(live_seeds):
     identities, resolved = live_seeds
     template = '/api/v1/chats/{id}/messages/{message_id}'
     chat_id, message_id = resolved[template, 'id'], resolved[template, 'message_id']
-    result = identities.admin.request('GET', f'/api/v1/chats/{chat_id}')
+    result = identities.user.request('GET', f'/api/v1/chats/{chat_id}')
     assert result.status_code == 200
     if seeds.runtime_soev_backed() == 'drive':
         assert any(
@@ -115,30 +105,16 @@ def test_live_chat_history_message_is_in_its_parent(live_seeds):
         assert result.json()['chat']['history']['messages'][message_id]['id'] == message_id
 
 
-def test_live_task_still_exists_after_the_rest_of_seeding(live_seeds):
-    identities, resolved = live_seeds
-    task_id = resolved['/api/tasks/stop/{task_id}', 'task_id']
-    if seeds.runtime_soev_backed() == 'drive':
-        from . import plane
-
-        result = identities.admin.request('POST', f'/api/tasks/stop/{task_id}')
-        plane.record_design_refusal('POST /api/tasks/stop/{task_id}', 'admin', result)
-        return
-    result = identities.admin.request('GET', '/api/tasks')
-    assert result.status_code == 200
-    assert task_id in result.json()['tasks']
-
-
 def test_live_image_prompt_refusal_has_a_supported_owner_task_control(live_seeds):
     from . import crossuser, plane
 
     identities, resolved = live_seeds
     positive = 'POST /api/v1/tasks/title/completions'
-    response = identities.admin.request(
+    response = identities.user.request(
         'POST',
         positive.split(' ', 1)[1],
         json={
-            'model': resolved['/api/v1/analytics/models/{model_id}/overview', 'model_id'],
+            'model': resolved.fixtures['model'],
             'chat_id': resolved['/api/v1/chats/{id}', 'id'],
             'messages': [{'role': 'user', 'content': 'Fictional title control'}],
         },
@@ -171,7 +147,7 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
         assert stranger.status_code == 404, stranger.text
     else:
         assert share_id != resolved['/api/v1/chats/{id}', 'id']
-    result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared', json={})
+    result = identities.user.request('POST', f'/api/v1/chats/{share_id}/clone/shared', json={})
     assert result.status_code == 200
     assert result.json()['id'] not in (share_id, resolved['/api/v1/chats/{id}', 'id'])
 

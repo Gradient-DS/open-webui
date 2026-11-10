@@ -1,0 +1,52 @@
+# Platform reads retain the existing route authentication and resource grants.
+# These declarations supplement attack-surface.toml; they waive no routes.
+
+[configuration]
+routes = ["GET /api/config"]
+classification = "tenant_configuration"
+read = "Product settings use the cached service snapshot; all other persistent settings use deployment values."
+write = "Config.upsert refuses every platform write before changing defaults or rows."
+proof = "backend/open_webui/test/soev/test_product_config.py"
+seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
+
+[permissions]
+routes = ["GET /api/v1/users/permissions"]
+classification = "tenant_permissions"
+rule = "Only permissions.<path> leaves apply. Authentication and administrator dependencies are preserved; group membership and resource grants are unchanged."
+proof = "backend/open_webui/test/soev/test_product_config.py:test_permission_endpoints_use_product_leaves"
+seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
+
+[feedback]
+routes = ["GET /api/config", "POST /api/v1/evaluations/feedback", "GET /api/v1/evaluations/feedback/conversation/{chat_id}"]
+classification = "configured_feedback_metadata"
+rule = "Stable reason/tag IDs and nl/en labels are customer product content. Platform rating writes validate IDs; listing delegates workspace and tenant isolation to soev-api. Feedback grants no chat-read authority."
+proof = "backend/open_webui/test/soev/test_chat_paths.py:test_feedback_allowlist_authored_comment_and_admin_exception"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_feedback"
+
+[features]
+prefixes = ["/api/v1/knowledge", "/api/v1/prompts", "/api/v1/models", "/api/v1/skills", "/api/v1/notes", "/api/v1/tools", "/api/v1/terminals", "/api/v1/audio", "/api/v1/meetings"]
+classification = "feature_and_resource_authority"
+rule = "Unentitled or disabled product gates refuse their operations, including administrator callers. Existing ownership and access-grant checks still apply when enabled."
+proof = "backend/open_webui/test/soev/test_product_config.py:test_disabled_product_routes_are_refused"
+seed = "security/attack-surface.toml"
+
+[models]
+routes = ["GET /api/models", "POST /api/chat/completions", "POST /api/v1/chat/completions"]
+classification = "catalog_and_assistant_authority"
+rule = "Catalog content uses models.overrides; disabled catalog models refuse turns. Assistant rows retain their own resource grants."
+proof = "backend/open_webui/test/soev/test_model_catalog.py"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_model"
+
+[skill_files]
+routes = ["GET /api/v1/skills/id/{id}/files", "POST /api/v1/skills/id/{id}/files", "PUT /api/v1/skills/id/{id}/files", "POST /api/v1/skills/id/{id}/files/move", "POST /api/v1/skills/id/{id}/files/remove", "GET /api/v1/skills/id/{id}/files/content"]
+classification = "private_skill_content"
+rule = "Both product skill gates apply. Writes require the owner's authority or a write grant; content reads retain skill-scoped token and read-grant checks."
+proof = "backend/open_webui/test/apps/webui/routers/test_skill_file_scoped_token.py"
+seed = "backend/open_webui/test/security/attack/seeds.py:seed_skill_bundle"
+
+[bug_reports]
+routes = ["POST /api/v1/feedback/report"]
+classification = "authenticated_bug_report"
+rule = "Forwards strict bounded context to soev-api with the requesting person login. No local webhook, identity enrichment or content logging. Platform tenant admission, mode authority and delivery policy apply."
+proof = "backend/open_webui/test/apps/webui/routers/test_feedback_report.py"
+seed = "security/attack-surface.toml:POST /api/v1/feedback/report"

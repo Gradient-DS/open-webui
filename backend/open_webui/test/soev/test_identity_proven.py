@@ -61,8 +61,6 @@ def login(identity_config, monkeypatch):
     monkeypatch.setattr(oauth.Auths, 'insert_new_auth', AsyncMock(return_value=user))
     monkeypatch.setattr(oauth, 'get_password_hash', AsyncMock(return_value='invalid-test-password-hash'))
     monkeypatch.setattr(oauth, 'apply_default_group_assignment', AsyncMock())
-    monkeypatch.setattr(manager, 'get_user_role', AsyncMock(return_value='user'))
-    monkeypatch.setattr(manager, 'update_user_role_from_oauth', AsyncMock(return_value=user))
     monkeypatch.setattr(oauth.Config, 'get', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth, 'publish_event', AsyncMock())
     monkeypatch.setattr(oauth.OAuthSessions, 'get_sessions_by_user_id', AsyncMock(return_value=[]))

@@ -463,7 +463,8 @@ class IdentityServer:
         return response(200, self.session(user)) if user else response(400, {'detail': 'bad credentials'})
 
     def create_user(self, path, form, user):
-        from .identities import _EMAIL_TAKEN, _SIGNUP_DISABLED
+        _EMAIL_TAKEN = 'Email already registered'
+        _SIGNUP_DISABLED = 'Signup disabled'
 
         if path.endswith('/signup') and self.users:
             return response(403, {'detail': _SIGNUP_DISABLED})
@@ -472,7 +473,7 @@ class IdentityServer:
         if any(u['email'] == form['email'] for u in self.users.values()):
             return response(400, {'detail': _EMAIL_TAKEN})
         user_id = f'user-{self.issued}'
-        role = 'admin' if not self.users else form['role']
+        role = 'user'
         user = {**form, 'id': user_id, 'role': role, 'created_at': self.clock}
         self.users[user_id] = user
         return response(200, self.session(user))
@@ -525,180 +526,3 @@ def identity_server(monkeypatch):
     # of the helper under test, so nothing else may advance it.
     monkeypatch.setattr(time, 'sleep', server.advance)
     return server
-
-
-def test_identity_repair_survives_password_damage_throttles_and_driven_token_revocation(identity_server, tmp_path):
-    from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, PASSWORD, USER_EMAIL, ensure_identities
-
-    state_path = tmp_path / 'identities.json'
-    first = ensure_identities('http://app', state_path=state_path)
-    ids = [c.identity['id'] for c in first.clients]
-    assert identity_server.calls[0] == ('POST', '/api/v1/auths/signup')
-    assert len(identity_server.users) == 3
-    private_token = json.loads(state_path.read_text())['recovery_token']
-    assert private_token not in {c.token for c in first.clients}
-    assert state_path.stat().st_mode & 0o777 == 0o600
-    for client in first.clients:
-        user = identity_server.users[client.identity['id']]
-        user['password'] = 'destroyed'
-        identity_server.attempts[user['email']] = 100
-        identity_server.tokens.pop(client.token)
-    identity_server.users[ids[1]]['role'] = 'pending'
-    # Recover a rename interrupted between alias signin and restoring email.
-    identity_server.users[ids[2]]['email'] = 'interrupted-alias@example.com'
-    first.close()
-    second = ensure_identities('http://app', state_path=state_path)
-    try:
-        assert [c.identity['id'] for c in second.clients] == ids
-        assert [c.identity['email'] for c in second.clients] == [ADMIN_EMAIL, USER_EMAIL, INTRUDER_EMAIL]
-        assert [c.identity['role'] for c in second.clients] == ['admin', 'user', 'user']
-        assert len(identity_server.users) == 3
-        assert all(u['password'] == PASSWORD for u in identity_server.users.values())
-        assert identity_server.attempts[ADMIN_EMAIL] == identity_server.attempts[USER_EMAIL] == 100
-    finally:
-        second.close()
-
-
-def test_identities_can_be_adopted_without_local_state(identity_server, tmp_path):
-    from .identities import ensure_identities
-
-    first = ensure_identities('http://app', state_path=tmp_path / 'first.json')
-    second = ensure_identities('http://app', state_path=tmp_path / 'second.json')
-    try:
-        assert [c.identity['id'] for c in first.clients] == [c.identity['id'] for c in second.clients]
-        assert len(identity_server.users) == 3
-    finally:
-        first.close()
-        second.close()
-
-
-def test_a_new_setup_leaves_the_previous_passs_sessions_usable(identity_server, tmp_path):
-    from .identities import ensure_identities
-
-    state_path = tmp_path / 'identities.json'
-    first = ensure_identities('http://app', state_path=state_path)
-    earlier_ids = [client.identity['id'] for client in first.clients]
-    second = ensure_identities('http://app', state_path=state_path)
-    try:
-        # Passes are serial, but a pass keeps its identities open through its own
-        # teardown while the next pass has already set up. Repairing by resetting
-        # a password revokes every session that identity holds (v0.11.3), so an
-        # unconditional reset here strands the previous pass mid-cleanup.
-        for client, user_id in zip(first.clients, earlier_ids):
-            assert client.verify_identity(user_id=user_id)
-        for client, user_id in zip(second.clients, earlier_ids):
-            assert client.verify_identity(user_id=user_id)
-        # Distinct jti per pass is still the point; sharing one would mean a
-        # signout driven by either pass took the other down with it.
-        assert {client.token for client in first.clients}.isdisjoint(client.token for client in second.clients)
-    finally:
-        first.close()
-        second.close()
-
-
-def test_repeated_suite_setup_and_wrong_password_check_survive_exhausted_stable_buckets(identity_server, tmp_path):
-    from .test_live_client import test_wrong_password_is_a_loud_400
-
-    from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, USER_EMAIL, ensure_identities
-
-    state_path = tmp_path / 'identities.json'
-    first = ensure_identities('http://app', state_path=state_path)
-    ids = [client.identity['id'] for client in first.clients]
-    first.close()
-    for email in (ADMIN_EMAIL, USER_EMAIL, INTRUDER_EMAIL):
-        identity_server.attempts[email] = 15
-    for _ in range(3):
-        identities = ensure_identities('http://app', state_path=state_path)
-        try:
-            assert [client.identity['id'] for client in identities.clients] == ids
-            test_wrong_password_is_a_loud_400(identities)
-            assert identities.user.verify_identity(email=USER_EMAIL, role='user', user_id=ids[1])
-        finally:
-            identities.close()
-    assert all(identity_server.attempts[email] == 15 for email in (ADMIN_EMAIL, USER_EMAIL, INTRUDER_EMAIL))
-
-
-def test_alias_throttle_is_real_and_failure_restores_email_before_next_setup(identity_server, tmp_path):
-    from .identities import PASSWORD, USER_EMAIL, ensure_identities, signin_alias
-
-    state_path = tmp_path / 'identities.json'
-    first = ensure_identities('http://app', state_path=state_path)
-    user_id = first.user.identity['id']
-    try:
-        with pytest.raises(AuthenticationError, match='HTTP 429'):
-            with signin_alias(first.admin, user_id, USER_EMAIL) as email:
-                for _ in range(15):
-                    with pytest.raises(AuthenticationError, match='HTTP 400'):
-                        login(email, 'wrong-password', base_url='http://app')
-                login(email, PASSWORD, base_url='http://app')
-        assert identity_server.users[user_id]['email'] == USER_EMAIL
-        repaired = ensure_identities('http://app', state_path=state_path)
-        try:
-            assert repaired.user.identity['id'] == user_id
-            assert repaired.user.identity['email'] == USER_EMAIL
-        finally:
-            repaired.close()
-    finally:
-        first.close()
-
-
-def test_a_deleted_ordinary_identity_is_recreated(identity_server, tmp_path):
-    from .identities import ensure_identities
-
-    state_path = tmp_path / 'identities.json'
-    first = ensure_identities('http://app', state_path=state_path)
-    deleted_id = first.user.identity['id']
-    del identity_server.users[deleted_id]
-    first.close()
-    second = ensure_identities('http://app', state_path=state_path)
-    try:
-        assert second.user.identity['id'] != deleted_id
-        assert len(identity_server.users) == 3
-    finally:
-        second.close()
-
-
-def test_a_failed_repair_restores_the_stable_email(identity_server, tmp_path, monkeypatch):
-    from . import identities as module
-
-    state_path = tmp_path / 'identities.json'
-    original = module.ensure_identities('http://app', state_path=state_path)
-    original.close()
-
-    def failed_login(*args, **kwargs):
-        raise AuthenticationError('2FA challenge')
-
-    monkeypatch.setattr(module, 'login', failed_login)
-    with pytest.raises(AuthenticationError, match='2FA'):
-        module.ensure_identities('http://app', state_path=state_path)
-    assert {u['email'] for u in identity_server.users.values()} == {
-        module.ADMIN_EMAIL,
-        module.USER_EMAIL,
-        module.INTRUDER_EMAIL,
-    }
-
-
-def test_an_unrecoverable_admin_fails_loudly(identity_server, tmp_path):
-    from .identities import ensure_identities
-
-    state_path = tmp_path / 'identities.json'
-    original = ensure_identities('http://app', state_path=state_path)
-    identity_server.users[original.admin.identity['id']]['password'] = 'destroyed'
-    identity_server.tokens.clear()
-    original.close()
-    with pytest.raises(AuthenticationError):
-        ensure_identities('http://app', state_path=state_path)
-
-
-def test_no_identity_shares_the_bootstrap_admins_second(identity_server, tmp_path):
-    # PLANE-018: an account created in the admin's signup second can be taken for
-    # the primary admin, and then the admin's own repair of it is refused.
-    from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, USER_EMAIL, ensure_identities
-
-    identities = ensure_identities('http://app', state_path=tmp_path / 'identities.json')
-    try:
-        created = {u['email']: u['created_at'] for u in identity_server.users.values()}
-        assert created[USER_EMAIL] > created[ADMIN_EMAIL]
-        assert created[INTRUDER_EMAIL] > created[ADMIN_EMAIL]
-    finally:
-        identities.close()

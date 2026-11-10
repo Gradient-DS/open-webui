@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.features import feature_enabled
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ async def meeting_document(user, meeting_id: str, client: SoevClient | None = No
         raise MeetingUnavailable('No user or meeting')
     from open_webui.soev import capabilities
 
-    if not is_feature_enabled('meetings') or not await capabilities.has(capabilities.MEETINGS):
+    if not await feature_enabled('meetings') or not await capabilities.has(capabilities.MEETINGS):
         raise MeetingUnavailable('Meetings are not available')
     path = thread_path(meeting_id)
     client = client or identity.build_client()

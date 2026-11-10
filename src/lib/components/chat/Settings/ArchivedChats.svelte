@@ -355,7 +355,7 @@
 									<UndoAction className="size-3.5" strokeWidth="1.5" />
 								</button>
 							</Tooltip>
-							{#if !chat.readonly && ($user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true))}
+							{#if !chat.readonly && ($user?.permissions?.chat?.delete ?? true)}
 								<Tooltip content={$i18n.t('Delete Chat')}>
 									<button
 										class="rounded-lg p-1 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"

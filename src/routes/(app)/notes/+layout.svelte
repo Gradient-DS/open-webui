@@ -9,10 +9,7 @@
 
 	onMount(async () => {
 		if (
-			!(
-				($config?.features?.enable_notes ?? false) &&
-				($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-			)
+			!(($config?.features?.enable_notes ?? false) && ($user?.permissions?.features?.notes ?? true))
 		) {
 			// If the feature is not enabled, redirect to the home page
 			goto('/');

@@ -528,7 +528,7 @@ describe('platform sidebar', () => {
 	it('hides archived owner actions while keeping reader unarchive on its organization', () => {
 		const actions = archivedSource.match(/\{#if !chat\.readonly &&[\s\S]*?\{\/if\}/)?.[0];
 		expect(actions).toBeDefined();
-		expect(actions).toContain("$user?.role === 'admin'");
+		expect(actions).not.toContain("$user?.role === 'admin'");
 		expect(actions).toContain('$user?.permissions?.chat?.delete');
 		expect(actions).toContain('selectedChatId = chat.id;');
 		expect(actions).toContain("aria-label={$i18n.t('Delete Chat')}");

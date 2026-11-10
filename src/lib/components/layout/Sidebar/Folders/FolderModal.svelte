@@ -1,13 +1,12 @@
 <script lang="ts">
-	import { getContext, createEventDispatcher, onMount, tick } from 'svelte';
+	import { getContext, tick } from 'svelte';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import XMark from '../icons/XMark.svelte';
 
 	import { toast } from 'svelte-sonner';
-	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+
 	import { user, config } from '$lib/stores';
 
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -213,7 +212,7 @@
 
 					<hr class=" border-gray-50 dark:border-gray-850/30 my-2.5 w-full" />
 
-					{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
+					{#if $user?.permissions.chat?.system_prompt ?? true}
 						<div class="my-1">
 							<div class="mb-2 text-xs text-gray-500">
 								{$i18n.t('System Prompt')}

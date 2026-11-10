@@ -24,7 +24,6 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
-    ENABLE_INITIAL_ADMIN_SIGNUP,
     ENABLE_OAUTH_TOKEN_EXCHANGE,
     OAUTH_TOKEN_EXCHANGE_RATE_LIMIT,
     OAUTH_TOKEN_EXCHANGE_RATE_LIMIT_WINDOW,
@@ -91,6 +90,8 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+
+from open_webui.soev.console import ConsoleAccess
 
 router = APIRouter()
 
@@ -320,6 +321,14 @@ class SessionUserInfoResponse(SessionUserResponse, UserStatus):
     bio: str | None = None
     gender: str | None = None
     date_of_birth: datetime.date | None = None
+
+
+@router.get('/console-access', response_model=ConsoleAccess)
+async def get_console_access(response: Response, user=Depends(get_verified_user)):
+    from open_webui.soev.console import access
+
+    response.headers['Cache-Control'] = 'no-store'
+    return await access(user)
 
 
 @router.get('/', response_model=SessionUserInfoResponse)
@@ -825,24 +834,16 @@ async def ldap_auth(
             user = await Users.get_user_by_email(email, db=db)
             if not user:
                 try:
-                    # Insert with default role first to avoid TOCTOU race on
-                    # first-user registration.  Matches signup_handler pattern.
                     user = await Auths.insert_new_auth(
                         email=email,
                         password=str(uuid.uuid4()),
                         name=cn,
-                        role=await Config.get('ui.default_user_role'),
+                        role='user',
                         db=db,
                     )
 
                     if not user:
                         raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
-
-                    # Atomically check if this is the only user *after* the
-                    # insert.  Only the single user present should become admin.
-                    if await Users.get_num_users(db=db) == 1:
-                        await Users.update_user_role_by_id(user.id, 'admin', db=db)
-                        user = await Users.get_user_by_id(user.id, db=db)
 
                     await apply_default_group_assignment(
                         await Config.get('ui.default_group_id'),
@@ -948,24 +949,6 @@ async def signin(
                 if group_names:
                     await Groups.sync_groups_by_group_names(user.id, group_names, db=db)
 
-            if WEBUI_AUTH_TRUSTED_ROLE_HEADER:
-                trusted_role = request.headers.get(WEBUI_AUTH_TRUSTED_ROLE_HEADER, '').lower().strip()
-                if trusted_role in {'admin', 'user', 'pending'}:
-                    if user.role != trusted_role:
-                        updated_user = await Users.update_user_role_by_id(user.id, trusted_role, db=db)
-                        if updated_user:
-                            user = updated_user
-                            await publish_event(
-                                request,
-                                EVENTS.USER_ROLE_UPDATED,
-                                actor=updated_user,
-                                subject_id=updated_user.id,
-                                source='trusted_header',
-                                data={'role': updated_user.role},
-                            )
-                elif trusted_role:
-                    log.warning(f'Ignoring invalid trusted role header value: {trusted_role}')
-
     elif WEBUI_AUTH == False:
         auth_source = 'system'
         admin_email = 'admin@localhost'
@@ -1064,6 +1047,13 @@ async def signin(
 ############################
 
 
+def require_local_signup() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+
 async def signup_handler(
     request: Request,
     email: str,
@@ -1081,9 +1071,8 @@ async def signup_handler(
     Returns the newly created UserModel.
     Raises HTTPException on failure.
     """
-    # Insert with default role first to avoid TOCTOU race on first signup.
-    # If has_users() is checked before insert, concurrent requests during
-    # first-user registration can all see an empty table and each get admin.
+    require_local_signup()
+
     hashed = await get_password_hash(password)
 
     user = await Auths.insert_new_auth(
@@ -1091,18 +1080,11 @@ async def signup_handler(
         password=hashed,
         name=name,
         profile_image_url=profile_image_url,
-        role=await Config.get('ui.default_user_role'),
+        role='user',
         db=db,
     )
     if not user:
         raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
-
-    # Atomically check if this is the only user *after* the insert.
-    # Only the single user present at this point should become admin.
-    if await Users.get_num_users(db=db) == 1:
-        await Users.update_user_role_by_id(user.id, 'admin', db=db)
-        user = await Users.get_user_by_id(user.id, db=db)
-        await Config.upsert({'ui.enable_signup': False})
 
     await apply_default_group_assignment(
         await Config.get('ui.default_group_id'),
@@ -1122,25 +1104,23 @@ async def signup_handler(
     return user
 
 
-@router.post('/signup', response_model=SessionUserResponse)
+@router.post(
+    '/signup', response_model=SessionUserResponse, description='Platform users sign in through the identity provider.'
+)
 async def signup(
     request: Request,
     response: Response,
     form_data: SignupForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    require_local_signup()
     has_users = await Users.has_users(db=db)
 
     if WEBUI_AUTH:
-        if has_users:
-            if not await Config.get('ui.enable_signup') or not await Config.get('ui.enable_login_form'):
-                raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-        # Don't gate the first admin on ENABLE_SIGNUP: it auto-disables and can persist stale across a DB reset.
-        elif not await Config.get('ui.enable_login_form') and not ENABLE_INITIAL_ADMIN_SIGNUP:
+        if not await Config.get('ui.enable_signup') or not await Config.get('ui.enable_login_form'):
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-    else:
-        if has_users:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+    elif has_users:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     if not validate_email_format(form_data.email.lower()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
@@ -1345,112 +1325,14 @@ async def delete_oauth_session_by_provider(
 ############################
 
 
-@router.post('/add', response_model=SigninResponse)
-async def add_user(
-    request: Request,
-    form_data: AddUserForm,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    admin_user = user
-    if not validate_email_format(form_data.email.lower()):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
-
-    if await Users.get_user_by_email(form_data.email.lower(), db=db):
-        raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
-
-    try:
-        try:
-            validate_password(form_data.password)
-        except Exception as e:
-            raise HTTPException(400, detail=str(e))
-
-        hashed = await get_password_hash(form_data.password)
-        user = await Auths.insert_new_auth(
-            form_data.email.lower(),
-            hashed,
-            form_data.name,
-            form_data.profile_image_url,
-            form_data.role,
-            db=db,
-        )
-
-        if user:
-            await apply_default_group_assignment(
-                await Config.get('ui.default_group_id'),
-                user.id,
-                db=db,
-            )
-            await publish_event(
-                request,
-                EVENTS.USER_CREATED,
-                actor=admin_user,
-                subject_id=user.id,
-                source='admin',
-                data={'role': user.role},
-            )
-
-            expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
-            token = create_token(data={'id': user.id}, expires_delta=expires_delta)
-            return {
-                'token': token,
-                'token_type': 'Bearer',
-                'id': user.id,
-                'email': user.email,
-                'name': user.name,
-                'role': user.role,
-                'profile_image_url': f'/api/v1/users/{user.id}/profile/image',
-            }
-        else:
-            raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
-    except HTTPException:
-        raise
-    except Exception as err:
-        log.error(f'Add user error: {str(err)}')
-        raise HTTPException(500, detail='An internal error occurred while adding the user.')
-
-
 ############################
 # GetAdminDetails
 ############################
 
 
-@router.get('/admin/details')
-async def get_admin_details(
-    request: Request, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_session)
-):
-    if await Config.get('auth.admin.show'):
-        admin_email = await Config.get('auth.admin.email')
-        admin_name = None
-
-        log.info('Admin details requested')
-
-        if admin_email:
-            admin = await Users.get_user_by_email(admin_email, db=db)
-            if admin:
-                admin_name = admin.name
-        else:
-            admin = await Users.get_first_user(db=db)
-            if admin:
-                admin_email = admin.email
-                admin_name = admin.name
-
-        return {
-            'name': admin_name,
-            'email': admin_email,
-        }
-    else:
-        raise HTTPException(400, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
-
-
 ############################
 # ToggleSignUp
 ############################
-
-
-@router.get('/admin/config')
-async def get_admin_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(ADMIN_CONFIG_KEYS)
 
 
 class AdminConfig(BaseModel):
@@ -1499,27 +1381,6 @@ def _whole_number(value, name):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f'{name} must be a whole number.')
 
 
-@router.post('/admin/config')
-async def update_admin_config(request: Request, form_data: AdminConfig, user=Depends(get_admin_user)):
-    updates = config_updates(form_data.model_dump(), ADMIN_CONFIG_KEYS)
-    updates['ui.default_interface_settings'] = form_data.DEFAULT_INTERFACE_SETTINGS or {}
-    updates['folders.max_file_count'] = _whole_number(form_data.FOLDER_MAX_FILE_COUNT, 'FOLDER_MAX_FILE_COUNT')
-    updates['automations.max_count'] = _whole_number(form_data.AUTOMATION_MAX_COUNT, 'AUTOMATION_MAX_COUNT')
-    updates['automations.min_interval'] = _whole_number(form_data.AUTOMATION_MIN_INTERVAL, 'AUTOMATION_MIN_INTERVAL')
-
-    if form_data.DEFAULT_USER_ROLE not in ['pending', 'user', 'admin']:
-        updates.pop('ui.default_user_role', None)
-
-    pattern = r'^(-1|0|(-?\d+(\.\d+)?)(ms|s|m|h|d|w))$'
-
-    # Check if the input string matches the pattern
-    if not re.match(pattern, form_data.JWT_EXPIRES_IN):
-        updates.pop('auth.jwt_expiry', None)
-
-    await Config.upsert(updates)
-    return await get_config_values(ADMIN_CONFIG_KEYS)
-
-
 class LdapServerConfig(BaseModel):
     label: str
     host: str
@@ -1539,50 +1400,8 @@ class LdapServerConfig(BaseModel):
     attribute_for_groups: str = 'memberOf'
 
 
-@router.get('/admin/config/ldap/server', response_model=LdapServerConfig)
-async def get_ldap_server(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(LDAP_SERVER_CONFIG_KEYS)
-
-
-@router.post('/admin/config/ldap/server')
-async def update_ldap_server(request: Request, form_data: LdapServerConfig, user=Depends(get_admin_user)):
-    required_fields = [
-        'label',
-        'host',
-        'attribute_for_mail',
-        'attribute_for_username',
-        'search_base',
-    ]
-    for key in required_fields:
-        value = getattr(form_data, key)
-        if not value:
-            raise HTTPException(400, detail=ERROR_MESSAGES.REQUIRED_FIELD_EMPTY(key))
-
-    # The group attribute is what group management reads from the directory
-    # entry; an empty value would make group sync silently do nothing.
-    if form_data.enable_group_management and not (form_data.attribute_for_groups or '').strip():
-        raise HTTPException(400, detail=ERROR_MESSAGES.REQUIRED_FIELD_EMPTY('attribute_for_groups'))
-
-    updates = config_updates(form_data.model_dump(), LDAP_SERVER_CONFIG_KEYS)
-    updates['ldap.server.app_dn'] = form_data.app_dn or ''
-    updates['ldap.server.app_password'] = form_data.app_dn_password or ''
-    await Config.upsert(updates)
-    return await get_config_values(LDAP_SERVER_CONFIG_KEYS)
-
-
-@router.get('/admin/config/ldap')
-async def get_ldap_config(request: Request, user=Depends(get_admin_user)):
-    return {'ENABLE_LDAP': await Config.get('ldap.enable')}
-
-
 class LdapConfigForm(BaseModel):
     enable_ldap: bool | None = None
-
-
-@router.post('/admin/config/ldap')
-async def update_ldap_config(request: Request, form_data: LdapConfigForm, user=Depends(get_admin_user)):
-    await Config.upsert({'ldap.enable': form_data.enable_ldap})
-    return {'ENABLE_LDAP': await Config.get('ldap.enable')}
 
 
 ############################
@@ -1603,7 +1422,6 @@ class OAuthConfigForm(BaseModel):
     # Role management
     ENABLE_OAUTH_ROLE_MANAGEMENT: bool | None = None
     OAUTH_ROLES_CLAIM: str | None = None
-    OAUTH_ADMIN_ROLES: str | None = None
     OAUTH_ALLOWED_ROLES: str | None = None
 
     # Group management
@@ -1643,7 +1461,6 @@ class OAuthConfigForm(BaseModel):
 
 OAUTH_COMMA_LIST_FIELDS = {
     'OAUTH_ALLOWED_DOMAINS',
-    'OAUTH_ADMIN_ROLES',
     'OAUTH_ALLOWED_ROLES',
 }
 
@@ -1656,7 +1473,6 @@ OAUTH_CONFIG_KEYS = {
     'OAUTH_BLOCKED_GROUPS': 'oauth.blocked_groups',
     'ENABLE_OAUTH_ROLE_MANAGEMENT': 'oauth.enable_role_mapping',
     'OAUTH_ROLES_CLAIM': 'oauth.roles_claim',
-    'OAUTH_ADMIN_ROLES': 'oauth.admin_roles',
     'OAUTH_ALLOWED_ROLES': 'oauth.allowed_roles',
     'ENABLE_OAUTH_GROUP_MANAGEMENT': 'oauth.enable_group_mapping',
     'ENABLE_OAUTH_GROUP_CREATION': 'oauth.enable_group_creation',
@@ -1722,21 +1538,9 @@ class OAuthConfigResponse(OAuthConfigForm):
     ENABLE_OAUTH_PERSISTENT_CONFIG: bool
 
 
-@router.get('/admin/config/oauth', response_model=OAuthConfigResponse)
-async def get_oauth_config(request: Request, user=Depends(get_admin_user)):
-    return await get_oauth_config_values()
-
-
-@router.post('/admin/config/oauth', response_model=OAuthConfigResponse)
-async def update_oauth_config(request: Request, form_data: OAuthConfigForm, user=Depends(get_admin_user)):
-    await Config.upsert(oauth_config_updates(form_data.model_dump(exclude_none=True)))
-    return await get_oauth_config_values()
-
-
 async def _check_api_key_permission(request: Request, user, db: AsyncSession):
-    if not await Config.get('auth.enable_api_keys') or (
-        user.role != 'admin'
-        and not await has_permission(user.id, 'features.api_keys', await Config.get('user.permissions'), db=db)
+    if (not await Config.get('auth.enable_api_keys')) or (
+        not await has_permission(user.id, 'features.api_keys', await Config.get('user.permissions'), db=db)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1963,13 +1767,6 @@ async def token_exchange(
             detail='User not found. Please sign in via the web interface first.',
         )
 
-    user = await oauth_manager.update_user_role_from_oauth(
-        request=request,
-        user=user,
-        user_data=user_data,
-        provider=provider,
-        db=db,
-    )
     if await Config.get('oauth.enable_group_mapping'):
         await oauth_manager.update_user_groups(
             request=request,

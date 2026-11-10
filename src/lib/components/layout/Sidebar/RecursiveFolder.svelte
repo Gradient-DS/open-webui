@@ -4,7 +4,6 @@
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
-	import DOMPurify from 'dompurify';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
@@ -87,11 +86,15 @@
 			compactDisplay: 'short'
 		}).format(count);
 
-	const isUnreadChat = (chat) => isChatUnread(
-		{ ...chat, last_read_at: Math.max(chat.last_read_at ?? 0, $chatReadAt[chat.id] ?? 0) || null },
-		Boolean($config?.features?.enable_v2_threads),
-		$chatId
-	);
+	const isUnreadChat = (chat) =>
+		isChatUnread(
+			{
+				...chat,
+				last_read_at: Math.max(chat.last_read_at ?? 0, $chatReadAt[chat.id] ?? 0) || null
+			},
+			Boolean($config?.features?.enable_v2_threads),
+			$chatId
+		);
 
 	const sortFolderChats = (items) =>
 		[...items].sort(
@@ -152,7 +155,12 @@
 			chats = sortFolderChats(
 				chats.map((chat) =>
 					!chat.user_id || chat.user_id === $user?.id
-						? { ...chat, last_read_at: $config?.features?.enable_v2_threads ? answerTimestamp(chat.answered_at) : chat.updated_at }
+						? {
+								...chat,
+								last_read_at: $config?.features?.enable_v2_threads
+									? answerTimestamp(chat.answered_at)
+									: chat.updated_at
+							}
 						: chat
 				)
 			);
@@ -244,7 +252,7 @@
 									return null;
 								});
 								if (!chat && item) {
-									if (!($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true))) {
+									if (!($user?.permissions?.chat?.import ?? true)) {
 										toast.error($i18n.t('Access prohibited'));
 										return;
 									}
@@ -403,7 +411,12 @@
 					chats = sortFolderChats(
 						chats.map((chat) =>
 							!chat.user_id || chat.user_id === $user?.id
-								? { ...chat, last_read_at: $config?.features?.enable_v2_threads ? answerTimestamp(chat.answered_at) : chat.updated_at }
+								? {
+										...chat,
+										last_read_at: $config?.features?.enable_v2_threads
+											? answerTimestamp(chat.answered_at)
+											: chat.updated_at
+									}
 								: chat
 						)
 					);

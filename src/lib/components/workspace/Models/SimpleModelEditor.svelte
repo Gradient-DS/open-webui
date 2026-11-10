@@ -240,9 +240,9 @@
 		modelId={edit || hasBeenSaved ? id || null : null}
 		bind:accessGrants
 		accessRoles={['read', 'write']}
-		share={$user?.permissions?.sharing?.models || $user?.role === 'admin'}
-		sharePublic={$user?.permissions?.sharing?.public_models || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+		share={$user?.permissions?.sharing?.models}
+		sharePublic={$user?.permissions?.sharing?.public_models}
+		shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 	/>
 
 	<div class="flex flex-col gap-5 max-w-3xl mx-auto w-full p-1">

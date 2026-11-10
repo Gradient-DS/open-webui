@@ -18,7 +18,9 @@ describe('thread ratings', () => {
 		expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
 			thread_id: 'fictional-thread',
 			position: 2,
-			rating: 1
+			rating: 1,
+			reason: null,
+			tags: []
 		});
 		expect(fetcher.mock.calls[0][1].cache).toBe('no-store');
 	});
@@ -29,14 +31,18 @@ describe('thread ratings', () => {
 			thread_id: 'fictional-thread',
 			position: 2,
 			rating: -1,
-			comment: 'Fictional comment'
+			comment: 'Fictional comment',
+			reason: 'accuracy',
+			tags: ['language']
 		});
 		expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
 			thread_id: 'fictional-thread',
 			position: 2,
 			rating: -1,
 			comment: 'Fictional comment',
-			comment_authored: true
+			comment_authored: true,
+			reason: 'accuracy',
+			tags: ['language']
 		});
 	});
 	it('refuses a failed submission without displaying upstream content', async () => {

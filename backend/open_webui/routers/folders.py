@@ -92,7 +92,7 @@ async def check_folders_permission(request: Request, user, db=None):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'features.folders',
         config.get('user.permissions'),
@@ -804,7 +804,7 @@ async def delete_folder_by_id(
         chat_delete_permission = await has_permission(
             user.id, 'chat.delete', await Config.get('user.permissions'), db=db
         )
-        if (folder_owner_id != user.id) or (user.role != 'admin' and not chat_delete_permission):
+        if (folder_owner_id != user.id) or (not chat_delete_permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -882,11 +882,7 @@ async def delete_prepared_folder(request, user, folder, folder_ids, delete_conte
         raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     service = thread_paths(request)
     records = [record for record in await service.records(user.id) if record.folder_id in folder_ids]
-    if (
-        records
-        and user.role != 'admin'
-        and not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions'), db=db)
-    ):
+    if (records) and (not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions'), db=db)):
         raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     await folder_sharing.check_delete(user.id, folder.user_id, folder_ids)
     for record in records:

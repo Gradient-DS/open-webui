@@ -73,7 +73,7 @@ async def generate_chat_completion(
     if model is None:
         raise Exception('Model not found')
 
-    if not bypass_filter and user.role == 'user':
+    if not bypass_filter:
         try:
             await check_model_access(user, model)
         except Exception as e:
@@ -105,7 +105,7 @@ async def generate_chat_completion(
         form_data['model'] = selected_model_id
 
         # bypass_filter recursion below skips the line-200 check; gate the resolved model here.
-        if not bypass_filter and user.role == 'user':
+        if not bypass_filter:
             selected_model = request.app.state.MODELS.get(selected_model_id)
             if selected_model:
                 await check_model_access(user, selected_model)

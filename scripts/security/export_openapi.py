@@ -24,9 +24,10 @@ the process exits. Use the same
 environment with python -m pytest -c backend/pytest.ini
 backend/open_webui/test/security/test_openapi_surface.py to check drift.
 
-Route flags (including FEATURE_SKILL_FILES, ENABLE_ADMIN_ANALYTICS and
-ENABLE_SCIM) are left as configured. Generate and test in the environment the
-gate measures. No lifespan/startup hooks are run. STATIC_DIR is redirected to
+Route flags (including ENABLE_ADMIN_ANALYTICS and ENABLE_SCIM) are left as
+configured. Skill-file declarations remain in the inventory while their legacy
+matcher preserves the feature's mount boundary. Generate and test in the
+environment the gate measures. No lifespan/startup hooks are run. STATIC_DIR is redirected to
 a temporary directory because config.py deletes static assets during import.
 """
 

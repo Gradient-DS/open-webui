@@ -95,7 +95,7 @@
 					onSetDefault={saveDefaultModel}
 					multipleEnabled={!$config?.features?.enable_v2_threads &&
 						!$activeAssistantId &&
-						($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))}
+						($user?.permissions?.chat?.multiple_models ?? true)}
 					{disabled}
 					bind:compareEnabled={compareModels}
 					bind:values={selectedModels}

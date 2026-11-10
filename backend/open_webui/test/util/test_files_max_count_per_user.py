@@ -146,11 +146,8 @@ async def test_internal_count_cap_guard_false_skips_check_even_at_cap(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_admin_bypasses_cap_even_at_or_over_it(monkeypatch):
-    """Mirrors automations.py's ``check_automation_limits`` (admins bypass
-    all limits). Also required operationally here: the key is
-    env-authoritative, so an admin with no admin-UI escape hatch must never
-    be lockable out of uploads by their own configured cap."""
+async def test_legacy_admin_obeys_upload_cap(monkeypatch):
+    """Deployment upload guards bind legacy administrator rows too."""
     _patch_config(monkeypatch, max_count_per_user=1)
     count_mock = _patch_count(monkeypatch, count=999)
 
@@ -159,8 +156,8 @@ async def test_admin_bypasses_cap_even_at_or_over_it(monkeypatch):
             _request(), file=_upload_file(), process=False, process_in_background=False, user=_admin()
         )
 
-    assert exc_info.value.status_code != status.HTTP_403_FORBIDDEN
-    count_mock.assert_not_awaited()
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    count_mock.assert_awaited_once_with(user_id='a1', db=None)
 
 
 @pytest.mark.asyncio

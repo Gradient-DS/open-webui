@@ -15,7 +15,7 @@ from open_webui.soev.availability import ensure_configured
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MeetingUnavailable, latest_state, thread_path
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.features import feature_enabled
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 router = APIRouter()
@@ -45,7 +45,7 @@ def _http_error(error: SoevApiError) -> HTTPException:
 
 
 async def require_meetings(user=Depends(get_verified_user)):
-    if not is_feature_enabled('meetings'):
+    if not await feature_enabled('meetings'):
         raise HTTPException(status_code=403, detail="Feature 'meetings' is not available in your plan")
     ensure_configured()
     await capabilities.require(capabilities.MEETINGS)

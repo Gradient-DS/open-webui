@@ -91,7 +91,7 @@ def test_the_owners_clone_of_their_own_shared_chat_keeps_its_threads(seeded):
 def test_admin_without_a_share_grant_cannot_read_or_clone(seeded, monkeypatch):
     from open_webui import config
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True, raising=False)
     share_id = seed_shared_chat(seeded)
     for path in ('/target', f'/share/{share_id}', '/share/target'):
         response = seeded.client.get('/api/v1/chats' + path, headers=seeded.headers('admin'))

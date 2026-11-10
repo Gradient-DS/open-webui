@@ -15,7 +15,6 @@
 	import { goto } from '$app/navigation';
 	import {
 		createNewTool,
-		loadToolByUrl,
 		deleteToolById,
 		exportTools,
 		getToolById,
@@ -79,18 +78,10 @@
 				href: '/workspace/tools/create'
 			},
 			{
-				id: 'tools-import-link',
-				label: $i18n.t('Import From Link'),
-				onClick: () => {
-					showImportModal = true;
-				},
-				visible: $user?.role === 'admin'
-			},
-			{
 				id: 'tools-import',
 				label: $i18n.t('Import JSON'),
 				onClick: () => toolsImportInputElement?.click(),
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.tools_import
+				visible: $user?.permissions?.workspace?.tools_import
 			},
 			{
 				id: 'tools-export',
@@ -108,7 +99,7 @@
 						saveAs(blob, `tools-export-${Date.now()}.json`);
 					}
 				},
-				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.tools_export
+				visible: $user?.permissions?.workspace?.tools_export
 			}
 		]);
 	}
@@ -297,20 +288,6 @@
 		{$i18n.t('Tools')} / {$WEBUI_NAME}
 	</title>
 </svelte:head>
-
-<ImportModal
-	bind:show={showImportModal}
-	onImport={(tool) => {
-		sessionStorage.tool = JSON.stringify({
-			...tool
-		});
-		goto('/workspace/tools/create');
-	}}
-	loadUrlHandler={async (url) => {
-		return await loadToolByUrl(localStorage.token, url);
-	}}
-	successMessage={$i18n.t('Tool imported successfully')}
-/>
 
 {#if loaded}
 	<input

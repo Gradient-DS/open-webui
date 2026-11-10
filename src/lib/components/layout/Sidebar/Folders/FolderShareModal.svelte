@@ -100,11 +100,10 @@
 				readOnly={!mayShare}
 				accessRoles={['read', 'write']}
 				defaultPermission="write"
-				share={$user?.role === 'admin' || $user?.permissions?.sharing?.folders}
+				share={$user?.permissions?.sharing?.folders}
 				sharePublic={false}
-				shareUsers={$user?.role === 'admin' || $user?.permissions?.access_grants?.allow_users}
-				allowGroups={$user?.role === 'admin' ||
-					($user?.permissions?.access_grants?.allow_groups ?? true)}
+				shareUsers={$user?.permissions?.access_grants?.allow_users}
+				allowGroups={$user?.permissions?.access_grants?.allow_groups ?? true}
 			/>
 		</div>
 	</div>

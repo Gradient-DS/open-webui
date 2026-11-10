@@ -411,9 +411,8 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         # Re-gate the rehydrated owner: a demoted/deactivated or de-permissioned owner must not run.
         from open_webui.utils.access_control import has_permission
 
-        if user.role not in ('user', 'admin') or (
-            user.role != 'admin'
-            and not await has_permission(user.id, 'features.automations', await Config.get('user.permissions'))
+        if (user.role not in ('user', 'admin')) or (
+            not await has_permission(user.id, 'features.automations', await Config.get('user.permissions'))
         ):
             error = 'Owner no longer permitted to run automations'
             await _record_run(automation.id, 'error', error=error)

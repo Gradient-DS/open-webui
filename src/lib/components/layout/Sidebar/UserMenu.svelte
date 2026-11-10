@@ -1,22 +1,15 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext, onMount, tick } from 'svelte';
-
-	import { goto } from '$app/navigation';
-	import { fade, slide } from 'svelte/transition';
+	import { createEventDispatcher, getContext, tick } from 'svelte';
 
 	import { getUsage } from '$lib/apis';
-	import { getLogoutRedirectUrl, getSessionUser, userSignOut } from '$lib/apis/auths';
-
 	import {
-		showSettings,
-		showFeedbackModal,
-		mobile,
-		showSidebar,
-		user,
-		config,
-		settings
-	} from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+		getConsoleAccess,
+		getLogoutRedirectUrl,
+		getSessionUser,
+		userSignOut
+	} from '$lib/apis/auths';
+
+	import { showSettings, showFeedbackModal, mobile, showSidebar, user, config } from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -26,14 +19,14 @@
 	import UserStatusModal from './UserStatusModal.svelte';
 	import Emoji from '$lib/components/common/Emoji.svelte';
 	import EmojiFaceIcon from './icons/EmojiFace.svelte';
-	import HelpCircleIcon from './icons/HelpCircle.svelte';
+
 	import LogOutIcon from './icons/LogOut.svelte';
 	import Settings from '$lib/components/icons/Settings.svelte';
 	import UserIcon from './icons/User.svelte';
 	import XMarkIcon from './icons/XMark.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
-	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
+	import { updateUserStatus } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
 
 	const i18n = getContext('i18n');
@@ -53,6 +46,7 @@
 
 	const dispatch = createEventDispatcher();
 
+	let consoleUrl: string | null = null;
 	let usage = null;
 	const getUsageInfo = async () => {
 		const res = await getUsage(localStorage.token).catch((error) => {
@@ -68,9 +62,17 @@
 
 	const handleDropdownChange = (state) => {
 		dispatch('change', state);
+		consoleUrl = null;
+		if (state && $config?.features?.feature_agent_api_enabled) {
+			getConsoleAccess(localStorage.token)
+				.then((access) => {
+					if (show) consoleUrl = access.console_url;
+				})
+				.catch((error) => toast.error(error));
+		}
 
 		// Fetch usage info when dropdown opens, if user has permission
-		if (state && ($config?.features?.enable_public_active_users_count || role === 'admin')) {
+		if (state && $config?.features?.enable_public_active_users_count) {
 			getUsageInfo();
 		}
 	};
@@ -112,7 +114,7 @@
 						</div>
 						<div class="self-center min-w-0 flex-1 truncate">{$user.name}</div>
 
-						{#if showActiveUsers && ($config?.features?.enable_public_active_users_count || role === 'admin') && usage?.user_count}
+						{#if showActiveUsers && $config?.features?.enable_public_active_users_count && usage?.user_count}
 							<Tooltip
 								content={usage?.model_ids && usage?.model_ids.length > 0
 									? `${$i18n.t('Running')}: ${usage.model_ids.join(', ')} ✨`
@@ -121,7 +123,7 @@
 								<div
 									class="ml-auto flex shrink-0 items-center justify-end gap-1 rounded-full px-1.5 py-0.5 text-[0.6875rem] leading-none text-gray-500 dark:text-gray-400"
 									on:mouseenter={() => {
-										if ($config?.features?.enable_public_active_users_count || role === 'admin') {
+										if ($config?.features?.enable_public_active_users_count) {
 											getUsageInfo();
 										}
 									}}
@@ -218,24 +220,6 @@
 
 				<!-- {$i18n.t('Help')} -->
 
-				{#if $user?.role === 'admin'}
-					<a
-						href="https://docs.soev.ai"
-						target="_blank"
-						draggable="false"
-						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						id="chat-share-button"
-						on:click={() => {
-							show = false;
-						}}
-					>
-						<div class="self-center">
-							<HelpCircleIcon className="size-3.5" />
-						</div>
-						<div class=" self-center truncate">{$i18n.t('Documentation')}</div>
-					</a>
-				{/if}
-
 				<!-- [Gradient] Keyboard shortcuts live in Settings only; they do not need a
 				     second entry here. Still reachable via the shortcuts tab and Cmd+/. -->
 			{/if}
@@ -286,28 +270,18 @@
 				</button>
 			{/if}
 
-			{#if role === 'admin'}
+			{#if consoleUrl}
 				<a
-					href="/admin"
-					draggable="false"
+					href={consoleUrl}
+					target="_blank"
+					rel="noopener noreferrer"
 					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-					on:click={async (e) => {
-						if (e.metaKey || e.ctrlKey || e.button === 1) {
-							return;
-						}
-						e.preventDefault();
+					on:click={() => {
 						show = false;
-						goto('/admin');
-						if ($mobile) {
-							await tick();
-							showSidebar.set(false);
-						}
 					}}
 				>
-					<div class="self-center">
-						<UserIcon className="size-3.5" strokeWidth="1.5" />
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Admin Panel')}</div>
+					<UserIcon className="size-3.5" strokeWidth="1.5" />
+					<span>{$i18n.t('Management console')}</span>
 				</a>
 			{/if}
 

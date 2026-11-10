@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { tick, getContext, onMount } from 'svelte';
 
-	import { config, models, settings } from '$lib/stores';
+	import { config, settings } from '$lib/stores';
 	import { user as _user } from '$lib/stores';
 	import {
 		copyToClipboard as _copyToClipboard,
@@ -591,7 +591,7 @@
 						</Tooltip>
 					{/if}
 
-					{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.delete_message ?? false)}
+					{#if $_user?.permissions?.chat?.delete_message ?? false}
 						{#if !compactPreview && !readOnly && allowDelete && (!isFirstMessage || siblings.length > 1)}
 							<Tooltip content={$i18n.t('Delete')} placement="bottom">
 								<button

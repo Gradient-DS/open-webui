@@ -5,6 +5,7 @@ import importlib.util
 import pytest
 from fastapi import Depends, FastAPI
 from starlette.routing import Mount, WebSocketRoute
+from starlette.staticfiles import StaticFiles
 
 PUBLIC_ROUTES = {
     'MOUNT /ws': 'Socket.IO transport handshake is public; socket events authenticate their tokens.',
@@ -21,8 +22,6 @@ PUBLIC_ROUTES = {
     'POST /api/v1/auths/2fa/verify': 'Consumes a partial-login token and second factor before a full session exists.',
     'GET /api/v1/chats/share/{share_id}': 'Anyone-read shares are anonymous; other shares check identity.',
     'WEBSOCKET /api/v1/terminals/{server_id}/api/terminals/{session_id}': 'Public upgrade; first message authenticates before connecting upstream.',
-    'GET /api/v1/invites/{token}/validate': 'Validates an invitation capability before account creation.',
-    'POST /api/v1/invites/{token}/accept': 'Consumes an invitation capability to create an account.',
     'GET /api/config': 'Login screen bootstrap exposes the public configuration subset.',
     'GET /api/version': 'Public application version metadata.',
     'GET /api/changelog': 'Public release notes.',
@@ -52,6 +51,7 @@ DEV_PUBLIC_ROUTES = {
 
 def authentication_dependencies():
     from open_webui.routers.scim import get_scim_auth
+    from open_webui.routers.skill_files import get_skill_file_content
     from open_webui.routers.totp import get_2fa_setup_user
     from open_webui.utils.auth import get_admin_user, get_current_user, get_verified_user
 
@@ -61,6 +61,7 @@ def authentication_dependencies():
         get_current_user,  # Real session authentication, also allows pending accounts.
         get_2fa_setup_user,  # Session or signed, purpose-scoped enrollment token.
         get_scim_auth,  # Configured SCIM service bearer.
+        get_skill_file_content,  # Handler authenticates a session or signed skill-scoped token and checks read grants.
     }
 
 
@@ -97,6 +98,10 @@ def test_route_authentication_inventory(application):
     from open_webui.env import ENV
 
     public = PUBLIC_ROUTES | (DEV_PUBLIC_ROUTES if ENV == 'dev' else {})
+    for route in application.routes:
+        if isinstance(route, Mount) and isinstance(route.app, StaticFiles):
+            assert route.path in {'', '/static', '/pyodide'}, route.path
+            public[f'MOUNT {route.path}'] = 'Public bundled frontend assets needed before sign-in.'
     audit_routes(application.routes, public, authentication_dependencies())
 
 

@@ -3,7 +3,6 @@
 import pytest
 
 from . import plane, seeds
-from .test_seeds import stop_seed_task
 
 
 @pytest.fixture(scope='module')
@@ -18,11 +17,7 @@ def live_seeding():
         parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.seed_every_writable_field(identities.admin, parameters)
     finally:
-        try:
-            if parameters is not None:
-                stop_seed_task(identities.admin, parameters)
-        finally:
-            identities.close()
+        identities.close()
 
 
 @pytest.fixture(scope='module')
@@ -35,11 +30,7 @@ def live_drive(live_seeding):
         parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.drive_every_route(identities.admin, parameters)
     finally:
-        try:
-            if parameters is not None:
-                stop_seed_task(identities.admin, parameters)
-        finally:
-            identities.close()
+        identities.close()
 
 
 def test_live_seeding_has_its_own_5xx_assertion(live_seeding):

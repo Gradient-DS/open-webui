@@ -74,13 +74,13 @@ async def test_unconfigured_soev_refuses_callers_by_auth_first(monkeypatch):
             (None, 'GET', '/knowledge/', 401),
             (None, 'POST', '/live/onedrive/attach', 401),
             (None, 'GET', '/cloud/knowledge/kb/sync', 401),
-            (None, 'GET', '/knowledge/kb/export', 401),
+            (None, 'GET', '/knowledge/kb/export', 404),
             ('user', 'GET', '/knowledge/', 503),
             ('user', 'POST', '/live/onedrive/attach', 503),
             ('user', 'GET', '/cloud/knowledge/kb/sync', 503),
-            ('user', 'GET', '/knowledge/kb/export', 401),
-            ('user', 'POST', '/knowledge/metadata/reindex', 401),
-            ('admin', 'GET', '/knowledge/kb/export', 503),
+            ('user', 'GET', '/knowledge/kb/export', 404),
+            ('user', 'POST', '/knowledge/metadata/reindex', 404),
+            ('admin', 'GET', '/knowledge/kb/export', 404),
         ]:
             headers = {} if role is None else {'x-role': role}
             response = await client.request(method, path, headers=headers)
@@ -211,39 +211,24 @@ async def test_content_update_skips_only_kb_propagation(soev_state, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_reset_always_resets_vectors(soev_state, monkeypatch):
-    from open_webui.routers import retrieval
+@pytest.mark.parametrize(
+    'path,method',
+    [
+        ('/api/v1/retrieval/reset/db', 'POST'),
+        ('/api/v1/users/target/preview', 'GET'),
+        ('/api/v1/groups/id/target/preview', 'GET'),
+    ],
+)
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_retired_administration_is_unavailable(soev_state, path, method, role):
+    from open_webui.main import app as main_app
+    from open_webui.utils.auth import get_current_user
 
-    monkeypatch.setattr(retrieval.ASYNC_VECTOR_DB_CLIENT, 'reset', AsyncMock())
-    monkeypatch.setattr(retrieval.Knowledges, 'delete_all_knowledge', AsyncMock())
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
-    await retrieval.reset_vector_db(user=SimpleNamespace(role='admin'), db=None)
-    retrieval.ASYNC_VECTOR_DB_CLIENT.reset.assert_awaited_once()
-    assert retrieval.Knowledges.delete_all_knowledge.await_count == int(soev_state)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('preview', ['user', 'group'])
-async def test_previews(soev_state, monkeypatch, preview):
-    from open_webui.routers import groups, users
-
-    module = users if preview == 'user' else groups
-    target = SimpleNamespace(id='target', name='Target', permissions={})
-    kb = SimpleNamespace(id='kb', name='Knowledge', user_id='target')
-    monkeypatch.setattr(users.Users, 'get_user_by_id', AsyncMock(return_value=target))
-    monkeypatch.setattr(module.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
-    monkeypatch.setattr(module.Groups, 'get_group_by_id', AsyncMock(return_value=target))
-    monkeypatch.setattr(module.Models, 'get_all_models', AsyncMock(return_value=[]))
-    monkeypatch.setattr(module.Tools, 'get_tools', AsyncMock(return_value=[]))
-    monkeypatch.setattr(module.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value={'kb'}))
-    monkeypatch.setattr(module.Knowledges, 'get_knowledge_bases', AsyncMock(return_value=[kb]))
-    handler = users.get_user_preview if preview == 'user' else groups.preview_group_access
-    result = await handler('target', user=SimpleNamespace(id='admin', role='admin'), db=None)
-    assert result['knowledge'] == {
-        'items': [{'id': 'kb', 'name': 'Knowledge'}] if soev_state else [],
-        'total': int(soev_state),
-    }
-    assert module.Knowledges.get_knowledge_bases.await_count == int(soev_state)
+    app = FastAPI(routes=main_app.routes)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id='reader', role=role)
+    async with AsyncClient(transport=ASGITransport(app), base_url='http://test') as client:
+        response = await client.request(method, path)
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

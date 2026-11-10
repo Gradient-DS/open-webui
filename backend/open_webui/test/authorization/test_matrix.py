@@ -1,4 +1,4 @@
-"""Owner, grant, and administrator policy against real rows and real JWTs."""
+"""Owner and grant policy bind legacy administrator rows and real JWTs."""
 
 import importlib
 
@@ -8,47 +8,47 @@ from sqlalchemy.orm import Session
 
 # Columns: admin, owner, reader, writer (read + write), outsider, other_group, public.
 # A = allow, D = deny; public uses a separate wildcard-read copy of the object.
-# Chat content is owner-only regardless of administrator settings.
+# Legacy administrator settings never change owner or grant checks.
 # Grants are exact permissions, not an implicit write-implies-read hierarchy.
 PRINCIPALS = ('admin', 'owner', 'reader', 'writer', 'outsider', 'other_group', 'public')
 MATRIX = [
-    # object     action    bypass off  bypass on
+    # object     action    legacy bypass off/on (both ignored)
     ('chat', 'read', 'DADDDDD', 'DADDDDD'),
     ('chat', 'update', 'DADDDDD', 'DADDDDD'),
     ('chat', 'delete', 'DADDDDD', 'DADDDDD'),
     ('chat', 'share', 'DADDDDD', 'DADDDDD'),  # Native chats are owner-only; snapshots have grants.
-    ('file', 'read', 'DAAADDA', 'AAAADDA'),
-    ('file', 'update', 'DADADDD', 'AADADDD'),
-    ('file', 'delete', 'DADADDD', 'AADADDD'),
+    ('file', 'read', 'DAAADDA', 'DAAADDA'),
+    ('file', 'update', 'DADADDD', 'DADADDD'),
+    ('file', 'delete', 'DADADDD', 'DADADDD'),
     ('file', 'share', None, None),  # File access is delegated through a knowledge base/model.
-    ('note', 'read', 'DAAADDA', 'AAAADDA'),
-    ('note', 'update', 'DADADDD', 'AADADDD'),
-    ('note', 'delete', 'DADADDD', 'AADADDD'),
-    ('note', 'share', 'DADADDD', 'AADADDD'),
-    ('folder', 'read', 'DAAADDA', 'AAAADDA'),
-    ('folder', 'update', 'DADADDD', 'AADADDD'),
-    ('folder', 'delete', 'DADDDDD', 'AADDDDD'),  # Cascading deletion is reserved for owner/admin.
+    ('note', 'read', 'DAAADDA', 'DAAADDA'),
+    ('note', 'update', 'DADADDD', 'DADADDD'),
+    ('note', 'delete', 'DADADDD', 'DADADDD'),
+    ('note', 'share', 'DADADDD', 'DADADDD'),
+    ('folder', 'read', 'DAAADDA', 'DAAADDA'),
+    ('folder', 'update', 'DADADDD', 'DADADDD'),
+    ('folder', 'delete', 'DADDDDD', 'DADDDDD'),  # Cascading deletion is reserved for owners.
     ('folder', 'share', 'DADDDDD', 'DADDDDD'),  # Sharing a folder shares its owner's knowledge: owner-only.
-    ('model', 'read', 'DAAADDA', 'AAAADDA'),
-    ('model', 'update', 'DADADDD', 'AADADDD'),
-    ('model', 'delete', 'DADADDD', 'AADADDD'),
+    ('model', 'read', 'DAAADDA', 'DAAADDA'),
+    ('model', 'update', 'DADADDD', 'DADADDD'),
+    ('model', 'delete', 'DADADDD', 'DADADDD'),
     ('model', 'share', 'DADDDDD', 'DADDDDD'),
-    ('prompt', 'read', 'DAAADDA', 'AAAADDA'),
-    ('prompt', 'update', 'DADADDD', 'AADADDD'),
-    ('prompt', 'delete', 'DADADDD', 'AADADDD'),
-    ('prompt', 'share', 'DADADDD', 'AADADDD'),
-    ('tool', 'read', 'DAAADDA', 'AAAADDA'),
-    ('tool', 'update', 'DADADDD', 'AADADDD'),
-    ('tool', 'delete', 'DADADDD', 'AADADDD'),
-    ('tool', 'share', 'DADADDD', 'AADADDD'),
-    ('knowledge', 'read', 'DAAADDA', 'AAAADDA'),
-    ('knowledge', 'update', 'DADADDD', 'AADADDD'),
-    ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
+    ('prompt', 'read', 'DAAADDA', 'DAAADDA'),
+    ('prompt', 'update', 'DADADDD', 'DADADDD'),
+    ('prompt', 'delete', 'DADADDD', 'DADADDD'),
+    ('prompt', 'share', 'DADADDD', 'DADADDD'),
+    ('tool', 'read', 'DAAADDA', 'DAAADDA'),
+    ('tool', 'update', 'DADADDD', 'DADADDD'),
+    ('tool', 'delete', 'DADADDD', 'DADADDD'),
+    ('tool', 'share', 'DADADDD', 'DADADDD'),
+    ('knowledge', 'read', 'DAAADDA', 'DAAADDA'),
+    ('knowledge', 'update', 'DADADDD', 'DADADDD'),
+    ('knowledge', 'delete', 'DADADDD', 'DADADDD'),
     ('knowledge', 'share', 'DADDDDD', 'DADDDDD'),  # Access changes are owner-only; writers edit content.
-    ('skill', 'read', 'DAAADDA', 'AAAADDA'),
-    ('skill', 'update', 'DADADDD', 'AADADDD'),
-    ('skill', 'delete', 'DADADDD', 'AADADDD'),
-    ('skill', 'share', 'DADADDD', 'AADADDD'),
+    ('skill', 'read', 'DAAADDA', 'DAAADDA'),
+    ('skill', 'update', 'DADADDD', 'DADADDD'),
+    ('skill', 'delete', 'DADADDD', 'DADADDD'),
+    ('skill', 'share', 'DADADDD', 'DADADDD'),
 ]
 
 # Low-level helpers deliberately do not confer ownership/admin privileges unless documented.
@@ -166,8 +166,8 @@ CASES = [
 def test_http_matrix(seeded, monkeypatch, kind, action, principal, bypass, allowed):
     from open_webui import config
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', bypass)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass, raising=False)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', bypass, raising=False)
     model = seeded.run(seed_resource, seeded, kind, principal == 'public')
     from open_webui.models.access_grants import AccessGrants
 

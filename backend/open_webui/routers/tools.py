@@ -8,6 +8,7 @@ from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from open_webui import config
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT, ENABLE_PLUGINS
@@ -15,7 +16,6 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.tools import (
@@ -26,15 +26,18 @@ from open_webui.models.tools import (
     Tools,
     ToolUserResponse,
 )
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.utils.access_control import (
+    can_bypass_access_control,
     filter_allowed_access_grants,
     has_access,
     has_permission,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import require_platform_feature
 from open_webui.utils.plugin import (
-    get_tools_cache,
     get_tool_module_from_cache,
+    get_tools_cache,
     load_tool_module_by_id,
     replace_imports,
     resolve_valves_schema_options,
@@ -42,13 +45,13 @@ from open_webui.utils.plugin import (
 from open_webui.utils.tools import get_tool_servers, get_tool_specs
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui import config
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_platform_feature('feature.tools'))],
+)
 
 
 async def get_tool_module(request, tool_id, load_from_db=True):
@@ -85,7 +88,7 @@ async def get_tools(
         for tool in await Tools.get_tools(
             defer_content=True,
             db=db,
-            user_id=None if bypass_access_control else user.id,
+            user_id=user.id,
             user_group_ids=user_group_ids,
         ):
             tool_module = tools_cache.get(tool.id)
@@ -216,7 +219,7 @@ async def get_tool_list(user=Depends(get_verified_user), db: AsyncSession = Depe
     tools = await Tools.get_tools(
         defer_content=True,
         db=db,
-        user_id=None if bypass_access_control else user.id,
+        user_id=user.id,
         user_group_ids=user_group_ids,
     )
 
@@ -270,56 +273,6 @@ def github_url_to_raw_url(url: str) -> str:
     return url
 
 
-@router.post('/load/url', response_model=dict | None)
-async def load_tool_from_url(request: Request, form_data: LoadUrlForm, user=Depends(get_admin_user)):
-    # NOTE: This is NOT a SSRF vulnerability:
-    # This endpoint is admin-only (see get_admin_user), meant for *trusted* internal use,
-    # and does NOT accept untrusted user input. Access is enforced by authentication.
-
-    url = str(form_data.url)
-    if not url:
-        raise HTTPException(status_code=400, detail='Please enter a valid URL')
-
-    url = github_url_to_raw_url(url)
-    url_parts = url.rstrip('/').split('/')
-
-    file_name = url_parts[-1]
-    tool_name = (
-        file_name[:-3]
-        if (file_name.endswith('.py') and (not file_name.startswith(('main.py', 'index.py', '__init__.py'))))
-        else url_parts[-2]
-        if len(url_parts) > 1
-        else 'function'
-    )
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
-        ) as session:
-            async with session.get(
-                url, headers={'Content-Type': 'application/json'}, ssl=AIOHTTP_CLIENT_SESSION_SSL
-            ) as resp:
-                if resp.status != 200:
-                    raise HTTPException(status_code=resp.status, detail='Failed to fetch the tool')
-                data = await resp.text()
-                if not data:
-                    raise HTTPException(status_code=400, detail='No data received from the URL')
-        return {
-            'name': tool_name,
-            'content': data,
-        }
-    except HTTPException:
-        raise
-    except aiohttp.ClientError as e:
-        # The admin-supplied URL could not be fetched: a bad URL, not a server fault.
-        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e, 'Error fetching tool'))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=ERROR_MESSAGES.DEFAULT(e, 'Error fetching tool'),
-        )
-
-
 ############################
 # ExportTools
 ############################
@@ -331,7 +284,7 @@ async def export_tools(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'workspace.tools_export',
         await Config.get('user.permissions'),
@@ -342,10 +295,9 @@ async def export_tools(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    bypass_access_control = can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT
     return await Tools.get_tools(
         db=db,
-        user_id=None if bypass_access_control else user.id,
+        user_id=user.id,
     )
 
 
@@ -362,7 +314,7 @@ async def create_new_tools(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create a new tool from user-supplied Python source code."""
-    if user.role != 'admin' and not (
+    if not (
         await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
         or await has_permission(
             user.id,
@@ -503,7 +455,7 @@ async def update_tools_by_id(
     """Update an existing tool's source code and metadata."""
     # CVE-2026-45395: enforce workspace.tools permission so a non-admin user
     # who has lost workspace.tools cannot keep mutating tools they own.
-    if user.role != 'admin' and not await has_permission(
+    if not await has_permission(
         user.id,
         'workspace.tools',
         await Config.get('user.permissions'),
@@ -540,7 +492,7 @@ async def update_tools_by_id(
 
     # Content edits trigger exec on load — gate them behind workspace.tools (matches /create).
     if form_data.content != tools.content:
-        if user.role != 'admin' and not (
+        if not (
             await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
             or await has_permission(user.id, 'workspace.tools_import', await Config.get('user.permissions'), db=db)
         ):

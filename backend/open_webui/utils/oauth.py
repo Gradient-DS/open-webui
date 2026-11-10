@@ -40,7 +40,6 @@ from open_webui.config import (
     ENABLE_OAUTH_SIGNUP,
     JWT_EXPIRES_IN,
     OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID,
-    OAUTH_ADMIN_ROLES,
     OAUTH_ALLOWED_DOMAINS,
     OAUTH_ALLOWED_ROLES,
     OAUTH_ALLOWED_TENANTS,
@@ -165,7 +164,6 @@ OAUTH_RUNTIME_CONFIG = {
     'OAUTH_PICTURE_CLAIM': ('oauth.picture_claim', OAUTH_PICTURE_CLAIM),
     'OAUTH_USERNAME_CLAIM': ('oauth.username_claim', OAUTH_USERNAME_CLAIM),
     'OAUTH_ALLOWED_ROLES': ('oauth.allowed_roles', OAUTH_ALLOWED_ROLES),
-    'OAUTH_ADMIN_ROLES': ('oauth.admin_roles', OAUTH_ADMIN_ROLES),
     'OAUTH_ALLOWED_DOMAINS': ('oauth.allowed_domains', OAUTH_ALLOWED_DOMAINS),
     'OAUTH_ALLOWED_TENANTS': ('oauth.allowed_tenants', OAUTH_ALLOWED_TENANTS),
     'WEBHOOK_URL': ('webhook_url', WEBHOOK_URL),
@@ -1580,120 +1578,6 @@ class OAuthManager:
             log.error(f'Exception during token refresh for provider {provider}: {e}')
             return None
 
-    async def get_user_role(self, user, user_data):
-        auth_config = await get_oauth_runtime_config()
-        user_count = await Users.get_num_users()
-        if user and user_count == 1:
-            # If the user is the only user, assign the role "admin" - actually repairs role for single user on login
-            log.debug('Assigning the only user the admin role')
-            return 'admin'
-        if not user and user_count == 0:
-            # First-user bootstrap: skip role management gating so the
-            # instance can be initialized.  We intentionally return the
-            # default role here (not 'admin') — admin promotion happens
-            # race-safely *after* insert via get_num_users() == 1.
-            log.debug('First user bootstrap: using default role (admin promotion deferred to post-insert)')
-            return auth_config.DEFAULT_USER_ROLE
-
-        if auth_config.ENABLE_OAUTH_ROLE_MANAGEMENT:
-            log.debug('Running OAUTH Role management')
-            oauth_claim = auth_config.OAUTH_ROLES_CLAIM
-            oauth_allowed_roles = auth_config.OAUTH_ALLOWED_ROLES
-            oauth_admin_roles = auth_config.OAUTH_ADMIN_ROLES
-            oauth_roles = []
-            # Keep existing users at their current role unless the provider sent roles.
-            role = user.role if user else auth_config.DEFAULT_USER_ROLE
-
-            # Next block extracts the roles from the user data, accepting nested claims of any depth
-            if oauth_claim and oauth_allowed_roles and oauth_admin_roles:
-                claim_data = user_data
-                nested_claims = oauth_claim.split('.')
-                for nested_claim in nested_claims:
-                    claim_data = claim_data.get(nested_claim, {})
-
-                # Try flat claim structure as alternative
-                if not claim_data:
-                    claim_data = user_data.get(oauth_claim, {})
-
-                oauth_roles = []
-
-                if isinstance(claim_data, list):
-                    oauth_roles = claim_data
-                elif isinstance(claim_data, str):
-                    # Split by the configured separator if present
-                    if OAUTH_ROLES_SEPARATOR and OAUTH_ROLES_SEPARATOR in claim_data:
-                        oauth_roles = claim_data.split(OAUTH_ROLES_SEPARATOR)
-                    else:
-                        oauth_roles = [claim_data]
-                elif isinstance(claim_data, int):
-                    oauth_roles = [str(claim_data)]
-
-            log.debug('Oauth Roles claim: %s', oauth_claim)
-            log.debug('User roles from oauth: %s', oauth_roles)
-            log.debug('Accepted user roles: %s', oauth_allowed_roles)
-            log.debug('Accepted admin roles: %s', oauth_admin_roles)
-
-            # If roles are present in the token, they must match; otherwise deny access
-            if oauth_roles:
-                matched = False
-                for allowed_role in oauth_allowed_roles:
-                    if allowed_role == '*' or allowed_role in oauth_roles:
-                        log.debug('Assigned user the user role')
-                        role = 'user'
-                        matched = True
-                        break
-                for admin_role in oauth_admin_roles:
-                    if admin_role in oauth_roles:
-                        log.debug('Assigned user the admin role')
-                        role = 'admin'
-                        matched = True
-                        break
-                if not matched:
-                    log.warning(
-                        f'OAuth role management enabled but user roles do not match any allowed/admin roles. '
-                        f'User roles: {oauth_roles}, allowed: {oauth_allowed_roles}, admin: {oauth_admin_roles}'
-                    )
-                    raise HTTPException(
-                        status.HTTP_403_FORBIDDEN,
-                        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                    )
-        else:
-            if not user:
-                # If role management is disabled, use the default role for new users
-                role = auth_config.DEFAULT_USER_ROLE
-            else:
-                # If role management is disabled, use the existing role for existing users
-                role = user.role
-
-        return role
-
-    async def update_user_role_from_oauth(
-        self,
-        request,
-        user,
-        user_data,
-        provider,
-        *,
-        db=None,
-    ):
-        determined_role = await self.get_user_role(user, user_data)
-        if user.role == determined_role:
-            return user
-
-        updated_user = await Users.update_user_role_by_id(user.id, determined_role, db=db)
-        user = updated_user or user
-        user.role = determined_role
-        await publish_event(
-            request,
-            EVENTS.USER_ROLE_UPDATED,
-            actor=user,
-            subject_id=user.id,
-            source='oauth',
-            data={'role': determined_role, 'provider': provider},
-        )
-
-        return user
-
     async def update_user_groups(self, request, user, user_data, default_permissions, db=None):
         refuse_group_write()
 
@@ -1924,14 +1808,6 @@ class OAuthManager:
                     user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
 
             if user:
-                user = await self.update_user_role_from_oauth(
-                    request=request,
-                    user=user,
-                    user_data=user_data,
-                    provider=provider,
-                    db=db,
-                )
-
                 updated_fields = []
 
                 if auth_config.OAUTH_UPDATE_NAME_ON_LOGIN:
@@ -2049,10 +1925,7 @@ class OAuthManager:
 
                     # Invite-supplied role wins over OAuth role-claim at provisioning.
                     # Subsequent logins still let ENABLE_OAUTH_ROLE_MANAGEMENT reconcile.
-                    # `get_user_role` became async in the v0.9.0 refactor — the
-                    # `await` here is required for the conditional below it to
-                    # carry a role string instead of a coroutine.
-                    role = consumed_invite.role if consumed_invite else await self.get_user_role(None, user_data)
+                    role = 'user'
 
                     user = await Auths.insert_new_auth(
                         email=email,
@@ -2066,13 +1939,6 @@ class OAuthManager:
 
                     if not user:
                         raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
-
-                    # Atomically check if this is the only user *after* the
-                    # insert to avoid TOCTOU race on first-user registration.
-                    # Matches signup_handler pattern.
-                    if await Users.get_num_users(db=db) == 1:
-                        await Users.update_user_role_by_id(user.id, 'admin', db=db)
-                        user = await Users.get_user_by_id(user.id, db=db)
 
                     default_group_id = await Config.get('ui.default_group_id')
                     await apply_default_group_assignment(default_group_id, user.id, db=db)

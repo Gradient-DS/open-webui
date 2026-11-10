@@ -16,13 +16,10 @@ import requests
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel, TypeAdapter
 
-from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
-
 from open_webui.env import (
     AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
-    ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_DB_MIGRATIONS,
     ENV,
     FRONTEND_BUILD_DIR,
@@ -37,10 +34,15 @@ from open_webui.env import (
     log,
 )
 from open_webui.models.config import Config
+from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
 from open_webui.utils.json_codec import JSONCodec
 
 
 async def seed_registered_defaults():
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     await Config.rename_prefix('rag.web', 'web')
     await Config.repair_config_rows()
     await Config.seed_defaults(DEFAULT_CONFIG)
@@ -85,6 +87,10 @@ if ENABLE_DB_MIGRATIONS:
 
 async def import_legacy_config_json():
     """Migrate legacy config.json → database on first run."""
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     if not os.path.exists(f'{DATA_DIR}/config.json'):
         return
     with open(f'{DATA_DIR}/config.json', 'r') as _f:
@@ -221,7 +227,6 @@ if CUSTOM_NAME:
             WEBUI_NAME = data['name']
     except Exception as e:
         log.exception(e)
-        pass
 
 
 ####################################
@@ -1706,13 +1711,6 @@ DEFAULT_ARENA_MODEL = {
 
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
 
-ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
-
-ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
-
-BYPASS_ADMIN_ACCESS_CONTROL = os.getenv('BYPASS_ADMIN_ACCESS_CONTROL', 'False').lower() == 'true'
-
-ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = os.getenv('ENABLE_COMMUNITY_SHARING', 'True').lower() == 'true'
 
@@ -1785,11 +1783,6 @@ except Exception as e:
     banners = []
 
 WEBUI_BANNERS = banners
-
-
-SHOW_ADMIN_DETAILS = os.getenv('SHOW_ADMIN_DETAILS', 'true').lower() == 'true'
-
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', None)
 
 
 ####################################
@@ -2197,14 +2190,9 @@ OAUTH_ROLES_CLAIM = os.getenv('OAUTH_ROLES_CLAIM', 'roles')
 OAUTH_ROLES_SEPARATOR = os.getenv('OAUTH_ROLES_SEPARATOR', ',')
 
 OAUTH_ALLOWED_ROLES = [
-    role.strip()
-    for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(OAUTH_ROLES_SEPARATOR)
-    if role
+    role.strip() for role in os.getenv('OAUTH_ALLOWED_ROLES', 'user').split(OAUTH_ROLES_SEPARATOR) if role
 ]
 
-OAUTH_ADMIN_ROLES = [
-    role.strip() for role in os.getenv('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role
-]
 
 OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_DOMAINS', '*').split(',')]
 OAUTH_ALLOWED_TENANTS = [
@@ -2434,10 +2422,6 @@ KNOWLEDGE_MAX_FILE_COUNT = int(os.environ.get('KNOWLEDGE_MAX_FILE_COUNT', '250')
 
 ENABLE_FEEDBACK_LAYER2 = os.environ.get('ENABLE_FEEDBACK_LAYER2', 'True').lower() == 'true'
 
-FEEDBACK_LAYER2_POSITIVE_TAGS = []
-
-FEEDBACK_LAYER2_NEGATIVE_TAGS = []
-
 ENABLE_FEEDBACK_LAYER3 = os.environ.get('ENABLE_FEEDBACK_LAYER3', 'True').lower() == 'true'
 
 FEEDBACK_LAYER3_PROMPT = ''
@@ -2451,21 +2435,6 @@ CONVERSATION_FEEDBACK_SCALE_MAX = int(os.environ.get('CONVERSATION_FEEDBACK_SCAL
 CONVERSATION_FEEDBACK_HEADER = ''
 
 CONVERSATION_FEEDBACK_PLACEHOLDER = ''
-
-ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False').lower() == 'true'
-
-FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
-
-# Notification-router endpoint. Takes precedence over the Slack webhook above:
-# when set, the event is POSTed here and the Slack card is skipped. An in-cluster
-# URL, not a secret — so it comes from the ConfigMap, not the tenant vault.
-FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
-
-FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (
-    os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true'
-)
-
-FEEDBACK_REPORT_TRACE_URL_TEMPLATE = os.environ.get('FEEDBACK_REPORT_TRACE_URL_TEMPLATE', '')
 
 ENABLE_DATA_EXPORT = os.environ.get('ENABLE_DATA_EXPORT', 'True').lower() == 'true'
 
@@ -2574,15 +2543,6 @@ ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'tr
 # [Gradient] Admins' "Agent trace (.json)" download; off unless a tenant turns it on.
 ENABLE_AGENT_TRACE_DOWNLOAD = os.environ.get('ENABLE_AGENT_TRACE_DOWNLOAD', 'False').lower() == 'true'
 
-FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS = os.environ.get('FEATURE_ADMIN_SETTINGS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS_TABS = [
-    tab.strip() for tab in os.environ.get('FEATURE_ADMIN_SETTINGS_TABS', '').split(',') if tab.strip()
-]
 
 FEATURE_CHAT_CONTROLS_SECTIONS = [
     section.strip() for section in os.environ.get('FEATURE_CHAT_CONTROLS_SECTIONS', '').split(',') if section.strip()
@@ -2893,8 +2853,6 @@ DEFAULT_CONFIG = {
     'ui.enable_message_rating': ENABLE_MESSAGE_RATING,
     'ui.enable_user_webhooks': ENABLE_USER_WEBHOOKS,
     'ui.banners': WEBUI_BANNERS,
-    'auth.admin.show': SHOW_ADMIN_DETAILS,
-    'auth.admin.email': ADMIN_EMAIL,
     'task.model.default': TASK_MODEL,
     'task.model.external': TASK_MODEL_EXTERNAL,
     'task.model.params': TASK_MODEL_PARAMS,
@@ -2963,7 +2921,6 @@ DEFAULT_CONFIG = {
     'oauth.blocked_groups': OAUTH_BLOCKED_GROUPS,
     'oauth.roles_claim': OAUTH_ROLES_CLAIM,
     'oauth.allowed_roles': OAUTH_ALLOWED_ROLES,
-    'oauth.admin_roles': OAUTH_ADMIN_ROLES,
     'oauth.allowed_domains': OAUTH_ALLOWED_DOMAINS,
     'oauth.allowed_tenants': OAUTH_ALLOWED_TENANTS,
     'oauth.update_picture_on_login': OAUTH_UPDATE_PICTURE_ON_LOGIN,
@@ -3017,16 +2974,11 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.conversation.placeholder': CONVERSATION_FEEDBACK_PLACEHOLDER,
     'evaluation.feedback.conversation.scale_max': CONVERSATION_FEEDBACK_SCALE_MAX,
     'evaluation.feedback.layer2.enable': ENABLE_FEEDBACK_LAYER2,
-    'evaluation.feedback.layer2.negative_tags': FEEDBACK_LAYER2_NEGATIVE_TAGS,
-    'evaluation.feedback.layer2.positive_tags': FEEDBACK_LAYER2_POSITIVE_TAGS,
+    'evaluation.feedback.reasons': [],
+    'evaluation.feedback.tags': [],
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
     'features.enable_data_warnings': ENABLE_DATA_WARNINGS,
-    'feedback_report.enable': ENABLE_FEEDBACK_REPORTING,
-    'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
-    'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-    'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
-    'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,

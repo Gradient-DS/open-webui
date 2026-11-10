@@ -77,7 +77,7 @@ async def test_share_names_preserve_group_visibility_and_unknown_audiences(group
     result = await named_shares(shares, SimpleNamespace(id='fern', role=role), db=group_db)
     assert result[0]['name'] == 'Lark'
     assert result[1]['name'] == 'Old'
-    assert result[2].get('name') == ('Hidden group' if role == 'admin' else None)
+    assert result[2].get('name') == None
     assert 'name' not in result[3]
     assert [item['audience'] for item in result] == [item.audience.model_dump() for item in shares]
 

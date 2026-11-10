@@ -1,3 +1,5 @@
+# Product configuration boundaries are classified in product-config-coverage.toml.
+# Skill-file routes have ordinary owner seeds and no coverage exemption.
 # Routes no security test drives, each with the reason it cannot be driven on
 # the sealed CI stack. Read by backend/open_webui/test/security/test_route_coverage.py,
 # which fails on an empty reason, on a waiver for a route that no longer exists,
@@ -35,6 +37,7 @@ reason = "Never attempted: every owner pass skips it because `provider` is decla
 
 [[waived]]
 id = "GET /oauth/clients/{client_id}/authorize"
+runtime_soev_backed = "waive"
 reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
 
 [[waived]]
@@ -50,16 +53,6 @@ id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_session_provider). auths.py:delete_oauth_session_by_provider needs an OAuthSessions row for the caller, which only a completed external authorization-code exchange creates. Closes with an OIDC issuer stub."
 
 # --- Pipelines: creation is delegated to an external Pipelines server --------
-
-[[waived]]
-id = "PUT /api/events/webhooks/{webhook_id}"
-reason = "Never attempted: every owner pass skips it because `webhook_id` is declared unseedable (attack-surface.toml, key event_webhook). main.py:create_event_webhook validates the target with retrieval/web/utils.py:validate_url, which refuses every in-network host (private Docker addresses), and external hosts do not resolve on the internal network. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard, and production leaves it unset. Does not close: the route is unseedable because the guard works."
-
-[[waived]]
-id = "DELETE /api/events/webhooks/{webhook_id}"
-reason = "Never attempted: every owner pass skips it because `webhook_id` is declared unseedable (attack-surface.toml, key event_webhook). main.py:create_event_webhook validates the target with retrieval/web/utils.py:validate_url, which refuses every in-network host (private Docker addresses), and external hosts do not resolve on the internal network. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard, and production leaves it unset. Does not close: the route is unseedable because the guard works."
-
-# --- Notification targets: unseedable because the same SSRF guard works --------
 
 [[waived]]
 id = "PUT /api/v1/notifications/targets/{target_id}"
@@ -110,28 +103,6 @@ reason = "Never attempted: `path` is unseedable (attack-surface.toml, key cache)
 # is ever turned on for a tenant; drive it then with the flag on in CI.
 
 [[waived]]
-id = "POST /api/v1/models/sync"
-reason = "Not entered: routers/models.py:sync_models answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
-
-[[waived]]
-id = "DELETE /api/v1/models/delete/all"
-reason = "Not entered: routers/models.py:delete_all_models answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
-
-[[waived]]
-id = "DELETE /api/v1/files/all"
-reason = "Not entered: routers/files.py:delete_all_files answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
-
-[[waived]]
-id = "POST /api/v1/retrieval/reset/db"
-reason = "Not entered: routers/retrieval.py:reset_vector_db answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
-
-[[waived]]
-id = "POST /api/v1/retrieval/reset/uploads"
-reason = "Not entered: routers/retrieval.py:reset_upload_dir answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
-
-# --- Platform speech: local users have no platform login ---------------------
-
-[[waived]]
 id = "POST /api/v1/audio/speech"
 runtime_soev_backed = "waive"
 reason = "Observed in the actual-handler HTTP control: a verified local user with read_aloud enabled and a valid SpeechForm receives 401 sign_in, constraint identity:platform_login, from soev/primitives.py:_login_token before upstream I/O. The public sealed stack has no platform login or soev-api speech role. Keep owner and cross-user probes enabled; private drive mode requires a successful handler hit. Closes when the public stack supplies a platform login and speech role."
@@ -175,11 +146,6 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
-id = "GET /api/v1/knowledge/{id}/export"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
-
-[[waived]]
 id = "GET /api/v1/knowledge/{id}/files"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live. The existing owned KB seed and required_drive_routes exercise the bounded read bundle in the private full-stack sweep; its missing and foreign selectors are proved in the platform leak matrix."
@@ -191,16 +157,6 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 
 [[waived]]
 id = "POST /api/v1/knowledge/create"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
-
-[[waived]]
-id = "POST /api/v1/knowledge/metadata/reindex"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
-
-[[waived]]
-id = "POST /api/v1/knowledge/reindex"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
@@ -385,11 +341,6 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
-id = "GET /api/v1/agent-threads/{thread_id}/trace"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/agent_threads.py streams a soev-api chat thread export as the admin caller, answers 404 unless ENABLE_AGENT_TRACE_DOWNLOAD is set and 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
-
-[[waived]]
 id = "POST /api/v1/files/onedrive/attach"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
@@ -430,56 +381,6 @@ runtime_soev_backed = "drive"
 reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
 
 [[waived]]
-id = "POST /api/v1/functions/create"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/export"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/id/{id}"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "DELETE /api/v1/functions/id/{id}/delete"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/id/{id}/toggle"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/id/{id}/toggle/global"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/id/{id}/update"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/id/{id}/valves"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/id/{id}/valves/spec"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/id/{id}/valves/update"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
 id = "GET /api/v1/functions/id/{id}/valves/user"
 runtime_soev_backed = "drive"
 reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
@@ -491,21 +392,6 @@ reason = "The private sweep observed functions/create returning 403 after #535. 
 
 [[waived]]
 id = "POST /api/v1/functions/id/{id}/valves/user/update"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/list"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/load/url"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/sync"
 runtime_soev_backed = "drive"
 reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
 

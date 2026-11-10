@@ -68,14 +68,14 @@ def test_admin_write_access_follows_platform(api, monkeypatch, route, writable):
     assert (body['items'][0] if 'items' in body else body)['write_access'] is writable
 
 
-def test_admin_bypass_defaults_off_even_with_legacy_content_setting():
+def test_admin_bypass_is_removed_even_with_legacy_content_setting():
     environment = {**os.environ, 'ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS': 'True'}
     environment.pop('BYPASS_ADMIN_ACCESS_CONTROL', None)
     result = subprocess.run(
         [
             sys.executable,
             '-c',
-            'from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL; assert BYPASS_ADMIN_ACCESS_CONTROL is False',
+            "from open_webui import config; assert not hasattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL')",
         ],
         env=environment,
         capture_output=True,

@@ -67,7 +67,7 @@ async def named_shares(shares: list[Share], user: UserModel, db: AsyncSession | 
             rows = await session.execute(select(User.person_id, User.name).where(User.person_id.in_(people)))
             names.update({('person', ref): name for ref, name in rows})
         if groups:
-            visible = await Groups.get_groups(filter={} if user.role == 'admin' else {'member_id': user.id}, db=session)
+            visible = await Groups.get_groups(filter={'member_id': user.id}, db=session)
             names.update({('group', f'platform:group:{group.id}'): group.name for group in visible})
         for id in folders:
             folder = await Folders.get_folder_by_id(id, db=session)

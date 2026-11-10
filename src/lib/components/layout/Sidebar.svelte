@@ -14,7 +14,6 @@
 	import {
 		user,
 		chats,
-		settings,
 		chatId,
 		tags,
 		folders as _folders,
@@ -45,8 +44,7 @@
 	const i18n = getContext<import('svelte/store').Readable<import('i18next').i18n>>('i18n');
 
 	$: canImportChats =
-		!$config?.features?.enable_v2_threads &&
-		($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true));
+		!$config?.features?.enable_v2_threads && ($user?.permissions?.chat?.import ?? true);
 
 	import {
 		getAllTags,
@@ -54,8 +52,6 @@
 		getChatById,
 		updateChatFolderIdById,
 		importChats,
-		deleteAllChats,
-		getChatListBySearchText,
 		markChatsRead
 	} from '$lib/apis/chats';
 	import {
@@ -64,8 +60,8 @@
 		getSharedFolders,
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
-	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
-	import { updateUserSettings } from '$lib/apis/users';
+	import { getPinnedNoteList } from '$lib/apis/notes';
+
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
@@ -82,9 +78,7 @@
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
-	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
-	import ClockIcon from './Sidebar/icons/Clock.svelte';
-	import CodeIcon from './Sidebar/icons/Code.svelte';
+
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
 	import NotesIcon from './Sidebar/icons/Notes.svelte';
 	// [Gradient] Vergadering entry, gated on FEATURE_MEETINGS and the soev-api agent catalog.
@@ -92,7 +86,7 @@
 	import { checkMeetingsAvailable, meetingsAvailable } from '$lib/components/meetings/availability';
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
-	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
+
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import DropdownMenu from '../common/DropdownMenu.svelte';
@@ -299,10 +293,7 @@
 				tags.set(_tags);
 			})(),
 			(async () => {
-				if (
-					$config?.features?.enable_notes &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-				) {
+				if ($config?.features?.enable_notes && ($user?.permissions?.features?.notes ?? true)) {
 					console.log('Init pinned notes');
 					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
 					pinnedNotes.set(_pinnedNotes);
@@ -740,7 +731,7 @@
 		selectedFolder.set(null);
 		closeMobileSidebar();
 
-		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+		if ($user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		} else {
 			await temporaryChatEnabled.set(false);
@@ -911,7 +902,7 @@
 						</Tooltip>
 					</div>
 
-					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
+					{#if ($config?.features?.enable_notes ?? false) && ($user?.permissions?.features?.notes ?? true)}
 						<div class="">
 							<Tooltip content={$i18n.t('Notes')} placement="right">
 								<a
@@ -940,7 +931,7 @@
 						<MeetingsSidebarEntry collapsed onClick={itemClickHandler} />
 					{/if}
 
-					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
+					{#if isFeatureEnabled('knowledge') && $user?.permissions?.workspace?.knowledge}
 						<div class="">
 							<Tooltip content={$i18n.t('Knowledge')} placement="right">
 								<a
@@ -968,7 +959,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+					{#if isFeatureEnabled('models') && $user?.permissions?.workspace?.models}
 						<div class="">
 							<Tooltip content={$i18n.t('Agents')} placement="right">
 								<a
@@ -996,7 +987,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+					{#if isFeatureEnabled('prompts') && $user?.permissions?.workspace?.prompts}
 						<div class="">
 							<Tooltip content={$i18n.t('Prompts')} placement="right">
 								<a
@@ -1024,7 +1015,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+					{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && $user?.permissions?.workspace?.tools}
 						<div class="">
 							<Tooltip content={$i18n.t('Tools')} placement="right">
 								<a
@@ -1048,7 +1039,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+					{#if isFeatureEnabled('skills') && $user?.permissions?.workspace?.skills}
 						<div class="">
 							<Tooltip content={$i18n.t('Skills')} placement="right">
 								<a
@@ -1265,7 +1256,7 @@
 					     collapsed-icon-bar block above for the matching structure).
 					     Each entry is gated by its own feature flag + permission so
 					     unused items drop out cleanly per tenant. -->
-							{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
+							{#if ($config?.features?.enable_notes ?? false) && ($user?.permissions?.features?.notes ?? true)}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-notes-button"
@@ -1294,7 +1285,7 @@
 								<MeetingsSidebarEntry onClick={itemClickHandler} />
 							{/if}
 
-							{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
+							{#if isFeatureEnabled('knowledge') && $user?.permissions?.workspace?.knowledge}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-knowledge-button"
@@ -1320,7 +1311,7 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+							{#if isFeatureEnabled('models') && $user?.permissions?.workspace?.models}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-agents-button"
@@ -1344,7 +1335,7 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+							{#if isFeatureEnabled('prompts') && $user?.permissions?.workspace?.prompts}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-prompts-button"
@@ -1370,7 +1361,7 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+							{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && $user?.permissions?.workspace?.tools}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-tools-button"
@@ -1390,7 +1381,7 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+							{#if isFeatureEnabled('skills') && $user?.permissions?.workspace?.skills}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-skills-button"
@@ -1410,7 +1401,7 @@
 								</div>
 							{/if}
 
-							{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
+							{#if $config?.features?.enable_calendar && $user?.permissions?.features?.calendar}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-calendar-button"
@@ -1445,7 +1436,7 @@
 								</div>
 							{/if}
 
-							{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
+							{#if $config?.features?.enable_automations && $user?.permissions?.features?.automations}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-automations-button"
@@ -1479,28 +1470,6 @@
 									</a>
 								</div>
 							{/if}
-
-							{#if isFeatureEnabled('playground') && $user?.role === 'admin'}
-								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
-									<a
-										id="sidebar-playground-button"
-										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-										href="/playground"
-										on:click={itemClickHandler}
-										draggable="false"
-										aria-label={$i18n.t('Playground')}
-									>
-										<div class="self-center">
-											<CodeIcon className="size-4" strokeWidth="1.5" />
-										</div>
-										<div class="flex self-center translate-y-[0.5px]">
-											<div class=" self-center text-[0.8125rem] leading-5">
-												{$i18n.t('Playground')}
-											</div>
-										</div>
-									</a>
-								</div>
-							{/if}
 						</div>
 					</div>
 
@@ -1516,7 +1485,7 @@
 						</Folder>
 					{/if}
 
-					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
+					{#if ($config?.features?.enable_notes ?? false) && ($user?.permissions?.features?.notes ?? true) && $pinnedNotes.length > 0}
 						<SidebarSection
 							id="sidebar-pinned-notes"
 							bind:open={showPinnedNotes}
@@ -1534,7 +1503,7 @@
 						</SidebarSection>
 					{/if}
 
-					{#if $config?.features?.enable_folders && ($user?.role === 'admin' || ($user?.permissions?.features?.folders ?? true))}
+					{#if $config?.features?.enable_folders && ($user?.permissions?.features?.folders ?? true)}
 						<SidebarSection
 							id="sidebar-folders"
 							bind:open={showFolders}
@@ -1820,7 +1789,9 @@
 							</div>
 						{/if}
 
-						<div class=" min-w-0 flex-1 flex flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden">
+						<div
+							class=" min-w-0 flex-1 flex flex-col overflow-x-hidden overflow-y-auto scrollbar-hidden"
+						>
 							<div class="pt-1.5">
 								{#if chatLists.own}
 									{#each chatLists.own as chat, idx (`chat-${chat?.id ?? idx}`)}

@@ -104,32 +104,9 @@ class ImportConfigForm(BaseModel):
     config: dict
 
 
-@router.post('/import', response_model=dict)
-async def import_config(request: Request, form_data: ImportConfigForm, user=Depends(get_admin_user)):
-    await Config.upsert(form_data.config)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_IMPORTED,
-        actor=user,
-        subject_id='import',
-        data={'keys': list(form_data.config.keys())},
-    )
-    return await Config.get_all()
-
-
 ############################
 # ExportConfig
 ############################
-
-
-@router.get('/export', response_model=dict)
-async def export_config(user=Depends(get_admin_user)):
-    return await Config.get_all()
-
-
-@router.get('/namespace/{namespace}', response_model=dict)
-async def get_config_namespace(namespace: str, user=Depends(get_admin_user)):
-    return await Config.get_namespace(namespace)
 
 
 ############################
@@ -144,46 +121,6 @@ class OAuthClientRegistrationForm(BaseModel):
     client_secret: str | None = None
     oauth_server_url: str | None = None
     oauth_scope: str | None = None
-
-
-@router.post('/oauth/clients/register')
-async def register_oauth_client(
-    request: Request,
-    form_data: OAuthClientRegistrationForm,
-    type: str | None = None,
-    user=Depends(get_admin_user),
-):
-    try:
-        oauth_client_id = form_data.client_id
-        if type:
-            oauth_client_id = f'{type}:{form_data.client_id}'
-
-        oauth_server_url = form_data.oauth_server_url if form_data.oauth_server_url else form_data.url
-
-        if form_data.client_secret:
-            # Static credentials: skip dynamic registration, build from provided credentials
-            oauth_client_info = await get_oauth_client_info_with_static_credentials(
-                request,
-                oauth_client_id,
-                oauth_server_url,
-                oauth_client_id=form_data.client_id,
-                oauth_client_secret=form_data.client_secret,
-                oauth_scope=form_data.oauth_scope,
-            )
-        else:
-            oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
-                request, oauth_client_id, oauth_server_url, oauth_scope=form_data.oauth_scope
-            )
-        return {
-            'status': True,
-            'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
-        }
-    except Exception as e:
-        log.debug('Failed to register OAuth client: %s', e)
-        raise HTTPException(
-            status_code=400,
-            detail=f'Failed to register OAuth client: {e}',
-        )
 
 
 ############################
@@ -208,77 +145,6 @@ class ToolServersConfigForm(BaseModel):
     TOOL_SERVER_CONNECTIONS: list[ToolServerConnection]
 
 
-@router.get('/tool_servers', response_model=ToolServersConfigForm)
-async def get_tool_servers_config(
-    request: Request,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('tool_servers')),
-):
-    return {'TOOL_SERVER_CONNECTIONS': await Config.get('tool_server.connections')}
-
-
-@router.post('/tool_servers', response_model=ToolServersConfigForm)
-async def set_tool_servers_config(
-    request: Request,
-    form_data: ToolServersConfigForm,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('tool_servers')),
-):
-    existing_connections = await Config.get('tool_server.connections', []) or []
-    for connection in existing_connections:
-        server_type = connection.get('type', 'openapi')
-        auth_type = connection.get('auth_type', 'none')
-
-        if auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-            # Remove existing OAuth clients for tool servers
-            server_id = (connection.get('info') or {}).get('id')
-            client_key = f'{server_type}:{server_id}'
-
-            try:
-                request.app.state.oauth_client_manager.remove_client(client_key)
-            except Exception:
-                pass
-
-    # Set new tool server connections
-    connections = [connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS]
-    await Config.upsert({'tool_server.connections': connections})
-
-    await set_tool_servers(request)
-
-    for connection in connections:
-        server_type = connection.get('type', 'openapi')
-        if server_type == 'mcp':
-            server_id = (connection.get('info') or {}).get('id')
-            auth_type = connection.get('auth_type', 'none')
-
-            if auth_type in ('oauth_2.1', 'oauth_2.1_static') and server_id:
-                try:
-                    oauth_client_info = resolve_oauth_client_info(connection)
-                    oauth_client_info = await recover_static_oauth_client_metadata(connection, oauth_client_info)
-                    oauth_client_info = apply_connection_oauth_options(connection, oauth_client_info)
-                    request.app.state.oauth_client_manager.add_client(
-                        f'{server_type}:{server_id}',
-                        OAuthClientInformationFull(**oauth_client_info),
-                    )
-                except Exception as e:
-                    log.debug(
-                        'Failed to add OAuth client for MCP tool server %s: %s',
-                        server_id,
-                        f'{type(e).__name__}: {e}' if str(e) else type(e).__name__,
-                    )
-                    continue
-
-    await publish_event(
-        request,
-        EVENTS.CONFIG_TOOL_SERVERS_UPDATED,
-        actor=user,
-        subject_id='tool_server.connections',
-        subject_type='config',
-        data={'count': len(connections), 'types': [connection.get('type', 'openapi') for connection in connections]},
-    )
-    return {'TOOL_SERVER_CONNECTIONS': connections}
-
-
 class TerminalServerConnection(BaseModel):
     id: str | None = ''
     name: str | None = ''
@@ -301,92 +167,6 @@ class TerminalServerConnection(BaseModel):
 
 class TerminalServersConfigForm(BaseModel):
     TERMINAL_SERVER_CONNECTIONS: list[TerminalServerConnection]
-
-
-@router.get('/terminal_servers')
-async def get_terminal_servers_config(
-    request: Request,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    return {'TERMINAL_SERVER_CONNECTIONS': await Config.get('terminal_server.connections')}
-
-
-@router.post('/terminal_servers')
-async def set_terminal_servers_config(
-    request: Request,
-    form_data: TerminalServersConfigForm,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    connections = [
-        connection.model_dump(exclude={'policy', 'lifecycle'}) for connection in form_data.TERMINAL_SERVER_CONNECTIONS
-    ]
-    await Config.upsert({'terminal_server.connections': connections})
-
-    await set_terminal_servers(request)
-
-    await publish_event(
-        request,
-        EVENTS.CONFIG_TERMINAL_SERVERS_UPDATED,
-        actor=user,
-        subject_id='terminal_server.connections',
-        subject_type='config',
-        data={'count': len(connections)},
-    )
-    return {'TERMINAL_SERVER_CONNECTIONS': connections}
-
-
-@router.post('/terminal_servers/verify')
-async def verify_terminal_server_connection(
-    request: Request,
-    form_data: TerminalServerConnection,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    """
-    Verify the connection to a terminal server by detecting its type.
-
-    Tries GET {url}/api/v1/policies (orchestrator) then GET {url}/api/config
-    (plain terminal).  Returns ``{status: true, type: "orchestrator"|"terminal"}``.
-    """
-    base_url = (form_data.url or '').rstrip('/')
-    if not base_url:
-        raise HTTPException(status_code=400, detail='Terminal server URL is required')
-
-    headers = {}
-    if form_data.auth_type == 'bearer' and form_data.key:
-        headers.update(bearer_auth_header(form_data.key))
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        ) as session:
-            # Orchestrators expose a policies API; plain terminals don't.
-            try:
-                async with session.get(
-                    f'{base_url}/api/v1/policies', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL
-                ) as resp:
-                    if resp.ok:
-                        return {'status': True, 'type': 'orchestrator'}
-            except Exception:
-                pass
-
-            # Fall back to open-terminal config endpoint.
-            try:
-                async with session.get(
-                    f'{base_url}/api/config', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL
-                ) as resp:
-                    if resp.ok:
-                        return {'status': True, 'type': 'terminal'}
-            except Exception:
-                pass
-
-    except Exception as e:
-        log.debug('Failed to connect to the terminal server: %s', e)
-
-    raise HTTPException(status_code=400, detail='Failed to connect to the terminal server')
 
 
 class TerminalServerPolicyForm(BaseModel):
@@ -415,273 +195,6 @@ class TerminalServerRefreshForm(BaseModel):
     reset: bool = False
 
 
-@router.post('/terminal_servers/policy')
-async def put_terminal_server_policy(
-    request: Request,
-    form_data: TerminalServerPolicyForm,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    """Proxy a policy read or update to an orchestrator terminal server."""
-    base_url = (form_data.url or '').rstrip('/')
-    if not base_url:
-        raise HTTPException(status_code=400, detail='Terminal server URL is required')
-
-    headers = {'Content-Type': 'application/json'}
-    if form_data.auth_type == 'bearer' and form_data.key:
-        headers.update(bearer_auth_header(form_data.key))
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        ) as session:
-            policy_url = f'{base_url}/api/v1/policies/{form_data.policy_id}'
-            async with session.request(
-                'GET' if form_data.policy_data is None else 'PUT',
-                policy_url,
-                headers=headers,
-                json=form_data.policy_data,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as resp:
-                if resp.ok:
-                    return await resp.json()
-                detail = await resp.text()
-                raise HTTPException(status_code=resp.status, detail=detail)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.debug('Failed to access policy on terminal server: %s', e)
-        raise HTTPException(status_code=400, detail='Failed to access policy on terminal server')
-
-
-@router.post('/terminal_servers/lifecycle')
-async def put_terminal_server_lifecycle(
-    request: Request,
-    form_data: TerminalServerLifecycleForm,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    """Proxy a lifecycle read or update to an orchestrator terminal server."""
-    base_url = (form_data.url or '').rstrip('/')
-    if not base_url:
-        raise HTTPException(status_code=400, detail='Terminal server URL is required')
-
-    headers = {'Content-Type': 'application/json'}
-    if form_data.auth_type == 'bearer' and form_data.key:
-        headers.update(bearer_auth_header(form_data.key))
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        ) as session:
-            lifecycle_url = f'{base_url}/api/v1/policies/{form_data.policy_id}/lifecycle'
-            async with session.request(
-                'GET' if form_data.lifecycle_data is None else 'PUT',
-                lifecycle_url,
-                headers=headers,
-                json=form_data.lifecycle_data,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as resp:
-                if resp.ok:
-                    return await resp.json()
-                detail = await resp.text()
-                raise HTTPException(status_code=resp.status, detail=detail)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.debug('Failed to access lifecycle on terminal server: %s', e)
-        raise HTTPException(status_code=400, detail='Failed to access lifecycle on terminal server')
-
-
-@router.post('/terminal_servers/refresh')
-async def refresh_terminal_server_terminals(
-    request: Request,
-    form_data: TerminalServerRefreshForm,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('terminal_servers')),
-):
-    """
-    Proxy a terminal refresh request to an orchestrator terminal server.
-    """
-    base_url = (form_data.url or '').rstrip('/')
-    if not base_url:
-        raise HTTPException(status_code=400, detail='Terminal server URL is required')
-
-    headers = {'Content-Type': 'application/json'}
-    if form_data.auth_type == 'bearer' and form_data.key:
-        headers.update(bearer_auth_header(form_data.key))
-
-    body = {
-        'only_idle': form_data.only_idle,
-        'reset': form_data.reset,
-    }
-    if form_data.user_id:
-        body['user_id'] = form_data.user_id
-    if form_data.policy_id:
-        body['policy_id'] = form_data.policy_id
-
-    try:
-        async with aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        ) as session:
-            refresh_url = f'{base_url}/api/v1/terminals/refresh'
-            async with session.post(
-                refresh_url,
-                headers=headers,
-                json=body,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as resp:
-                if resp.ok:
-                    return await resp.json()
-                detail = await resp.text()
-                raise HTTPException(status_code=resp.status, detail=detail)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.debug('Failed to refresh terminals: %s', e)
-        raise HTTPException(status_code=400, detail='Failed to refresh terminals')
-
-
-@router.post('/tool_servers/verify')
-async def verify_tool_servers_config(
-    request: Request,
-    form_data: ToolServerConnection,
-    user=Depends(get_admin_user),
-    _=Depends(require_feature('tool_servers')),
-):
-    """
-    Verify the connection to the tool server.
-    """
-    try:
-        if form_data.type == 'mcp':
-            if form_data.auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-                oauth_server_url = (
-                    form_data.info.get('oauth_server_url')
-                    if form_data.info and form_data.info.get('oauth_server_url')
-                    else form_data.url
-                )
-                discovery_urls = await get_discovery_urls(oauth_server_url)
-                for discovery_url in discovery_urls:
-                    log.debug('Trying to fetch OAuth 2.1 discovery document from %s', discovery_url)
-                    async with aiohttp.ClientSession(
-                        trust_env=True,
-                        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-                    ) as session:
-                        async with session.get(
-                            discovery_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
-                        ) as oauth_server_metadata_response:
-                            if oauth_server_metadata_response.status == 200:
-                                try:
-                                    oauth_server_metadata = OAuthMetadata.model_validate(
-                                        await oauth_server_metadata_response.json()
-                                    )
-                                    return {
-                                        'status': True,
-                                        'oauth_server_metadata': oauth_server_metadata.model_dump(mode='json'),
-                                    }
-                                except Exception as e:
-                                    log.info('Failed to parse OAuth 2.1 discovery document: %s', e)
-                                    raise HTTPException(
-                                        status_code=400,
-                                        detail=f'Failed to parse OAuth 2.1 discovery document from {discovery_url}',
-                                    )
-
-                raise HTTPException(
-                    status_code=400,
-                    detail=f'Failed to fetch OAuth 2.1 discovery document from {discovery_urls}',
-                )
-            else:
-                try:
-                    client = MCPClient()
-                    headers = None
-
-                    token = None
-                    if form_data.auth_type == 'bearer':
-                        token = form_data.key
-                    elif form_data.auth_type == 'session':
-                        token = request.state.token.credentials
-                    elif form_data.auth_type == 'system_oauth':
-                        oauth_token = None
-                        try:
-                            if request.cookies.get('oauth_session_id', None):
-                                oauth_token = await request.app.state.oauth_manager.get_oauth_token(
-                                    user.id,
-                                    request.cookies.get('oauth_session_id', None),
-                                )
-
-                                if oauth_token:
-                                    token = oauth_token.get('access_token', '')
-                        except Exception as e:
-                            pass
-                    if token:
-                        headers = {'Authorization': f'Bearer {token}'}
-
-                    if form_data.headers and isinstance(form_data.headers, dict):
-                        if headers is None:
-                            headers = {}
-                        custom_headers = await get_custom_headers(form_data.headers, user)
-                        headers.update(custom_headers)
-
-                    await client.connect(form_data.url, headers=headers)
-                    specs = await client.list_tool_specs()
-                    return {
-                        'status': True,
-                        'specs': specs,
-                    }
-                except Exception as e:
-                    log.debug('Failed to create MCP client: %s', e)
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f'Failed to create MCP client',
-                    )
-                finally:
-                    if client:
-                        await client.disconnect()
-        else:  # openapi
-            token = None
-            headers = None
-            if form_data.auth_type == 'bearer':
-                token = form_data.key
-            elif form_data.auth_type == 'session':
-                token = request.state.token.credentials
-            elif form_data.auth_type == 'system_oauth':
-                try:
-                    if request.cookies.get('oauth_session_id', None):
-                        oauth_token = await request.app.state.oauth_manager.get_oauth_token(
-                            user.id,
-                            request.cookies.get('oauth_session_id', None),
-                        )
-
-                        if oauth_token:
-                            token = oauth_token.get('access_token', '')
-
-                except Exception as e:
-                    pass
-
-            if token:
-                headers = {'Authorization': f'Bearer {token}'}
-
-            if form_data.headers and isinstance(form_data.headers, dict):
-                if headers is None:
-                    headers = {}
-                custom_headers = await get_custom_headers(form_data.headers, user)
-                headers.update(custom_headers)
-
-            url = get_tool_server_url(form_data.url, form_data.path)
-            return await get_tool_server_data(url, headers=headers)
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        log.debug('Failed to connect to the tool server: %s', e)
-        raise HTTPException(
-            status_code=400,
-            detail=f'Failed to connect to the tool server',
-        )
-
-
 ############################
 # CodeInterpreterConfig
 ############################
@@ -704,33 +217,6 @@ class CodeInterpreterConfigForm(BaseModel):
     CODE_INTERPRETER_JUPYTER_TIMEOUT: int | None
 
 
-@router.get('/code_execution', response_model=CodeInterpreterConfigForm)
-async def get_code_execution_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
-
-
-@router.post('/code_execution', response_model=CodeInterpreterConfigForm)
-async def set_code_execution_config(
-    request: Request, form_data: CodeInterpreterConfigForm, user=Depends(get_admin_user)
-):
-    await Config.upsert(config_updates(form_data.model_dump(), CODE_EXECUTION_CONFIG_KEYS))
-    values = await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_CODE_EXECUTION_UPDATED,
-        actor=user,
-        subject_id='code_execution',
-        subject_type='config',
-        data={
-            'code_execution_enabled': values.get('ENABLE_CODE_EXECUTION'),
-            'code_execution_engine': values.get('CODE_EXECUTION_ENGINE'),
-            'code_interpreter_enabled': values.get('ENABLE_CODE_INTERPRETER'),
-            'code_interpreter_engine': values.get('CODE_INTERPRETER_ENGINE'),
-        },
-    )
-    return values
-
-
 ############################
 # SetDefaultModels
 ############################
@@ -749,57 +235,11 @@ async def get_models_defaults(request: Request, user=Depends(get_verified_user))
     }
 
 
-@router.get('/models', response_model=ModelsConfigForm)
-async def get_models_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(MODELS_CONFIG_KEYS)
-
-
-@router.post('/models', response_model=ModelsConfigForm)
-async def set_models_config(request: Request, form_data: ModelsConfigForm, user=Depends(get_admin_user)):
-    await Config.upsert(config_updates(form_data.model_dump(), MODELS_CONFIG_KEYS))
-    values = await get_config_values(MODELS_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_MODELS_UPDATED,
-        actor=user,
-        subject_id='models',
-        subject_type='config',
-        data={
-            'default_models': values.get('DEFAULT_MODELS'),
-            'default_pinned_models': values.get('DEFAULT_PINNED_MODELS'),
-            'model_order_count': len(values.get('MODEL_ORDER_LIST') or []),
-        },
-    )
-    return values
-
-
 ############################
 # SystemPrompt
 ############################
 class SystemPromptForm(BaseModel):
     SYSTEM_PROMPT: str
-
-
-@router.get('/system_prompt', response_model=SystemPromptForm)
-async def get_system_prompt(request: Request, user=Depends(get_admin_user)):
-    """[Gradient] The global system prompt of every base model without its own (soev/system_prompt.py)."""
-    return {'SYSTEM_PROMPT': await Config.get(SYSTEM_PROMPT_KEY, '') or ''}
-
-
-@router.post('/system_prompt', response_model=SystemPromptForm)
-async def set_system_prompt(request: Request, form_data: SystemPromptForm, user=Depends(get_admin_user)):
-    value = form_data.SYSTEM_PROMPT if form_data.SYSTEM_PROMPT.strip() else ''
-    await Config.upsert({SYSTEM_PROMPT_KEY: value})
-    # The audit event says whether a prompt is set and how long it is, never its text.
-    await publish_event(
-        request,
-        EVENTS.CONFIG_SYSTEM_PROMPT_UPDATED,
-        actor=user,
-        subject_id='system_prompt',
-        subject_type='config',
-        data={'length': len(value)},
-    )
-    return {'SYSTEM_PROMPT': value}
 
 
 class SubagentsConfigForm(BaseModel):
@@ -812,30 +252,6 @@ class SubagentsConfigForm(BaseModel):
     SUBAGENTS_SYSTEM_PROMPT: str
 
 
-@router.get('/subagents', response_model=SubagentsConfigForm)
-async def get_subagents_config(user=Depends(get_admin_user)):
-    return await get_config_values(SUBAGENTS_CONFIG_KEYS)
-
-
-@router.post('/subagents', response_model=SubagentsConfigForm)
-async def set_subagents_config(
-    request: Request,
-    form_data: SubagentsConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), SUBAGENTS_CONFIG_KEYS))
-    values = await get_config_values(SUBAGENTS_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_UPDATED,
-        actor=user,
-        subject_id='subagents',
-        subject_type='config',
-        data={'enabled': values.get('ENABLE_SUBAGENTS')},
-    )
-    return values
-
-
 class PromptSuggestion(BaseModel):
     title: list[str]
     content: str
@@ -845,26 +261,6 @@ class SetDefaultSuggestionsForm(BaseModel):
     suggestions: list[PromptSuggestion]
 
 
-@router.post('/suggestions', response_model=list[PromptSuggestion])
-async def set_default_suggestions(
-    request: Request,
-    form_data: SetDefaultSuggestionsForm,
-    user=Depends(get_admin_user),
-):
-    data = form_data.model_dump()
-    await Config.upsert({'ui.prompt_suggestions': data['suggestions']})
-    suggestions = await Config.get('ui.prompt_suggestions')
-    await publish_event(
-        request,
-        EVENTS.CONFIG_SUGGESTIONS_UPDATED,
-        actor=user,
-        subject_id='ui.prompt_suggestions',
-        subject_type='config',
-        data={'count': len(suggestions or [])},
-    )
-    return suggestions
-
-
 ############################
 # SetBanners
 ############################
@@ -872,26 +268,6 @@ async def set_default_suggestions(
 
 class SetBannersForm(BaseModel):
     banners: list[BannerModel]
-
-
-@router.post('/banners', response_model=list[BannerModel])
-async def set_banners(
-    request: Request,
-    form_data: SetBannersForm,
-    user=Depends(get_admin_user),
-):
-    data = form_data.model_dump()
-    await Config.upsert({'ui.banners': data['banners']})
-    banners = await Config.get('ui.banners')
-    await publish_event(
-        request,
-        EVENTS.CONFIG_BANNERS_UPDATED,
-        actor=user,
-        subject_id='ui.banners',
-        subject_type='config',
-        data={'count': len(banners or [])},
-    )
-    return banners
 
 
 @router.get('/banners', response_model=list[BannerModel])
@@ -910,16 +286,6 @@ async def get_banners(
 class SetGreetingTemplateForm(BaseModel):
     # Either a plain string (legacy) or a mapping of locale code to template.
     template: Union[str, dict[str, str]]
-
-
-@router.post('/greeting_template')
-async def set_greeting_template(
-    request: Request,
-    form_data: SetGreetingTemplateForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert({'ui.greeting_template': form_data.template})
-    return {'template': await Config.get('ui.greeting_template')}
 
 
 @router.get('/greeting_template')
@@ -946,21 +312,6 @@ class InviteContentForm(BaseModel):
     heading: str = ''
 
 
-@router.get('/invite_content')
-async def get_invite_content(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(INVITE_CONTENT_CONFIG_KEYS)
-
-
-@router.post('/invite_content')
-async def set_invite_content(
-    request: Request,
-    form_data: InviteContentForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), INVITE_CONTENT_CONFIG_KEYS))
-    return await get_config_values(INVITE_CONTENT_CONFIG_KEYS)
-
-
 ############################
 # EmailConfig
 ############################
@@ -979,46 +330,6 @@ class EmailConfigForm(BaseModel):
     EMAIL_FROM_ADDRESS: str
     EMAIL_FROM_NAME: str
     INVITE_EXPIRY_HOURS: int
-
-
-@router.get('/email', response_model=EmailConfigForm)
-async def get_email_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(EMAIL_CONFIG_KEYS)
-
-
-@router.post('/email', response_model=EmailConfigForm)
-async def set_email_config(
-    request: Request,
-    form_data: EmailConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), EMAIL_CONFIG_KEYS))
-    return await get_config_values(EMAIL_CONFIG_KEYS)
-
-
-@router.post('/email/test')
-async def test_email_config(request: Request, user=Depends(get_admin_user)):
-    """Send a test email to the admin's own address."""
-    values = await Config.get_many('email.enable_invites', 'email.from_name')
-    if not values.get('email.enable_invites'):
-        raise HTTPException(400, detail='Email invites are not enabled')
-
-    try:
-        from open_webui.services.email.graph_mail_client import send_mail
-
-        from_name = values.get('email.from_name')
-        await send_mail(
-            app=request.app,
-            to_address=user.email,
-            subject=f'Test email from {from_name}',
-            html_body='<p>This is a test email. Your email configuration is working correctly.</p>',
-        )
-        return {'status': 'ok', 'message': f'Test email sent to {user.email}'}
-    except ValueError as e:
-        # The sender raises ValueError for its own configuration: the admin's to fix.
-        raise HTTPException(400, detail=f'Failed to send test email: {str(e)}')
-    except Exception as e:
-        raise HTTPException(500, detail=f'Failed to send test email: {str(e)}')
 
 
 ############################
@@ -1050,43 +361,6 @@ async def _unbind_service_account(user_id: str):
     await Users.update_user_by_id(user_id, {'info': info})
 
 
-@router.get('/integrations')
-async def get_integrations_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'providers': await Config.get('integrations.providers'),
-    }
-
-
-@router.post('/integrations')
-async def set_integrations_config(
-    request: Request,
-    form_data: IntegrationsConfigForm = Depends(integrations_config_body(IntegrationsConfigForm)),
-    user=Depends(get_admin_user),
-):
-    old_providers = await Config.get('integrations.providers') or {}
-
-    # Unbind service accounts that were removed or changed
-    for slug, old_provider in old_providers.items():
-        old_sa = old_provider.get('service_account_id')
-        if not old_sa:
-            continue
-        new_provider = form_data.providers.get(slug)
-        new_sa = new_provider.get('service_account_id') if new_provider else None
-        if old_sa != new_sa:
-            await _unbind_service_account(old_sa)
-
-    # Save new config
-    await Config.upsert({'integrations.providers': form_data.providers})
-
-    # Bind new service accounts
-    for slug, provider in form_data.providers.items():
-        sa_id = provider.get('service_account_id')
-        if sa_id:
-            await _bind_service_account(sa_id, slug)
-
-    return {'providers': await Config.get('integrations.providers')}
-
-
 ####################################
 # External Agents Config
 ####################################
@@ -1094,37 +368,6 @@ async def set_integrations_config(
 
 class ExternalAgentsConfigForm(BaseModel):
     AGENT_API_SELECTED_AGENT: str
-
-
-@router.get('/external_agents')
-async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'AGENT_API_ENABLED': AGENT_API_ENABLED,
-        'AGENT_API_AGENTS': AGENT_API_AGENTS,
-        'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent'),
-    }
-
-
-@router.post('/external_agents')
-async def set_external_agents_config(
-    request: Request,
-    form_data: ExternalAgentsConfigForm,
-    user=Depends(get_admin_user),
-):
-    if not AGENT_API_ENABLED:
-        raise HTTPException(status_code=403, detail='Agent API is disabled')
-
-    agents = AGENT_API_AGENTS
-    selected = form_data.AGENT_API_SELECTED_AGENT
-    if agents and selected not in agents:
-        raise HTTPException(
-            status_code=400,
-            detail='Selected agent is not in the configured AGENT_API_AGENTS list',
-        )
-
-    await Config.upsert({'agent_api.selected_agent': selected})
-
-    return {'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent')}
 
 
 ####################################
@@ -1143,21 +386,6 @@ class TwoFAConfigForm(BaseModel):
     ENABLE_2FA: bool
     REQUIRE_2FA: bool
     TWO_FA_GRACE_PERIOD_DAYS: int
-
-
-@router.get('/2fa')
-async def get_2fa_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(TWO_FA_CONFIG_KEYS)
-
-
-@router.post('/2fa')
-async def set_2fa_config(
-    request: Request,
-    form_data: TwoFAConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), TWO_FA_CONFIG_KEYS))
-    return await get_config_values(TWO_FA_CONFIG_KEYS)
 
 
 ####################################
@@ -1198,92 +426,3 @@ async def _retention_admin(user_id: str) -> str:
     if requester_ref() != ref or not await user_token(ref):
         raise SoevApiError(401, 'unauthenticated', 'A user token is required')
     return ref
-
-
-@router.get('/data-retention')
-async def get_data_retention_config(request: Request, user=Depends(get_admin_user)):
-    from open_webui.soev import identity
-    from open_webui.soev.policy_jobs import v2_enabled
-
-    if v2_enabled():
-        ref = await _retention_admin(user.id)
-        return {'platform_policy': await identity.build_client().get_retention_policy(as_user=ref)}
-    return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
-
-
-@router.post('/data-retention')
-async def set_data_retention_config(
-    request: Request,
-    form_data: DataRetentionConfigForm | PlatformRetentionConfigForm,
-    user=Depends(get_admin_user),
-):
-    from open_webui.soev import identity
-    from open_webui.soev.client import SoevApiError
-    from open_webui.soev.policy_jobs import v2_enabled
-
-    if v2_enabled():
-        ref = await _retention_admin(user.id)
-        if not isinstance(form_data, PlatformRetentionConfigForm):
-            raise SoevApiError(422, 'invalid_field', 'Invalid retention policy', constraint='retention:rules')
-        policy = await identity.build_client().send(
-            'PUT',
-            '/v1/retention-policy',
-            form_data.model_dump(),
-            as_user=ref,
-            idempotency_key=request.headers.get('Idempotency-Key') or str(uuid4()),
-        )
-        return {'platform_policy': policy}
-    if not isinstance(form_data, DataRetentionConfigForm):
-        raise SoevApiError(422, 'invalid_field', 'Invalid retention settings', constraint='retention:rules')
-    await Config.upsert(config_updates(form_data.model_dump(), DATA_RETENTION_CONFIG_KEYS))
-    return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
-
-
-@router.post('/data-retention/test')
-async def test_data_retention_cleanup(
-    request: Request,
-    user=Depends(get_admin_user),
-):
-    """Manually trigger a data retention cleanup cycle (admin only).
-    Uses current config values. Does NOT wait for the daily timer."""
-    from open_webui.services.retention.service import DataRetentionService
-
-    values = await Config.get_many(
-        'admin.data_retention_ttl_days',
-        'admin.user_inactivity_ttl_days',
-        'admin.chat_retention_ttl_days',
-        'admin.knowledge_retention_ttl_days',
-        'admin.data_retention_warning_days',
-        'admin.enable_retention_warning_email',
-        'admin.enable_user_archival',
-        'admin.default_archive_retention_days',
-    )
-
-    master_ttl = values.get('admin.data_retention_ttl_days')
-    if master_ttl is None or master_ttl <= 0:
-        return {
-            'status': 'skipped',
-            'message': 'Data retention is disabled (DATA_RETENTION_TTL_DAYS=0)',
-        }
-
-    report = await DataRetentionService.run_cleanup(
-        app=request.app,
-        master_ttl=master_ttl,
-        user_inactivity_ttl=values.get('admin.user_inactivity_ttl_days'),
-        chat_ttl=values.get('admin.chat_retention_ttl_days'),
-        knowledge_ttl=values.get('admin.knowledge_retention_ttl_days'),
-        warning_days=values.get('admin.data_retention_warning_days'),
-        enable_warning_email=values.get('admin.enable_retention_warning_email'),
-        enable_archival=values.get('admin.enable_user_archival'),
-        archive_retention_days=values.get('admin.default_archive_retention_days'),
-    )
-
-    return {
-        'status': 'completed',
-        'warnings_sent': report.warnings_sent,
-        'users_deleted': report.users_deleted,
-        'users_archived': report.users_archived,
-        'chats_deleted': report.chats_deleted,
-        'knowledge_deleted': report.knowledge_deleted,
-        'errors': report.errors,
-    }

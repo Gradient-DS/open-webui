@@ -10,41 +10,41 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from open_webui.models.recovery_codes import RecoveryCodes
-from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
-from open_webui.soev.client import SoevApiError
 from open_webui.soev.initials_avatar import initials_svg
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.auths import Auths
-from open_webui.models.config import Config
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
-from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
+from open_webui.models.config import Config
 from open_webui.models.groups import Groups
+from open_webui.models.knowledge import Knowledges
+from open_webui.models.models import Models
 from open_webui.models.oauth_sessions import OAuthSessionResponse, OAuthSessions
+from open_webui.models.recovery_codes import RecoveryCodes
+from open_webui.models.tools import Tools
 from open_webui.models.users import (
     UserGroupIdsListResponse,
     UserGroupIdsModel,
     UserInfoListResponse,
     UserInfoResponse,
-    UserSearchListResponse,
-    UserSearchResponse,
     UserModel,
     UserRoleUpdateForm,
     Users,
+    UserSearchListResponse,
+    UserSearchResponse,
     UserSettings,
     UserStatus,
     UserUpdateForm,
 )
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.models import Models
-from open_webui.models.tools import Tools
-from open_webui.soev.availability import configured
+from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
+from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
 from open_webui.socket.main import disconnect_user_sessions  # [Gradient] Revoke deleted users' live sessions.
+from open_webui.soev.availability import configured
+from open_webui.soev.client import SoevApiError
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     get_admin_user,
@@ -108,61 +108,6 @@ def strip_default_interface_settings(defaults: dict, settings: dict) -> dict:
 
 
 PAGE_ITEM_COUNT = 30
-
-
-@router.get('/', response_model=UserGroupIdsListResponse)
-async def get_users(
-    query: str | None = None,
-    order_by: str | None = None,
-    direction: str | None = None,
-    page: int | None = 1,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    limit = PAGE_ITEM_COUNT
-
-    page = max(1, page)
-    skip = (page - 1) * limit
-
-    filter = {}
-    if query:
-        filter['query'] = query
-
-    result = await Users.get_users(
-        filter=filter,
-        sort={'order_by': order_by, 'direction': direction},
-        skip=skip,
-        limit=limit,
-        db=db,
-    )
-
-    users = result['users']
-    total = result['total']
-
-    # Fetch groups for all users in a single query to avoid N+1
-    user_ids = [user.id for user in users]
-    user_groups = await Groups.get_groups_by_member_ids(user_ids, db=db)
-
-    return {
-        'users': [
-            UserGroupIdsModel(
-                **{
-                    **user.model_dump(),
-                    'group_ids': [group.id for group in user_groups.get(user.id, [])],
-                }
-            )
-            for user in users
-        ],
-        'total': total,
-    }
-
-
-@router.get('/all', response_model=UserInfoListResponse)
-async def get_all_users(
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    return await Users.get_users(db=db)
 
 
 @router.get('/search', response_model=UserSearchListResponse)
@@ -447,47 +392,6 @@ def _calculate_streaks(heatmap: list[dict]) -> dict[str, int]:
     return {'current': current, 'longest': longest}
 
 
-@router.get('/default/permissions', response_model=UserPermissions)
-async def get_default_user_permissions(request: Request, user=Depends(get_admin_user)):
-    user_permissions = await Config.get('user.permissions')
-    return {
-        'workspace': WorkspacePermissions(**user_permissions.get('workspace', {})),
-        'sharing': SharingPermissions(**user_permissions.get('sharing', {})),
-        'access_grants': AccessGrantsPermissions(**user_permissions.get('access_grants', {})),
-        'chat': ChatPermissions(**user_permissions.get('chat', {})),
-        'features': FeaturesPermissions(**user_permissions.get('features', {})),
-        'settings': SettingsPermissions(**user_permissions.get('settings', {})),
-    }
-
-
-@router.post('/default/permissions')
-async def update_default_user_permissions(request: Request, form_data: UserPermissions, user=Depends(get_admin_user)):
-    user_permissions = form_data.model_dump(by_alias=True)
-    await Config.upsert({'user.permissions': user_permissions})
-    await publish_event(
-        request,
-        EVENTS.USER_PERMISSIONS_UPDATED,
-        actor=user,
-        subject_id='user.permissions',
-        subject_type='config',
-    )
-    return user_permissions
-
-
-@router.get('/default/permissions/defaults', response_model=UserPermissions)
-async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
-    from open_webui.config import DEFAULT_USER_PERMISSIONS
-
-    return {
-        'workspace': WorkspacePermissions(**DEFAULT_USER_PERMISSIONS.get('workspace', {})),
-        'sharing': SharingPermissions(**DEFAULT_USER_PERMISSIONS.get('sharing', {})),
-        'access_grants': AccessGrantsPermissions(**DEFAULT_USER_PERMISSIONS.get('access_grants', {})),
-        'chat': ChatPermissions(**DEFAULT_USER_PERMISSIONS.get('chat', {})),
-        'features': FeaturesPermissions(**DEFAULT_USER_PERMISSIONS.get('features', {})),
-        'settings': SettingsPermissions(**DEFAULT_USER_PERMISSIONS.get('settings', {})),
-    }
-
-
 ############################
 # GetUserSettingsBySessionUser
 ############################
@@ -525,9 +429,7 @@ async def update_user_settings_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'settings.interface', await Config.get('user.permissions')
-    ):
+    if not await has_permission(user.id, 'settings.interface', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -536,13 +438,14 @@ async def update_user_settings_by_session_user(
     updated_user_settings = form_data.model_dump(exclude_unset=True)
     ui_settings = updated_user_settings.get('ui')
     if (
-        user.role != 'admin'
-        and ui_settings is not None
-        and 'toolServers' in ui_settings
-        and not await has_permission(
-            user.id,
-            'features.direct_tool_servers',
-            await Config.get('user.permissions'),
+        (ui_settings is not None)
+        and ('toolServers' in ui_settings)
+        and (
+            not await has_permission(
+                user.id,
+                'features.direct_tool_servers',
+                await Config.get('user.permissions'),
+            )
         )
     ):
         # If the user is not an admin and does not have permission to use tool servers, remove the key
@@ -550,12 +453,10 @@ async def update_user_settings_by_session_user(
 
     ui_notifications = ui_settings.get('notifications') if isinstance(ui_settings, dict) else None
     if (
-        user.role != 'admin'
-        and (
-            'notifications' in updated_user_settings
-            or (isinstance(ui_notifications, dict) and 'webhook_url' in ui_notifications)
-        )
-        and not await has_permission(
+        'notifications' in updated_user_settings
+        or (isinstance(ui_notifications, dict) and 'webhook_url' in ui_notifications)
+    ) and (
+        not await has_permission(
             user.id,
             'features.webhooks',
             await Config.get('user.permissions'),
@@ -815,26 +716,6 @@ class UserActiveResponse(UserStatus):
     model_config = ConfigDict(extra='allow')
 
 
-@router.get('/{user_id}', response_model=UserActiveResponse)
-async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-
-    user = await Users.get_user_by_id(user_id, db=db)
-    if user:
-        groups = await Groups.get_groups_by_member_id(user_id, db=db)
-        return UserActiveResponse(
-            **{
-                **user.model_dump(),
-                'groups': [{'id': group.id, 'name': group.name} for group in groups],
-                'is_active': await Users.is_user_active(user_id, db=db),
-            }
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
-
-
 @router.get('/{user_id}/info', response_model=UserInfoResponse)
 async def get_user_info_by_id(
     user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
@@ -842,9 +723,8 @@ async def get_user_info_by_id(
     target = await Users.get_user_by_id(user_id, db=db)
     if target:
         groups = await Groups.get_groups_by_member_id(user_id, db=db)
-        if user.role != 'admin':
-            visible_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
-            groups = [group for group in groups if group.id in visible_ids]
+        visible_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+        groups = [group for group in groups if group.id in visible_ids]
         return UserInfoResponse(
             **{
                 **target.model_dump(),
@@ -852,23 +732,6 @@ async def get_user_info_by_id(
                 'is_active': await Users.is_user_active(user_id, db=db),
             }
         )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
-
-
-@router.get('/{user_id}/oauth/sessions', response_model=list[OAuthSessionResponse])
-async def get_user_oauth_sessions_by_id(
-    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
-):
-    """Only the owner can read session metadata; tokens are never returned."""
-    if user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-    sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
-    if sessions and len(sessions) > 0:
-        return [OAuthSessionResponse.model_validate(session.model_dump()) for session in sessions]
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -950,218 +813,9 @@ async def get_user_active_status_by_id(
 ############################
 
 
-@router.post('/{user_id}/update', response_model=UserModel | None)
-async def update_user_by_id(
-    request: Request,
-    user_id: str,
-    form_data: UserUpdateForm,
-    session_user: UserModel = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    # Prevent modification of the primary admin user by other admins
-    try:
-        first_user = await Users.get_first_user(db=db)
-        if first_user:
-            if user_id == first_user.id:
-                if session_user.id != user_id:
-                    # If the user trying to update is the primary admin, and they are not the primary admin themselves
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
-                    )
-
-                if form_data.role is not None and form_data.role != 'admin':
-                    # If the primary admin is trying to change their own role, prevent it
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
-                    )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f'Error checking primary admin status: {e}')
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Could not verify primary admin status.',
-        )
-
-    user = await Users.get_user_by_id(user_id, db=db)
-
-    if user:
-        from open_webui.soev.identity import check_role_change
-
-        check_role_change(user, form_data.role if form_data.role is not None else user.role)
-        if form_data.email is not None and form_data.email.lower() != user.email:
-            email_user = await Users.get_user_by_email(form_data.email.lower(), db=db)
-            if email_user:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.EMAIL_TAKEN,
-                )
-
-        if form_data.password:
-            try:
-                validate_password(form_data.password)
-            except Exception as e:
-                raise HTTPException(400, detail=str(e))
-
-            hashed = await get_password_hash(form_data.password)
-            if await Auths.update_user_password_by_id(user_id, hashed, db=db):
-                await revoke_user_tokens(request, user_id)
-
-        # Build update dict from only the provided fields
-        update_data: dict[str, str] = {}
-        if form_data.role is not None:
-            update_data['role'] = form_data.role
-        if form_data.name is not None:
-            update_data['name'] = form_data.name
-        if form_data.email is not None:
-            update_data['email'] = form_data.email.lower()
-            await Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
-        if form_data.profile_image_url is not None:
-            update_data['profile_image_url'] = form_data.profile_image_url
-
-        if update_data:
-            updated_user = await Users.update_user_by_id(
-                user_id,
-                update_data,
-                db=db,
-            )
-        else:
-            updated_user = user
-
-        if updated_user:
-            updated_fields = [field for field in update_data.keys() if field != 'role']
-            role_changed = updated_user.role != user.role
-
-            if updated_fields:
-                await publish_event(
-                    request,
-                    EVENTS.USER_UPDATED,
-                    actor=session_user,
-                    subject_id=user_id,
-                    data={'updated_fields': updated_fields},
-                )
-
-            if role_changed:
-                await publish_event(
-                    request,
-                    EVENTS.USER_ROLE_UPDATED,
-                    actor=session_user,
-                    subject_id=user_id,
-                    data={'role': updated_user.role},
-                )
-
-            if form_data.password:
-                await publish_event(
-                    request,
-                    EVENTS.AUTH_PASSWORD_CHANGED,
-                    actor=session_user,
-                    subject_id=user_id,
-                    subject_type='user',
-                    source='admin',
-                )
-            return updated_user
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(),
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=ERROR_MESSAGES.USER_NOT_FOUND,
-    )
-
-
 ############################
 # DeleteUserById
 ############################
-
-
-@router.get('/{user_id}/shared-data', dependencies=[Depends(require_console_offboarding)])
-async def get_user_shared_data(
-    user_id: str,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Return the item ids required to confirm deletion of shared resources."""
-    if await Users.get_user_by_id(user_id, db=db) is None:
-        raise HTTPException(404, detail=ERROR_MESSAGES.USER_NOT_FOUND)
-    return {'items': (await inventory(user_id, db=db)).shared}
-
-
-@router.delete('/{user_id}', response_model=bool, dependencies=[Depends(require_console_offboarding)])
-async def delete_user_by_id(
-    request: Request,
-    user_id: str,
-    mode: Literal['delete', 'transfer', 'archive'] = Query('delete'),
-    transfer_to: str | None = Query(None),
-    confirm_shared_deletion: list[str] = Query([]),
-    never_delete: bool = Query(False),
-    archive_before_delete: bool = Query(False),
-    archive_reason: Optional[str] = Query(None),
-    archive_retention_days: Optional[int] = Query(None, gt=0),
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Delete, transfer or archive resources before removing the account."""
-    if mode == 'transfer' and transfer_to is None:
-        raise SoevApiError(422, 'invalid_field', 'Missing transfer target', constraint='offboarding:target')
-    # Prevent deletion of the primary admin user
-    try:
-        first_user = await Users.get_first_user(db=db)
-        if first_user and user_id == first_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACTION_PROHIBITED,
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f'Error checking primary admin status: {e}')
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Could not verify primary admin status.',
-        )
-
-    if user.id != user_id:
-        count = await offboard_user(
-            user_id,
-            actor_id=user.id,
-            options=OffboardingOptions(
-                mode=mode,
-                transfer_to=transfer_to,
-                confirm_shared_deletion=confirm_shared_deletion,
-                archive_before_delete=archive_before_delete,
-                archive_reason=archive_reason or 'Admin deletion',
-                archive_retention_days=archive_retention_days,
-                never_delete=never_delete,
-            ),
-            db=db,
-            language=request.headers.get('accept-language', 'en'),
-        )
-        if count > 0:
-            await disconnect_user_sessions(user_id)
-            await publish_event(
-                request,
-                EVENTS.USER_DELETED,
-                actor=user,
-                subject_id=user_id,
-            )
-            return True
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DELETE_USER_ERROR,
-        )
-
-    # Prevent self-deletion
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
-    )
 
 
 ############################
@@ -1169,43 +823,9 @@ async def delete_user_by_id(
 ############################
 
 
-@router.get('/{user_id}/2fa/status')
-async def admin_get_user_2fa_status(
-    user_id: str,
-    request: Request,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Admin endpoint to check if a user has 2FA enabled."""
-    auth = await Auths.get_auth_by_user_id(user_id, db=db)
-    return {'totp_enabled': bool(auth and auth.totp_enabled)}
-
-
 ############################
 # Admin Force-Disable 2FA
 ############################
-
-
-@router.post('/{user_id}/2fa/disable')
-async def admin_disable_user_2fa(
-    user_id: str,
-    request: Request,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Admin endpoint to force-disable 2FA for a locked-out user."""
-    target_user = await Users.get_user_by_id(user_id, db=db)
-    if not target_user:
-        raise HTTPException(status_code=404, detail='User not found')
-
-    auth = await Auths.get_auth_by_user_id(user_id, db=db)
-    if not auth or not auth.totp_enabled:
-        raise HTTPException(status_code=400, detail='2FA is not enabled for this user')
-
-    await Auths.update_totp(user_id, None, False, db=db)
-    await RecoveryCodes.delete_all(user_id, db=db)
-
-    return {'success': True}
 
 
 ############################
@@ -1213,86 +833,6 @@ async def admin_disable_user_2fa(
 ############################
 
 
-@router.get('/{user_id}/groups')
-async def get_user_groups_by_id(
-    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
-):
-    return await Groups.get_groups_by_member_id(user_id, db=db)
-
-
 ############################
 # GetUserPreview
 ############################
-
-
-@router.get('/{user_id}/preview')
-async def get_user_preview(
-    user_id: str,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Show what resources a specific user can access across all their groups."""
-    target_user = await Users.get_user_by_id(user_id, db=db)
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
-
-    # Get all group IDs this user belongs to
-    user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
-    user_group_ids = {g.id for g in user_groups}
-
-    all_models = await Models.get_all_models(db=db)
-    active_models = [m for m in all_models if m.is_active]
-    owned_model_ids = {m.id for m in active_models if m.user_id == user_id}
-    granted_model_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user_id,
-        resource_type='model',
-        resource_ids=[m.id for m in active_models if m.user_id != user_id],
-        permission='read',
-        user_group_ids=user_group_ids,
-        db=db,
-    )
-    accessible_model_ids = owned_model_ids | granted_model_ids
-
-    all_knowledge = await Knowledges.get_knowledge_bases(db=db) if configured() else []
-    owned_knowledge_ids = {k.id for k in all_knowledge if k.user_id == user_id}
-    granted_knowledge_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user_id,
-        resource_type='knowledge',
-        resource_ids=[k.id for k in all_knowledge if k.user_id != user_id],
-        permission='read',
-        user_group_ids=user_group_ids,
-        db=db,
-    )
-    accessible_knowledge_ids = owned_knowledge_ids | granted_knowledge_ids
-
-    all_tools = await Tools.get_tools(defer_content=True, db=db)
-    owned_tool_ids = {t.id for t in all_tools if t.user_id == user_id}
-    granted_tool_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user_id,
-        resource_type='tool',
-        resource_ids=[t.id for t in all_tools if t.user_id != user_id],
-        permission='read',
-        user_group_ids=user_group_ids,
-        db=db,
-    )
-    accessible_tool_ids = owned_tool_ids | granted_tool_ids
-
-    return {
-        'user': {'id': target_user.id, 'name': target_user.name},
-        'groups': [{'id': g.id, 'name': g.name} for g in user_groups],
-        'models': {
-            'items': [{'id': m.id, 'name': m.name} for m in active_models if m.id in accessible_model_ids],
-            'total': len(active_models),
-        },
-        'knowledge': {
-            'items': [{'id': k.id, 'name': k.name} for k in all_knowledge if k.id in accessible_knowledge_ids],
-            'total': len(all_knowledge),
-        },
-        'tools': {
-            'items': [{'id': t.id, 'name': t.name} for t in all_tools if t.id in accessible_tool_ids],
-            'total': len(all_tools),
-        },
-    }

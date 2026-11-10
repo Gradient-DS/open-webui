@@ -1,86 +1,41 @@
-"""Product-feedback router — POST /api/v1/feedback/report.
-
-Thin HTTP layer: authentication, request validation (with a strict context
-allowlist), and the runtime enable check. All enrichment, logging, and delivery
-(notification router or Slack) live in utils/feedback_report.py.
-
-Mounted unconditionally in main.py and gated in-handler on the
-ENABLE_FEEDBACK_REPORTING PersistentConfig flag — the fork's preference for
-runtime-toggleable features (no pod restart to flip the flag).
-"""
+"""Forward bounded bug reports using the requesting persons platform authority."""
 
 from typing import Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
-
-from open_webui.models.config import Config
+from fastapi import APIRouter, Depends
+from open_webui.soev.identity import build_client
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.feedback_report import (
-    build_feedback_event,
-    emit_feedback_log,
-    post_feedback_to_router,
-    post_feedback_to_slack,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
 
 
 class FeedbackReportContext(BaseModel):
-    # extra='forbid' is the hard guarantee that no chat content can be smuggled through
-    model_config = ConfigDict(extra='forbid')
-    route: str | None = None
-    app_version: str | None = None
-    user_agent: str | None = None
-    error_message: str | None = None
-    error_detail: str | None = None
-    model: str | None = None
-    chat_id: str | None = None
-    trace_id: str | None = None
+    model_config = ConfigDict(extra='forbid', strict=True)
+    route: str | None = Field(default=None, max_length=2048)
+    app_version: str | None = Field(default=None, max_length=128)
+    user_agent: str | None = Field(default=None, max_length=512)
+    error_message: str | None = Field(default=None, max_length=2000)
+    error_detail: str | None = Field(default=None, max_length=4000)
+    model: str | None = Field(default=None, max_length=256)
+    chat_id: str | None = Field(default=None, max_length=128)
+    trace_id: str | None = Field(default=None, max_length=128)
 
 
 class FeedbackReportForm(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
     category: Literal['bug', 'idea', 'question', 'error', 'other']
     description: str = Field(min_length=1, max_length=5000)
-    context: FeedbackReportContext = FeedbackReportContext()
+    context: FeedbackReportContext = Field(default_factory=FeedbackReportContext)
 
 
 @router.post('/report')
-async def submit_feedback_report(request: Request, form: FeedbackReportForm, user=Depends(get_verified_user)):
-    config = await Config.get_many(
-        'feedback_report.enable',
-        'feedback_report.include_user_identity',
-        'feedback_report.slack_webhook_url',
-        'feedback_report.webhook_url',
-        'feedback_report.trace_url_template',
+async def submit_feedback_report(form: FeedbackReportForm, user=Depends(get_verified_user)):
+    return await build_client(timeout=20).send(
+        'POST',
+        '/v1/bug-reports',
+        form.model_dump(exclude_none=True),
+        as_user=f'owui:user:{user.id}',
+        idempotency_key=str(uuid4()),
     )
-    if not config.get('feedback_report.enable'):
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={'detail': 'Feedback reporting is disabled.'},
-        )
-
-    event = build_feedback_event(
-        category=form.category,
-        description=form.description,
-        context=form.context.model_dump(),
-        user=user,
-        include_identity=config.get('feedback_report.include_user_identity'),
-    )
-    emit_feedback_log(event)  # the record — always happens
-
-    # Either/or, not a fallback chain: slack_webhook_url stays persisted in the
-    # config DB after its env var and vault field are removed, so only skipping
-    # it here stops a migrated tenant delivering twice.
-    trace_url_template = config.get('feedback_report.trace_url_template', '')
-    router_url = config.get('feedback_report.webhook_url')
-    if router_url:
-        await post_feedback_to_router(event, router_url, trace_url_template)
-    else:
-        await post_feedback_to_slack(
-            event,
-            config.get('feedback_report.slack_webhook_url'),
-            trace_url_template,
-        )
-    return {'status': True}

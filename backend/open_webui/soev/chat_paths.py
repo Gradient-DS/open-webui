@@ -4,7 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import time
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,6 +31,8 @@ class FeedbackForm(BaseModel):
     rating: int
     comment: str | None = Field(None, max_length=2000)
     comment_authored: bool = False
+    reason: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')] | None = None
+    tags: list[Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')]] = Field(default_factory=list, max_length=16)
 
 
 class ComposerFeatures(BaseModel):

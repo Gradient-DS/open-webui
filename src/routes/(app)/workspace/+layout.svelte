@@ -47,7 +47,7 @@
 		}
 
 		// Permission checks for non-admin users
-		if ($user?.role !== 'admin') {
+		{
 			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/', { replaceState: true });
 			} else if (

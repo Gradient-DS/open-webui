@@ -20,7 +20,7 @@ Every production tenant sets agentApiEnabled=true.
 | enableCodeExecution | ENABLE_CODE_EXECUTION | "false" | "true" | Jupyter sink |
 | enableCodeInterpreter | ENABLE_CODE_INTERPRETER | "false" | "true" | Jupyter sink |
 | codeExecutionEngine (unset) | CODE_EXECUTION_ENGINE | pyodide (app default) | pyodide | set by no tenant and no chart value, so production runs the app default (`config.py:402`); a tenant setting `jupyter` activates a server-side HTTP+WebSocket sink and will show here as drift |
-| enableFeedbackReporting | ENABLE_FEEDBACK_REPORTING | "False" | "True" | the unguarded webhook sink |
+| Bug reports | bug_reports.enabled (platform product configuration) | false | requires tenant configuration | OWUI forwards to soev-api; no direct webhook sink |
 | enableWebSearch | ENABLE_WEB_SEARCH | "true" | "true" | |
 | webSearchEngine | WEB_SEARCH_ENGINE | "searxng" | "searxng" | shared-services searxng |
 | contentExtractionEngine | CONTENT_EXTRACTION_ENGINE | "external" | "external" | external document loader |

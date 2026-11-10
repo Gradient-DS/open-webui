@@ -224,12 +224,12 @@
 	let fileUploadEnabled = true;
 	$: fileUploadEnabled =
 		fileUploadCapableModels.length === selectedModels.length &&
-		($user?.role === 'admin' || $user?.permissions?.chat?.file_upload);
+		$user?.permissions?.chat?.file_upload;
 
 	let webUploadEnabled = true;
-	$: webUploadEnabled = $user?.role === 'admin' || ($user?.permissions?.chat?.web_upload ?? true);
+	$: webUploadEnabled = $user?.permissions?.chat?.web_upload ?? true;
 	$: toolPermissionsEnabled = $config?.features?.enable_tool_permissions ?? false;
-	$: valvesAllowed = $user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true);
+	$: valvesAllowed = $user?.permissions?.chat?.valves ?? true;
 
 	$: if (!fileUploadEnabled && files.length > 0) {
 		files = [];

@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
 
 	import {
-		WEBUI_NAME,
 		banners,
 		chatId,
 		config,
@@ -16,7 +14,6 @@
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
-	import { slide } from 'svelte/transition';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 
@@ -232,7 +229,7 @@
 						</Tooltip>
 					{/if}
 
-					{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true))}
+					{#if isFeatureEnabled('chat_controls') && ($user?.permissions?.chat?.controls ?? true)}
 						<Tooltip content={$i18n.t('Sources')}>
 							<button
 								class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"

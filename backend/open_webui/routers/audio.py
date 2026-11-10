@@ -10,7 +10,7 @@ from open_webui.models.config import Config
 from open_webui.soev import primitives
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.features import feature_enabled
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
@@ -26,9 +26,9 @@ class SpeechForm(BaseModel):
 
 @router.post('/speech')
 async def speech(request: Request, form_data: SpeechForm, user=Depends(get_verified_user)):
-    if not (is_feature_enabled('read_aloud') or is_feature_enabled('voice_call')):
+    if not (await feature_enabled('read_aloud') or await feature_enabled('voice_call')):
         raise HTTPException(status_code=403, detail="Feature 'read_aloud' is not available in your plan")
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
+    if not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
         raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     response = await primitives.speech(form_data.model_dump(exclude_none=True), user)
@@ -50,13 +50,13 @@ async def transcription(
     user=Depends(get_verified_user),
 ):
     # [Gradient] Dictation is tenant-gated; the gate binds admins too.
-    if not is_feature_enabled('voice'):
+    if not await feature_enabled('voice'):
         raise HTTPException(
             status_code=403,
             detail="Feature 'voice' is not available in your plan",
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.stt', await Config.get('user.permissions')):
+    if not await has_permission(user.id, 'chat.stt', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=403,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
