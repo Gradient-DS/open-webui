@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.models.recovery_codes import RecoveryCodes
 from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.initials_avatar import initials_svg
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
@@ -914,7 +915,15 @@ async def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_u
                     )
                 except Exception as e:
                     pass
-        return FileResponse(f'{STATIC_DIR}/user.png')
+        return Response(
+            content=initials_svg(user.name, user.id),
+            media_type='image/svg+xml',
+            headers={
+                'Content-Disposition': 'inline',
+                'X-Content-Type-Options': 'nosniff',
+                'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+            },
+        )
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
