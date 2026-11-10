@@ -275,5 +275,5 @@ async def test_explicit_cross_user_client_call_still_refuses(admin_app):
 
     response = await store.ctx.browser.get('/cross-user')
     assert response.status_code == 401
-    assert response.json()['detail']['code'] == 'sign_in'
+    assert response.json()['detail']['state'] == 'sign_in'
     assert _non_directory_requests(store.ctx.requests) == []

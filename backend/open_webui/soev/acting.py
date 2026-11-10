@@ -9,9 +9,10 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 from open_webui.soev.request_cache import request_cache
+from open_webui.soev.sessions import platform_mode
 
 _requester_ref: ContextVar[str | None] = ContextVar('soev_requester_ref', default=None)
-_token_resolver: ContextVar[Callable[[], Awaitable[str | None]] | None] = ContextVar(
+_token_resolver: ContextVar[Callable[..., Awaitable[str | None]] | None] = ContextVar(
     'soev_token_resolver', default=None
 )
 
@@ -34,15 +35,19 @@ async def user_token(as_user: str | None) -> str | None:
     return await resolver()
 
 
-def oidc_token_resolver(request: Request, user, auth_token) -> Callable[[], Awaitable[str | None]]:
-    """Fetch (and refresh) the user's `oidc` session token on first use, once per request.
+async def refresh_user_token(as_user: str | None, rejected_token: str) -> str | None:
+    resolver = _token_resolver.get()
+    if resolver is None or as_user is None or as_user != _requester_ref.get():
+        return None
+    return await resolver(rejected_token=rejected_token)
 
-    Concurrent soev calls in one request share the single lookup instead of seeing it unfinished.
-    """
+
+def oidc_token_resolver(request: Request, user, auth_token) -> Callable[..., Awaitable[str | None]]:
+    """Share owned OIDC token lookups and refreshes under one request-local lock."""
     cached: dict[str, str | None] = {}
     lock = asyncio.Lock()
 
-    async def fetch() -> str | None:
+    async def fetch(rejected_token: str | None = None) -> str | None:
         from open_webui.models.oauth_sessions import OAuthSessions
 
         # Match upstream's credential precedence, including x-api-key middleware.
@@ -55,13 +60,17 @@ def oidc_token_resolver(request: Request, user, auth_token) -> Callable[[], Awai
         session = await OAuthSessions.get_session_by_id_and_user_id(session_id, user.id)
         if session is None or session.provider != 'oidc':
             return None
-        oauth_token = await request.app.state.oauth_manager.get_oauth_token(user.id, session_id)
+        manager = request.app.state.oauth_manager
+        if rejected_token is not None and session.token.get('access_token') == rejected_token:
+            oauth_token = await manager.get_oauth_token(user.id, session_id, force_refresh=True)
+        else:
+            oauth_token = await manager.get_oauth_token(user.id, session_id)
         return oauth_token.get('access_token') if oauth_token else None
 
-    async def resolve() -> str | None:
+    async def resolve(*, rejected_token: str | None = None) -> str | None:
         async with lock:
-            if 'token' not in cached:
-                cached['token'] = await fetch()
+            if 'token' not in cached or (rejected_token is not None and cached['token'] == rejected_token):
+                cached['token'] = await fetch(rejected_token)
             return cached['token']
 
     return resolve
@@ -83,6 +92,8 @@ def install(app: FastAPI) -> None:
         user=Depends(upstream_user),
         auth_token: HTTPAuthorizationCredentials = Depends(bearer_security),
     ):
+        from open_webui.soev.client import SoevApiError
+
         ref = identity.external_ref(user)
         requester = _requester_ref.set(ref)
         resolver = _token_resolver.set(oidc_token_resolver(request, user, auth_token))
@@ -109,6 +120,16 @@ def install(app: FastAPI) -> None:
                     await jobs.reconcile_owner_jobs(user.id)
                     await pending_sync.on_request(user.id, background_tasks)
                     yield user
+        except (SoevApiError, HTTPException) as error:
+            status = error.status if isinstance(error, SoevApiError) else error.status_code
+            if platform_mode() and status == 401:
+                # A valid OWUI JWT cannot extend refused platform login authority.
+                raise HTTPException(
+                    401,
+                    detail={'state': 'sign_in'},
+                    headers={'Cache-Control': 'private, no-store', 'Vary': 'Authorization, Cookie'},
+                ) from None
+            raise
         finally:
             _token_resolver.reset(resolver)
             _requester_ref.reset(requester)

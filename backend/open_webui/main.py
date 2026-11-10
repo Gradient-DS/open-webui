@@ -2356,6 +2356,7 @@ async def get_app_config(request: Request):
                 else {}
             ),
             'auto_redirect': config.get('oauth.auto_redirect'),
+            'required_provider': 'oidc' if sessions.platform_mode() else None,
         },
         'features': {
             # --- Public: required by login/signup page pre-auth ---
