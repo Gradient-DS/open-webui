@@ -45,6 +45,8 @@ required_drive_routes = [
   "POST /api/v1/tasks/image_prompt/completions"
 ]
 
+# Caller-index 404s return 403 no_access without content; individual chat 404s stay unavailable.
+
 [[fixture]]
 key = "console_eligibility"
 description = "Read the caller's fresh platform console decision without inspecting its local role."
