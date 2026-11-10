@@ -125,7 +125,7 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
-from open_webui.soev import capabilities, model_catalog, system_prompt
+from open_webui.soev import capabilities, model_catalog, sessions, system_prompt
 from open_webui.soev import threads as soev_threads
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
@@ -273,6 +273,7 @@ from open_webui.utils.auth import (
     get_http_authorization_cred,
     get_license_data,
     get_verified_user,
+    is_valid_token,
 )
 from open_webui.utils.chat import (
     chat_completed as chat_completed_handler,
@@ -2341,8 +2342,11 @@ async def get_app_config(request: Request):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail='Invalid token',
             )
-        if data is not None and 'id' in data:
-            user = await Users.get_user_by_id(data['id'])
+        # [Gradient] Same session boundary as every other route: revoked,
+        # scoped and partial tokens, and unbound platform accounts, read only
+        # the public configuration.
+        if data is not None and 'id' in data and await is_valid_token(data, getattr(request.app.state, 'redis', None)):
+            user = sessions.session_user(await Users.get_user_by_id(data['id']), data)
 
     onboarding = False
     if user is None:
