@@ -59,9 +59,13 @@ const fixture = () => {
 		localStorage: { token: 'session-token' },
 		threadAPI,
 		console: { error: vi.fn() },
-		denied: false
+		denied: false,
+		noAccess: false
 	};
-	return { state, html: () => show(evaluate('sessionReady', state), state.denied) };
+	return {
+		state,
+		html: () => show(evaluate('sessionReady', state), state.denied || state.noAccess)
+	};
 };
 
 it.each([200, 403, 404, 503])(
@@ -118,6 +122,7 @@ it.each([200, 403, 404, 503])(
 				expect(f.html()).toContain('Sidebar and chat shell');
 			} else {
 				if (status === 403) await vi.waitFor(() => expect(f.state.denied).toBe(true));
+				else if (status === 404) await vi.waitFor(() => expect(f.state.noAccess).toBe(true));
 				else if (status === 503)
 					await vi.waitFor(() => expect(waitForRetry).toHaveBeenCalledOnce());
 				else await pending;

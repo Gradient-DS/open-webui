@@ -131,7 +131,10 @@
 			if (threadsEnabled) await threadAPI(localStorage.token).index();
 			if (accessUser === userId) accessReady = true;
 		} catch (error) {
+			// A concealed refusal (404) means no access too: show that page, never a blank one.
+			// Expired sessions and reconnects are handled by the session boundary.
 			console.error('Error checking platform access:', error);
+			if (accessUser === userId && error?.state === 'unavailable') noAccess = true;
 		}
 	};
 
