@@ -107,6 +107,10 @@ validation and password reset with logged `403` responses before account lookup.
 Keycloak owns login and recovery. This boundary applies even when
 `AGENT_API_ENABLED` is false; the narrower agent-routing predicate `v2_enabled()`
 is not the login-mode predicate.
+LDAP, trusted-header and no-auth sign-in are also refused, as is local signup.
+`soev.login_attach.require_local_signup()` uses the same `SOEV_API_URL` predicate;
+the router calls it by module name so the parallel admin-removal branch's older
+local helper cannot shadow this boundary. No OWUI role changes enable these paths.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product

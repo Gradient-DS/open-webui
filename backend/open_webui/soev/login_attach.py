@@ -33,6 +33,10 @@ def refuse_platform_signin(trusted_header: str | None) -> None:
     refuse_platform_login('trusted_header' if trusted_header else 'password_signin')
 
 
+def require_local_signup() -> None:
+    refuse_platform_login('local_signup')
+
+
 def refuse_platform_token_exchange() -> None:
     if platform_mode():
         log.warning('OAuth token exchange denied', extra={'code': 'oauth_platform_token_exchange_refused'})

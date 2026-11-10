@@ -1852,3 +1852,19 @@ route = "GET /api/v1/auths/password/reset/{token}/validate"
 status = 403
 detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
 reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/ldap"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/signup"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."

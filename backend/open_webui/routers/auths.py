@@ -66,6 +66,7 @@ from open_webui.soev.login_attach import (
     refuse_platform_token_exchange,
     refuse_unsafe_sub_claim,
 )
+from open_webui.soev import login_attach
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
@@ -671,6 +672,7 @@ async def ldap_auth(
     form_data: LdapForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('ldap')
     # Security checks FIRST - before loading any config
     if not await Config.get('ldap.enable'):
         raise HTTPException(400, detail='LDAP authentication is not enabled')
@@ -1091,6 +1093,7 @@ async def signup_handler(
     Returns the newly created UserModel.
     Raises HTTPException on failure.
     """
+    login_attach.require_local_signup()
     # Insert with default role first to avoid TOCTOU race on first signup.
     # If has_users() is checked before insert, concurrent requests during
     # first-user registration can all see an empty table and each get admin.
@@ -1139,6 +1142,7 @@ async def signup(
     form_data: SignupForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    login_attach.require_local_signup()
     has_users = await Users.has_users(db=db)
 
     if WEBUI_AUTH:
