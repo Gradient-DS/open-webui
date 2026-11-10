@@ -60,7 +60,12 @@ from open_webui.models.users import (
     Users,
     UserStatus,
 )
-from open_webui.soev.login_attach import refuse_platform_token_exchange, refuse_unsafe_sub_claim
+from open_webui.soev.login_attach import (
+    refuse_platform_login,
+    refuse_platform_signin,
+    refuse_platform_token_exchange,
+    refuse_unsafe_sub_claim,
+)
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
@@ -560,6 +565,7 @@ async def forgot_password(
     """Self-service password reset request. Always returns the same generic
     response (no account enumeration). Sends a reset email only when the
     feature is enabled and the email maps to an active local password user."""
+    refuse_platform_login('password_recovery')
     email = form_data.email.lower().strip()
     try:
         eligible = (
@@ -616,6 +622,7 @@ async def validate_password_reset_token(
     token: str,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('password_reset')
     record = await PasswordResetTokens.get_by_token_hash(hash_reset_token(token), db=db)
     return {'valid': is_reset_token_usable(record, int(time.time()))}
 
@@ -626,6 +633,7 @@ async def reset_password(
     form_data: ResetPasswordForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_login('password_reset')
     if not await Config.get('email.enable_forgot_password'):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
@@ -900,6 +908,7 @@ async def signin(
     form_data: SigninForm,
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_platform_signin(WEBUI_AUTH_TRUSTED_EMAIL_HEADER)
     if not ENABLE_PASSWORD_AUTH:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

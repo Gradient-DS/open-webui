@@ -18,20 +18,35 @@ log = logging.getLogger(__name__)
 _PLATFORM_SUB_CLAIMS = (None, '', 'sub')
 
 
+def platform_mode() -> bool:
+    # v2_enabled() also requires agent routing; login boundaries must survive its disablement.
+    return bool(config.SOEV_API_URL)
+
+
+def refuse_platform_login(method: str) -> None:
+    if platform_mode():
+        log.warning('Non-Keycloak login denied', extra={'code': f'oauth_platform_{method}_refused'})
+        raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
+
+def refuse_platform_signin(trusted_header: str | None) -> None:
+    refuse_platform_login('trusted_header' if trusted_header else 'password_signin')
+
+
 def refuse_platform_token_exchange() -> None:
-    if config.SOEV_API_URL:
+    if platform_mode():
         log.warning('OAuth token exchange denied', extra={'code': 'oauth_platform_token_exchange_refused'})
         raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 
 def refuse_unsafe_sub_claim(claim: str | None) -> None:
-    if config.SOEV_API_URL and claim not in _PLATFORM_SUB_CLAIMS:
+    if platform_mode() and claim not in _PLATFORM_SUB_CLAIMS:
         log.warning('OAuth configuration denied', extra={'code': 'oauth_unsafe_sub_claim_refused'})
         raise HTTPException(403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 
 async def validate_login_config() -> None:
-    if not config.SOEV_API_URL:
+    if not platform_mode():
         return
     for claim in (config.OAUTH_SUB_CLAIM, await Config.get('oauth.sub_claim', config.OAUTH_SUB_CLAIM)):
         if claim not in _PLATFORM_SUB_CLAIMS:
@@ -70,7 +85,7 @@ async def attach_person_login(
     user: UserModel | None = None,
     db: AsyncSession | None = None,
 ) -> UserModel | None:
-    if not config.SOEV_API_URL:
+    if not platform_mode():
         return user
     if user is not None and user.person_id is None:
         return user

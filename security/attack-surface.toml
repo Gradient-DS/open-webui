@@ -572,6 +572,7 @@ unseedable = "The only cache file the API creates is a data export, and services
 
 [[parameter]]
 key = "reset_token"
+v2_refused_value = "attack-reset-token"
 name = "token"
 prefix = "/api/v1/auths/password/reset/{token}"
 description = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
@@ -952,6 +953,7 @@ json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/auths/signin"
+v2 = { setup = [] }
 description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
 json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
 setup = [
@@ -1818,3 +1820,35 @@ json = { folder_id = "{folder}" }
 route = "POST /api/v1/chats/{id}"
 description = "Prepared metadata writes accept title/tags/features, not the legacy history dictionary."
 v2 = { json = { title = "Fictional conversation {token}" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/signin"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/password/forgot"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/auths/password/reset"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/auths/password/reset/{token}/validate"
+status = 403
+detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
+reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."

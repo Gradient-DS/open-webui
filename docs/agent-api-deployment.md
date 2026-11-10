@@ -102,6 +102,11 @@ Runtime OAuth settings updates also refuse a custom `oauth.sub_claim` with `403`
 before writing any configuration. OAuth token exchange is always refused with
 `403` when soev-api is configured, including when `ENABLE_OAUTH_TOKEN_EXCHANGE`
 is enabled; it logs `oauth_platform_token_exchange_refused` and issues no session.
+`SOEV_API_URL` also refuses local password sign-in, forgot-password, reset-token
+validation and password reset with logged `403` responses before account lookup.
+Keycloak owns login and recovery. This boundary applies even when
+`AGENT_API_ENABLED` is false; the narrower agent-routing predicate `v2_enabled()`
+is not the login-mode predicate.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product

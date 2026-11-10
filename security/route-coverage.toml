@@ -104,6 +104,7 @@ reason = "Same handler as /api/embeddings: the private v2 sweep left this alias 
 
 [[waived]]
 id = "GET /api/v1/auths/password/reset/{token}/validate"
+runtime_soev_backed = "waive"
 reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
 
 [[waived]]
