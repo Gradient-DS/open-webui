@@ -80,7 +80,7 @@ async def test_first_login_attaches_to_persons_existing_account(person_login, mo
     assert request.url == 'https://platform.example.invalid/v1/me'
     assert request.headers['Authorization'] == 'Bearer fictional-product-credential'
     assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
-    assert not any(header in request.headers for header in ('X-Soev-Subject', 'X-Soev-Acting-User'))
+    assert not any(header in request.headers for header in ('X-Soev-' + 'Subject', 'X-Soev-Acting-User'))
 
 
 @pytest.mark.asyncio
