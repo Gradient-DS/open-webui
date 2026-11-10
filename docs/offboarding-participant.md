@@ -39,6 +39,33 @@ Source-owned legacy knowledge rows and legacy archive snapshots are refused with
 Delete and archive also refuse an owned calendar containing another person's
 events. These refusals preserve data rather than claim complete cleanup.
 
+## Reviewed local content access
+
+The content inventory entries below are relative to
+`services/deletion/platform_offboarding.py`. The caller is the product-credential
+pull worker; the task's canonical person maps to the source through `User.person_id`.
+The prepared receipt binds that mapping and disposition. Before effects, the source
+is locked and rechecked against the task's person and pending role; transfer also
+locks and rechecks the target's person and active role.
+
+Every listed function starts with `refuse_local_content()`. With prepared v2
+threads enabled, the participant returns `unsupported_content` before preparing
+a receipt, suspending the source, or touching external data. A platform-issued
+offboarding task does not bypass the existing legacy content guard.
+
+| Inventory entry | Reviewed scope and purpose |
+|---|---|
+| `_archive_organisation:Chat` | Reads folder IDs and updates only `Chat.user_id == source` rows. Keeps thread references under the job's opaque archive owner and clears that source's legacy payloads. Folder changes also require `Folder.user_id == source`. |
+| `_content_conflict:Chat` | Selects IDs of source-owned chats to bound the dependent-owner checks; no chat payload is read. |
+| `_content_conflict:ChatFile` | Checks attachment IDs beneath source-owned chats and source-owned files scheduled for deletion. A foreign or unknown owner refuses preparation, preventing cross-person mutation or deletion by foreign-key cascade. |
+| `_content_conflict:ChatMessage` | Checks message IDs beneath source-owned chats. A foreign or unknown author refuses preparation, preserving other people's messages during chat disposition. |
+| `_dependents:ChatFile` | Deletes only links whose `user_id == source` and whose file ID selects a source-owned file in the disposition. Foreign attachment and knowledge-file dependencies refuse preparation before file removal. |
+| `_local:Chat` | Deletes or transfers only `user_id == source` rows; the transfer owner is the receipt's revalidated platform target. Archive delegates to the guarded source-only operation above. |
+| `_local:ChatFile` | Deletes or transfers only links with `user_id == source`; the only transfer destination is the revalidated target. |
+| `_local:ChatMessage` | Deletes or transfers only messages with `user_id == source`; no other author is updated. The source-chat dependency check prevents implicit effects on foreign authors. |
+| `_local:Feedback` | Deletes only feedback with `user_id == source`; no feedback payload is selected or transferred. |
+| `_organisation_grants:Chat` | Selects only source-owned chat IDs. Delete/archive revoke grants on those disposed resources; transfer removes only the departing source's own user grant and preserves other principals' grants. |
+
 The existing platform admin deletion refusal remains in force. Legacy deletion
 cannot implement the participant contract: it deletes chats during transfer and
 uses the departing person's live authority for remote work. Native platform

@@ -9,7 +9,7 @@ import json
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, or_, select, text, update
 
 from open_webui.internal.db import get_async_db
 from open_webui.models.access_grants import AccessGrant
@@ -41,6 +41,8 @@ from open_webui.models.tools import Tool
 from open_webui.models.user_archives import UserArchive
 from open_webui.models.users import ApiKey, User
 from open_webui.services.deletion.offboarding_store import delete_storage_files
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.soev.threads import ThreadError
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,6 +93,10 @@ async def _locked(db: AsyncSession, person: str) -> Config | None:
 
 async def apply(task: Task) -> Error | None:
     """A committed receipt precedes acknowledgement and fences replays by person."""
+    try:
+        refuse_local_content()
+    except ThreadError:
+        return 'unsupported_content'
     async with _lock:
         error = await _prepare(task)
         if error is not None:
@@ -107,12 +113,9 @@ async def apply(task: Task) -> Error | None:
             if _expired(task):
                 return 'unsupported_content'
             source, target = state.source, state.target
-            if task.mode == 'transfer' and not await db.scalar(
-                select(User.id).where(
-                    User.id == target, User.person_id == task.target, User.role.in_(['user', 'admin'])
-                )
-            ):
-                return 'target_missing'
+            error = await _binding_error(db, source, target, task)
+            if error is not None:
+                return error
             try:
                 await _external(db, source, target if task.mode == 'transfer' else None)
                 await _local(db, source, target, task)
@@ -151,19 +154,7 @@ async def _prepare(task: Task) -> Error | None:
         source = await db.scalar(select(User).where(User.person_id == task.person).with_for_update())
         if source is None:
             return 'source_conflict'
-        if await db.scalar(select(Knowledge.id).where(Knowledge.user_id == source.id).limit(1)) is not None:
-            return 'unsupported_content'
-        if await db.scalar(select(UserArchive.id).where(UserArchive.user_id == source.id).limit(1)) is not None:
-            return 'unsupported_content'
-        foreign_events = await db.scalar(
-            select(CalendarEvent.id)
-            .where(
-                CalendarEvent.calendar_id.in_(select(Calendar.id).where(Calendar.user_id == source.id)),
-                CalendarEvent.user_id != source.id,
-            )
-            .limit(1)
-        )
-        if task.mode != 'transfer' and foreign_events is not None:
+        if await _unsupported_content(db, source.id, task.mode == 'transfer'):
             return 'unsupported_content'
         source.role = 'pending'
         db.add(Config(key=job_key, value={'digest': _digest(task)}))
@@ -184,6 +175,41 @@ async def _prepare(task: Task) -> Error | None:
         )
         await db.commit()
     return None
+
+
+async def _binding_error(db: AsyncSession, source: str, target: str | None, task: Task) -> Error | None:
+    if not await db.scalar(
+        select(User.id)
+        .where(User.id == source, User.person_id == task.person, User.role == 'pending')
+        .with_for_update()
+    ):
+        return 'source_conflict'
+    if task.mode == 'transfer' and not await db.scalar(
+        select(User.id)
+        .where(User.id == target, User.person_id == task.target, User.role.in_(['user', 'admin']))
+        .with_for_update()
+    ):
+        return 'target_missing'
+    if await _unsupported_content(db, source, task.mode == 'transfer'):
+        return 'unsupported_content'
+    return None
+
+
+async def _unsupported_content(db: AsyncSession, source: str, transferring: bool) -> bool:
+    refuse_local_content()
+    if await db.scalar(select(Knowledge.id).where(Knowledge.user_id == source).limit(1)) is not None:
+        return True
+    if await db.scalar(select(UserArchive.id).where(UserArchive.user_id == source).limit(1)) is not None:
+        return True
+    foreign_events = await db.scalar(
+        select(CalendarEvent.id)
+        .where(
+            CalendarEvent.calendar_id.in_(select(Calendar.id).where(Calendar.user_id == source)),
+            CalendarEvent.user_id != source,
+        )
+        .limit(1)
+    )
+    return (not transferring and foreign_events is not None) or await _content_conflict(db, source, transferring)
 
 
 def _expired(task: Task) -> bool:
@@ -210,6 +236,7 @@ async def _external(db: AsyncSession, source: str, target: str | None) -> None:
 
 
 async def _local(db: AsyncSession, source: str, target: str | None, task: Task) -> None:
+    refuse_local_content()
     transferring = task.mode == 'transfer'
     if transferring and target is None:
         message = 'Transfer target required'
@@ -229,7 +256,7 @@ async def _local(db: AsyncSession, source: str, target: str | None, task: Task) 
             )
             await db.execute(update(table).where(table.id.in_(ids)).values(user_id=target))
             continue
-        await _dependents(db, table, ids)
+        await _dependents(db, source, table, ids)
         await db.execute(
             delete(AccessGrant).where(
                 AccessGrant.resource_type == table.__tablename__, AccessGrant.resource_id.in_(ids)
@@ -280,7 +307,7 @@ async def _cloud(db: AsyncSession, source: str) -> None:
         FileBinding.model_validate(row) for row in (await db.scalars(select(File).where(File.user_id == source))).all()
     ]
     cloud_files = [row.id for row in files if (row.meta or {}).get('source') is not None]
-    await _dependents(db, File, cloud_files)
+    await _dependents(db, source, File, cloud_files)
     await db.execute(
         delete(AccessGrant).where(
             AccessGrant.resource_type == 'file',
@@ -290,14 +317,18 @@ async def _cloud(db: AsyncSession, source: str) -> None:
     await db.execute(delete(File).where(File.id.in_(cloud_files)))
 
 
-async def _dependents(db: AsyncSession, table: ResourceTable, ids: list[str]) -> None:
+async def _dependents(db: AsyncSession, source: str, table: ResourceTable, ids: list[str]) -> None:
+    refuse_local_content()
     if table is Prompt:
         await db.execute(delete(PromptHistory).where(PromptHistory.prompt_id.in_(ids)))
     elif table is Note:
         await db.execute(delete(PinnedNote).where(PinnedNote.note_id.in_(ids)))
     elif table is File:
-        await db.execute(delete(ChatFile).where(ChatFile.file_id.in_(ids)))
-        await db.execute(delete(KnowledgeFile).where(KnowledgeFile.file_id.in_(ids)))
+        owned_files = select(File.id).where(File.user_id == source, File.id.in_(ids))
+        await db.execute(delete(ChatFile).where(ChatFile.user_id == source, ChatFile.file_id.in_(owned_files)))
+        await db.execute(
+            delete(KnowledgeFile).where(KnowledgeFile.user_id == source, KnowledgeFile.file_id.in_(owned_files))
+        )
     elif table is Model:
         await db.execute(delete(AssistantShareGrant).where(AssistantShareGrant.assistant_id.in_(ids)))
     elif table is Calendar:
@@ -311,6 +342,7 @@ async def _dependents(db: AsyncSession, table: ResourceTable, ids: list[str]) ->
 
 
 async def _organisation_grants(db: AsyncSession, source: str, transferring: bool) -> None:
+    refuse_local_content()
     for table in (Chat, Folder):
         ids = select(table.id).where(table.user_id == source)
         clause = (AccessGrant.resource_type == table.__tablename__) & AccessGrant.resource_id.in_(ids)
@@ -331,6 +363,7 @@ async def _tags(db: AsyncSession, source: str, target: str) -> None:
 
 
 async def _archive_organisation(db: AsyncSession, source: str, job: str) -> None:
+    refuse_local_content()
     owner = 'platform:svc:archive-offboarding-' + job
     folders: dict[str, str | None] = {
         str(row[0]): str(row[1]) if row[1] is not None else None
@@ -353,4 +386,41 @@ async def _archive_organisation(db: AsyncSession, source: str, job: str) -> None
             tasks=None,
             summary=None,
         )
+    )
+
+
+async def _content_conflict(db: AsyncSession, source: str, transferring: bool) -> bool:
+    refuse_local_content()
+    owned_chats = select(Chat.id).where(Chat.user_id == source)
+    for table in (ChatFile, ChatMessage):
+        if (
+            await db.scalar(
+                select(table.id)
+                .where(table.chat_id.in_(owned_chats), or_(table.user_id != source, table.user_id.is_(None)))
+                .limit(1)
+            )
+            is not None
+        ):
+            return True
+    files = (await db.execute(select(File.id, File.meta).where(File.user_id == source))).all()
+    deleted_files = [id for id, meta in files if not transferring or (meta or {}).get('source') is not None]
+    if (
+        await db.scalar(
+            select(ChatFile.id)
+            .where(ChatFile.file_id.in_(deleted_files), or_(ChatFile.user_id != source, ChatFile.user_id.is_(None)))
+            .limit(1)
+        )
+        is not None
+    ):
+        return True
+    return (
+        await db.scalar(
+            select(KnowledgeFile.id)
+            .outerjoin(Knowledge, Knowledge.id == KnowledgeFile.knowledge_id)
+            .where(
+                KnowledgeFile.file_id.in_(deleted_files), or_(Knowledge.user_id != source, Knowledge.user_id.is_(None))
+            )
+            .limit(1)
+        )
+        is not None
     )
