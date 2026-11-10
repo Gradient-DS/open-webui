@@ -786,7 +786,13 @@
 			},
 			reload: () => window.location.reload(),
 			onExpire: () => {
-				const login = sessionLoginPath(new URL(window.location.href));
+				const url = new URL(window.location.href);
+				const provider = $config?.oauth?.required_provider;
+				const login = sessionLoginPath(url, provider);
+				if (provider) {
+					const returnTo = new URL(sessionLoginPath(url), url.origin).searchParams.get('redirect');
+					localStorage.setItem('redirectPath', returnTo || '/');
+				}
 				sessionRedirecting.set(true);
 				clearInterval(tokenTimer);
 				tokenTimer = undefined;

@@ -109,6 +109,36 @@ describe('session request boundary', () => {
 		expect(f.fetch).toHaveBeenCalledOnce();
 	});
 
+	it.each([
+		'/api/v1/chats/',
+		'/api/v1/meetings/agents',
+		'/api/v1/auths/console-access',
+		'/api/models',
+		'/openai/chat/completions',
+		'/ollama/api/chat'
+	])(
+		'ends the session on a platform sign-in 401 from %s without probing or toasting',
+		async (path) => {
+			const f = fixture();
+			const completed = vi.fn();
+			const errorToast = vi.fn();
+			f.fetch.mockImplementation(async (input) =>
+				String(input).endsWith('/auths/')
+					? json(200, { id: 'still-valid-owui-session' })
+					: json(401, { detail: { state: 'sign_in' } })
+			);
+			void f.boundary
+				.fetch(path, { headers: { Authorization: 'Bearer session-token' } })
+				.then(completed, errorToast);
+			await vi.waitFor(() => expect(f.onExpire).toHaveBeenCalledOnce());
+			expect(f.session.token).toBeNull();
+			expect(f.fetch).toHaveBeenCalledOnce();
+			expect(f.waitForRetry).not.toHaveBeenCalled();
+			expect(completed).not.toHaveBeenCalled();
+			expect(errorToast).not.toHaveBeenCalled();
+		}
+	);
+
 	it('coalesces generic backend 401 checks and suppresses their errors after confirmed expiry', async () => {
 		const f = fixture();
 		const probe = deferred<Response>();
@@ -278,7 +308,7 @@ describe('session request boundary', () => {
 
 	it.each([
 		['https://provider.test/api/v1/models', { Authorization: 'Bearer session-token' }],
-		['/openai/models', { Authorization: 'Bearer session-token' }],
+		['/api-other/models', { Authorization: 'Bearer session-token' }],
 		['/api/v1/models', { Authorization: 'Bearer provider-key' }],
 		['/api/v1/auths/signin', {}],
 		['/api/v1/auths/signout', {}]
@@ -431,6 +461,11 @@ describe('automatic session retries', () => {
 });
 
 describe('sign-out navigation', () => {
+	it('sends expired platform sessions directly to Keycloak login', () => {
+		expect(sessionLoginPath(new URL('https://webui.test/c/thread'), 'oidc')).toBe(
+			'/oauth/oidc/login'
+		);
+	});
 	it('keeps the path, query, and fragment and suppresses automatic SSO login', () => {
 		const path = sessionLoginPath(new URL('https://webui.test/c/thread?model=one%2Ftwo#message-2'));
 		const login = new URL(path, 'https://webui.test');

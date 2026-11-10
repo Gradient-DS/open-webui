@@ -462,6 +462,7 @@ type Config = {
 			[key: string]: string;
 		};
 		auto_redirect?: boolean;
+		required_provider?: string | null;
 	};
 	ui?: {
 		default_interface_settings?: Record<string, unknown>;

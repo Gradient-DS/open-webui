@@ -14,7 +14,8 @@ type SessionBoundaryOptions = {
 	) => Promise<void>;
 };
 
-export const sessionLoginPath = (url: URL): string => {
+export const sessionLoginPath = (url: URL, provider?: string | null): string => {
+	if (provider) return `/oauth/${encodeURIComponent(provider)}/login`;
 	const returnTo =
 		url.pathname === '/auth'
 			? url.searchParams.get('redirect') || '/'
@@ -46,6 +47,7 @@ const retiringRequest = new Promise<never>(() => {});
 
 export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 	const api = new URL(options.apiBase, options.origin);
+	const backendPaths = [api.pathname.replace(/\/v1\/?$/, ''), '/openai', '/ollama'];
 	let redirecting = false;
 	let noAccess = false;
 	let reloading = false;
@@ -103,7 +105,7 @@ export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 		const token = options.token();
 		const backend =
 			url.origin === api.origin &&
-			(url.pathname === api.pathname || url.pathname.startsWith(`${api.pathname}/`));
+			backendPaths.some((path) => url.pathname === path || url.pathname.startsWith(`${path}/`));
 		if (backend && (redirecting || noAccess) && headers.has('authorization'))
 			return retiringRequest;
 		const authenticated =
