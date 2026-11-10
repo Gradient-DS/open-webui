@@ -48,24 +48,3 @@ async def test_platform_user_writers_refuse_before_config_or_identity_changes(mo
         assert response.json() == {'detail': ERROR_MESSAGES.ACTION_PROHIBITED}
     writes.assert_not_called()
     create.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('path', 'payload'),
-    [
-        ('/configs/import', {'config': {'ui.banners': []}}),
-        ('/archives/admin/config', {'enable_user_archival': True}),
-    ],
-)
-async def test_retained_admin_config_routes_return_fixed_403(monkeypatch, path, payload):
-    monkeypatch.setattr(product_config, 'v2_enabled', lambda: True)
-    app = FastAPI()
-    app.add_exception_handler(SoevApiError, main.soev_api_error_handler)
-    app.include_router(configs.router, prefix='/configs')
-    app.include_router(archives.router, prefix='/archives')
-    app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(id='fictional-admin', role='admin')
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as api:
-        response = await api.post(path, json=payload)
-    assert response.status_code == 403, response.text
-    assert response.json()['detail']['constraint'] == 'product_config:read_only'

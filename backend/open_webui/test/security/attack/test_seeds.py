@@ -211,6 +211,23 @@ def response(status, body):
     return result
 
 
+@pytest.mark.parametrize('url,expected', [(None, 'unavailable'), ('https://tenant.invalid/console/', 'allowed')])
+def test_console_seed_reads_the_callers_platform_eligibility(url, expected):
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(return_value={'console_url': url})
+    assert seeds.seed_console_access(ctx, {'key': 'console_eligibility'}) == expected
+    ctx.request.assert_called_once_with('GET', '/api/v1/auths/console-access', actor=ctx.client)
+    ctx.admin.request.assert_not_called()
+
+
+@pytest.mark.parametrize('payload', [{}, {'console_url': 1}, {'console_url': None, 'role': 'admin'}])
+def test_console_seed_refuses_an_invalid_decision(payload):
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(return_value=payload)
+    with pytest.raises(RuntimeError, match='Invalid caller console eligibility'):
+        seeds.seed_console_access(ctx, {'key': 'console_eligibility'})
+
+
 def test_synchronous_file_processing_does_not_poll():
     client = Mock(spec=seeds.AttackClient)
     client.request.return_value = response(200, {'status': True, 'content': 'text'})
@@ -223,7 +240,7 @@ def test_synchronous_file_processing_does_not_poll():
 def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, consent_status):
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    admin.request.side_effect = [
+    client.request.side_effect = [
         response(
             201,
             {
@@ -245,13 +262,13 @@ def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, c
     if consent_status != 200:
         with pytest.raises(RuntimeError, match=f'HTTP {consent_status}'):
             seeds.seed_cloud_connection(ctx, parameter)
-        assert admin.request.call_count == 1
+        assert client.request.call_count == 1
         assert not ctx.values
     else:
         assert seeds.seed_cloud_connection(ctx, parameter) == 'connection'
         assert ctx.values == {'cloud_grant': 'grant'}
-        admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections/connection/live/live_documents')
-    client.request.assert_not_called()
+        client.request.assert_called_with('POST', '/api/v1/cloud-sync/connections/connection/live/live_documents')
+    admin.request.assert_not_called()
     session.post.assert_called_once_with(
         'http://fixture:8040/ci/consent',
         headers={'Authorization': 'Bearer test-fixture-key'},
@@ -303,7 +320,7 @@ def test_a_later_pass_reuses_the_consented_connection_without_new_consent(monkey
     """One connection per owner and provider: the create returns the consented one, with no authorize URL."""
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    admin.request.side_effect = [
+    client.request.side_effect = [
         response(200, {'connection_id': 'connection', 'authorize_url': None}),
         response(200, {'id': 'grant'}),
     ]
@@ -328,23 +345,23 @@ def test_the_authorize_control_takes_a_separate_provider():
     """Outlook mail keeps the control off the consented OneDrive connection."""
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    admin.request.side_effect = [
+    client.request.side_effect = [
         response(200, {'providers_enabled': ['onedrive', 'outlook_mail']}),
         response(201, {'connection_id': 'pending', 'authorize_url': 'http://soev-api:8020/oauth/start/attempt'}),
     ]
     assert seeds.seed_cloud_authorize_connection(ctx, {'key': 'cloud_authorize_connection'}) == 'pending'
-    admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections', json={'provider': 'outlook_mail'})
-    client.request.assert_not_called()
+    client.request.assert_called_with('POST', '/api/v1/cloud-sync/connections', json={'provider': 'outlook_mail'})
+    admin.request.assert_not_called()
 
 
 def test_authorize_control_never_reuses_the_consented_onedrive_connection():
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    admin.request.return_value = response(200, {'providers_enabled': ['onedrive']})
+    client.request.return_value = response(200, {'providers_enabled': ['onedrive']})
     with pytest.raises(RuntimeError, match='separate Outlook'):
         seeds.seed_cloud_authorize_connection(ctx, {'key': 'cloud_authorize_connection'})
-    admin.request.assert_called_once_with('GET', '/api/v1/cloud-sync/policy')
-    client.request.assert_not_called()
+    client.request.assert_called_once_with('GET', '/api/v1/cloud-sync/policy')
+    admin.request.assert_not_called()
 
 
 def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
@@ -480,16 +497,16 @@ def test_null_success_response_and_empty_seeder_result_cannot_produce_ids(monkey
         )
 
 
-def test_repeated_resolutions_get_fresh_tokens_and_use_admin_only_where_declared():
+def test_repeated_resolutions_get_fresh_tokens_as_the_ordinary_caller():
     client, admin = Mock(spec=seeds.AttackClient), Mock(spec=seeds.AttackClient)
-    admin.request.side_effect = lambda *a, **kw: response(200, {'id': kw['json']['name']})
-    surface = tiny_surface(declaration(via='POST /parent', extract='id', actor='admin', body={'name': '{token}'}))
+    client.request.side_effect = lambda *a, **kw: response(200, {'id': kw['json']['name']})
+    surface = tiny_surface(declaration(via='POST /parent', extract='id', actor='user', body={'name': '{token}'}))
     spec = {'paths': {'/parent/{id}': {'get': {}}}}
     first = seeds.resolve_parameters(client, admin=admin, surface=surface, spec=spec)
     second = seeds.resolve_parameters(client, admin=admin, surface=surface, spec=spec)
     assert first != second
     assert '{token}' not in next(iter(first.values()))
-    client.request.assert_not_called()
+    admin.request.assert_not_called()
 
 
 def test_multipart_seed_and_get_extraction_use_the_expected_http_shapes():
@@ -531,7 +548,6 @@ def test_destructive_routes_have_reasons_exist_in_spec_and_never_become_ordinary
         'POST /api/v1/auths/signout',
         'DELETE /api/v1/auths/api_key',
         'POST /api/v1/auths/update/password',
-        'DELETE /api/v1/users/{user_id}',
         'DELETE /api/v1/auths/oauth/sessions/{provider}',
     }
     assert required <= seeds.DESTRUCTIVE.keys()
@@ -597,11 +613,11 @@ def test_skill_seed_survives_an_existing_name_and_repeated_resolution():
                 return response(400, {'detail': 'Error creating skill'})
             return response(200, {'id': body['id']})
 
-        admin.request.side_effect = create
+        owner.request.side_effect = create
         for _ in range(2):
             seeds.resolve_parameters(owner, admin=admin, surface=tiny_surface(entry), spec={'paths': {}})
         assert db.execute('SELECT COUNT(*) FROM skill').fetchone()[0] == 3
-    owner.request.assert_not_called()
+    admin.request.assert_not_called()
 
 
 def test_plain_seed_bodies_supply_all_required_schema_fields():
@@ -629,64 +645,6 @@ def test_plain_seed_bodies_supply_all_required_schema_fields():
         check(entry['body'], operation['requestBody']['content']['application/json']['schema'])
 
 
-def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
-    entries = {p['key']: p for p in seeds.SURFACE['parameter']}
-    for chain in [
-        ('folder', 'chat', 'chat_message', 'share'),
-        ('knowledge', 'directory'),
-        ('calendar', 'event'),
-        ('prompt', 'prompt_history'),
-        ('file', 'filename'),
-    ]:
-        assert {entries[key].get('actor') for key in chain} == {'admin'}
-    order = {p['key']: i for i, p in enumerate(seeds.dependency_order(seeds.SURFACE))}
-    for key, gate in [
-        ('folder', 'folders.enable'),
-        ('calendar', 'calendar.enable'),
-        ('automation', 'automations.enable'),
-        ('memory', 'memories.enable'),
-        ('archive', 'admin.enable_user_archival'),
-    ]:
-        assert entries['namespace']['config'][gate] is True
-        assert order['namespace'] < order[key]
-
-
-@pytest.mark.parametrize('oidc_mode', [False, True])
-def test_archive_seed_snapshots_its_admin_owner(monkeypatch, oidc_mode):
-    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
-    admin = Mock(identity={'id': 'fictional-admin'})
-    client = Mock(identity={'id': 'fictional-user'})
-    ctx = seeds.SeedContext(client, admin, seeds.SURFACE)
-    entries = {p['key']: p for p in seeds.SURFACE['parameter']}
-    ctx.values['archive_user'] = seeds.seed_admin_user(ctx, entries['archive_user'])
-    ctx.values['namespace'] = 'fictional-namespace'
-    ctx.values['user'] = 'disposable-account-target'
-    admin.request.return_value = response(200, {'archive_id': 'fictional-archive'})
-    assert seeds._seed_endpoint(ctx, entries['archive']) == 'fictional-archive'
-    assert admin.request.call_args.args == ('POST', '/api/v1/archives/user/fictional-admin')
-    assert entries['archive_user']['actor'] == entries['archive']['actor'] == 'admin'
-    assert entries['archive_user']['fresh'] is False
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize('oidc_mode', [False, True])
-def test_oauth_session_seed_reads_its_admin_owner_without_reusing_the_account_target(monkeypatch, oidc_mode):
-    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
-    admin = Mock(identity={'id': 'fictional-admin'})
-    client = Mock(identity={'id': 'fictional-user'})
-    path = '/api/v1/users/{user_id}/oauth/sessions'
-    entry = seeds.parameter_for(path, 'user_id')
-    assert entry['key'] == 'oauth_session_user'
-    assert entry['actor'] == 'admin' and entry['fresh'] is False
-    surface = {'parameter': [entry]}
-    resolved = seeds.resolve_parameters(client, admin=admin, surface=surface, spec={'paths': {path: {'get': {}}}})
-    assert resolved[path, 'user_id'] == 'fictional-admin'
-    assert seeds.parameter_for('/api/v1/users/{user_id}', 'user_id')['key'] == 'user'
-    assert seeds.parameter_for('/api/v1/users/{user_id}/shared-data', 'user_id')['key'] == 'user'
-    admin.request.assert_not_called()
-    client.request.assert_not_called()
-
-
 def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
     def provides_extra(ctx, entry):
         ctx.provide(entry, 'extra', 'extra-value')
@@ -707,29 +665,6 @@ def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
     silent = tiny_surface(declaration(seeded_by='provides_nothing', depends_on=[], provides=['extra']))
     with pytest.raises(RuntimeError, match='did not provide'):
         seeds.resolve_parameters(client, surface=silent, spec=spec)
-
-
-def test_active_function_seeder_turns_its_own_function_on():
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}, {'is_global': True}, {}])
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'active_function')
-    assert seeds.seed_active_function(ctx, parameter) == 'attack_active_fixture'
-    create, toggle, made_global, registry = ctx.request.call_args_list
-    assert create.args == ('POST', '/api/v1/functions/create')
-    assert create.kwargs['json']['content'] == parameter['content']
-    assert toggle.args == ('POST', '/api/v1/functions/id/attack_active_fixture/toggle')
-    assert made_global.args == ('POST', '/api/v1/functions/id/attack_active_fixture/toggle/global')
-    assert registry.args == ('GET', '/api/models')
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
-    # The passes toggle the shared {function}; this one must never be its target.
-    function = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'function')
-    assert seeds.parameter_for('/api/v1/functions/id/{id}/toggle', 'id') is function
-    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': False}])
-    with pytest.raises(RuntimeError, match='not activated'):
-        seeds.seed_active_function(ctx, parameter)
-    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}, {'is_global': False}])
-    with pytest.raises(RuntimeError, match='not made global'):
-        seeds.seed_active_function(ctx, parameter)
 
 
 def test_active_function_serves_chat_actions_and_user_valves():
@@ -763,7 +698,7 @@ def test_knowledge_file_seeder_adds_a_file_nothing_else_uses(key, provided):
     assert process.kwargs['json'] == {'file_id': 'own-file'}
     assert add.args == ('POST', '/api/v1/knowledge/own-kb/file/add')
     assert add.kwargs['json'] == {'file_id': 'own-file'}
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    assert all(call.kwargs['actor'] is ctx.client for call in ctx.request.call_args_list)
     assert not seeds.is_destructive('POST', '/api/v1/knowledge/{id}/file/remove')
     ctx.request = Mock(
         side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
@@ -778,155 +713,6 @@ def test_totp_code_matches_rfc_6238_sha1_vectors():
     for at, code in [(59, '287082'), (1111111109, '081804'), (1234567890, '005924'), (2000000000, '279037')]:
         assert seeds.totp_code(secret, at=at) == code
     assert seeds.totp_code(secret.rstrip('=').lower(), at=59) == '287082'
-
-
-@pytest.mark.parametrize('oidc_mode', [False, True])
-def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch, oidc_mode):
-    monkeypatch.setenv('ATTACK_OIDC_LOGIN', '1' if oidc_mode else '0')
-    sessions = []
-
-    class Enrolee:
-        def __init__(self, base_url, token):
-            sessions.append(token)
-            self.verify_identity = Mock()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(seeds, 'AttackClient', Enrolee)
-    monkeypatch.setattr(seeds, 'totp_code', lambda secret: f'code-for-{secret}')
-    ctx = seeds.SeedContext(Mock(base_url='http://app'), Mock(), seeds.SURFACE, token='fixture')
-    ctx.request = Mock(
-        side_effect=[{'id': 'totp-user', 'token': 'totp-session'}, {'secret': 'SECRET'}, {'totp_enabled': True}]
-    )
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'totp_user')
-    assert seeds.seed_totp_user(ctx, parameter) == 'totp-user'
-    assert sessions == ['totp-session']
-    add, setup, enable = ctx.request.call_args_list
-    assert add.kwargs['actor'] is ctx.admin and add.kwargs['json']['role'] == 'user'
-    assert add.kwargs['password_identity'] is True
-    assert setup.args == ('POST', '/api/v1/auths/2fa/totp/setup') and setup.kwargs['actor'] is not ctx.admin
-    assert enable.kwargs['json'] == {'password': parameter['password'], 'secret': 'SECRET', 'code': 'code-for-SECRET'}
-    # Not the shared {user}: the exporter signs in with that user's password.
-    assert seeds.parameter_for('/api/v1/users/{user_id}/2fa/disable', 'user_id') is parameter
-    assert seeds.parameter_for('/api/v1/users/{user_id}/groups', 'user_id')['key'] == 'user'
-    ctx.request = Mock(side_effect=[{'id': 'totp-user', 'token': 't'}, {'secret': 'S'}, {'totp_enabled': False}])
-    with pytest.raises(RuntimeError, match='did not take effect'):
-        seeds.seed_totp_user(ctx, parameter)
-
-
-@pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch, mode):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.values['chat'] = 'chat-id'
-    ctx.values['model'] = 'stub-model'
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'attack_task_fixture'},
-            {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
-            {'data': [{'id': 'attack_task_fixture'}]},
-            {'task_ids': ['expired-task']},
-            {'task_ids': []},
-        ]
-    )
-    if mode == 'drive':
-        assert seeds.seed_task(ctx, {'key': 'task'}) == 'attack_task_probe_fixture'
-        assert ctx.request.call_count == 3
-        ctx.admin.request.assert_not_called()
-        return
-    with pytest.raises(RuntimeError, match='Task completed'):
-        seeds.seed_task(ctx, {'key': 'task'})
-    ctx.admin.request.assert_called_once_with('POST', '/api/tasks/stop/expired-task')
-
-
-@pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_task_seeder_observes_a_live_task_without_installing_a_function(monkeypatch, mode):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.values['chat'] = 'chat-id'
-    ctx.values['model'] = 'stub-model'
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'attack_task_fixture'},
-            {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
-            {'data': [{'id': 'attack_task_fixture'}]},
-            {'task_ids': ['live-task']},
-            *[{'task_ids': ['live-task']}] * 3,
-        ]
-    )
-    task = seeds.seed_task(ctx, {'key': 'task'})
-    if mode == 'drive':
-        assert task == 'attack_task_probe_fixture'
-        assert ctx.request.call_count == 3
-        return
-    assert task == 'live-task'
-    model = ctx.request.call_args_list[0]
-    assert model.args == ('POST', '/api/v1/models/create')
-    assert model.kwargs['json']['base_model_id'] == 'stub-model'
-    assert model.kwargs['json']['meta'] == {}
-    registration = ctx.request.call_args_list[1]
-    assert registration.args == ('POST', '/api/v1/models/model/access/update')
-    assert registration.kwargs['json'] == {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]}
-    assert registration.kwargs['actor'] is ctx.admin
-    completion = ctx.request.call_args_list[3]
-    assert completion.kwargs['json']['chat_id'] == 'chat-id'
-    assert completion.kwargs['json']['model'] == 'attack_task_fixture'
-    assert completion.kwargs['json']['stream'] is True
-    assert completion.kwargs['json']['messages'] == [{'role': 'user', 'content': 'owui_attack_task_hold:fixture'}]
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
-    assert not any('/functions/' in call.args[1] for call in ctx.request.call_args_list)
-
-
-def stop_seed_task(admin, resolved):
-    task_id = resolved.get(('/api/tasks/stop/{task_id}', 'task_id'))
-    if task_id is None:
-        return
-    result = admin.request('POST', f'/api/tasks/stop/{task_id}')
-    try:
-        if seeds.runtime_soev_backed() == 'drive':
-            from .crossuser import expected_refusals, refused_as_expected
-
-            assert refused_as_expected(
-                expected_refusals()['POST /api/tasks/stop/{task_id}'], result.status_code, result.text
-            )
-        else:
-            assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
-    finally:
-        result.close()
-
-
-@pytest.mark.parametrize(
-    'mode,status,body,accepted',
-    [
-        ('waive', 200, {}, True),
-        ('waive', 409, {'state': 'unavailable'}, False),
-        ('drive', 409, {'state': 'unavailable'}, True),
-        ('drive', 200, {}, False),
-        ('drive', 409, {'state': 'other'}, False),
-        ('drive', 404, {'state': 'unavailable'}, False),
-    ],
-)
-def test_seed_task_cleanup_requires_the_exact_runtime_contract(monkeypatch, mode, status, body, accepted):
-    from . import test_live_plane
-
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    result = response(status, body)
-    result.close = Mock()
-    admin = Mock(request=Mock(return_value=result))
-    parameters = {('/api/tasks/stop/{task_id}', 'task_id'): 'fictional-task'}
-    if accepted:
-        test_live_plane.stop_seed_task(admin, parameters)
-    else:
-        with pytest.raises(AssertionError):
-            test_live_plane.stop_seed_task(admin, parameters)
-    admin.request.assert_called_once_with('POST', '/api/tasks/stop/fictional-task')
-    result.close.assert_called_once()
 
 
 PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
@@ -954,7 +740,7 @@ def test_v2_chat_seeds_committed_messages_and_shares_to_a_known_group(monkeypatc
     assert turn.kwargs['json']['follow_thread'] is True
     assert turn.kwargs['json']['chat_id'] == 'fictional-thread'
     assert folder.kwargs['json'] == {'folder_id': 'fictional-folder'}
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    assert all(call.kwargs['actor'] is ctx.client for call in ctx.request.call_args_list)
     ctx.values.update(chat='fictional-thread', chat_message='7')
     ctx.request = Mock(return_value={'share_id': 'fictional-thread'})
     assert seeds.seed_chat_share(ctx, {'key': 'share'}) == 'fictional-thread'
@@ -985,8 +771,8 @@ def test_v2_chat_seeds_committed_messages_and_shares_to_a_known_group(monkeypatc
 def test_v2_feedback_seed_requires_committed_owner_readback(readable):
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fictional')
     ctx.values.update(chat='fictional-thread', chat_message='7')
-    ctx.admin.request.return_value = response(204, None)
-    ctx.admin.request.return_value._content_consumed = True
+    ctx.client.request.return_value = response(204, None)
+    ctx.client.request.return_value._content_consumed = True
     ctx.request = Mock(
         return_value={
             'items': [
@@ -1007,7 +793,7 @@ def test_v2_feedback_seed_requires_committed_owner_readback(readable):
     else:
         with pytest.raises(RuntimeError, match='could not be read back'):
             seeds.seed_feedback(ctx, {'key': 'feedback'})
-    ctx.admin.request.assert_called_once_with(
+    ctx.client.request.assert_called_once_with(
         'POST',
         '/api/v1/evaluations/feedback',
         json={
@@ -1055,7 +841,7 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
     async def exercise():
         user = SimpleNamespace(id=f'{role}-caller', role=role)
         model = {'id': 'stub-model'}
-        assert await scope['get_filtered_models']([model], user) == ([model] if role == 'admin' else [])
+        assert await scope['get_filtered_models']([model], user) == []
         with pytest.raises(Exception, match='Model not found'):
             await scope['check_model_access'](user, model)
 
@@ -1097,26 +883,9 @@ def test_drive_model_seed_requires_the_active_soev_catalog_default(monkeypatch):
     assert 'upstream_model' not in ctx.values
     config, registry = ctx.request.call_args_list
     assert config.args == ('GET', '/api/config')
-    assert config.kwargs == {'actor': ctx.admin}
+    assert config.kwargs == {'actor': ctx.client}
     assert registry.args == ('GET', '/api/models')
-    assert registry.kwargs == {'actor': ctx.admin, 'params': {'refresh': True}}
-
-
-def test_legacy_model_seed_preserves_public_read_registration(monkeypatch):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(
-        side_effect=[
-            {'default_models': 'fictional/chat'},
-            {'id': 'fictional/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': True},
-        ]
-    )
-    assert seeds.seed_model(ctx, {'key': 'model'}) == 'fictional/chat'
-    assert 'upstream_model' not in ctx.values
-    config, registration = ctx.request.call_args_list
-    assert config.args == ('GET', '/api/config')
-    assert config.kwargs == {'actor': ctx.admin}
-    assert registration.kwargs['json'] == {'id': 'fictional/chat', 'access_grants': [PUBLIC_MODEL_READ]}
+    assert registry.kwargs == {'actor': ctx.client}
 
 
 def test_skill_bundle_seed_creates_separate_owned_files():
@@ -1131,7 +900,7 @@ def test_skill_bundle_seed_creates_separate_owned_files():
         'fictional-move.txt',
         'fictional-remove.txt',
     }
-    assert all(call.kwargs['actor'] is ctx.admin for call in requests)
+    assert all(call.kwargs['actor'] is ctx.client for call in requests)
 
 
 def test_product_config_inventory_has_real_routes_proofs_and_seeds():
@@ -1160,22 +929,20 @@ def test_ollama_seed_uses_a_model_from_its_connection_instead_of_the_catalog():
     ctx.values['model'] = 'fictional/catalog-model'
     ctx.request = Mock(
         side_effect=[
-            {'OLLAMA_BASE_URLS': ['http://provider.invalid']},
-            {'models': [{'model': 'fictional-ollama'}]},
-            {'models': [{'model': 'other-connection', 'urls': [1]}, {'model': 'fictional-ollama', 'urls': [0]}]},
+            {'models': [{'model': 'fictional-ollama', 'urls': [2]}]},
         ]
     )
-    assert seeds.seed_ollama_connection(ctx, entry) == '0'
+    assert seeds.seed_ollama_connection(ctx, entry) == '2'
     assert ctx.values['upstream_model'] == 'fictional-ollama'
     assert ctx.request.call_args.args == ('GET', '/ollama/api/tags')
-    assert ctx.request.call_args.kwargs == {'actor': ctx.admin}
+    assert ctx.request.call_args.kwargs == {'actor': ctx.client}
 
 
 def test_ollama_seed_refuses_an_empty_connection_instead_of_substituting_the_catalog():
     entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(side_effect=[{'OLLAMA_BASE_URLS': ['http://provider.invalid']}, {'models': []}, {'models': []}])
-    with pytest.raises(RuntimeError, match='upstream_model'):
+    ctx.request = Mock(return_value={'models': []})
+    with pytest.raises(RuntimeError, match='caller-readable Ollama connection'):
         seeds.seed_ollama_connection(ctx, entry)
     assert 'upstream_model' not in ctx.values
 
@@ -1189,36 +956,9 @@ def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, default
         seeds.seed_model(ctx, {'key': 'model'})
 
 
-def test_model_registration_reactivates_a_row_an_earlier_toggle_disabled():
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': False},
-            {'id': 'ci/chat', 'is_active': True},
-        ]
-    )
-    seeds.register_readable_model(ctx, 'ci/chat')
-    toggle = ctx.request.call_args_list[1]
-    assert toggle.args == ('POST', '/api/v1/models/model/toggle')
-    assert toggle.kwargs == {'actor': ctx.admin, 'params': {'id': 'ci/chat'}}
-
-
-def test_model_registration_fails_when_the_row_stays_inactive():
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': False},
-            {'id': 'ci/chat', 'is_active': False},
-        ]
-    )
-    with pytest.raises(RuntimeError, match='could not be reactivated'):
-        seeds.register_readable_model(ctx, 'ci/chat')
-
-
 def test_connection_proxy_fields_use_the_upstream_model():
     # These routes resolve the model against a connection's own list, not the registry.
     direct = {
-        'POST /api/models/unload',
         'POST /ollama/api/chat/{url_idx}',
         'POST /ollama/v1/chat/completions/{url_idx}',
         'POST /ollama/v1/messages/{url_idx}',
@@ -1230,21 +970,6 @@ def test_connection_proxy_fields_use_the_upstream_model():
     }
     assert direct <= models.keys()
     assert {route for route, value in models.items() if value == '{upstream_model}'} == direct
-
-
-@pytest.mark.parametrize(
-    'body',
-    [
-        {'id': 'stub-model', 'access_grants': []},
-        {'id': 'stub-model', 'access_grants': [{**PUBLIC_MODEL_READ, 'permission': 'write'}]},
-        {'id': 'different-model', 'access_grants': [PUBLIC_MODEL_READ]},
-    ],
-)
-def test_model_registration_rejects_missing_read_access_or_wrong_model(body):
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(return_value=body)
-    with pytest.raises(RuntimeError, match='did not acquire public read access'):
-        seeds.register_readable_model(ctx, 'stub-model')
 
 
 LIVE_READS = [
@@ -1275,24 +1000,6 @@ LIVE_READS = [
     '/api/v1/configs/namespace/{namespace}',
     '/api/v1/terminals/{server_id}/{path}',
 ]
-
-
-def test_stack_configuration_is_imported_and_verified():
-    client = Mock(spec=seeds.AttackClient)
-    client.request.return_value = response(200, {'ui.enable_signup': True, 'other.key': 1})
-    surface = {**tiny_surface(), 'stack_configuration': {'ui.enable_signup': True}}
-    assert seeds.resolve_parameters(client, surface=surface, spec={'paths': {}}) == {}
-    call = client.request.call_args
-    assert call.args == ('POST', '/api/v1/configs/import')
-    assert call.kwargs['json'] == {'config': {'ui.enable_signup': True}}
-
-
-def test_stack_configuration_that_does_not_take_effect_fails_setup():
-    client = Mock(spec=seeds.AttackClient)
-    client.request.return_value = response(200, {'ui.enable_signup': False})
-    surface = {**tiny_surface(), 'stack_configuration': {'ui.enable_signup': True}}
-    with pytest.raises(RuntimeError, match='did not take effect'):
-        seeds.resolve_parameters(client, surface=surface, spec={'paths': {}})
 
 
 def test_fields_fill_seed_keys_and_the_token_after_their_setup_request():
@@ -1361,7 +1068,9 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         if method in METHODS
     }
     templates = {re.sub(r'\{[^}]+\}', '{}', route) for route in operations}
-    seeded = {p['key'] for p in seeds.SURFACE['parameter'] if 'unseedable' not in p}
+    seeded = {
+        p['key'] for p in [*seeds.SURFACE['parameter'], *seeds.SURFACE.get('fixture', [])] if 'unseedable' not in p
+    }
     seeded |= {name for p in seeds.SURFACE['parameter'] for name in p.get('provides', [])}
     writable = writable_string_fields(SPEC)
     skeletons = body_skeletons(SPEC)

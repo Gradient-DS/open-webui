@@ -126,7 +126,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(models.Groups, 'get_groups_by_member_id', groups)
     monkeypatch.setattr(application.Config, 'get', config)
     monkeypatch.setattr(application, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(webui_config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(False).lower())
     monkeypatch.setattr(application, 'check_model_access', models.check_model_access)
     monkeypatch.setattr(application, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(application, 'process_chat_payload', payload)

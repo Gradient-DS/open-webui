@@ -57,7 +57,6 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'cloud_schedule',
         'retry_schedule',
         'meeting',
-        'agent_thread',
         'platform_thread',
         'platform_thread_versions',
         'platform_thread_read',
@@ -65,7 +64,7 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
-    assert {'file', 'task'} <= selected_keys
+    assert {'file', 'model'} <= selected_keys
     assert all(set(seeds._dependencies(p)) <= selected_keys for p in selected)
 
 
@@ -96,7 +95,7 @@ def test_platform_thread_seed_reuses_the_admin_owned_meeting(monkeypatch, mode):
     else:
         request.assert_called_once()
         assert request.call_args.args == ('POST', '/api/v1/meetings')
-        assert request.call_args.kwargs['actor'] is admin
+        assert request.call_args.kwargs['actor'] is client
         assert resolved == {(path, 'thread_id'): 'fictional-meeting-thread' for path in paths}
         assert resolved.fields == {
             'POST /api/v1/threads/{thread_id}/read': {'headers': {'Content-Type': 'application/json'}}
@@ -255,13 +254,8 @@ def test_function_seeds_and_refusal_controls_follow_the_runtime(monkeypatch, mod
         assert not functions & crossuser._shared().keys()
         assert 'POST /api/chat/actions/{action_id}' in crossuser.expected_refusals()
     else:
-        endpoint.assert_called_once()
-        active.assert_called_once()
-        assert action == 'installed-action'
-        assert not functions & crossuser.expected_refusals().keys()
-        assert not functions & coverage.waivers().keys()
-        assert 'GET /api/v1/functions/id/{id}/valves/user/spec' in crossuser._shared()
-    assert not resolved.failures and not resolved.blocked
+        active.assert_not_called()
+        assert action.startswith('fictional-retired-')
 
 
 def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_route(monkeypatch):

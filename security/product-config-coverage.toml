@@ -2,7 +2,7 @@
 # These declarations supplement attack-surface.toml; they waive no routes.
 
 [configuration]
-routes = ["GET /api/config", "GET /api/v1/configs/export", "POST /api/v1/configs/import"]
+routes = ["GET /api/config"]
 classification = "tenant_configuration"
 read = "Product settings use the cached service snapshot; all other persistent settings use deployment values."
 write = "Config.upsert refuses every platform write before changing defaults or rows."
@@ -10,14 +10,14 @@ proof = "backend/open_webui/test/soev/test_product_config.py"
 seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
 
 [permissions]
-routes = ["GET /api/v1/users/permissions", "GET /api/v1/users/default/permissions", "GET /api/v1/users/default/permissions/defaults", "POST /api/v1/users/default/permissions"]
+routes = ["GET /api/v1/users/permissions"]
 classification = "tenant_permissions"
 rule = "Only permissions.<path> leaves apply. Authentication and administrator dependencies are preserved; group membership and resource grants are unchanged."
 proof = "backend/open_webui/test/soev/test_product_config.py:test_permission_endpoints_use_product_leaves"
 seed = "soev-solutions/tests/leak_matrix/product_config_seed.py:seed_product_config"
 
 [feedback]
-routes = ["GET /api/config", "GET /api/v1/evaluations/config", "POST /api/v1/evaluations/config", "POST /api/v1/evaluations/feedback", "GET /api/v1/evaluations/feedbacks/list", "GET /api/v1/evaluations/feedback/conversation/{chat_id}"]
+routes = ["GET /api/config", "POST /api/v1/evaluations/feedback", "GET /api/v1/evaluations/feedback/conversation/{chat_id}"]
 classification = "configured_feedback_metadata"
 rule = "Stable reason/tag IDs and nl/en labels are customer product content. Platform rating writes validate IDs; listing delegates workspace and tenant isolation to soev-api. Feedback grants no chat-read authority."
 proof = "backend/open_webui/test/soev/test_chat_paths.py:test_feedback_allowlist_authored_comment_and_admin_exception"

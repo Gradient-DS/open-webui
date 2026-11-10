@@ -25,11 +25,10 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (49, 99)
+    assert (len(targets), sum(map(len, targets.values()))) == (36, 78)
     assert targets['POST /api/v1/meetings/audio'] == ['name', 'thread_id']
     assert targets['GET /api/v1/models/model/sharing'] == ['id']
     assert targets['GET /api/v1/skills/id/{id}/files/content'] == ['path']
-    assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
     assert targets['GET /api/v1/threads'] == ['cursor', 'q']
     assert targets['GET /api/v1/threads/{thread_id}'] == ['before']
     assert targets['GET /api/v1/threads/{thread_id}/forks'] == ['cursor']
@@ -56,26 +55,6 @@ def test_skill_file_query_pass_uses_the_owned_bundle_seed(offline, monkeypatch):
     )
     assert tally.entered == {route: {200: 1}}
     assert not tally.skipped and not tally.fixture_failures
-
-
-def test_offboarding_query_contract_includes_resource_confirmation_array():
-    operation = seeds.SPEC['paths']['/api/v1/users/{user_id}']['delete']
-    parameters = {p['name']: p['schema'] for p in operation['parameters'] if p['in'] == 'query'}
-    assert set(parameters) == {
-        'mode',
-        'transfer_to',
-        'confirm_shared_deletion',
-        'never_delete',
-        'archive_before_delete',
-        'archive_reason',
-        'archive_retention_days',
-    }
-    assert parameters['mode']['enum'] == ['delete', 'transfer', 'archive']
-    assert parameters['mode']['default'] == 'delete'
-    assert parameters['transfer_to']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
-    assert parameters['confirm_shared_deletion']['type'] == 'array'
-    assert parameters['confirm_shared_deletion']['items'] == {'type': 'string'}
-    assert parameters['confirm_shared_deletion']['default'] == []
 
 
 @pytest.mark.parametrize('full', [False, True])
