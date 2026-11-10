@@ -86,6 +86,7 @@ from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.soev import silent_connect
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.group_policy import refuse_group_write
+from open_webui.soev.login_attach import attach_person_login
 from open_webui.utils.auth import (
     create_token,
     get_optional_verified_user_from_request,
@@ -1947,8 +1948,10 @@ class OAuthManager:
                 log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # [Gradient] Only an existing provider/sub binding identifies an account.
+            # [Gradient] An unknown login can attach only through soev-api's person.
             user = await Users.get_user_by_oauth_sub(provider, sub, db=db)
+            if user is None:
+                user = await attach_person_login(provider, sub, token.get('access_token'), db=db)
 
             if user:
                 provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None

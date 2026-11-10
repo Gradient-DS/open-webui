@@ -3082,7 +3082,10 @@ async def oauth_login_callback(
 
     Resolution order:
     1. Match by subject ID bound to the provider.
-    2. If no match and signup policy allows it, create a new user.
+    2. With soev-api configured, resolve the login token's person and attach to
+       that person's existing account. A different bound subject refuses (403);
+       failed discovery refuses with a retryable error (503).
+    3. If no person account matches and signup policy allows it, create a new user.
        An already registered email is refused; it never links accounts.
     """
     return await oauth_manager.handle_callback(request, provider, response, db=db)

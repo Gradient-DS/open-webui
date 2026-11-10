@@ -67,8 +67,16 @@ ENABLE_LOGIN_FORM=false
 
 Set the client secret through the deployment's secret store. Password login takes
 place only through Keycloak; OWUI's login form stays disabled. Existing users must
-have their OIDC identity mapping provisioned by the migration; matching email
-addresses do not link accounts.
+have `user.person_id` provisioned by the migration before reopening. On an unknown
+provider/sub, OWUI asks soev-api `/v1/me` with that login's access token and the
+product credential. If the returned person already owns an OWUI account, OWUI
+attaches the provider/sub to that account and logs in with its existing id,
+settings and content. An existing different subject for that provider refuses
+with `403`, logged as `oauth_person_provider_conflict`; a discovery failure or
+invalid person response refuses with a retryable `503` before signup. No person
+account match keeps the existing signup policy and email-conflict refusal.
+Matching email addresses never link accounts; email merging and its runtime
+configuration have been removed, including support for stale persisted settings.
 
 For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
 access token when needed and forwards it as `X-Soev-User-Token` beside the product
