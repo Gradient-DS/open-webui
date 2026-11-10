@@ -40,6 +40,18 @@ preserves product settings, returns changed-row counts, and refuses unmapped ids
 or conflicting targets. The caller commits or rolls back; the function makes no
 network calls.
 
+Before that group step and before reopening login, call
+`soev.migrate_persons.cutover_persons(session, person_map)` with the migration
+journal's complete map of OWUI user id to canonical `platform:user:<uuid>`.
+Every retained account must be mapped. The helper validates all entries before
+writing `user.person_id`: unknown or unmapped user ids, duplicate person ids,
+invalid refs and changes to an existing binding refuse. It preserves account ids,
+OAuth bindings, settings and content, returns `{'users': changed_count}`, and
+does not commit or make network calls. Repeating the same map returns zero
+changes. The cutover Job owns the transaction for both steps and must roll it
+back on any refusal. The platform remains responsible for migration proof and
+quarantine; OWUI never derives this map from email.
+
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
 With External Secrets enabled and a platform URL set, provide `soevApiKey` in the configured 1Password item instead of inline secrets.
 Startup validates the product credential when the platform URL is set. Missing platform
