@@ -507,14 +507,13 @@ async def get_current_user_by_api_key(request, api_key: str):
     if not config_values.get('auth.enable_api_keys'):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
 
-    if user.role != 'admin':
-        user_permissions = config_values.get('user.permissions')
-        if not await has_permission(
-            user.id,
-            'features.api_keys',
-            user_permissions,
-        ):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
+    user_permissions = config_values.get('user.permissions')
+    if not await has_permission(
+        user.id,
+        'features.api_keys',
+        user_permissions,
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
 
     # Enforce endpoint restrictions — checked here (not in middleware)
     # so it applies regardless of how the API key was transported
@@ -627,43 +626,5 @@ async def get_optional_verified_user_from_request(request: Request):
 
 
 def get_admin_user(user=Depends(get_current_user)):
-    if user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-    return user
-
-
-async def create_admin_user(email: str, password: str, name: str = 'Admin'):
-    """
-    Create an admin user from environment variables.
-    Used for headless/automated deployments.
-    Returns the created user or None if creation failed.
-    """
-
-    if not email or not password:
-        return None
-
-    if await Users.has_users():
-        log.debug('Users already exist, skipping admin creation')
-        return None
-
-    log.info('Creating admin account from environment variables')
-    try:
-        hashed = await get_password_hash(password)
-        user = await Auths.insert_new_auth(
-            email=email.lower(),
-            password=hashed,
-            name=name,
-            role='admin',
-        )
-        if user:
-            log.info('Admin account created successfully')
-            return user
-        else:
-            log.error('Failed to create admin account from environment variables')
-            return None
-    except Exception as e:
-        log.error(f'Error creating admin account: {e}')
-        return None
+    """Retired extension dependency; local roles no longer confer management rights."""
+    raise HTTPException(status_code=403, detail='console_management_required')

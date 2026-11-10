@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 161
+    assert len(admin_gated_operations()) == 0
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -30,24 +30,24 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     assert set(routes) == expected - unseedable
 
 
-def test_oauth_sessions_keep_a_cross_user_refusal_and_require_a_positive_owner():
-    route = 'GET /api/v1/users/{user_id}/oauth/sessions'
+def test_skill_file_routes_require_owner_controls_and_have_no_sharing_allowance():
     routes, admins = crossuser.targets()
-    assert route in routes and route in admins and route in seeds.ordinary_targets()
-    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
-    assert route not in crossuser.expected_refusals() and route not in crossuser._shared()
-    result = crossuser.Authorization(plane.Seeding())
-    crossuser._check(
-        result,
-        route,
-        plane.Outcome(403, True, '{"detail": "You do not have permission to access this resource"}'),
-        plane.Outcome(200, True, '[{"user_id": "fictional-admin", "provider": "oidc"}]'),
-        (),
-        admin_only=True,
-        control=True,
-    )
-    assert result.controls[route] == 200
-    assert not result.violations
+    expected = {
+        'GET /api/v1/skills/id/{id}/files',
+        'POST /api/v1/skills/id/{id}/files',
+        'PUT /api/v1/skills/id/{id}/files',
+        'GET /api/v1/skills/id/{id}/files/content',
+        'POST /api/v1/skills/id/{id}/files/move',
+        'POST /api/v1/skills/id/{id}/files/remove',
+    }
+    assert expected <= set(routes)
+    assert not expected & admins
+    assert not expected & crossuser._shared().keys()
+    assert not expected & crossuser.expected_refusals().keys()
+    for route in expected:
+        assert route in seeds.ordinary_targets()
+        path = route.split(' ', 1)[1]
+        assert seeds.parameter_for(path, 'id')['seeded_by'] == 'seed_skill_bundle'
 
 
 @pytest.mark.parametrize('path', ['/api/v1/chats/{id}/share', '/api/v1/chats/shared/{id}/access'])
@@ -55,7 +55,7 @@ def test_chat_share_access_requires_an_owner_control_without_sharing_allowances(
     route = f'GET {path}'
     routes, admins = crossuser.targets()
     assert route in routes and route not in admins
-    assert crossuser._owner_key(path, seeds.SURFACE) == 'admin'
+    assert crossuser._owner_key(path, seeds.SURFACE) == 'user'
     assert route not in crossuser._shared()
     assert route not in crossuser.expected_refusals()
     assert route not in seeds.SOEV_BACKED
@@ -77,17 +77,6 @@ def test_chat_share_access_requires_an_owner_control_without_sharing_allowances(
     assert not result.violations
     crossuser._check(result, route, owner, owner, ['owner-principal'], admin_only=False, control=True)
     assert result.violations
-
-
-def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():
-    route = 'GET /api/v1/users/{user_id}/shared-data'
-    routes, admins = crossuser.targets()
-    assert route in routes and route in admins
-    assert route in seeds.ordinary_targets()
-    assert route not in crossuser._shared()
-    assert route not in seeds.SOEV_BACKED
-    assert route not in seeds.DESTRUCTIVE
-    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
 
 
 @pytest.mark.parametrize('status', [200, 400, 401, 403, 404, 500])
@@ -238,7 +227,7 @@ def test_second_account_first_reads_writes_child_deletes_then_parent_and_destruc
         'paths': {
             '/r/{id}': {'delete': {}, 'post': {}, 'get': {}},
             '/r/{id}/child': {'delete': {}},
-            '/api/v1/users/{user_id}': {'delete': {}},
+            '/api/v1/auths/oauth/sessions/{provider}': {'delete': {}},
             '/admin': {'post': {}},
         }
     }
@@ -259,7 +248,7 @@ def test_second_account_first_reads_writes_child_deletes_then_parent_and_destruc
         ('POST', '/r/owned'),
         ('DELETE', '/r/owned/child'),
         ('DELETE', '/r/owned'),
-        ('DELETE', '/api/v1/users/{user_id}'),
+        ('DELETE', '/api/v1/auths/oauth/sessions/{provider}'),
     ]
     assert [flag for _, flag in actors][-2:] == [True, True]
     assert not result.violations
@@ -365,8 +354,8 @@ def test_folder_owner_control_supplies_the_owned_folder(monkeypatch):
     parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
     assert crossuser._benign(route, parameters, seeds.SPEC)['json'] == {'folder_id': 'fictional-folder'}
     assert route not in crossuser.expected_refusals()
-    assert seeds.parameter_for('/api/v1/folders/{id}', 'id')['actor'] == 'admin'
-    assert crossuser._owner_key('/api/v1/chats/{id}', seeds.SURFACE) == 'admin'
+    assert seeds.parameter_for('/api/v1/folders/{id}', 'id')['actor'] == 'user'
+    assert crossuser._owner_key('/api/v1/chats/{id}', seeds.SURFACE) == 'user'
 
 
 @pytest.mark.parametrize('full', [False, True])
@@ -399,7 +388,7 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
     monkeypatch.setattr(crossuser, 'login', Mock(return_value=Mock()))
     for _ in range(2):
         with crossuser.own_fixtures(identities) as (_, markers, surface, owners):
-            assert markers[1] == 'procedural-token'
+            assert len(markers) == 1
             assert markers[0] in str(surface)
             assert owners['user'] is identities.user
     assert maps[0] != maps[1] and maps[0] is not seeds.SURFACE
@@ -408,8 +397,7 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
 
 def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export():
     for path, expected in [
-        ('/api/v1/chats/folder/{folder_id}', 'admin'),
-        ('/api/tasks/stop/{task_id}', 'admin'),
+        ('/api/v1/chats/folder/{folder_id}', 'user'),
     ]:
         assert crossuser._owner_key(path, seeds.SURFACE) == expected
 
@@ -417,16 +405,15 @@ def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export(
 def test_destructive_ordinary_probe_never_acquires_admin_role(offline, monkeypatch):
     admin, ordinary, disposable = Mock(), Mock(), Mock()
     ordinary.identity = {'role': 'user'}
-    admin.request.return_value = reply(200, {})
     factory = Mock(return_value=disposable)
-    monkeypatch.setattr(crossuser, 'AttackClient', factory)
+    monkeypatch.setattr(plane, 'create_oidc_identity', factory)
     for _ in range(2):
         with crossuser._actor(admin, ordinary, True) as actor:
             assert actor is disposable
     assert factory.call_count == disposable.close.call_count == 2
-    assert all(call.kwargs['json']['role'] == 'user' for call in admin.request.call_args_list)
-    assert all(call.kwargs['role'] == 'user' for call in disposable.authenticate.call_args_list)
-    emails = [call.kwargs['json']['email'] for call in admin.request.call_args_list]
+    assert all(call.args == (admin,) for call in factory.call_args_list)
+    assert all(call.kwargs['role'] == 'user' for call in factory.call_args_list)
+    emails = [call.kwargs['email'] for call in factory.call_args_list]
     assert emails[0] != emails[1]
 
 
@@ -543,16 +530,6 @@ def test_the_owner_control_carries_declared_fields():
     assert control and get['params'] == {'from_id': 'h1'}
     [(_, post)] = list(crossuser._requests('POST /y', parameters, spec, {}, (), False))
     assert post['json']['file_id'] == 'f1'
-
-
-def test_sharing_declarations_on_token_routes_stay_matchable():
-    # own_fixtures fills {token} throughout its copy of the surface, which
-    # rewrote routes like invites/{token}/validate so no declaration matched.
-    from copy import deepcopy
-
-    route = 'GET /api/v1/invites/{token}/validate'
-    assert route in crossuser._shared()
-    assert route not in crossuser._shared(seeds._fill_token(deepcopy(seeds.SURFACE), 'marker'))
 
 
 def test_a_service_route_is_driven_as_the_service_acting_for_each_side(monkeypatch):
@@ -695,7 +672,7 @@ def test_conversation_routes_require_an_owner_control_without_stranger_allowance
     route = f'{method} {path}'
     routes, admins = crossuser.targets()
     assert route in routes and route not in admins
-    assert crossuser._owner_key(path, seeds.SURFACE) == 'admin'
+    assert crossuser._owner_key(path, seeds.SURFACE) == 'user'
     assert (route in seeds.SOEV_BACKED) is (suffix == 'versions')
     assert route in seeds.ordinary_targets() and route not in seeds.DESTRUCTIVE
     assert route not in crossuser._shared() and route not in crossuser.expected_refusals()

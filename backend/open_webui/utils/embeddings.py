@@ -58,8 +58,11 @@ async def generate_embeddings(
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(model_id))
     model = models[model_id]
 
+    if model.get('owned_by') != 'ollama':
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(model_id))
+
     # Access filtering
-    if not bypass_filter and user.role == 'user':
+    if not bypass_filter:
         await check_model_access(user, model)
 
     # Ollama backend — use /api/embed which supports batch input natively

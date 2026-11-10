@@ -168,7 +168,13 @@ async def test_stock_base_models_can_still_come_from_ollama(stock, connections: 
 
 
 @pytest.mark.asyncio
-async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_bases(v2: FakeSoevApi, all_models) -> None:
+async def test_catalog_meta_uses_console_content_and_assistants_keep_catalog_bases(v2: FakeSoevApi, all_models) -> None:
+    v2.product_config['values']['models.overrides'] = {
+        'glm-5-3': {
+            'name': 'Fictional console model',
+            'meta': {'description': 'Console text', 'capabilities': {'vision': True, 'citations': False}},
+        },
+    }
     rows, run = all_models
     rows.extend(
         [
@@ -179,10 +185,9 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
     models = await run()
     assert set(models) == {'glm-5-3', 'gemma-4-31b', 'helper'}
     meta = models['glm-5-3']['info']['meta']
-    # The row's name ('Admin glm-5-3', or a migrated v1 name) never replaces the id.
-    assert models['glm-5-3']['name'] == 'glm-5-3'
+    assert models['glm-5-3']['name'] == 'Fictional console model'
     assert models['helper']['name'] == 'Admin helper'
-    assert meta['description'] == 'Admin text'
+    assert meta['description'] == 'Console text'
     assert meta['capabilities'] == {'vision': False, 'citations': False}
     assert meta['soev']['vendor'] == 'Zhipu AI'
     assert models['helper']['owned_by'] == 'soev'
@@ -200,7 +205,7 @@ def access(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, ModelModel], set[
     rows: dict[str, ModelModel] = {}
     granted: set[str] = set()
     monkeypatch.setattr(models_utils, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(False).lower())
     monkeypatch.setattr(models_utils.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(models_utils.Models, 'get_model_by_id', AsyncMock(side_effect=lambda id, db=None: rows.get(id)))
     monkeypatch.setattr(
@@ -271,20 +276,20 @@ async def test_v2_custom_model_on_a_catalog_base_follows_its_own_grants(v2: Fake
 
 
 @pytest.mark.asyncio
-async def test_v2_row_less_models_outside_the_catalog_stay_admin_only(v2: FakeSoevApi, access) -> None:
+async def test_v2_row_less_models_outside_the_catalog_remain_unavailable(v2: FakeSoevApi, access) -> None:
     model = {'id': 'zai-org/GLM-5.3', 'owned_by': 'openai'}
     assert await models_utils.get_filtered_models([model], USER) == []
-    assert await models_utils.get_filtered_models([model], ADMIN) == [model]
+    assert await models_utils.get_filtered_models([model], ADMIN) == []
     for user in (USER, ADMIN):
         with pytest.raises(Exception, match='Model not found'):
             await models_utils.check_model_access(user, model)
 
 
 @pytest.mark.asyncio
-async def test_stock_row_less_models_stay_admin_only(stock, access) -> None:
+async def test_stock_row_less_models_remain_unavailable(stock, access) -> None:
     model = {'id': 'glm-5-3', 'owned_by': 'openai'}
     assert await models_utils.get_filtered_models([model], USER) == []
-    assert await models_utils.get_filtered_models([model], ADMIN) == [model]
+    assert await models_utils.get_filtered_models([model], ADMIN) == []
     for user in (USER, ADMIN):
         with pytest.raises(Exception, match='Model not found'):
             await models_utils.check_model_access(user, model)
@@ -293,11 +298,9 @@ async def test_stock_row_less_models_stay_admin_only(stock, access) -> None:
 
 
 @pytest.mark.asyncio
-async def test_v2_default_comes_from_the_catalog_and_ignores_ui_default_models(v2: FakeSoevApi) -> None:
-    assert await model_catalog.default_models('zai-org/GLM-5.3') == 'glm-5-3'
-    v2.models = [{**GLM, 'default': False}, GEMMA]
-    model_catalog.CATALOG_CACHE['expires_at'] = 0.0
-    assert await model_catalog.default_models('zai-org/GLM-5.3') is None
+async def test_v2_default_comes_from_product_config_and_ignores_local_values(v2: FakeSoevApi) -> None:
+    v2.product_config['values']['ui.default_models'] = 'gemma-4-31b'
+    assert await model_catalog.default_models('zai-org/GLM-5.3') == 'gemma-4-31b'
 
 
 @pytest.mark.asyncio

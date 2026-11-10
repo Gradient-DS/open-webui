@@ -552,8 +552,7 @@ async def get_builtin_tools(
     )
 
     async def has_user_permission(feature_key: str) -> bool:
-        if user.get('role') == 'admin':
-            return True
+        pass
         return await has_permission(
             user.get('id', ''),
             f'features.{feature_key}',
@@ -561,8 +560,7 @@ async def get_builtin_tools(
         )
 
     async def has_user_chat_permission(permission_key: str) -> bool:
-        if user.get('role') == 'admin':
-            return True
+        pass
         return await has_permission(
             user.get('id', ''),
             f'chat.{permission_key}',

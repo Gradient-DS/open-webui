@@ -306,7 +306,7 @@ async def test_held_inference_task_is_visible_only_to_its_owner_and_cancellable(
     import httpx
     from fastapi import FastAPI
     from open_webui import tasks
-    from open_webui.main import Chats, list_tasks_by_chat_id_endpoint, stop_task_endpoint
+    from open_webui.main import Chats, list_tasks_by_chat_id_endpoint, stop_tasks_by_chat_id_endpoint
     from open_webui.utils.auth import get_admin_user, get_verified_user
 
     monkeypatch.setattr(tasks, 'tasks', {})
@@ -316,8 +316,8 @@ async def test_held_inference_task_is_visible_only_to_its_owner_and_cancellable(
     app = FastAPI()
     app.state.redis = None
     app.add_api_route('/api/tasks/chat/{chat_id}', list_tasks_by_chat_id_endpoint, methods=['GET'])
-    app.add_api_route('/api/tasks/stop/{task_id}', stop_task_endpoint, methods=['POST'])
-    actor = SimpleNamespace(id='fictional-owner', role='admin')
+    app.add_api_route('/api/tasks/chat/{chat_id}/stop', stop_tasks_by_chat_id_endpoint, methods=['POST'])
+    actor = SimpleNamespace(id='fictional-owner', role='user')
     app.dependency_overrides[get_verified_user] = lambda: actor
     app.dependency_overrides[get_admin_user] = lambda: actor
     entered = asyncio.Event()
@@ -345,8 +345,8 @@ async def test_held_inference_task_is_visible_only_to_its_owner_and_cancellable(
             actor = SimpleNamespace(id='fictional-second-account', role='user')
             stranger = await client.get('/api/tasks/chat/fictional-chat')
             assert stranger.json() == {'task_ids': []}
-            actor = SimpleNamespace(id='fictional-owner', role='admin')
-            stopped = await client.post(f'/api/tasks/stop/{task_id}')
+            actor = SimpleNamespace(id='fictional-owner', role='user')
+            stopped = await client.post('/api/tasks/chat/fictional-chat/stop')
             assert stopped.status_code == 200 and stopped.json()['status'] is True
             assert task.cancelled()
             assert (await client.get('/api/tasks/chat/fictional-chat')).json() == {'task_ids': []}

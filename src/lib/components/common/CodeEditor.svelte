@@ -17,9 +17,7 @@
 
 	import { createPyodideWorker } from '$lib/pyodide/createPyodideWorker';
 
-	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
-	import { user } from '$lib/stores';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -106,7 +104,7 @@
 	// Generate unique IDs for requests
 	let _formatReqId = 0;
 
-	const formatPythonCodePyodide = (code) => {
+	const formatPythonCodePyodide = (code): Promise<{ code: string }> => {
 		return new Promise((resolve, reject) => {
 			const id = `format-${++_formatReqId}`;
 			let timeout;
@@ -180,11 +178,7 @@ print("${endTag}")
 
 	export const formatPythonCodeHandler = async () => {
 		if (codeEditor) {
-			const res = await (
-				$user?.role === 'admin'
-					? formatPythonCode(localStorage.token, _value)
-					: formatPythonCodePyodide(_value)
-			).catch((error) => {
+			const res = await formatPythonCodePyodide(_value).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});

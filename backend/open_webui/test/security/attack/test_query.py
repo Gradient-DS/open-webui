@@ -25,33 +25,36 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (48, 98)
+    assert (len(targets), sum(map(len, targets.values()))) == (36, 78)
     assert targets['POST /api/v1/meetings/audio'] == ['name', 'thread_id']
     assert targets['GET /api/v1/models/model/sharing'] == ['id']
-    assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
+    assert targets['GET /api/v1/skills/id/{id}/files/content'] == ['path']
     assert targets['GET /api/v1/threads'] == ['cursor', 'q']
     assert targets['GET /api/v1/threads/{thread_id}'] == ['before']
     assert targets['GET /api/v1/threads/{thread_id}/forks'] == ['cursor']
 
 
-def test_offboarding_query_contract_includes_resource_confirmation_array():
-    operation = seeds.SPEC['paths']['/api/v1/users/{user_id}']['delete']
-    parameters = {p['name']: p['schema'] for p in operation['parameters'] if p['in'] == 'query'}
-    assert set(parameters) == {
-        'mode',
-        'transfer_to',
-        'confirm_shared_deletion',
-        'never_delete',
-        'archive_before_delete',
-        'archive_reason',
-        'archive_retention_days',
-    }
-    assert parameters['mode']['enum'] == ['delete', 'transfer', 'archive']
-    assert parameters['mode']['default'] == 'delete'
-    assert parameters['transfer_to']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
-    assert parameters['confirm_shared_deletion']['type'] == 'array'
-    assert parameters['confirm_shared_deletion']['items'] == {'type': 'string'}
-    assert parameters['confirm_shared_deletion']['default'] == []
+def test_skill_file_query_pass_uses_the_owned_bundle_seed(offline, monkeypatch):
+    route = 'GET /api/v1/skills/id/{id}/files/content'
+    path = route.split(' ', 1)[1]
+    parameter = seeds.parameter_for(path, 'id')
+    entry = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
+    spec = {'paths': {path: {'get': seeds.SPEC['paths'][path]['get']}}}
+    seed_request = Mock(side_effect=[{'id': 'fictional-skill'}, {}, {}, {}])
+    monkeypatch.setattr(seeds.SeedContext, 'request', seed_request)
+    actor = Mock()
+    parameters = seeds.resolve_parameters(actor, surface={'parameter': [parameter], 'field': [entry]}, spec=spec)
+    declared_path = parameters.fields[route]['params']['path']
+    assert declared_path == 'fictional-edit.txt'
+    assert any(call.kwargs['json'].get('path') == declared_path for call in seed_request.call_args_list)
+    assert all(call.kwargs['actor'] is actor for call in seed_request.call_args_list)
+    actor.request.side_effect = lambda *a, **k: reply()
+    tally = query.drive_query_parameters(actor, parameters, spec=spec, payloads=['../fictional-private.txt'])
+    actor.request.assert_called_once_with(
+        'GET', '/api/v1/skills/id/fictional-skill/files/content', params={'path': '../fictional-private.txt'}
+    )
+    assert tally.entered == {route: {200: 1}}
+    assert not tally.skipped and not tally.fixture_failures
 
 
 @pytest.mark.parametrize('full', [False, True])

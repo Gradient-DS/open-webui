@@ -14,8 +14,6 @@ from uuid import uuid4
 
 import aiohttp
 import anyio.to_thread
-from redis.asyncio import Redis as AsyncRedis
-
 from cryptography.fernet import InvalidToken
 from fastapi import (
     Depends,
@@ -30,6 +28,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from redis.asyncio import Redis as AsyncRedis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
@@ -45,31 +44,21 @@ from starsessions import (
 )
 from starsessions.stores.redis import RedisStore
 
-from open_webui.soev.thread_approvals import require_legacy_approval
-from open_webui.soev.thread_content import refuse_local_content
-from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.config import (
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
     # Admin
-    ENABLE_ADMIN_ANALYTICS,
-    ENABLE_ADMIN_EXPORT,
+    ENABLE_AGENT_TRACE_DOWNLOAD,
     # [Gradient] GDPR data export
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
-    ENABLE_AGENT_TRACE_DOWNLOAD,
-    USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
     # OpenAI
     ENV,
     # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
-    FEATURE_ADMIN_EVALUATIONS,
-    FEATURE_ADMIN_FUNCTIONS,
-    FEATURE_ADMIN_SETTINGS,
-    FEATURE_ADMIN_SETTINGS_TABS,
     FEATURE_ARTIFACTS,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
@@ -80,14 +69,15 @@ from open_webui.config import (
     FEATURE_DOCUMENT_WRITER,
     FEATURE_INPUT_MENU,
     FEATURE_KNOWLEDGE,
+    FEATURE_MEETINGS,
     FEATURE_MODEL_METERS,
     FEATURE_MODELS,
     FEATURE_NOTES_AI_CONTROLS,
     FEATURE_PLAYGROUND,
     FEATURE_PROMPTS,
+    FEATURE_READ_ALOUD,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
-    WHATS_NEW_MODELS,
     FEATURE_SKILL_FILES,
     FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -99,8 +89,6 @@ from open_webui.config import (
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
-    FEATURE_READ_ALOUD,
-    FEATURE_MEETINGS,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -116,21 +104,15 @@ from open_webui.config import (
     STATIC_DIR,
     THREAD_POOL_SIZE,
     THREAD_POOL_THREAD_NAME_PREFIX,
+    USE_STYLIZED_PDF_EXPORT,
     WEBUI_AUTH,
     WEBUI_NAME,
+    WHATS_NEW_MODELS,
     async_reset_config,
     import_legacy_config_json,
     seed_registered_defaults,
 )
-from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
-from open_webui.soev.acting import install
-from open_webui.soev import capabilities, model_catalog, sessions, system_prompt
-from open_webui.soev import threads as soev_threads
-from open_webui.soev.availability import SoevNotConfigured
-from open_webui.soev.client import SoevApiError
-from open_webui.soev.errors import problem_message
-from open_webui.soev.login_attach import validate_login_config
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -172,9 +154,6 @@ from open_webui.env import (
     VERSION,
     WEBSOCKET_HEARTBEAT_INTERVAL,
     # Admin Account Runtime Creation
-    WEBUI_ADMIN_EMAIL,
-    WEBUI_ADMIN_NAME,
-    WEBUI_ADMIN_PASSWORD,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
@@ -207,13 +186,12 @@ from open_webui.routers import (
     automations,
     calendar,
     chats,
-    configs,
     cloud_sync,
+    configs,
     data_warnings,
     evaluations,
     export,
     feedback_report,
-    meetings,
     files,
     folders,
     functions,
@@ -221,6 +199,7 @@ from open_webui.routers import (
     integrations,
     invites,
     knowledge,
+    meetings,
     memories,
     models,
     notes,
@@ -238,6 +217,8 @@ from open_webui.routers import (
     users,
     utils,
 )
+from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.socket.main import (
     MODELS,
     get_event_emitter,
@@ -249,6 +230,16 @@ from open_webui.socket.main import (
 from open_webui.socket.main import (
     app as socket_app,
 )
+from open_webui.soev import capabilities, model_catalog, sessions, system_prompt
+from open_webui.soev import threads as soev_threads
+from open_webui.soev.acting import install
+from open_webui.soev.availability import SoevNotConfigured
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.errors import problem_message
+from open_webui.soev.login_attach import validate_login_config
+from open_webui.soev.thread_approvals import require_legacy_approval
+from open_webui.soev.thread_content import refuse_local_content
+from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.tasks import (
     cleanup_task,
     create_task,
@@ -260,14 +251,13 @@ from open_webui.tasks import (
     stop_task,
 )  # Import from tasks.py
 from open_webui.utils import logger
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
-    create_admin_user,
     decode_token,
     get_admin_user,
     get_http_authorization_cred,
@@ -290,15 +280,15 @@ from open_webui.utils.chat_variables import (
     normalize_chat_variables,
 )
 from open_webui.utils.embeddings import generate_embeddings
+from open_webui.utils.features import feature_enabled
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
 )
-from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
-from open_webui.utils.log_context import install_log_context
-
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.json_response import apply_orjson_http_json
+from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
+from open_webui.utils.log_context import install_log_context
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -330,15 +320,13 @@ from open_webui.utils.oauth import (
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.redis import clear_connection_cache, get_redis_client
 from open_webui.utils.session_pool import get_session
+from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tool_approval import (
     ResolveToolCallForm,
     build_tool_approval_resume_payload,
     resolve_tool_call_output,
 )
-from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
-from open_webui.services.email.auth import is_mail_configured  # [Gradient]
-from open_webui.utils.access_control import can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -483,8 +471,19 @@ async def periodic_export_cleanup():
             log.error(f'Error in export cleanup: {e}')
 
 
+def validate_bootstrap_environment() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if not v2_enabled():
+        return
+    if RESET_CONFIG_ON_START:
+        raise RuntimeError('RESET_CONFIG_ON_START is not supported on the platform route')
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_bootstrap_environment()
+
     # Store reference to main event loop for sync->async calls (e.g., embedding generation)
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
@@ -536,12 +535,6 @@ async def lifespan(app: FastAPI):
     if LICENSE_KEY:
         license_task = asyncio.create_task(asyncio.to_thread(get_license_data, app, LICENSE_KEY))
 
-    # Create admin account from env vars if specified and no users exist
-    if WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD:
-        if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
-            # Disable signup since we now have an admin
-            await Config.upsert({'ui.enable_signup': False})
-
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
 
@@ -587,6 +580,9 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.retention import deletion_feed_worker
 
     deletion_feed_task = asyncio.create_task(deletion_feed_worker()) if v2_enabled() else None
+    from open_webui.soev.offboarding import start_worker as start_offboarding_worker
+
+    offboarding_task = start_offboarding_worker()
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -684,6 +680,9 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.group_mirror import stop_reconciler
 
     await stop_reconciler(app)
+    from open_webui.soev.offboarding import stop_worker as stop_offboarding_worker
+
+    await stop_offboarding_worker(offboarding_task)
     # [Gradient] Release the soev-api keep-alive pool after its workers stop.
     from open_webui.soev.client import close_client
 
@@ -852,9 +851,10 @@ app.state.BASE_MODELS = []
 
 async def initialize_runtime_config(app: FastAPI):
     # Migrate legacy access_control → access_grants on boot.
+    from open_webui.soev.policy_jobs import v2_enabled
     from open_webui.utils.access_control import migrate_access_control
 
-    connections = await Config.get('tool_server.connections', []) or []
+    connections = [] if v2_enabled() else await Config.get('tool_server.connections', []) or []
     if any('access_control' in c.get('config', {}) for c in connections):
         for connection in connections:
             migrate_access_control(connection.get('config', {}))
@@ -890,7 +890,7 @@ async def initialize_runtime_config(app: FastAPI):
                     )
 
     arena_models = await Config.get('evaluation.arena.models', []) or []
-    if any('access_control' in m.get('meta', {}) for m in arena_models):
+    if not model_catalog.is_v2() and any('access_control' in m.get('meta', {}) for m in arena_models):
         for model in arena_models:
             migrate_access_control(model.get('meta', {}))
         await Config.upsert({'evaluation.arena.models': arena_models})
@@ -999,8 +999,7 @@ app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['in
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
-if FEATURE_SKILL_FILES:
-    app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
+app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
@@ -1008,8 +1007,6 @@ app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
 app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
-if ENABLE_ADMIN_ANALYTICS:
-    app.include_router(analytics.router, prefix='/api/v1/analytics', tags=['analytics'])
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
@@ -1025,9 +1022,7 @@ app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
-# [Gradient] Product feedback reporting API.
-# Mounted unconditionally — gated in-handler on the feedback_report.enable
-# config flag so it can be toggled at runtime without a pod restart.
+# Bug report admission and delivery policy live in soev-api.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
 
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
@@ -1090,84 +1085,8 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
     return {'data': models}
 
 
-@app.get('/api/models/base')
-async def get_base_models(request: Request, user=Depends(get_admin_user)):
-    models = await get_all_base_models(request, user=user)
-    # [Gradient] Apply global model whitelist filter (if configured)
-    if MODEL_WHITELIST:
-        models = [m for m in models if m.get('id') in MODEL_WHITELIST]
-    return {'data': models}
-
-
 class ModelUnloadForm(BaseModel):
     model: str
-
-
-@app.post('/api/models/unload')
-async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depends(get_admin_user)):
-    """
-    Unified model unload endpoint.
-    Resolves the provider that owns the model and calls its native unload mechanism.
-    Supports: Ollama (keep_alive=0) and llama.cpp (/models/unload).
-    """
-    model_id = form_data.model
-
-    ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
-
-    seen = set()
-    while model_id not in ollama_models and model_id not in seen:
-        seen.add(model_id)
-        model_info = await Models.get_model_by_id(model_id)
-        if not model_info or not model_info.base_model_id:
-            break
-        model_id = model_info.base_model_id
-
-    # --- Ollama provider ---
-    if model_id in ollama_models:
-        ollama_config = await Config.get_many('ollama.base_urls', 'ollama.api_configs')
-        ollama_base_urls = ollama_config.get('ollama.base_urls') or []
-        ollama_api_configs = ollama_config.get('ollama.api_configs') or {}
-        url_indices = ollama_models[model_id].get('urls', [])
-        errors = []
-        for idx in url_indices:
-            url = ollama_base_urls[idx]
-            api_config = ollama_api_configs.get(
-                str(idx),
-                ollama_api_configs.get(url, {}),
-            )
-            key = api_config.get('key', None)
-
-            prefix_id = api_config.get('prefix_id', None)
-            actual_model = strip_provider_model_prefix(model_id, prefix_id)
-
-            payload = JSONCodec.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
-
-            try:
-                timeout = aiohttp.ClientTimeout(total=30)
-                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-                    headers = {
-                        'Content-Type': 'application/json',
-                        **({'Authorization': f'Bearer {key}'} if key else {}),
-                    }
-                    async with session.post(
-                        f'{url}/api/generate',
-                        data=payload,
-                        headers=headers,
-                    ) as r:
-                        if not r.ok:
-                            errors.append({'url_idx': idx, 'error': await r.text()})
-            except Exception as e:
-                log.exception(f'Failed to unload model on Ollama node {idx}: {e}')
-                errors.append({'url_idx': idx, 'error': str(e)})
-
-        if errors:
-            raise HTTPException(
-                status_code=500,
-                detail=f'Failed to unload model on {len(errors)} node(s): {errors}',
-            )
-        return {'status': True}
-
-    raise HTTPException(status_code=404, detail=f'Model "{model_id}" not found')
 
 
 ##################################
@@ -1241,6 +1160,7 @@ async def chat_completion(
             raise Exception('Model not found')
         model = request.app.state.MODELS[model_id]
         model_info = await Models.get_model_by_id(model_id)
+        model = await model_catalog.configured_model(model, model_info)
         missing_base_model = bool(
             model_info and model_info.base_model_id and model_info.base_model_id not in request.app.state.MODELS
         )
@@ -1373,10 +1293,8 @@ async def chat_completion(
         # Drop tool_servers if caller lacks features.direct_tool_servers —
         # mirrors the storage-side strip in user/settings/update.
         tool_servers = form_data.pop('tool_servers', None)
-        if (
-            tool_servers
-            and user.role != 'admin'
-            and not await has_permission(
+        if (tool_servers) and (
+            not await has_permission(
                 user.id,
                 'features.direct_tool_servers',
                 await Config.get('user.permissions'),
@@ -1587,7 +1505,6 @@ async def chat_completion(
                             )
                         except Exception as e:
                             log.debug('Error inserting chat files: %s', e)
-                            pass
 
                     if initial_title_generation is not None and all_assistant_ids:
                         title_metadata = {
@@ -1695,7 +1612,6 @@ async def chat_completion(
                             )
                         except Exception as e:
                             log.debug('Error inserting chat files: %s', e)
-                            pass
 
                     # Save ALL assistant placeholders
                     user_message_id = metadata.get('user_message_id')
@@ -2129,8 +2045,6 @@ async def chat_completed(
     try:
         form_data.pop('model_item', None)
 
-        pass
-
         return await chat_completed_handler(request, form_data, user)
     except Exception as e:
         raise HTTPException(
@@ -2149,8 +2063,6 @@ async def chat_action(
     try:
         form_data.pop('model_item', None)
 
-        pass
-
         return await chat_action_handler(request, action_id, form_data, user)
     except Exception as e:
         raise HTTPException(
@@ -2161,20 +2073,6 @@ async def chat_action(
 
 async def require_legacy_task_dispatch(user=Depends(get_verified_user)) -> None:
     refuse_local_content()
-
-
-@app.post('/api/tasks/stop/{task_id}', dependencies=[Depends(require_legacy_task_dispatch)])
-async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
-    try:
-        result = await stop_task(request.app.state.redis, task_id)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-
-@app.get('/api/tasks')
-async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
-    return {'tasks': await list_tasks(request.app.state.redis)}
 
 
 @app.get('/api/tasks/chat/{chat_id:path}')
@@ -2420,7 +2318,7 @@ async def get_app_config(request: Request):
         'evaluation.feedback.conversation.scale_max',
         'evaluation.feedback.conversation.header',
         'evaluation.feedback.conversation.placeholder',
-        'feedback_report.enable',
+        'bug_reports.enabled',
         'google_drive.client_id',
         'google_drive.api_key',
         'onedrive.enable_personal',
@@ -2512,8 +2410,8 @@ async def get_app_config(request: Request):
                     'enable_message_rating': config.get('ui.enable_message_rating'),
                     # [Gradient] Feedback layers
                     'enable_feedback_layer2': config.get('evaluation.feedback.layer2.enable'),
-                    'feedback_layer2_positive_tags': config.get('evaluation.feedback.layer2.positive_tags'),
-                    'feedback_layer2_negative_tags': config.get('evaluation.feedback.layer2.negative_tags'),
+                    'feedback_reasons': config.get('evaluation.feedback.reasons'),
+                    'feedback_tags': config.get('evaluation.feedback.tags'),
                     'enable_feedback_layer3': config.get('evaluation.feedback.layer3.enable'),
                     'feedback_layer3_prompt': config.get('evaluation.feedback.layer3.prompt'),
                     'enable_feedback_category_tags': config.get('evaluation.feedback.category_tags.enable'),
@@ -2521,49 +2419,53 @@ async def get_app_config(request: Request):
                     'conversation_feedback_scale_max': config.get('evaluation.feedback.conversation.scale_max'),
                     'conversation_feedback_header': config.get('evaluation.feedback.conversation.header'),
                     'conversation_feedback_placeholder': config.get('evaluation.feedback.conversation.placeholder'),
-                    'enable_feedback_report': config.get('feedback_report.enable'),  # [Gradient]
+                    'enable_feedback_report': config.get('bug_reports.enabled'),  # [Gradient]
                     'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
                     'enable_user_status': config.get('users.enable_status'),
-                    'enable_admin_export': ENABLE_ADMIN_EXPORT,
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
-                    'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # [Gradient] Feature Flags (SaaS Tier Control)
-                    'feature_chat_controls': FEATURE_CHAT_CONTROLS,
-                    'feature_capture': FEATURE_CAPTURE,
-                    'feature_artifacts': FEATURE_ARTIFACTS,
-                    'feature_document_writer': FEATURE_DOCUMENT_WRITER,
-                    'feature_playground': FEATURE_PLAYGROUND,
-                    'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
-                    'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
-                    'feature_voice': FEATURE_VOICE,
-                    'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
-                    'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
-                    'feature_changelog': FEATURE_CHANGELOG,
-                    'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
-                    'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
-                    'feature_models': FEATURE_MODELS,
-                    'feature_model_meters': FEATURE_MODEL_METERS,
-                    'feature_knowledge': FEATURE_KNOWLEDGE,
-                    'feature_prompts': FEATURE_PROMPTS,
-                    'feature_tools': FEATURE_TOOLS,
-                    'feature_skills': FEATURE_SKILLS,
-                    'feature_skill_files': FEATURE_SKILL_FILES,
+                    'feature_chat_controls': await feature_enabled('chat_controls', FEATURE_CHAT_CONTROLS),
+                    'feature_capture': await feature_enabled('capture', FEATURE_CAPTURE),
+                    'feature_artifacts': await feature_enabled('artifacts', FEATURE_ARTIFACTS),
+                    'feature_document_writer': await feature_enabled('document_writer', FEATURE_DOCUMENT_WRITER),
+                    'feature_playground': await feature_enabled('playground', FEATURE_PLAYGROUND),
+                    'feature_chat_overview': await feature_enabled('chat_overview', FEATURE_CHAT_OVERVIEW),
+                    'feature_notes_ai_controls': await feature_enabled('notes_ai_controls', FEATURE_NOTES_AI_CONTROLS),
+                    'feature_voice': await feature_enabled('voice', FEATURE_VOICE),
+                    'feature_voice_call': await feature_enabled('voice', FEATURE_VOICE)
+                    and await feature_enabled('voice_call', FEATURE_VOICE_CALL),
+                    'feature_read_aloud': await feature_enabled('voice', FEATURE_VOICE)
+                    and await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
+                    'feature_changelog': await feature_enabled('changelog', FEATURE_CHANGELOG),
+                    'feature_meetings': await feature_enabled('meetings', FEATURE_MEETINGS)
+                    and await capabilities.has(capabilities.MEETINGS),
+                    'feature_system_prompt': await feature_enabled('system_prompt', FEATURE_SYSTEM_PROMPT),
+                    'feature_models': await feature_enabled('models', FEATURE_MODELS),
+                    'feature_model_meters': await feature_enabled('model_meters', FEATURE_MODEL_METERS),
+                    'feature_knowledge': await feature_enabled('knowledge', FEATURE_KNOWLEDGE),
+                    'feature_prompts': await feature_enabled('prompts', FEATURE_PROMPTS),
+                    'feature_tools': await feature_enabled('tools', FEATURE_TOOLS),
+                    'feature_skills': await feature_enabled('skills', FEATURE_SKILLS),
+                    'feature_skill_files': await feature_enabled('skill_files', FEATURE_SKILL_FILES),
                     'enable_skill_execution': ENABLE_SKILL_EXECUTION,
-                    'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
-                    'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
-                    'feature_admin_settings': FEATURE_ADMIN_SETTINGS,
-                    'feature_admin_settings_tabs': FEATURE_ADMIN_SETTINGS_TABS,
-                    'feature_chat_controls_sections': FEATURE_CHAT_CONTROLS_SECTIONS,
-                    'feature_webpage_url': FEATURE_WEBPAGE_URL,
-                    'feature_reference_chats': FEATURE_REFERENCE_CHATS,
-                    'feature_simple_assistant_builder': FEATURE_SIMPLE_ASSISTANT_BUILDER,
-                    'feature_input_menu': FEATURE_INPUT_MENU,
-                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT and not soev_threads.enabled(),
-                    'feature_tool_servers': FEATURE_TOOL_SERVERS,
-                    'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
-                    'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
-                    'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
-                    'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
+                    'feature_chat_controls_sections': await feature_enabled(
+                        'chat_controls_sections', FEATURE_CHAT_CONTROLS_SECTIONS
+                    ),
+                    'feature_webpage_url': await feature_enabled('webpage_url', FEATURE_WEBPAGE_URL),
+                    'feature_reference_chats': await feature_enabled('reference_chats', FEATURE_REFERENCE_CHATS),
+                    'feature_simple_assistant_builder': await feature_enabled(
+                        'simple_assistant_builder', FEATURE_SIMPLE_ASSISTANT_BUILDER
+                    ),
+                    'feature_input_menu': await feature_enabled('input_menu', FEATURE_INPUT_MENU),
+                    'feature_temporary_chat': await feature_enabled('temporary_chat', FEATURE_TEMPORARY_CHAT)
+                    and not soev_threads.enabled(),
+                    'feature_tool_servers': await feature_enabled('tool_servers', FEATURE_TOOL_SERVERS),
+                    'feature_terminal_servers': await feature_enabled('terminal_servers', FEATURE_TERMINAL_SERVERS),
+                    'feature_user_demographics': await feature_enabled('user_demographics', FEATURE_USER_DEMOGRAPHICS),
+                    'feature_builtin_tools': await feature_enabled('builtin_tools', FEATURE_BUILTIN_TOOLS),
+                    'feature_strict_data_separation': await feature_enabled(
+                        'strict_data_separation', FEATURE_STRICT_DATA_SEPARATION
+                    ),
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
                     'enable_agent_trace_download': ENABLE_AGENT_TRACE_DOWNLOAD,  # [Gradient]
@@ -2676,13 +2578,7 @@ async def get_app_config(request: Request):
                     'iframe_csp': IFRAME_CSP,
                 },
                 'license_metadata': license_metadata,
-                **(
-                    {
-                        'active_entries': user_count,
-                    }
-                    if user.role == 'admin' and user_count is not None
-                    else {}
-                ),
+                **({}),
             }
             if user is not None and (user.role in ['admin', 'user'])
             else {
@@ -2729,101 +2625,6 @@ class EventWebhookUpdateForm(BaseModel):
     targets: list[dict[str, str]] | None = None
 
 
-@app.get('/api/events')
-async def get_event_catalog(user=Depends(get_admin_user)):
-    return {
-        'schema': VERSION,
-        'events': get_event_catalog_items(),
-    }
-
-
-@app.get('/api/events/webhooks')
-async def get_event_webhooks_api(user=Depends(get_admin_user)):
-    return await get_event_webhooks()
-
-
-@app.post('/api/events/webhooks')
-async def create_event_webhook(form_data: EventWebhookForm, user=Depends(get_admin_user)):
-    try:
-        webhook = await upsert_event_webhook(
-            {
-                'name': form_data.name,
-                'url': form_data.url,
-                'enabled': form_data.enabled,
-                'events': form_data.events,
-                'targets': form_data.targets,
-            }
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook['id'],
-        subject_type='config',
-        data={
-            'action': 'created',
-            'enabled': webhook.get('enabled'),
-            'events': webhook.get('events'),
-            'targets': webhook.get('targets'),
-        },
-    )
-    return webhook
-
-
-@app.put('/api/events/webhooks/{webhook_id}')
-async def update_event_webhook(webhook_id: str, form_data: EventWebhookUpdateForm, user=Depends(get_admin_user)):
-    webhooks = await get_event_webhooks()
-    existing = next((webhook for webhook in webhooks if webhook.get('id') == webhook_id), None)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
-
-    try:
-        webhook = await upsert_event_webhook(
-            {
-                **existing,
-                **form_data.model_dump(exclude_unset=True),
-                'id': webhook_id,
-            }
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook_id,
-        subject_type='config',
-        data={
-            'action': 'updated',
-            'enabled': webhook.get('enabled'),
-            'events': webhook.get('events'),
-            'targets': webhook.get('targets'),
-        },
-    )
-    return webhook
-
-
-@app.delete('/api/events/webhooks/{webhook_id}')
-async def delete_event_webhook_api(webhook_id: str, user=Depends(get_admin_user)):
-    deleted = await delete_event_webhook(webhook_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
-
-    await publish_event(
-        app,
-        EVENTS.CONFIG_WEBHOOK_UPDATED,
-        actor=user,
-        subject_id=webhook_id,
-        subject_type='config',
-        data={'action': 'deleted'},
-    )
-    return {'status': True}
-
-
 @app.get('/api/version')
 async def get_app_version():
     return {
@@ -2867,7 +2668,7 @@ async def get_current_usage(user=Depends(get_verified_user)):
     """
     try:
         # If public visibility is disabled, only allow admins to access this endpoint
-        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role != 'admin':
+        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail='Access denied. Only administrators can view usage statistics.',
@@ -2920,7 +2721,15 @@ except Exception as e:
     )
 
 
+def require_tool_server_registration() -> None:
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+
 async def register_client(request, client_id: str) -> bool:
+    require_tool_server_registration()
     server_type, server_id = client_id.split(':', 1)
 
     connection = None
@@ -3015,13 +2824,16 @@ async def register_client(request, client_id: str) -> bool:
     return True
 
 
-@app.get('/oauth/clients/{client_id}/authorize')
+@app.get(
+    '/oauth/clients/{client_id}/authorize', description='MCP client authorization is unavailable on the platform route.'
+)
 async def oauth_client_authorize(
     client_id: str,
     request: Request,
     response: Response,
     user=Depends(get_verified_user),
 ):
+    require_tool_server_registration()
     # ensure_valid_client_registration
     client = await oauth_client_manager.get_client(client_id)
     client_info = await oauth_client_manager.get_client_info(client_id)

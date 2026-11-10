@@ -63,7 +63,7 @@ def api(monkeypatch):
     return state
 
 
-@pytest.mark.parametrize('operation', ['access', 'knowledge', 'import'])
+@pytest.mark.parametrize('operation', ['access', 'knowledge'])
 def test_another_user_cannot_change_assistant_sharing_or_knowledge_before_commit(api, operation):
     if operation == 'access':
         response = api.client.post('/models/model/access/update', json={'id': api.model.id, 'access_grants': []})

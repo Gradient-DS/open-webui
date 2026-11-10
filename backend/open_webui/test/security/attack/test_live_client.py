@@ -59,97 +59,6 @@ def test_an_authenticated_client_can_write(identities):
     assert deleted.status_code == 200, deleted.text
 
 
-def test_wrong_password_is_a_loud_400(identities):
-    from .identities import signin_alias
-
-    user = identities.user
-    with signin_alias(identities.admin, user.identity['id'], user.identity['email']) as email:
-        # This probes OWUI's password endpoint even when the actors use OIDC.
-        with pytest.MonkeyPatch.context() as password_mode:
-            password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
-            with pytest.raises(AuthenticationError, match='HTTP 400'):
-                login(email, 'wrong-password', base_url=user.base_url)
-
-
-@pytest.mark.parametrize('challenge', ['requires_2fa', 'requires_2fa_setup'])
-def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
-    import pyotp
-
-    from .identities import PASSWORD, signin_alias
-
-    admin, user = identities.admin, identities.intruder
-    config_path = '/api/v1/configs/2fa'
-    original = admin.request('GET', config_path)
-    assert original.status_code == 200, original.text
-    enrolled = False
-    local_user = None
-    try:
-        if oidc.enabled():
-            # OWUI rejects TOTP setup for accounts linked to an SSO provider.
-            email = f'attack-2fa-{uuid4().hex}@example.com'
-            local_user = AttackClient(admin.base_url)
-            with admin.request(
-                'POST',
-                '/api/v1/auths/add',
-                json={'email': email, 'password': PASSWORD, 'name': 'Attack 2FA', 'role': 'user'},
-            ) as created:
-                user = local_user.authenticate(created, email, role='user')
-        configured = admin.request(
-            'POST',
-            config_path,
-            json={
-                'ENABLE_2FA': True,
-                'REQUIRE_2FA': challenge == 'requires_2fa_setup',
-                'TWO_FA_GRACE_PERIOD_DAYS': 0,
-            },
-        )
-        assert configured.status_code == 200, configured.text
-        if challenge == 'requires_2fa':
-            setup = user.request('POST', '/api/v1/auths/2fa/totp/setup')
-            assert setup.status_code == 200, setup.text
-            secret = setup.json()['secret']
-            enabled = user.request(
-                'POST',
-                '/api/v1/auths/2fa/totp/enable',
-                json={
-                    'password': PASSWORD,
-                    'secret': secret,
-                    'code': pyotp.TOTP(secret).now(),
-                },
-            )
-            assert enabled.status_code == 200, enabled.text
-            enrolled = True
-        with signin_alias(admin, user.identity['id'], user.identity['email']) as email, AttackClient() as anonymous:
-            result = anonymous.request(
-                'POST',
-                '/api/v1/auths/signin',
-                json={
-                    'email': email,
-                    'password': PASSWORD,
-                },
-            )
-            assert result.status_code == 200, result.text
-            assert result.json()[challenge] is True
-            assert not entered_the_handler(result)
-            with pytest.raises(AuthenticationError, match='2FA'):
-                anonymous.authenticate(result, email)
-            assert anonymous.token is None
-            with pytest.MonkeyPatch.context() as password_mode:
-                password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
-                with pytest.raises(AuthenticationError, match='2FA'):
-                    login(email, PASSWORD, base_url=user.base_url)
-    finally:
-        try:
-            if enrolled:
-                disabled = user.request('POST', '/api/v1/auths/2fa/totp/disable', json={'password': PASSWORD})
-                assert disabled.status_code == 200, disabled.text
-        finally:
-            if local_user:
-                local_user.close()
-            restored = admin.request('POST', config_path, json=original.json())
-            assert restored.status_code == 200, restored.text
-
-
 def test_live_repair_preserves_ids_after_throttle_password_change_and_signout(identities):
     from .identities import PASSWORD, ensure_identities
 
@@ -190,3 +99,11 @@ def test_live_repair_preserves_ids_after_throttle_password_change_and_signout(id
         assert deleted.status_code == 200, deleted.text
     finally:
         repaired.close()
+
+
+def test_wrong_password_is_a_loud_400(identities):
+    user = identities.user
+    with pytest.MonkeyPatch.context() as password_mode:
+        password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
+        with pytest.raises(AuthenticationError, match='HTTP 400'):
+            login(user.identity['email'], 'wrong-password', base_url=user.base_url)

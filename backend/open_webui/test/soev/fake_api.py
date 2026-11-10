@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+from pathlib import Path
 from urllib.parse import quote, unquote
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -70,6 +71,7 @@ class FakeSoevApi:
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
         self.models: list[dict] = []
+        self.product_config = json.loads(Path(__file__).with_name('product_config.json').read_text())
         self.task_bodies: list[tuple[str | None, dict]] = []
         self.task_model = 'task-model'
         self.task_threads = {}
@@ -92,6 +94,9 @@ class FakeSoevApi:
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
         subject = self._subject(request)
+        if request.method == 'GET' and request.url.path == '/v1/products/owui/config':
+            assert subject is None
+            return httpx.Response(200, json=self.product_config)
         if request.method == 'PUT' and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path):
             return self._upload(request, credential)
         body = json.loads(request.content) if request.content else None

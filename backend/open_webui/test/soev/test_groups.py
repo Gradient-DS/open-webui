@@ -173,13 +173,6 @@ async def test_model_writers_refuse(group_db, method, args):
 @pytest.mark.parametrize(
     'method,path,body',
     [
-        ('POST', '/groups/create', {'name': 'Meadow', 'description': ''}),
-        ('POST', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/update', {'name': 'Changed'}),
-        ('POST', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/update', {'description': 'Changed'}),
-        ('POST', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/update', {'user_ids': ['lark']}),
-        ('POST', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/users/add', {'user_ids': ['lark']}),
-        ('POST', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/users/remove', {'user_ids': ['fern']}),
-        ('DELETE', '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/delete', None),
         ('POST', '/scim/Groups', {'displayName': 'Meadow'}),
         ('PUT', '/scim/Groups/13b95f20-57d8-48c6-9a13-042bcf78d021', {'displayName': 'Changed', 'members': []}),
         (
@@ -334,97 +327,6 @@ def group_router_app(group_db, actor):
     app.dependency_overrides[get_async_session] = session
     app.dependency_overrides[get_current_user] = lambda: actor
     return app
-
-
-@pytest.mark.asyncio
-async def test_admin_group_reads_and_product_setting_update_remain_available(group_db):
-    from open_webui.routers import groups
-
-    app = group_router_app(group_db, SimpleNamespace(id='fern', role='admin'))
-    # Event publishing needs application configuration; isolate that side effect.
-    from unittest.mock import patch
-
-    with patch.object(groups, 'publish_event', AsyncMock()):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
-            listing = await client.get('/groups/')
-            assert listing.status_code == 200
-            assert [g['id'] for g in listing.json()] == ['13b95f20-57d8-48c6-9a13-042bcf78d021']
-            members = await client.post('/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/users')
-            assert members.status_code == 200
-            assert [user['id'] for user in members.json()] == ['fern']
-            updated = await client.post(
-                '/groups/id/13b95f20-57d8-48c6-9a13-042bcf78d021/update',
-                json={
-                    'permissions': {'chat': {'file_upload': False}},
-                    'data': {'config': {'share': False}},
-                },
-            )
-            assert updated.status_code == 200, updated.text
-            assert updated.json()['name'] == 'Old'
-            assert updated.json()['permissions'] == {'chat': {'file_upload': False}}
-            assert updated.json()['data'] == {'config': {'share': False}}
-            assert await Groups.get_group_user_ids_by_id(row()['id'], db=group_db) == ['fern']
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('actor,role', [('fern', 'admin'), ('lark', 'user'), ('elm', 'user')])
-@pytest.mark.parametrize(
-    'body',
-    [
-        {'name': 'Changed'},
-        {'description': 'Changed'},
-        {'user_ids': ['lark']},
-        {'name': None},
-        {'description': None},
-        {'user_ids': None},
-        {'name': 'Changed', 'permissions': {'chat': {'file_upload': False}}, 'data': {'config': {'share': False}}},
-    ],
-)
-async def test_group_identity_update_refuses_every_actor_before_target_access(group_db, monkeypatch, actor, role, body):
-    from open_webui.routers import groups
-
-    app = group_router_app(group_db, SimpleNamespace(id=actor, role=role))
-    publish = AsyncMock()
-    monkeypatch.setattr(groups, 'publish_event', publish)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
-        for target in (row()['id'], 'missing'):
-            response = await client.post(f'/groups/id/{target}/update', json=body)
-            assert response.status_code == 403, response.text
-            assert response.json() == {
-                'detail': {
-                    'code': 'platform_groups_read_only',
-                    'detail': 'Groups are managed in the platform console.',
-                }
-            }
-    unchanged = await Groups.get_group_by_id(row()['id'], db=group_db)
-    assert unchanged.name == 'Old'
-    assert unchanged.description == ''
-    assert unchanged.permissions == {'workspace': {'knowledge': True}}
-    assert unchanged.data == {'config': {'share': 'members'}}
-    assert await Groups.get_group_user_ids_by_id(row()['id'], db=group_db) == ['fern']
-    publish.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('actor', ['lark', 'elm'])
-async def test_group_product_setting_update_still_requires_admin(group_db, monkeypatch, actor):
-    from open_webui.constants import ERROR_MESSAGES
-    from open_webui.routers import groups
-
-    app = group_router_app(group_db, SimpleNamespace(id=actor, role='user'))
-    publish = AsyncMock()
-    monkeypatch.setattr(groups, 'publish_event', publish)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
-        response = await client.post(
-            f'/groups/id/{row()["id"]}/update',
-            json={'permissions': {'chat': {'file_upload': False}}, 'data': {'config': {'share': False}}},
-        )
-    assert response.status_code == 401
-    assert response.json() == {'detail': ERROR_MESSAGES.ACCESS_PROHIBITED}
-    unchanged = await Groups.get_group_by_id(row()['id'], db=group_db)
-    assert unchanged.permissions == {'workspace': {'knowledge': True}}
-    assert unchanged.data == {'config': {'share': 'members'}}
-    publish.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -873,25 +775,20 @@ async def test_directory_read_scope_and_hidden_group_differential(group_db, role
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://owui.invalid') as client:
         listing = await client.get('/groups/')
         assert listing.status_code == 200
-        expected = {visible, hidden} if role == 'admin' else {visible}
+        expected = {visible}
         assert {g['id'] for g in listing.json()} == expected
         info = await client.get('/users/lark/info')
         assert {g['id'] for g in info.json()['groups']} == expected
         # The upstream user-info read already supplies this field to this caller.
         assert info.json()['email'] == 'lark@example.invalid'
         assert (await client.get(f'/groups/id/{visible}/info')).json()['member_count'] == 2
-        for suffix, method in [('info', 'GET'), ('export', 'GET'), ('users', 'POST')]:
+        for suffix, method in [('info', 'GET')]:
             response = await client.request(method, f'/groups/id/{hidden}/{suffix}')
-            if role == 'user':
-                missing = await client.request(method, f'/groups/id/missing/{suffix}')
-                assert (response.status_code, response.content) == (missing.status_code, missing.content)
-                assert response.status_code in (401, 404)
-            else:
-                assert response.status_code == 200
-                if suffix == 'users':
-                    assert [member['email'] for member in response.json()] == ['lark@example.invalid']
+            missing = await client.request(method, f'/groups/id/missing/{suffix}')
+            assert (response.status_code, response.content) == (missing.status_code, missing.content)
+            assert response.status_code in (401, 404)
         baseline = [(await client.get(path)).json() for path in paths]
-        if role == 'user':
+        if role in {'user', 'admin'}:
             group = await group_db.get(Group, hidden)
             group.name = 'Another hidden grove'
             group.data = {'config': {'share': False}}

@@ -64,39 +64,6 @@ export const getModels = async (
 	return localizeCatalogDescriptions(models, get(i18n)?.language) as typeof models;
 };
 
-export const unloadModel = async (token: string, model: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/models/unload`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		},
-		body: JSON.stringify({ model })
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = err;
-			}
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
 type ChatCompletedForm = {
 	model: string;
 	messages: Record<string, unknown>[];
@@ -157,38 +124,6 @@ export const chatAction = async (token: string, action_id: string, body: ChatAct
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify(body)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = err;
-			}
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const stopTask = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/tasks/stop/${id}`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		}
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -598,39 +533,6 @@ export const getTaskConfig = async (token: string = '') => {
 		.catch((err) => {
 			console.error(err);
 			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateTaskConfig = async (token: string, config: object) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/v1/tasks/config/update`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		},
-		body: JSON.stringify(config)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = err;
-			}
 			return null;
 		});
 
@@ -1484,152 +1386,6 @@ export type EventWebhook = {
 	targets: EventWebhookTarget[] | null;
 	created_at?: number;
 	updated_at?: number;
-};
-
-export const getEvents = async (
-	token: string
-): Promise<{ schema: string; events: EventCatalogItem[] }> => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/events`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getEventWebhooks = async (token: string): Promise<EventWebhook[]> => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const createEventWebhook = async (
-	token: string,
-	webhook: Partial<EventWebhook>
-): Promise<EventWebhook> => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify(webhook)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateEventWebhook = async (
-	token: string,
-	id: string,
-	webhook: Partial<EventWebhook>
-): Promise<EventWebhook> => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks/${id}`, {
-		method: 'PUT',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify(webhook)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const deleteEventWebhook = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks/${id}`, {
-		method: 'DELETE',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
 };
 
 export interface ModelConfig {

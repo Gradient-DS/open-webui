@@ -1,0 +1,640 @@
+{
+  "components": {
+    "schemas": {
+      "BugReportResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "const": true,
+            "default": true,
+            "title": "Status",
+            "type": "boolean"
+          }
+        },
+        "title": "BugReportResult",
+        "type": "object"
+      },
+      "FeedbackCount": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "count": {
+            "minimum": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              -1,
+              1
+            ],
+            "title": "Rating",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "agent",
+          "rating",
+          "count",
+          "period"
+        ],
+        "title": "FeedbackCount",
+        "type": "object"
+      },
+      "FeedbackItem": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "rating": {
+            "enum": [
+              -1,
+              1
+            ],
+            "title": "Rating",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "time": {
+            "format": "date-time",
+            "title": "Time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "position",
+          "rating",
+          "model",
+          "agent",
+          "time",
+          "comment",
+          "reason",
+          "tags"
+        ],
+        "title": "FeedbackItem",
+        "type": "object"
+      },
+      "FeedbackPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page; null at the end.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "FeedbackPage",
+        "type": "object"
+      },
+      "FeedbackSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackCount"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page; null at the end.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "FeedbackSummary",
+        "type": "object"
+      },
+      "JsonValue": {},
+      "ParticipantTask": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "delete",
+              "transfer",
+              "archive"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "person": {
+            "title": "Person",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "id",
+          "person",
+          "mode",
+          "target",
+          "expires_at"
+        ],
+        "title": "ParticipantTask",
+        "type": "object"
+      },
+      "ParticipantTaskFeed": {
+        "additionalProperties": false,
+        "description": "Only work assigned to the authenticated participant is included.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantTask"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ParticipantTaskFeed",
+        "type": "object"
+      },
+      "ServiceProductConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "entitlements": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Entitlements",
+            "type": "object"
+          },
+          "product": {
+            "title": "Product",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "unset": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unset",
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "product",
+          "revision",
+          "values",
+          "entitlements",
+          "unset"
+        ],
+        "title": "ServiceProductConfig",
+        "type": "object"
+      },
+      "Tokens": {
+        "additionalProperties": false,
+        "properties": {
+          "completion_tokens": {
+            "minimum": 0,
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "minimum": 0,
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "minimum": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "title": "Tokens",
+        "type": "object"
+      },
+      "UsageBreakdown": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "known_tokens": {
+            "$ref": "#/components/schemas/Tokens"
+          },
+          "model_outputs": {
+            "minimum": 0,
+            "title": "Model Outputs",
+            "type": "integer"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unknown_outputs": {
+            "minimum": 0,
+            "title": "Unknown Outputs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_outputs",
+          "unknown_outputs",
+          "known_tokens",
+          "tokens",
+          "key"
+        ],
+        "title": "UsageBreakdown",
+        "type": "object"
+      },
+      "UsageInsights": {
+        "additionalProperties": false,
+        "properties": {
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBreakdown"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "by_period": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBreakdown"
+            },
+            "title": "By Period",
+            "type": "array"
+          },
+          "by_person": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBreakdown"
+            },
+            "title": "By Person",
+            "type": "array"
+          },
+          "known_tokens": {
+            "$ref": "#/components/schemas/Tokens"
+          },
+          "model_outputs": {
+            "minimum": 0,
+            "title": "Model Outputs",
+            "type": "integer"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unknown_outputs": {
+            "minimum": 0,
+            "title": "Unknown Outputs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_outputs",
+          "unknown_outputs",
+          "known_tokens",
+          "tokens",
+          "by_model",
+          "by_person",
+          "by_period"
+        ],
+        "title": "UsageInsights",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Turn your documents into a searchable knowledge base. Push documents in,\nand we chunk, embed and index them; search them with one call. Access\ncontrol runs inside the search, so a caller only sees what its credential\nmay read. Use it to add retrieval to your own product or to feed an agent,\nwithout running search infrastructure yourself. One deployment serves one\ntenant, over API-key auth.\n\n### Quickstart\n\nEvery call carries `Authorization: Bearer <your API key>`. Mutating calls\nalso carry an `Idempotency-Key` you choose, so a retry is always safe.\n\n**1. Declare a schema**: the custom fields your documents carry, and which\nof them a query may filter on.\n\n```\nPOST /v1/schemas\n{ \"key\": \"invoices\",\n  \"metadata_spec\": { \"fields\": [\n    { \"name\": \"year\", \"type\": \"number\", \"filterable\": true },\n    { \"name\": \"client\", \"type\": \"keyword\", \"filterable\": true } ] } }\n```\n\n**2. Create a collection** in that schema, and say who may read it.\n\n```\nPOST /v1/collections\n{ \"key\": \"firm-1234-invoices\", \"schema_key\": \"invoices\",\n  \"visibility\": \"restricted\", \"principals\": [\"mk:firm:1234\"] }\n```\n\n**3. Push documents** as a job. Inline `text` starts at once. For files,\nsend `size` and `sha256`, `PUT` the bytes to each URL in the job's\n`uploads`, then `POST /v1/jobs/{job_id}/commit`.\n\n```\nPOST /v1/jobs\n{ \"collection_key\": \"firm-1234-invoices\",\n  \"documents\": [\n    { \"source_id\": \"inv-2024-001\", \"filename\": \"inv-2024-001.txt\",\n      \"text\": \"Invoice 2024-001 ...\",\n      \"metadata\": { \"year\": 2024, \"client\": \"acme\" } } ] }\n\nGET /v1/jobs/{job_id}    until status is SUCCEEDED, COMPLETED_WITH_ERRORS or FAILED\n```\n\nSUCCEEDED means searchable: the vector index has caught up, so a query issued\nafter it sees the document.\n\n**4. Search.** Each hit is one chunk with its `source_id`, `score`,\n`content` and metadata. Tune with `alpha` (1.0 vector, 0.0 keyword) and\n`rerank: true`.\n\n```\nPOST /v1/query\n{ \"query\": \"what did we invoice acme for in 2024\",\n  \"collection_keys\": [\"firm-1234-invoices\"],\n  \"filter\": { \"year\": 2024 }, \"top_k\": 5 }\n```\n\n**5. Delete** one document or a whole collection; both answer with a job.\n\n```\nDELETE /v1/collections/{collection_key}/documents/{source_id}\nDELETE /v1/collections/{collection_key}\n```\n\n### Principals\n\nA principal names who may read something: `source:kind:external_id`, such\nas `mk:firm:1234`. You choose the strings; they are compared verbatim.\n\n### Paging through lists\n\nList endpoints take `limit` (default 50, at most 200) and return `data`\nwith `next_cursor`. Call once without a cursor; while `next_cursor` is not\nnull, call again with `cursor=<next_cursor>`. Cursors are opaque: pass them\nback unchanged.\n\n### Errors\n\nEvery refusal is an `application/problem+json` document with a stable\n`code`. One code always arrives at one status, so branch on `code` and\nnever on `title` or `detail`.",
+    "title": "soev API",
+    "version": "0.29.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/bug-reports": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BugReportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/feedback": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackPage"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success; current authority checked before release",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "const": "Authorization, Cookie",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/feedback/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackSummary"
+                }
+              }
+            },
+            "description": "Success; current authority checked before release",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "const": "Authorization, Cookie",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/offboarding": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantTaskFeed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/offboarding/{job_id}/acknowledgement": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParticipantTask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/products/owui/config": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProductConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/threads/usage": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageInsights"
+                }
+              }
+            },
+            "description": "Success; current authority checked before release",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "const": "Authorization, Cookie",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{thread_id}/feedback": {
+      "post": {
+        "responses": {
+          "204": {
+            "description": "Success; current authority checked before release",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "const": "Authorization, Cookie",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

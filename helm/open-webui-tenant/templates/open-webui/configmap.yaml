@@ -43,7 +43,6 @@ data:
   WEBUI_AUTH: {{ .Values.openWebui.config.webuiAuth | quote }}
   ENABLE_SIGNUP: {{ .Values.openWebui.config.enableSignup | quote }}
   ENABLE_LOGIN_FORM: {{ .Values.openWebui.config.enableLoginForm | quote }}
-  ENABLE_INITIAL_ADMIN_SIGNUP: {{ .Values.openWebui.config.enableInitialAdminSignup | quote }}
   DEFAULT_USER_ROLE: {{ .Values.openWebui.config.defaultUserRole | quote }}
   ENABLE_OAUTH_SIGNUP: {{ .Values.openWebui.config.enableOauthSignup | quote }}
   OAUTH_INVITE_REQUIRED: {{ .Values.openWebui.config.oauthInviteRequired | quote }}
@@ -167,10 +166,6 @@ data:
   FEATURE_SKILL_FILES: {{ .Values.openWebui.config.featureSkillFiles | quote }}
   ENABLE_SKILL_EXECUTION: {{ .Values.openWebui.config.enableSkillExecution | quote }}
   FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
-  FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
-  FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
-  FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
-  FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
   FEATURE_WEBPAGE_URL: {{ .Values.openWebui.config.featureWebpageUrl | quote }}
   FEATURE_REFERENCE_CHATS: {{ .Values.openWebui.config.featureReferenceChats | quote }}
@@ -181,13 +176,6 @@ data:
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
   FEATURE_STRICT_DATA_SEPARATION: {{ .Values.openWebui.config.featureStrictDataSeparation | quote }}
   WHATS_NEW_MODELS: {{ .Values.openWebui.config.whatsNewModels | toJson | quote }}
-
-  # Feedback Reporting (PersistentConfig: env seeds initial value; admin UI wins thereafter)
-  ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
-  FEEDBACK_REPORT_INCLUDE_USER_IDENTITY: {{ .Values.openWebui.config.feedbackReportIncludeUserIdentity | quote }}
-  FEEDBACK_REPORT_TRACE_URL_TEMPLATE: {{ .Values.openWebui.config.feedbackReportTraceUrlTemplate | quote }}
-  # Set -> wins over FEEDBACK_REPORT_SLACK_WEBHOOK_URL; the router decides Linear vs Slack.
-  FEEDBACK_REPORT_WEBHOOK_URL: {{ .Values.openWebui.config.feedbackReportWebhookUrl | quote }}
 
   # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)
   ENABLE_WELCOME_MESSAGE: {{ .Values.openWebui.config.enableWelcomeMessage | quote }}
@@ -302,16 +290,10 @@ data:
   USER_PERMISSIONS_FEATURES_API_KEYS: {{ .Values.openWebui.config.userPermissionsFeaturesApiKeys | quote }}
 
   # Admin
-  ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
   ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
   DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
   # Legacy feedback access only.
-  ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
-  ENABLE_ADMIN_ANALYTICS: {{ .Values.openWebui.config.enableAdminAnalytics | quote }}
-  ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
-  BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
   ENABLE_PLUGINS: {{ .Values.openWebui.config.enablePlugins | quote }}
-  SHOW_ADMIN_DETAILS: {{ .Values.openWebui.config.showAdminDetails | quote }}
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
   # Google Drive Integration

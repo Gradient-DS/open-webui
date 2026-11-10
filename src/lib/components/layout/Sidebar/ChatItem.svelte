@@ -131,7 +131,7 @@
 	$: if (id === $chatId) {
 		viewedAt = $config?.features?.enable_v2_threads
 			? answerTimestamp(answeredAt)
-			: updatedAt ?? Date.now() / 1000;
+			: (updatedAt ?? Date.now() / 1000);
 	}
 
 	$: effectiveReadAt = Math.max(lastReadAt ?? 0, viewedAt ?? 0, $chatReadAt[id] ?? 0) || null;
@@ -141,8 +141,7 @@
 		Boolean($config?.features?.enable_v2_threads),
 		$chatId
 	);
-	$: showMenu =
-		id === $chatId || confirmEdit || mouseOver || focusWithin || menuOpen || selected;
+	$: showMenu = id === $chatId || confirmEdit || mouseOver || focusWithin || menuOpen || selected;
 	$: chatItemClass = ` min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 ${
 		id === $chatId || confirmEdit
 			? ($settings?.highContrastMode ?? false)
@@ -237,7 +236,7 @@
 	};
 
 	const cloneChatHandler = async (id) => {
-		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true))) {
+		if (!($user?.permissions?.chat?.import ?? true)) {
 			toast.error($i18n.t('Access prohibited'));
 			return;
 		}
@@ -627,7 +626,8 @@
 	{#if confirmEdit}
 		<div
 			id="sidebar-chat-item"
-			class=" min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 {id === $chatId || confirmEdit
+			class=" min-w-0 w-full flex justify-between rounded-xl px-2 py-1.5 {id === $chatId ||
+			confirmEdit
 				? ($settings?.highContrastMode ?? false)
 					? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 					: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -709,11 +709,8 @@
 	{#if !readonly}
 		<div
 			id="sidebar-chat-item-menu"
-			class="{$mobile
-				? 'selected'
-				: showMenu
-					? 'selected'
-					: 'hover-reveal'} absolute {className === 'pr-2'
+			class="{$mobile ? 'selected' : showMenu ? 'selected' : 'hover-reveal'} absolute {className ===
+			'pr-2'
 				? 'right-[0.5rem]'
 				: 'right-1'} inset-y-0 mr-1.5 flex items-center"
 		>
@@ -774,7 +771,7 @@
 						</button>
 					</ChatMenu>
 
-					{#if id === $chatId && ($user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true))}
+					{#if id === $chatId && ($user?.permissions?.chat?.delete ?? true)}
 						<!-- Shortcut support using "delete-chat-button" id -->
 						<button
 							id="delete-chat-button"

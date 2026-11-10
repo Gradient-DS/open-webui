@@ -14,12 +14,10 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import { uploadFile } from '$lib/apis/files';
 
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	export let selectedItems = [];
 	// [Gradient] When true, the KB selector dropdown shows a "New Knowledge" footer
@@ -41,7 +39,7 @@
 	}
 
 	const uploadFileHandler = async (file) => {
-		if ($user?.role !== 'admin' && !($user?.permissions?.chat?.file_upload ?? true)) {
+		if (!($user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;
 		}
@@ -211,7 +209,7 @@
 						</KnowledgeSelector>
 					</div>
 
-					{#if $user?.role === 'admin' || $user?.permissions?.chat?.file_upload}
+					{#if $user?.permissions?.chat?.file_upload}
 						<button
 							class="self-center bg-transparent text-xs text-gray-500 hover:underline dark:text-gray-400"
 							type="button"

@@ -268,14 +268,6 @@ other app containers so they use the same credentials.
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: email-graph-client-secret
 {{- end }}
-# Feedback Reporting Slack webhook (only if configured)
-{{- if or .Values.secrets.feedbackReportSlackWebhookUrl .Values.externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl }}
-- name: FEEDBACK_REPORT_SLACK_WEBHOOK_URL
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: feedback-report-slack-webhook-url
-{{- end }}
 # External Services API Keys (only if configured)
 {{- if or .Values.secrets.externalDocumentLoaderApiKey .Values.externalSecrets.onepassword.fields.externalDocumentLoaderApiKey }}
 - name: EXTERNAL_DOCUMENT_LOADER_API_KEY
@@ -479,7 +471,6 @@ Output: YAML list of {matchName} / {matchPattern}.
 {{- with $c.confluenceSiteUrl }}{{ $names = append $names (urlParse .).host }}{{ end -}}
 {{- end -}}
 {{- if and (eq (toString $c.storageProvider) "s3") $c.s3EndpointUrl }}{{ $names = append $names (urlParse $c.s3EndpointUrl).host }}{{ end -}}
-{{- if or .Values.secrets.feedbackReportSlackWebhookUrl .Values.externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl }}{{ $names = append $names "hooks.slack.com" }}{{ end -}}
 {{- $names = concat $names $fqdn.extraNames -}}
 {{- $patterns = concat $patterns $fqdn.extraPatterns -}}
 {{- range $names | uniq | sortAlpha }}

@@ -231,7 +231,7 @@
 		/>
 
 		<UserSettingSection title={$i18n.t('Chats')} first>
-			{#if !$config?.features?.enable_v2_threads && ($user?.role === 'admin' || ($user.permissions?.chat?.import ?? true))}
+			{#if !$config?.features?.enable_v2_threads && ($user.permissions?.chat?.import ?? true)}
 				<UserSettingRow
 					label={$i18n.t('Import Chats')}
 					description={$i18n.t('Import chat history from a JSON export file.')}
@@ -248,7 +248,7 @@
 				</UserSettingRow>
 			{/if}
 
-			{#if !$config?.features?.enable_v2_threads && ($user?.role === 'admin' || ($user.permissions?.chat?.export ?? true))}
+			{#if !$config?.features?.enable_v2_threads && ($user.permissions?.chat?.export ?? true)}
 				<UserSettingRow
 					label={$i18n.t('Export Chats')}
 					description={$i18n.t('Download your chat history as a JSON export.')}
@@ -295,7 +295,7 @@
 				</button>
 			</UserSettingRow>
 
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+			{#if $user?.permissions?.chat?.delete ?? true}
 				<UserSettingRow
 					label={$i18n.t('Delete All Chats')}
 					description={$i18n.t('Permanently delete every chat after confirmation.')}

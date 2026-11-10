@@ -1,14 +1,4 @@
-"""Drive authorization pairs on fixtures owned exclusively by this pass.
-
-RUN-TAG: owui-phase7b-authorization-and-model-passes
-
-The seed map chooses the actual owner: most feature-gated rows belong to the
-admin, integration rows to the ordinary caller, and exports to the disposable
-seed user. Never accept parameters from fresh_surface or another pass. Keep
-the second response in full, including refusal bodies, before the owner can
-consume the resource. Unsuccessful owner controls are evidence gaps, not proof
-of isolation. Corpus requests supplement the structural positive control.
-"""
+"""Probe resource isolation with ordinary callers and platform authority."""
 
 import json
 import os
@@ -23,11 +13,10 @@ import requests
 from hostile_corpus import fetch_payloads
 from openapi_surface import writable_string_fields
 
-from . import oidc, plane, seeds
+from . import plane, seeds
 from .authorization_inventory import admin_gated_operations, platform_operations
 from .benign_requests import benign_request
 from .client import AttackClient, login
-from .identities import PASSWORD, create_oidc_identity
 from .pass_support import pass_run
 
 # Violation kinds a [[shared]] declaration in the attack surface may allow for
@@ -177,10 +166,6 @@ def _owner_key(path, surface):
     declaration = seeds.parameter_for(path, re.findall(r'\{([^}]+)\}', path)[-1], surface)
     while 'same_as' in declaration:
         declaration = entries[declaration['same_as']]
-    if declaration.get('seeded_by') == 'seed_export':
-        return 'exporter'
-    if declaration.get('actor') == 'admin' or declaration['key'] == 'task':
-        return 'admin'
     return 'user'
 
 
@@ -193,22 +178,7 @@ def own_fixtures(identities, *, spec=seeds.SPEC):
     parameters = seeds.resolve_parameters(
         identities.user, admin=identities.admin, surface=surface, spec=spec, collect_failures=True
     )
-    namespace = parameters['/api/v1/configs/namespace/{namespace}', 'namespace']
-    markers = (marker, namespace.removeprefix('attack_'))
-    exporter = None
-    try:
-        export_user = next(entry for entry in surface['parameter'] if entry['key'] == 'user')['body']
-        exporter = login(export_user['email'], export_user['password'], base_url=identities.admin.base_url, role='user')
-        yield parameters, markers, surface, {'admin': identities.admin, 'user': identities.user, 'exporter': exporter}
-    finally:
-        try:
-            task = parameters.get(('/api/tasks/stop/{task_id}', 'task_id'))
-            if task:
-                response = identities.admin.request('POST', f'/api/tasks/stop/{quote(task, safe="")}')
-                response.close()
-        finally:
-            if exporter:
-                exporter.close()
+    yield parameters, (marker,), surface, {'admin': identities.admin, 'user': identities.user}
 
 
 @contextmanager
@@ -216,34 +186,11 @@ def _actor(admin, actor, destructive):
     if not destructive:
         yield actor
         return
-    if actor.identity['role'] == 'admin':
-        disposable = plane._throwaway(admin)
-    else:
-        email = f'attack-crossuser-{uuid4().hex}@example.com'
-        disposable = _disposable_user(admin, email)
+    disposable = plane._throwaway(admin)
     try:
         yield disposable
     finally:
         disposable.close()
-
-
-def _disposable_user(admin: AttackClient, email: str) -> AttackClient:
-    if oidc.enabled():
-        return create_oidc_identity(admin, email=email, password=PASSWORD, name='Attack authorization', role='user')
-    response = admin.request(
-        'POST',
-        '/api/v1/auths/add',
-        json={'email': email, 'password': PASSWORD, 'name': 'Attack authorization', 'role': 'user'},
-    )
-    disposable = AttackClient(admin.base_url)
-    try:
-        disposable.authenticate(response, email, role='user')
-        return disposable
-    except Exception:
-        disposable.close()
-        raise
-    finally:
-        response.close()
 
 
 def _request(admin, actor, route, target, tally, kwargs):

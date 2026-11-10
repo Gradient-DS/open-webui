@@ -1,38 +1,30 @@
-"""
-Feature flag utilities for SaaS tier-based feature control.
-
-These flags apply to ALL users including admins and cannot be overridden
-via the admin panel. Use environment variables to control features per deployment.
-"""
+"""Feature gates bind every user; platform values come from product configuration."""
 
 from typing import Literal
-from fastapi import HTTPException, status
 
+from fastapi import HTTPException, status
 from open_webui.config import (
-    FEATURE_CHAT_CONTROLS,
-    FEATURE_CAPTURE,
     FEATURE_ARTIFACTS,
-    FEATURE_DOCUMENT_WRITER,
-    FEATURE_PLAYGROUND,
+    FEATURE_BUILTIN_TOOLS,
+    FEATURE_CAPTURE,
+    FEATURE_CHANGELOG,
+    FEATURE_CHAT_CONTROLS,
     FEATURE_CHAT_OVERVIEW,
+    FEATURE_DOCUMENT_WRITER,
+    FEATURE_KNOWLEDGE,
+    FEATURE_MEETINGS,
+    FEATURE_MODELS,
     FEATURE_NOTES_AI_CONTROLS,
+    FEATURE_PLAYGROUND,
+    FEATURE_PROMPTS,
+    FEATURE_READ_ALOUD,
+    FEATURE_SKILLS,
+    FEATURE_SYSTEM_PROMPT,
+    FEATURE_TERMINAL_SERVERS,
+    FEATURE_TOOL_SERVERS,
+    FEATURE_TOOLS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
-    FEATURE_READ_ALOUD,
-    FEATURE_CHANGELOG,
-    FEATURE_MEETINGS,
-    FEATURE_SYSTEM_PROMPT,
-    FEATURE_MODELS,
-    FEATURE_KNOWLEDGE,
-    FEATURE_PROMPTS,
-    FEATURE_TOOLS,
-    FEATURE_SKILLS,
-    FEATURE_ADMIN_EVALUATIONS,
-    FEATURE_ADMIN_FUNCTIONS,
-    FEATURE_ADMIN_SETTINGS,
-    FEATURE_TOOL_SERVERS,
-    FEATURE_TERMINAL_SERVERS,
-    FEATURE_BUILTIN_TOOLS,
 )
 
 Feature = Literal[
@@ -54,9 +46,6 @@ Feature = Literal[
     'prompts',
     'tools',
     'skills',
-    'admin_evaluations',
-    'admin_functions',
-    'admin_settings',
     'tool_servers',
     'terminal_servers',
     'builtin_tools',
@@ -81,9 +70,6 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'prompts': FEATURE_PROMPTS,
     'tools': FEATURE_TOOLS,
     'skills': FEATURE_SKILLS,
-    'admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
-    'admin_functions': FEATURE_ADMIN_FUNCTIONS,
-    'admin_settings': FEATURE_ADMIN_SETTINGS,
     'tool_servers': FEATURE_TOOL_SERVERS,
     'terminal_servers': FEATURE_TERMINAL_SERVERS,
     'builtin_tools': FEATURE_BUILTIN_TOOLS,
@@ -103,7 +89,34 @@ def is_feature_enabled(feature: Feature) -> bool:
     return FEATURE_FLAGS.get(feature, True)
 
 
-def require_feature(feature: Feature):
+async def feature_enabled(feature: str, legacy: bool | list[str] | None = None) -> bool | list[str]:
+    from open_webui.soev import product_config
+
+    if product_config.v2_enabled():
+        return await product_config.get(f'feature.{feature}')
+    if legacy is not None:
+        return legacy
+    if feature not in FEATURE_FLAGS:
+        from open_webui import config
+
+        return getattr(config, f'FEATURE_{feature.upper()}')
+    return is_feature_enabled(feature)
+
+
+def require_platform_feature(key: str):
+    from fastapi import Depends
+    from open_webui.utils.auth import get_verified_user
+
+    async def check(user=Depends(get_verified_user)):
+        from open_webui.soev import product_config
+
+        if product_config.v2_enabled() and not await product_config.get(key):
+            raise HTTPException(status_code=403, detail='Feature is unavailable')
+
+    return check
+
+
+def require_feature(feature: str):
     """
     FastAPI dependency that raises 403 if feature is disabled.
 
@@ -122,8 +135,8 @@ def require_feature(feature: Feature):
         A dependency function that raises HTTPException if feature is disabled
     """
 
-    def check_feature():
-        if not is_feature_enabled(feature):
+    async def check_feature():
+        if not await feature_enabled(feature):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Feature '{feature}' is not available in your plan",

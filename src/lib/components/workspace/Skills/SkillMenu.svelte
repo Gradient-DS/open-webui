@@ -76,7 +76,7 @@
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</button>
 
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills_export}
+			{#if $user?.permissions?.workspace?.skills_export}
 				<button
 					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 					on:click={() => {

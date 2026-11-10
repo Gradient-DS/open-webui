@@ -63,7 +63,7 @@ it('enables the v2 button while preserving legacy visibility and permissions', (
 						);
 					}
 });
-it('respects regenerate permissions, including admin and legacy behavior', () => {
+it('respects regenerate permissions, for legacy administrator rows too', () => {
 	expect(
 		canRegenerateResponse(
 			config,
@@ -79,7 +79,7 @@ it('respects regenerate permissions, including admin and legacy behavior', () =>
 			true,
 			true
 		)
-	).toBe(true);
+	).toBe(false);
 	expect(canRegenerateResponse({ features: {} }, {}, false, true)).toBe(true);
 });
 it('uses the visibility policy and keeps regenerate-with-prompt hidden in v2', () => {

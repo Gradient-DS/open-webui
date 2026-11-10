@@ -17,24 +17,27 @@ from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
 from open_webui.models.groups import Groups
+from open_webui.soev import product_config
 from open_webui.utils.access_control import has_connection_access
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.features import require_platform_feature
 from open_webui.utils.headers import bearer_auth_header, normalize_bearer_token
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.terminals import (
     TERMINAL_CONTEXT_HEADER,
     get_terminal_server_url,
     is_terminal_orchestrator,
+    terminal_chat_uploads,
     terminal_context_available,
     terminal_context_config,
     terminal_context_id,
-    terminal_chat_uploads,
     terminal_contexts,
 )
 from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
 log = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -77,7 +80,7 @@ def _sanitize_proxy_path(path: str) -> str | None:
     return cleaned
 
 
-@router.get('/')
+@router.get('/', dependencies=[Depends(require_platform_feature('feature.terminal_servers'))])
 async def list_terminal_servers(request: Request, user=Depends(get_verified_user)):
     """Return terminal servers the authenticated user has access to."""
     connections = await Config.get('terminal_server.connections', []) or []
@@ -99,7 +102,11 @@ async def list_terminal_servers(request: Request, user=Depends(get_verified_user
 PROXY_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 
 
-@router.api_route('/{server_id}/{path:path}', methods=PROXY_METHODS)
+@router.api_route(
+    '/{server_id}/{path:path}',
+    methods=PROXY_METHODS,
+    dependencies=[Depends(require_platform_feature('feature.terminal_servers'))],
+)
 async def proxy_terminal(
     server_id: str,
     path: str,
@@ -271,6 +278,10 @@ async def _resolve_authenticated_connection(ws: WebSocket, server_id: str):
         await ws.close(code=4001, reason='Invalid token')
         return None
 
+    if product_config.v2_enabled() and not await product_config.get('feature.terminal_servers'):
+        await ws.close(code=4003, reason='Feature is unavailable')
+        return None
+
     # Resolve terminal server
     connections = await Config.get('terminal_server.connections', []) or []
     connection = next((c for c in connections if c.get('id') == server_id), None)
@@ -313,7 +324,6 @@ async def ws_terminal(
     if result is None:
         return
     user, connection, chat_id, token = result
-
     base_url = get_terminal_server_url(connection)
     if not base_url:
         await ws.close(code=4003, reason='Terminal server URL not configured')

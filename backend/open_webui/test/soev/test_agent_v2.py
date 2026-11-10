@@ -726,7 +726,7 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
 ) -> None:
     from open_webui import config
 
-    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
+    monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(bypass).lower())
     item = stored_texts[item_id]
     if access != 'owner':
         item.user_id = 'bob'
@@ -743,7 +743,7 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         assert notices(chat) == [{'notices': ["Chat 'Stale title' is not accessible and was skipped."], 'removed': []}]
         agent_v2.AccessGrants.has_access.assert_not_awaited()
         return
-    if access == 'admin' and kind == 'note' and not bypass:
+    if access == 'admin' and kind == 'note':
         assert 'texts' not in chat.mutations()[-1][1]['input']
         assert notices(chat)[0]['notices'] == ["Note 'Stale title' is not accessible and was skipped."]
         agent_v2.AccessGrants.has_access.assert_awaited_once_with(
@@ -1560,7 +1560,7 @@ async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, mo
     ('enabled', 'role', 'permitted', 'allowed'),
     [
         (False, 'admin', True, False),
-        (True, 'admin', False, True),
+        (True, 'admin', False, False),
         (True, 'user', True, True),
         (True, 'user', False, False),
         (True, None, True, False),
@@ -2346,7 +2346,10 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
         ]
     ]
     chunks = await chat.turn('question', 'a1')
-    marker = '\n\n<details type="tool_calls" done="true" name="search">\n<summary>Searching the knowledge base…</summary>\n</details>\n\n'
+    marker = (
+        '\n\n<details type="tool_calls" done="true" name="search">\n'
+        '<summary>Searching the knowledge base…</summary>\n</details>\n\n'
+    )
     assert content(chunks) == marker + 'Answer [1] and [1].'
     assert 'PRIVATE' not in json.dumps(chunks)
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
@@ -3938,7 +3941,7 @@ async def test_documents_sends_its_state_on_every_turn(
     [
         (False, True, 'admin', True, False),
         (True, False, 'admin', True, False),
-        (True, True, 'admin', False, True),
+        (True, True, 'admin', False, False),
         (True, True, 'user', True, True),
         (True, True, 'user', False, False),
         (True, True, None, True, False),
@@ -3952,7 +3955,9 @@ async def test_documents_allowed_needs_tenant_setting_and_permission(
         return {'document_writer.enable': enabled, 'user.permissions': {}}.get(key, default)
 
     user = SimpleNamespace(id='u1', role=role) if role else None
-    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda key: tenant if key == 'document_writer' else False)
+    monkeypatch.setattr(
+        agent_v2, 'feature_enabled', AsyncMock(side_effect=lambda key: tenant if key == 'document_writer' else False)
+    )
     monkeypatch.setattr(agent_v2.Config, 'get', config_get)
     monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=user))
     permission = AsyncMock(return_value=permitted)

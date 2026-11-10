@@ -425,23 +425,9 @@ def _fill(path, parameters):
     return re.sub(r'\{([^}]+)\}', substitute, path)
 
 
-def _throwaway(admin):
-    email = f'attack-plane-throwaway-{uuid4().hex}@example.com'
-    if oidc.enabled():
-        return create_oidc_identity(admin, email=email, password=PASSWORD, name='Attack throwaway', role='admin')
-    response = admin.request(
-        'POST',
-        '/api/v1/auths/add',
-        json={'email': email, 'password': PASSWORD, 'name': 'Attack throwaway', 'role': 'admin'},
-    )
-    throwaway = transport.AttackClient(admin.base_url)
-    try:
-        return throwaway.authenticate(response, email, role='admin')
-    except Exception:
-        throwaway.close()
-        raise
-    finally:
-        response.close()
+def _throwaway(actor):
+    email = f'attack-plane-throwaway-{uuid4().hex}@example.invalid'
+    return create_oidc_identity(actor, email=email, password=PASSWORD, name='Fictional throwaway', role='user')
 
 
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
@@ -582,7 +568,6 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
             client,
             route='seeding pass',
             report=tally.config_findings.append,
-            durable=True,
             unverified=lambda reason: tally.config_unverified.setdefault('seeding pass', reason),
         ):
             for route in sorted(fields_by_route, key=_read_before_destroy):
@@ -626,7 +611,6 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
             client,
             route='drive pass',
             report=tally.config_findings.append,
-            durable=True,
             unverified=lambda reason: tally.config_unverified.setdefault('drive pass', reason),
         ):
             for route in routes:

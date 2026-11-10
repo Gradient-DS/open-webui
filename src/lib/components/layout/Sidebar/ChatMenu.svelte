@@ -15,10 +15,10 @@
 		getChatPinnedStatusById,
 		toggleChatPinnedStatusById
 	} from '$lib/apis/chats';
-	import { chats, config, folders, settings, theme, user } from '$lib/stores';
+	import { chats, config, folders, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
-	import { downloadChatAsPDF, exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
+	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
 	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
 	import CopyIcon from './icons/Copy.svelte';
 	import DownloadIcon from './icons/Download.svelte';
@@ -296,7 +296,7 @@
 				</button>
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+			{#if $user.permissions?.chat?.export ?? true}
 				<DropdownSub contentClass="select-none z-50">
 					<button
 						slot="trigger"
@@ -411,7 +411,7 @@
 				{/if}
 			</button>
 
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true)}
+			{#if $user?.permissions?.chat?.import ?? true}
 				<button
 					draggable="false"
 					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
@@ -465,7 +465,7 @@
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</button>
 
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+			{#if $user?.permissions?.chat?.delete ?? true}
 				<button
 					draggable="false"
 					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"

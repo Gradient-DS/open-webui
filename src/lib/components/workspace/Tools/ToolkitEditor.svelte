@@ -1,6 +1,6 @@
 <script>
 	import { toast } from 'svelte-sonner';
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext, tick } from 'svelte';
 
 	const i18n = getContext('i18n');
 
@@ -197,9 +197,9 @@ class Tools:
 	bind:show={showAccessControlModal}
 	bind:accessGrants
 	accessRoles={['read', 'write']}
-	share={$user?.permissions?.sharing?.tools || $user?.role === 'admin'}
-	sharePublic={$user?.permissions?.sharing?.public_tools || $user?.role === 'admin'}
-	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+	share={$user?.permissions?.sharing?.tools}
+	sharePublic={$user?.permissions?.sharing?.public_tools}
+	shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 	onChange={async () => {
 		if (edit && id) {
 			try {

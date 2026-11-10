@@ -3,7 +3,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { getGroups, getGroupById, getGroupInfoById } from '$lib/apis/groups';
+	import { getGroups, getGroupInfoById } from '$lib/apis/groups';
 	import { getUserInfoById } from '$lib/apis/users';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -559,7 +559,10 @@
 					{$i18n.t('Allow public write access')}
 				</div>
 				{#if readOnly}
-					<Badge type={'info'} content={$i18n.t(hasPublicWriteGrant(accessGrants ?? []) ? 'Write' : 'Read')} />
+					<Badge
+						type={'info'}
+						content={$i18n.t(hasPublicWriteGrant(accessGrants ?? []) ? 'Write' : 'Read')}
+					/>
 				{:else}
 					<Switch
 						state={hasPublicWriteGrant(accessGrants ?? [])}

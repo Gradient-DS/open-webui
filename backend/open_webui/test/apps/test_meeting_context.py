@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import AsyncMock
 from open_webui.soev import meetings
 from open_webui.soev.client import SoevApiError
 
@@ -41,7 +42,7 @@ class FakeClient:
 
 @pytest.fixture(autouse=True)
 def acting(monkeypatch, platform_capabilities):
-    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr(meetings, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
 
 
@@ -171,7 +172,7 @@ async def test_a_dot_segment_meeting_id_is_refused_before_any_request(meeting_id
 @pytest.mark.asyncio
 async def test_meetings_turned_off_are_not_attached(monkeypatch):
     """With the meetings feature off, an attached meeting is not read."""
-    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: feature != 'meetings')
+    monkeypatch.setattr(meetings, 'feature_enabled', AsyncMock(side_effect=lambda feature: feature != 'meetings'))
     client = FakeClient(thread={'events': [{'type': 'meeting_state', 'payload': STATE}]})
     with pytest.raises(meetings.MeetingUnavailable):
         await meetings.meeting_document(USER, 'thr-1', client)

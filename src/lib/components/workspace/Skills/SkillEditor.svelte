@@ -83,9 +83,9 @@
 	bind:show={showAccessControlModal}
 	bind:accessGrants
 	accessRoles={['read', 'write']}
-	share={$user?.permissions?.sharing?.skills || $user?.role === 'admin'}
-	sharePublic={$user?.permissions?.sharing?.public_skills || $user?.role === 'admin'}
-	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+	share={$user?.permissions?.sharing?.skills}
+	sharePublic={$user?.permissions?.sharing?.public_skills}
+	shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 	onChange={async () => {
 		if (edit && skill?.id) {
 			try {

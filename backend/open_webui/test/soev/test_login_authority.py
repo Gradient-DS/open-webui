@@ -30,8 +30,9 @@ async def test_main_routes_use_only_login_authority(
     ctx.user.role = 'admin'
     ctx.user.person_id = person_ref(ctx.user.id)
     monkeypatch.setattr(ctx.auth.Users, 'get_user_by_id', AsyncMock(return_value=ctx.user))
-    monkeypatch.setattr(features, 'is_feature_enabled', lambda feature: True)
-    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr(features, 'feature_enabled', AsyncMock(return_value=True))
+    monkeypatch.setattr(meetings, 'feature_enabled', AsyncMock(return_value=True))
+    monkeypatch.setattr(knowledge, 'has_permission', AsyncMock(return_value=True))
     monkeypatch.setattr(knowledge.Config, 'get', AsyncMock(return_value={}))
     monkeypatch.setattr(knowledge, 'filter_allowed_access_grants', AsyncMock(return_value=[]))
     monkeypatch.setattr(knowledge, 'embed_knowledge_base_metadata', AsyncMock())

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick, getContext } from 'svelte';
+	import { tick, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
@@ -44,9 +44,7 @@
 	};
 
 	$: messages = createMessagesList(history, history.currentId);
-	$: canClone =
-		$sessionUser &&
-		($sessionUser.role === 'admin' || ($sessionUser.permissions?.chat?.import ?? true));
+	$: canClone = $sessionUser && ($sessionUser.permissions?.chat?.import ?? true);
 
 	$: if ($page.params.id && $config && !$config?.features?.enable_v2_threads) {
 		(async () => {

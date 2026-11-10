@@ -159,7 +159,7 @@
 					triggerScroll={noop}
 				/>
 			{/each}
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true)}
+			{#if $user?.permissions?.chat?.import ?? true}
 				<button class="rounded border p-2" disabled={busy} onclick={clone}
 					>{$i18n.t('Continue in my own chat')}</button
 				>

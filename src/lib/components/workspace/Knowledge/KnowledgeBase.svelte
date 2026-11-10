@@ -388,7 +388,9 @@
 
 		if (res) {
 			if (
-				includeContext && res.knowledge && accessRequest === contextAccessRequest &&
+				includeContext &&
+				res.knowledge &&
+				accessRequest === contextAccessRequest &&
 				knowledge === previousKnowledge
 			) {
 				knowledge = res.knowledge;
@@ -1000,7 +1002,8 @@
 	) => {
 		if (!knowledgeId || destroyed) return false;
 		const request = ++syncStatusRequest;
-		const status = initialStatus ?? await cloudSync.getSyncStatus(localStorage.token, knowledgeId);
+		const status =
+			initialStatus ?? (await cloudSync.getSyncStatus(localStorage.token, knowledgeId));
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
@@ -2085,10 +2088,9 @@
 				bind:show={showAccessControlModal}
 				bind:accessGrants={knowledge.access_grants}
 				readOnly={savingAccess || knowledge.user_id !== $user?.id}
-				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
-				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
-					$user?.role === 'admin'}
+				share={$user?.permissions?.sharing?.knowledge}
+				sharePublic={$user?.permissions?.sharing?.public_knowledge}
+				shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 				onChange={async () => {
 					savingAccess = true;
 					clearTimeout(accessPoll);
@@ -2511,7 +2513,7 @@
 											skippedProvider={currentSourceProvider}
 											syncAccess={!!knowledge?.write_access}
 											syncBusy={cloudActionBusy || syncAllBusy}
-											isAdmin={$user?.role === 'admin'}
+											isAdmin={false}
 											onSourceAction={(targets, action) => sourceAction(targets, action)}
 											onReconnect={(connection) => reconnect(connection)}
 											{knowledge}

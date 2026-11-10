@@ -54,8 +54,8 @@ describe('whatsNewSlides', () => {
 		]);
 	});
 
-	it('lets admins bypass tool permissions', () => {
-		expect(slides({ enable_web_search: true }, { role: 'admin' })).toContain('auto_mode');
+	it('enforces tool permissions for a stored legacy role', () => {
+		expect(slides({ enable_web_search: true }, { role: 'admin' })).not.toContain('auto_mode');
 	});
 
 	it('skips auto mode when the document writer tier flag is off', () => {

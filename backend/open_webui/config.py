@@ -16,13 +16,10 @@ import requests
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel, TypeAdapter
 
-from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
-
 from open_webui.env import (
     AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
-    ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_DB_MIGRATIONS,
     ENV,
     FRONTEND_BUILD_DIR,
@@ -37,11 +34,15 @@ from open_webui.env import (
     log,
 )
 from open_webui.models.config import Config
-from open_webui.utils.oauth_issuer import require_tenant_allowlist
+from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
 from open_webui.utils.json_codec import JSONCodec
 
 
 async def seed_registered_defaults():
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     await Config.rename_prefix('rag.web', 'web')
     await Config.repair_config_rows()
     await Config.seed_defaults(DEFAULT_CONFIG)
@@ -86,6 +87,10 @@ if ENABLE_DB_MIGRATIONS:
 
 async def import_legacy_config_json():
     """Migrate legacy config.json → database on first run."""
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        return
     if not os.path.exists(f'{DATA_DIR}/config.json'):
         return
     with open(f'{DATA_DIR}/config.json', 'r') as _f:
@@ -222,7 +227,6 @@ if CUSTOM_NAME:
             WEBUI_NAME = data['name']
     except Exception as e:
         log.exception(e)
-        pass
 
 
 ####################################
@@ -1707,13 +1711,6 @@ DEFAULT_ARENA_MODEL = {
 
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
 
-ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
-
-ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
-
-BYPASS_ADMIN_ACCESS_CONTROL = os.getenv('BYPASS_ADMIN_ACCESS_CONTROL', 'False').lower() == 'true'
-
-ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = os.getenv('ENABLE_COMMUNITY_SHARING', 'True').lower() == 'true'
 
@@ -1786,11 +1783,6 @@ except Exception as e:
     banners = []
 
 WEBUI_BANNERS = banners
-
-
-SHOW_ADMIN_DETAILS = os.getenv('SHOW_ADMIN_DETAILS', 'true').lower() == 'true'
-
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', None)
 
 
 ####################################
@@ -2131,24 +2123,6 @@ if _google_oauth_authorize_params:
     except (JSONCodec.JSONDecodeError, TypeError):
         log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
-MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '')
-
-MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '')
-
-MICROSOFT_CLIENT_TENANT_ID = os.getenv('MICROSOFT_CLIENT_TENANT_ID', '')
-
-MICROSOFT_CLIENT_LOGIN_BASE_URL = os.getenv('MICROSOFT_CLIENT_LOGIN_BASE_URL', 'https://login.microsoftonline.com')
-
-MICROSOFT_CLIENT_PICTURE_URL = os.getenv(
-    'MICROSOFT_CLIENT_PICTURE_URL',
-    'https://graph.microsoft.com/v1.0/me/photo/$value',
-)
-
-
-MICROSOFT_OAUTH_SCOPE = os.getenv('MICROSOFT_OAUTH_SCOPE', 'openid email profile')
-
-MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', '')
-
 GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID', '')
 
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET', '')
@@ -2216,20 +2190,14 @@ OAUTH_ROLES_CLAIM = os.getenv('OAUTH_ROLES_CLAIM', 'roles')
 OAUTH_ROLES_SEPARATOR = os.getenv('OAUTH_ROLES_SEPARATOR', ',')
 
 OAUTH_ALLOWED_ROLES = [
-    role.strip()
-    for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(OAUTH_ROLES_SEPARATOR)
-    if role
+    role.strip() for role in os.getenv('OAUTH_ALLOWED_ROLES', 'user').split(OAUTH_ROLES_SEPARATOR) if role
 ]
 
-OAUTH_ADMIN_ROLES = [
-    role.strip() for role in os.getenv('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role
-]
 
 OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_DOMAINS', '*').split(',')]
 OAUTH_ALLOWED_TENANTS = [
     tenant.strip() for tenant in os.getenv('OAUTH_ALLOWED_TENANTS', '').split(',') if tenant.strip()
 ]
-require_tenant_allowlist(MICROSOFT_CLIENT_TENANT_ID, OAUTH_ALLOWED_TENANTS)
 
 OAUTH_UPDATE_PICTURE_ON_LOGIN = os.getenv('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true'
 
@@ -2275,7 +2243,9 @@ def oauth_client_kwargs(scope: str, **kwargs):
 
 def load_oauth_providers():
     OAUTH_PROVIDERS.clear()
-    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    # Platform user sessions must carry the broker's OIDC token.
+    platform_login = bool(os.getenv('SOEV_API_URL'))
+    if not platform_login and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
         def google_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2293,25 +2263,7 @@ def load_oauth_providers():
             'register': google_oauth_register,
         }
 
-    if MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET and MICROSOFT_CLIENT_TENANT_ID:
-
-        def microsoft_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='microsoft',
-                client_id=MICROSOFT_CLIENT_ID,
-                client_secret=MICROSOFT_CLIENT_SECRET,
-                server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL}/{MICROSOFT_CLIENT_TENANT_ID}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID}',
-                client_kwargs=oauth_client_kwargs(MICROSOFT_OAUTH_SCOPE),
-                redirect_uri=MICROSOFT_REDIRECT_URI,
-            )
-            return client
-
-        OAUTH_PROVIDERS['microsoft'] = {
-            'picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-            'register': microsoft_oauth_register,
-        }
-
-    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+    if not platform_login and GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
 
         def github_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2357,7 +2309,7 @@ def load_oauth_providers():
             'register': oidc_oauth_register,
         }
 
-    if FEISHU_CLIENT_ID and FEISHU_CLIENT_SECRET:
+    if not platform_login and FEISHU_CLIENT_ID and FEISHU_CLIENT_SECRET:
 
         def feishu_oauth_register(oauth: OAuth):
             client = oauth.register(
@@ -2384,8 +2336,6 @@ def load_oauth_providers():
     configured_providers = []
     if GOOGLE_CLIENT_ID:
         configured_providers.append('Google')
-    if MICROSOFT_CLIENT_ID:
-        configured_providers.append('Microsoft')
     if GITHUB_CLIENT_ID:
         configured_providers.append('GitHub')
     if FEISHU_CLIENT_ID:
@@ -2472,10 +2422,6 @@ KNOWLEDGE_MAX_FILE_COUNT = int(os.environ.get('KNOWLEDGE_MAX_FILE_COUNT', '250')
 
 ENABLE_FEEDBACK_LAYER2 = os.environ.get('ENABLE_FEEDBACK_LAYER2', 'True').lower() == 'true'
 
-FEEDBACK_LAYER2_POSITIVE_TAGS = []
-
-FEEDBACK_LAYER2_NEGATIVE_TAGS = []
-
 ENABLE_FEEDBACK_LAYER3 = os.environ.get('ENABLE_FEEDBACK_LAYER3', 'True').lower() == 'true'
 
 FEEDBACK_LAYER3_PROMPT = ''
@@ -2489,21 +2435,6 @@ CONVERSATION_FEEDBACK_SCALE_MAX = int(os.environ.get('CONVERSATION_FEEDBACK_SCAL
 CONVERSATION_FEEDBACK_HEADER = ''
 
 CONVERSATION_FEEDBACK_PLACEHOLDER = ''
-
-ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False').lower() == 'true'
-
-FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
-
-# Notification-router endpoint. Takes precedence over the Slack webhook above:
-# when set, the event is POSTed here and the Slack card is skipped. An in-cluster
-# URL, not a secret — so it comes from the ConfigMap, not the tenant vault.
-FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
-
-FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (
-    os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true'
-)
-
-FEEDBACK_REPORT_TRACE_URL_TEMPLATE = os.environ.get('FEEDBACK_REPORT_TRACE_URL_TEMPLATE', '')
 
 ENABLE_DATA_EXPORT = os.environ.get('ENABLE_DATA_EXPORT', 'True').lower() == 'true'
 
@@ -2612,15 +2543,6 @@ ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'tr
 # [Gradient] Admins' "Agent trace (.json)" download; off unless a tenant turns it on.
 ENABLE_AGENT_TRACE_DOWNLOAD = os.environ.get('ENABLE_AGENT_TRACE_DOWNLOAD', 'False').lower() == 'true'
 
-FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS = os.environ.get('FEATURE_ADMIN_SETTINGS', 'True').lower() == 'true'
-
-FEATURE_ADMIN_SETTINGS_TABS = [
-    tab.strip() for tab in os.environ.get('FEATURE_ADMIN_SETTINGS_TABS', '').split(',') if tab.strip()
-]
 
 FEATURE_CHAT_CONTROLS_SECTIONS = [
     section.strip() for section in os.environ.get('FEATURE_CHAT_CONTROLS_SECTIONS', '').split(',') if section.strip()
@@ -2931,8 +2853,6 @@ DEFAULT_CONFIG = {
     'ui.enable_message_rating': ENABLE_MESSAGE_RATING,
     'ui.enable_user_webhooks': ENABLE_USER_WEBHOOKS,
     'ui.banners': WEBUI_BANNERS,
-    'auth.admin.show': SHOW_ADMIN_DETAILS,
-    'auth.admin.email': ADMIN_EMAIL,
     'task.model.default': TASK_MODEL,
     'task.model.external': TASK_MODEL_EXTERNAL,
     'task.model.params': TASK_MODEL_PARAMS,
@@ -2971,13 +2891,6 @@ DEFAULT_CONFIG = {
     'oauth.google.client_secret': GOOGLE_CLIENT_SECRET,
     'oauth.google.scope': GOOGLE_OAUTH_SCOPE,
     'oauth.google.redirect_uri': GOOGLE_REDIRECT_URI,
-    'oauth.microsoft.client_id': MICROSOFT_CLIENT_ID,
-    'oauth.microsoft.client_secret': MICROSOFT_CLIENT_SECRET,
-    'oauth.microsoft.tenant_id': MICROSOFT_CLIENT_TENANT_ID,
-    'oauth.microsoft.login_base_url': MICROSOFT_CLIENT_LOGIN_BASE_URL,
-    'oauth.microsoft.picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-    'oauth.microsoft.scope': MICROSOFT_OAUTH_SCOPE,
-    'oauth.microsoft.redirect_uri': MICROSOFT_REDIRECT_URI,
     'oauth.github.client_id': GITHUB_CLIENT_ID,
     'oauth.github.client_secret': GITHUB_CLIENT_SECRET,
     'oauth.github.scope': GITHUB_CLIENT_SCOPE,
@@ -3008,7 +2921,6 @@ DEFAULT_CONFIG = {
     'oauth.blocked_groups': OAUTH_BLOCKED_GROUPS,
     'oauth.roles_claim': OAUTH_ROLES_CLAIM,
     'oauth.allowed_roles': OAUTH_ALLOWED_ROLES,
-    'oauth.admin_roles': OAUTH_ADMIN_ROLES,
     'oauth.allowed_domains': OAUTH_ALLOWED_DOMAINS,
     'oauth.allowed_tenants': OAUTH_ALLOWED_TENANTS,
     'oauth.update_picture_on_login': OAUTH_UPDATE_PICTURE_ON_LOGIN,
@@ -3062,16 +2974,11 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.conversation.placeholder': CONVERSATION_FEEDBACK_PLACEHOLDER,
     'evaluation.feedback.conversation.scale_max': CONVERSATION_FEEDBACK_SCALE_MAX,
     'evaluation.feedback.layer2.enable': ENABLE_FEEDBACK_LAYER2,
-    'evaluation.feedback.layer2.negative_tags': FEEDBACK_LAYER2_NEGATIVE_TAGS,
-    'evaluation.feedback.layer2.positive_tags': FEEDBACK_LAYER2_POSITIVE_TAGS,
+    'evaluation.feedback.reasons': [],
+    'evaluation.feedback.tags': [],
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
     'features.enable_data_warnings': ENABLE_DATA_WARNINGS,
-    'feedback_report.enable': ENABLE_FEEDBACK_REPORTING,
-    'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
-    'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-    'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
-    'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,

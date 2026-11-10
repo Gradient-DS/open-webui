@@ -57,7 +57,7 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
 
 def test_body_builder_can_plant_each_derived_field():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (195, 2152)
+    assert (len(fields), sum(map(len, fields.values()))) == (138, 1845)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name
@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 534
+    assert len(plane.operations()) == 373
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -324,18 +324,17 @@ def test_destructive_requests_run_last_with_a_new_throwaway_each_time(monkeypatc
 
 
 def test_throwaway_creation_uses_existing_client_session_validation(monkeypatch):
-    admin = fake_client()
-    admin.base_url = 'http://stack'
-    actor = Mock()
-    actor.authenticate.return_value = actor
-    monkeypatch.setattr(plane.transport, 'AttackClient', Mock(return_value=actor))
+    admin, actor = fake_client(), Mock()
+    factory = Mock(return_value=actor)
+    monkeypatch.setattr(plane, 'create_oidc_identity', factory)
     assert plane._throwaway(admin) is actor
-    call = admin.request.call_args
-    assert call.args == ('POST', '/api/v1/auths/add')
-    assert call.kwargs['json']['role'] == 'admin'
-    assert call.kwargs['json']['email'].startswith('attack-plane-throwaway-')
-    assert actor.authenticate.call_args.args[1] == call.kwargs['json']['email']
-    assert actor.authenticate.call_args.kwargs == {'role': 'admin'}
+    call = factory.call_args
+    assert call.args == (admin,)
+    assert call.kwargs['role'] == 'user'
+    assert call.kwargs['email'].startswith('attack-plane-throwaway-')
+    factory.side_effect = plane.transport.AuthenticationError('Invalid login')
+    with pytest.raises(plane.transport.AuthenticationError):
+        plane._throwaway(admin)
 
 
 def test_path_fill_is_route_scoped_and_escapes_slashes():
@@ -407,7 +406,7 @@ def test_child_deletes_precede_parents_and_bulk_deletes_are_last():
     parent = 'DELETE /api/v1/chats/{id}'
     bulk = 'DELETE /api/v1/chats/'
     assert sorted([bulk, parent, child], key=plane._read_before_destroy) == [child, parent, bulk]
-    assert 'DELETE /api/v1/files/all' in plane.DESTRUCTIVE
+    assert 'DELETE /api/v1/files/all' not in plane.operations()
 
 
 def timing_out_client():
@@ -919,7 +918,7 @@ def test_conversation_mark_read_is_driven_as_a_bodyless_write(monkeypatch):
 
 
 def test_fanout_queries_extend_existing_reads_without_adding_routes():
-    assert len(plane.operations()) == 534
+    assert len(plane.operations()) == 373
     for path, name in [
         ('/api/v1/chats/', 'include_sidebar'),
         ('/api/v1/chats/list', 'include_sidebar'),

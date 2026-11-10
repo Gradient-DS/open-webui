@@ -342,7 +342,7 @@
 	onMount(() => {
 		if (
 			!($config?.features as any)?.enable_automations ||
-			($user?.role !== 'admin' && !($user?.permissions?.features?.automations ?? false))
+			!($user?.permissions?.features?.automations ?? false)
 		) {
 			goto('/');
 			return;

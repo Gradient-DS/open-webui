@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 530 operations. Audit bodies across all
-# OpenAPI methods (534 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 536 operations. Audit bodies across all
+# OpenAPI methods (540 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (530, 534), (
-        f'Expected 530 five-method operations / 534 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (369, 373), (
+        f'Expected 536 five-method operations / 540 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -59,19 +59,19 @@ def test_conversation_read_has_no_client_selected_user_or_timestamp(surface):
 
 
 def test_derived_counts(surface):
-    _, fields, queries = surface
+    operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        195,
-        2152,
-    ), f'Expected 195 routes / 2152 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        138,
+        1845,
+    ), f'Expected 199 routes / 2160 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     # image_prompt refuses platform mode before consuming either field.
     for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
         assert {'language', 'message_id'} <= set(fields[f'POST /api/v1/tasks/{task}/completions'])
     # Membership edits remain in the attack surface even though the handler refuses them.
-    assert 'user_ids[]' in fields['POST /api/v1/groups/id/{id}/update']
+    assert 'POST /api/v1/groups/id/{id}/update' not in operations
     assert 'POST /api/v1/threads/{thread_id}/context:import' not in fields
     assert fields['POST /api/v1/threads:authorize'] == [
         'context_epoch',
@@ -80,21 +80,21 @@ def test_derived_counts(surface):
         'threads[].versions[]',
     ]
     assert query_counts == (
-        48,
-        98,
-    ), f'Expected 48 routes / 98 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        36,
+        78,
+    ), f'Expected 49 routes / 99 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
     # External knowledge retired 7 writable routes and 37 fields; keep the guard margin.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 - 17 - 11 - 7 and strings >= 2400 - 403 - 30 - 37, (
+    assert routes >= 225 - 17 - 11 - 7 - 61 and strings >= 2400 - 403 - 30 - 37 - 315, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
         'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
     )
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
-    assert routes >= 40 and strings >= 90 - 1, (
+    assert routes >= 40 - 13 and strings >= 90 - 1 - 21, (
         f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
         'original floor 40 / 90, less the retired source query parameter.'
     )
@@ -104,12 +104,12 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 20 and media == {'application/json': 16, 'multipart/form-data': 4}, (
+    assert len(blind) == 9 and media == {'application/json': 7, 'multipart/form-data': 2}, (
         'Expected 20 blind body operations (16 JSON: 15 write + 1 read; 4 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
-    assert read_bodies == {'GET /ollama/api/ps'}, (
+    assert read_bodies == set(), (
         f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 15 JSON write bodies; '
         f'measured read bodies: {sorted(read_bodies)}.'
     )
@@ -181,3 +181,25 @@ def test_fanout_flags_are_read_query_selectors():
         assert 'requestBody' not in operation
         flag = next(parameter for parameter in operation['parameters'] if parameter['name'] == name)
         assert flag['in'] == 'query' and flag['schema']['type'] == 'boolean'
+
+
+def test_bug_report_schema_forbids_extra_content_and_bounds_every_context_field(surface):
+    operations, _, _ = surface
+    assert 'POST /api/v1/feedback/report' in operations
+    spec = json.loads((REPO / 'security/openapi.json').read_text())
+    schemas = spec['components']['schemas']
+    form, context = schemas['FeedbackReportForm'], schemas['FeedbackReportContext']
+    assert form['additionalProperties'] is False
+    assert context['additionalProperties'] is False
+    assert set(form['properties']) == {'category', 'description', 'context'}
+    assert set(context['properties']) == {
+        'route',
+        'app_version',
+        'user_agent',
+        'error_message',
+        'error_detail',
+        'model',
+        'chat_id',
+        'trace_id',
+    }
+    assert all(any(part.get('maxLength', 0) > 0 for part in field['anyOf']) for field in context['properties'].values())

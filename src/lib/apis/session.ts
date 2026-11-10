@@ -5,6 +5,7 @@ type SessionBoundaryOptions = {
 	token: () => string | null;
 	expiresAt: () => number | undefined;
 	onExpire: () => void;
+	onNoAccess: () => void;
 	reload: () => void;
 	waitForRetry: (
 		signal?: AbortSignal | null,
@@ -46,6 +47,7 @@ const retiringRequest = new Promise<never>(() => {});
 export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 	const api = new URL(options.apiBase, options.origin);
 	let redirecting = false;
+	let noAccess = false;
 	let reloading = false;
 	let probe: { token: string; at: number; result: Promise<boolean | null> } | undefined;
 	const expire = () => {
@@ -102,11 +104,12 @@ export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 		const backend =
 			url.origin === api.origin &&
 			(url.pathname === api.pathname || url.pathname.startsWith(`${api.pathname}/`));
-		if (backend && redirecting && headers.has('authorization')) return retiringRequest;
+		if (backend && (redirecting || noAccess) && headers.has('authorization'))
+			return retiringRequest;
 		const authenticated =
 			backend && Boolean(token) && headers.get('authorization') === `Bearer ${token}`;
 		if (!authenticated) return options.fetch(input, init);
-		const current = () => !redirecting && options.token() === token;
+		const current = () => !redirecting && !noAccess && options.token() === token;
 		if (expired()) expire();
 		if (!current()) return retiringRequest;
 		const method = (
@@ -137,6 +140,11 @@ export const createSessionBoundary = (options: SessionBoundaryOptions) => {
 					: null;
 			if (!current()) return retiringRequest;
 			const state = payload?.state ?? payload?.detail?.state;
+			if (response?.status === 403 && state === 'no_access') {
+				noAccess = true;
+				options.onNoAccess();
+				return retiringRequest;
+			}
 			let verificationUnavailable = false;
 			if (
 				state === 'sign_in' ||

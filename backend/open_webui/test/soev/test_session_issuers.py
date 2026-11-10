@@ -9,7 +9,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from open_webui import config, env
 from open_webui.internal.db import get_async_session
-from open_webui.routers import auths, invites, totp
+from open_webui.routers import auths, invites, totp, users
 from open_webui.utils import auth
 
 
@@ -27,6 +27,9 @@ async def issuers(monkeypatch):
     monkeypatch.setattr(auths.Users, 'get_user_by_id', read)
     monkeypatch.setattr(invites.Invites, 'get_invite_by_token', read)
     monkeypatch.setattr(auths.Auths, 'insert_new_auth', write)
+    monkeypatch.setattr(auths.Config, 'upsert', write)
+    monkeypatch.setattr(auths, 'apply_default_group_assignment', write)
+    monkeypatch.setattr(auths, 'publish_event', write)
     monkeypatch.setattr(totp.Auths, 'get_auth_by_user_id', read)
     monkeypatch.setattr(totp.Auths, 'update_totp', write)
     monkeypatch.setattr(totp.Auths, 'update_totp_last_used', write)
@@ -44,30 +47,22 @@ async def issuers(monkeypatch):
     app.include_router(auths.router, prefix='/api/v1/auths')
     app.include_router(totp.router, prefix='/api/v1/auths/2fa')
     app.include_router(invites.router, prefix='/api/v1/invites')
+    app.include_router(users.router, prefix='/api/v1/users')
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='https://owui.invalid') as client:
         yield SimpleNamespace(app=app, client=client, user=user, read=read, write=write, mint=mint, session=session)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('issuer', ['invite', 'add', 'verify', 'recovery', 'enable'])
+@pytest.mark.parametrize('issuer', ['verify', 'recovery', 'enable'])
 async def test_platform_refuses_issuers_before_lookup_or_write(issuers, caplog, issuer):
-    if issuer == 'invite':
-        response = await issuers.client.post('/api/v1/invites/fictional-invite/accept', json={'password': 'Fable-123!'})
-        code = 'invite_acceptance'
-    elif issuer == 'add':
-        response = await issuers.client.post(
-            '/api/v1/auths/add', json={'email': 'fern@example.invalid', 'password': 'Fable-123!', 'name': 'Fern'}
-        )
-        code = 'add_user'
-    else:
-        purpose = '2fa_setup_pending' if issuer == 'enable' else '2fa_pending'
-        token = auth.create_token({'id': 'fern', 'purpose': purpose})
-        path = '/api/v1/auths/2fa/totp/enable' if issuer == 'enable' else '/api/v1/auths/2fa/verify'
-        body = {'password': 'Fable-123!', 'secret': 'FABLESECRET', 'code': '123456'}
-        if issuer == 'recovery':
-            body['code'] = 'ABCDE-FGHIJ'
-        response = await issuers.client.post(path, json=body, headers={'Authorization': f'Bearer {token}'})
-        code = '2fa_setup' if issuer == 'enable' else '2fa_verify'
+    purpose = '2fa_setup_pending' if issuer == 'enable' else '2fa_pending'
+    token = auth.create_token({'id': 'fern', 'purpose': purpose})
+    path = '/api/v1/auths/2fa/totp/enable' if issuer == 'enable' else '/api/v1/auths/2fa/verify'
+    body = {'password': 'Fable-123!', 'secret': 'FABLESECRET', 'code': '123456'}
+    if issuer == 'recovery':
+        body['code'] = 'ABCDE-FGHIJ'
+    response = await issuers.client.post(path, json=body, headers={'Authorization': f'Bearer {token}'})
+    code = '2fa_setup' if issuer == 'enable' else '2fa_verify'
     assert response.status_code == 403, response.text
     assert 'set-cookie' not in response.headers
     assert any(getattr(record, 'code', None) == f'oauth_platform_{code}_refused' for record in caplog.records)
@@ -164,47 +159,25 @@ async def test_platform_full_session_cannot_enable_local_totp(issuers, caplog):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('issuer', ['invite', 'add'])
-async def test_standalone_local_account_issuers_keep_working(issuers, monkeypatch, issuer):
-    monkeypatch.setattr(config, 'SOEV_API_URL', '')
-    user = SimpleNamespace(
-        id='lark', name='Lark', email='lark@example.invalid', role='user', profile_image_url='/fictional.png'
+@pytest.mark.parametrize('platform', [False, True])
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/api/v1/invites/fictional-invite/accept',
+        '/api/v1/auths/add',
+        '/api/v1/users/fern/2fa/disable',
+    ],
+    ids=['invite', 'add', 'admin-2fa-disable'],
+)
+async def test_removed_account_routes_return_404_without_writes(issuers, monkeypatch, platform, path):
+    monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.example.invalid' if platform else '')
+    response = await issuers.client.post(
+        path, json={'email': 'fern@example.invalid', 'password': 'Fable-123!', 'name': 'Fern'}
     )
-    issuers.mint.return_value = 'fictional-local-session'
-    issuers.write.return_value = user
-    monkeypatch.setattr(
-        auths.Config, 'get', AsyncMock(side_effect=lambda key: '1h' if key == 'auth.jwt_expiry' else {})
-    )
-    monkeypatch.setattr(auths, 'get_password_hash', AsyncMock(return_value='fictional-hash'))
-    monkeypatch.setattr(invites, 'get_password_hash', AsyncMock(return_value='fictional-hash'))
-    monkeypatch.setattr(auths, 'validate_password', lambda _: None)
-    monkeypatch.setattr(invites, 'validate_password', lambda _: None)
-    monkeypatch.setattr(auths, 'apply_default_group_assignment', AsyncMock())
-    monkeypatch.setattr(invites, 'apply_default_group_assignment', AsyncMock())
-    monkeypatch.setattr(auths, 'publish_event', AsyncMock())
-    monkeypatch.setattr(invites, 'get_permissions', AsyncMock(return_value={}))
-    if issuer == 'invite':
-        monkeypatch.setattr(
-            invites.Invites,
-            'get_invite_by_token',
-            AsyncMock(
-                return_value=SimpleNamespace(
-                    name=user.name,
-                    email=user.email,
-                    role=user.role,
-                    revoked_at=None,
-                    accepted_at=None,
-                    expires_at=4102444800,
-                )
-            ),
-        )
-        path = '/api/v1/invites/fictional-invite/accept'
-    else:
-        issuers.read.return_value = None
-        path = '/api/v1/auths/add'
-    response = await issuers.client.post(path, json={'email': user.email, 'password': 'Fable-123!', 'name': user.name})
-    assert response.status_code == 200, response.text
-    assert response.json()['token'] == 'fictional-local-session'
-    issuers.mint.assert_called_once()
-    assert issuers.write.await_count == (2 if issuer == 'invite' else 1)
-    assert ('set-cookie' in response.headers) is (issuer == 'invite')
+    assert response.status_code == 404, response.text
+    assert response.json() == {'detail': 'Not Found'}
+    assert 'set-cookie' not in response.headers
+    issuers.read.assert_not_awaited()
+    issuers.write.assert_not_awaited()
+    issuers.mint.assert_not_called()
+    issuers.session.assert_not_awaited()

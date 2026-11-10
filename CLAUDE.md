@@ -82,11 +82,12 @@ behaviour. Never exempt a route or loosen an assertion to make a count match. Us
 ## Models under the v2 runtime
 
 With `AGENT_API_ENABLED` and `SOEV_API_URL` set, `soev/model_catalog.py` reads models
-(`GET /v1/models`) and the default (served as `default_models`) only from soev-api.
+(`GET /v1/models`) only from soev-api. The default selection (`default_models`) comes from
+product configuration `ui.default_models`.
 Task routes send typed `soev.task/1` turns through `soev/task_turns.py` to `POST /v1/completions/task`.
-Connections, `ui.default_models` and the task model settings are not used. Details: `docs/agent-api-deployment.md`. Every model goes by its provider/model id:
-the catalog's label is not used, and an admin's or a migrated v1 base-model row never renames a catalog model
-(`apply_catalog`); assistants keep their own names.
+Connections and task model settings are not used. Details: `docs/agent-api-deployment.md`. Every model goes by its provider/model id:
+the catalog's label is not used. Console `models.overrides` can set a catalog model's display name;
+an admin's or a migrated v1 base-model row never renames it. Assistants keep their own names.
 
 A turn the agent refuses arrives as `invalid_field` with constraint `chat:<reason>`; `utils/agent_v2.py`
 (`_REFUSALS`) shows a nl/en message per reason, with the agent's detail only where it names what to fix
@@ -113,7 +114,9 @@ attached ones, and unreadable ones get the assistant's notices.
 Every base model (a catalog model, or a row without `base_model_id`) uses the global system prompt, config
 `models.system_prompt` (Admin > Settings > System prompt, shown wherever the models tab is), unless its own row still
 has a prompt; `DEFAULT_MODEL_PARAMS.system` comes below it. An empty prompt box (`system: null`) falls back instead of
-blanking it. Assistants keep their own prompt only. One resolver, `soev/system_prompt.py`, serves the agent route
+blanking it. On the platform route, per-model content comes from console `models.overrides`,
+and the global prompt comes from product configuration; local base-model rows are ignored.
+Assistants keep their own prompt only. One resolver, `soev/system_prompt.py`, serves the agent route
 (`main.py`) and the direct routers. The platform cutover tooling moves v1 per-model prompts to the global one: see
 `docs/cutover-handoff.md`.
 

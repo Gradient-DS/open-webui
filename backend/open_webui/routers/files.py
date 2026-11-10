@@ -345,26 +345,8 @@ async def upload_file_handler(
 ):
     log.info('file.content_type: %s %s', file.content_type, process)
 
-    # Backend-enforced cap on a user's total stored file count. Mirrors
-    # routers/automations.py's check_automation_limits max_count pattern:
-    # admins bypass entirely, 403, count >= cap (not >), config coerced
-    # through int() and skipped when falsy (unset/0). Unlike rag.file.max_count
-    # (frontend per-message advisory only), this is authoritative and checked
-    # before any work is done -- no bytes read, nothing stored yet.
-    #
-    # Admins bypass for the same reason knowledge_id write-access does a few
-    # lines down (existing `user.role != 'admin'` convention in this same
-    # handler): the key is env-authoritative (see models/config.py's
-    # rag.file.* carve-out), so an admin who hits the cap has no admin-UI
-    # escape hatch to raise it -- only a deploy-config change would unblock
-    # them.
-    #
-    # count_cap_guard defaults True so the user route is always covered;
-    # server-generated upload paths (image/audio generation, agent-internal
-    # blobs — see images.py/utils/files.py) pass
-    # count_cap_guard=False since they aren't a user-initiated upload the
-    # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
-    if count_cap_guard and user.role != 'admin':
+    # Internal generated files bypass the interactive upload cap.
+    if count_cap_guard:
         max_count_per_user = await Config.get('rag.file.max_count_per_user')
         if max_count_per_user:
             max_count_per_user = int(max_count_per_user)
@@ -709,34 +691,6 @@ async def count_files(
 ############################
 
 
-@router.delete('/all')
-async def delete_all_files(
-    request: Request, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
-):
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
-    result = await Files.delete_all_files(db=db)
-    if result:
-        try:
-            await asyncio.to_thread(Storage.delete_all_files)
-            await ASYNC_VECTOR_DB_CLIENT.reset()
-        except Exception as e:
-            log.exception(e)
-            log.error('Error deleting files')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT('Error deleting files'),
-            )
-        await publish_event(request, EVENTS.FILE_DELETED_ALL, actor=user, subject_type='file')
-        return {'message': 'All files deleted successfully'}
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT('Error deleting files'),
-        )
-
-
 ############################
 # Get File By Id
 ############################
@@ -997,55 +951,6 @@ async def get_file_content_by_id_inline(
 
                 return FileResponse(file_path, headers=headers, media_type=content_type)
 
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=ERROR_MESSAGES.NOT_FOUND,
-                )
-        except HTTPException as e:
-            raise e
-        except Exception as e:
-            log.exception(e)
-            log.error('Error getting file content')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT('Error getting file content'),
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-
-@router.get('/{id}/content/html')
-async def get_html_file_content_by_id(
-    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
-):
-    file = await Files.get_file_by_id(id, db=db)
-
-    if not file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    file_user = await Users.get_user_by_id(file.user_id, db=db)
-    if not file_user or file_user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
-        try:
-            file_path = await asyncio.to_thread(Storage.get_file, file.path)
-            file_path = Path(file_path)
-
-            # Check if the file already exists in the cache
-            if file_path.is_file():
-                log.info('file_path: %s', file_path)
-                return FileResponse(file_path)
             else:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

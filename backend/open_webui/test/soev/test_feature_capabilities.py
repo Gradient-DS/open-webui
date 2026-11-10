@@ -43,13 +43,13 @@ async def test_images_refused_without_platform_calls(monkeypatch, platform_capab
 @pytest.mark.asyncio
 @pytest.mark.parametrize('present', [False, True])
 @pytest.mark.parametrize('enabled', [False, True])
-async def test_frontend_config_flags(monkeypatch, platform_capabilities, present, enabled):
+async def test_frontend_config_flags(monkeypatch, platform_capabilities, chat_http, present, enabled):
     main = importlib.import_module('open_webui.main')
 
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://soev.invalid')
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(main, 'AGENT_API_ENABLED', True)
-    monkeypatch.setattr(main, 'FEATURE_MEETINGS', enabled)
+    chat_http.product_config['values']['feature.meetings'] = enabled
     monkeypatch.setattr(main, 'decode_token', lambda token: {'id': 'alice'})
     monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
     alice = SimpleNamespace(id='alice', role='user', person_id='platform:user:00000000-0000-4000-8000-0000000000a1')

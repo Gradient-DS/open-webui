@@ -11,7 +11,7 @@
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModelsDefaults } from '$lib/apis/configs';
-	import { getBaseModelTags, getModelTags } from '$lib/apis/models';
+	import { getModelTags } from '$lib/apis/models';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	// [Gradient] Assistants retain only a hidden legacy LLM default.
@@ -192,9 +192,7 @@
 					(!baseModel?.preset || (edit && baseModel.id === info.base_model_id)) &&
 					baseModel?.owned_by !== 'arena' &&
 					!(baseModel?.direct ?? false) &&
-					($user?.role === 'admin' ||
-						!(baseModel?.info?.meta?.hidden ?? false) ||
-						baseModel.id === info.base_model_id)
+					(!(baseModel?.info?.meta?.hidden ?? false) || baseModel.id === info.base_model_id)
 			)
 			.map((baseModel) => ({
 				value: baseModel.id,
@@ -204,9 +202,7 @@
 	};
 
 	const loadSuggestionTags = async () => {
-		const res: string[] = await (preset ? getModelTags : getBaseModelTags)(
-			localStorage.token
-		).catch(() => []);
+		const res: string[] = await getModelTags(localStorage.token).catch(() => []);
 		suggestionTags = res.map((tag) => ({ name: tag }));
 	};
 
@@ -523,9 +519,9 @@
 		modelId={edit ? info.id || null : null}
 		bind:accessGrants
 		accessRoles={preset ? ['read', 'write'] : ['read']}
-		share={$user?.permissions?.sharing?.models || $user?.role === 'admin'}
-		sharePublic={$user?.permissions?.sharing?.public_models || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+		share={$user?.permissions?.sharing?.models}
+		sharePublic={$user?.permissions?.sharing?.public_models}
+		shareUsers={$user?.permissions?.access_grants?.allow_users ?? true}
 	/>
 
 	<div class="flex h-full min-h-0 w-full flex-col">
@@ -742,7 +738,7 @@
 										items={getBaseModelItems($models)}
 										triggerClassName="text-xs"
 										selectionOnly
-										includeHidden={$user?.role === 'admin'}
+										includeHidden={false}
 										bind:value={info.base_model_id}
 									/>
 								</div>
