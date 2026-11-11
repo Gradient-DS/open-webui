@@ -33,7 +33,8 @@ OAuth, LDAP, SCIM, trusted-header and signup defaults cannot manage memberships.
 Disable OAuth/LDAP group management before reopening; attempts return
 `403 platform_groups_read_only`.
 
-The cutover Job can call `soev.migrate_groups.cutover_groups(session, group_map)`
+The offline OWUI command in [cutover-handoff.md](cutover-handoff.md) calls
+`soev.migrate_groups.cutover_groups(session, group_map)`
 with 9g's OWUI-id to platform-group-ref mapping before starting the mirror. It
 rewrites groups, memberships and group access grants in the caller's transaction,
 preserves product settings, returns changed-row counts, and refuses unmapped ids
@@ -41,15 +42,18 @@ or conflicting targets. The caller commits or rolls back; the function makes no
 network calls.
 
 Before that group step and before reopening login, call
-`soev.migrate_persons.cutover_persons(session, person_map)` with the migration
-journal's complete map of OWUI user id to canonical `platform:user:<uuid>`.
-Every retained account must be mapped. The helper validates all entries before
-writing `user.person_id`: unknown or unmapped user ids, duplicate person ids,
-invalid refs and changes to an existing binding refuse. It preserves account ids,
-OAuth bindings, settings and content, returns `{'users': changed_count}`, and
-does not commit or make network calls. Repeating the same map returns zero
-changes. The cutover Job owns the transaction for both steps and must roll it
-back on any refusal. The platform remains responsible for migration proof and
+`soev.migrate_persons.cutover_persons(session, person_map, excluded_ids)` with the
+migration journal's map of OWUI user id to canonical `platform:user:<uuid>` and
+explicit exclusion list. Every account must be mapped or explicitly excluded;
+exclusions remain unbound and cannot sign in or hold a session in platform mode.
+The helper validates all entries before writing `user.person_id`: unknown ids,
+unmapped users, duplicate person ids, invalid refs, overlapping mapped/excluded
+ids, bound exclusions and changes to an existing binding refuse. It preserves
+account ids, OAuth bindings, settings and content, returns
+`{'users': changed_count}`, and does not commit or make network calls. Repeating
+the same map returns zero changes. The command owns the transaction for both
+steps and rolls it back on any refusal or dry-run; only `--apply` commits after
+post-checks. The platform remains responsible for migration proof and
 quarantine; OWUI never derives this map from email.
 
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.

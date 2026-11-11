@@ -85,3 +85,55 @@ async def test_existing_person_binding_cannot_be_reassigned(person_cutover_db, m
     assert not db.dirty
     await db.commit()
     assert dict((await db.execute(select(User.id, User.person_id))).all()) == {'fern': None, 'lark': LARK}
+
+
+@pytest.mark.asyncio
+async def test_explicit_exclusion_stays_unbound_and_cannot_hold_platform_session(person_cutover_db, monkeypatch):
+    from fastapi import HTTPException
+    from open_webui.soev import sessions
+
+    db = person_cutover_db
+    monkeypatch.setattr(sessions.config, 'SOEV_API_URL', 'https://platform.example.invalid')
+    assert await cutover_persons(db, {'fern': FERN}, excluded_ids={'lark'}) == {'users': 1}
+    await db.commit()
+    assert await cutover_persons(db, {'fern': FERN}, excluded_ids={'lark'}) == {'users': 0}
+    excluded = await db.get(User, 'lark')
+    assert excluded.person_id is None
+    with pytest.raises(HTTPException) as error:
+        sessions.require_session(excluded)
+    assert error.value.status_code == 401
+    assert sessions.session_user(excluded, {}) is None
+    sessions.require_session(await db.get(User, 'fern'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'mapping,excluded',
+    [
+        ({'fern': FERN}, []),
+        ({}, ['lark']),
+        ({'fern': FERN, 'lark': LARK}, ['lark']),
+        ({'fern': FERN}, ['lark', 'unknown']),
+        ({'fern': FERN}, 'lark'),
+        ({'fern': FERN}, [None]),
+    ],
+)
+async def test_invalid_exclusions_refuse_without_writes(person_cutover_db, mapping, excluded):
+    db = person_cutover_db
+    with pytest.raises(ValueError):
+        await cutover_persons(db, mapping, excluded)
+    assert not db.dirty
+    await db.commit()
+    assert (await db.scalars(select(User.person_id))).all() == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_excluding_bound_account_refuses_without_unbinding(person_cutover_db):
+    db = person_cutover_db
+    (await db.get(User, 'lark')).person_id = LARK
+    await db.commit()
+    with pytest.raises(ValueError, match='Existing person binding'):
+        await cutover_persons(db, {'fern': FERN}, {'lark'})
+    assert not db.dirty
+    await db.commit()
+    assert dict((await db.execute(select(User.id, User.person_id))).all()) == {'fern': None, 'lark': LARK}

@@ -77,3 +77,29 @@ async def test_unchanged_ids_return_zero_changes(group_db):
         'access_grants': 0,
     }
     assert (await group_db.scalars(select(GroupMember))).one().group_id == '13b95f20-57d8-48c6-9a13-042bcf78d021'
+
+
+@pytest.mark.asyncio
+async def test_committed_cutover_accepts_same_map_and_refuses_conflicting_retry(group_db):
+    group_db.add(grant())
+    await group_db.commit()
+    old = '13b95f20-57d8-48c6-9a13-042bcf78d021'
+    mapping = {old: 'platform:group:meadow'}
+    assert await cutover_groups(group_db, mapping) == {'groups': 1, 'memberships': 1, 'access_grants': 1}
+    await group_db.commit()
+    assert await cutover_groups(group_db, mapping) == {'groups': 0, 'memberships': 0, 'access_grants': 0}
+    with pytest.raises(ValueError, match='Unmapped group'):
+        await cutover_groups(group_db, {old: 'platform:group:other'})
+    await group_db.rollback()
+    assert (await group_db.get(AccessGrant, 'grant')).principal_id == 'meadow'
+
+
+@pytest.mark.asyncio
+async def test_source_and_target_rows_together_refuse(group_db):
+    from open_webui.models.groups import Group
+
+    group_db.add(Group(id='meadow'))
+    await group_db.commit()
+    with pytest.raises(ValueError, match='collides'):
+        await cutover_groups(group_db, {'13b95f20-57d8-48c6-9a13-042bcf78d021': 'platform:group:meadow'})
+    assert not group_db.dirty
