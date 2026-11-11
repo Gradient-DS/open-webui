@@ -1,6 +1,7 @@
 """Channel retirement preserves other resources and restores only empty schema."""
 
 import importlib.util
+import logging
 import os
 from pathlib import Path
 
@@ -13,6 +14,49 @@ PATH = Path(__file__).resolve().parents[2] / 'migrations/versions/f73a9c0e2b61_r
 spec = importlib.util.spec_from_file_location('remove_channels', PATH)
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
+
+
+def seed_channel_content(conn):
+    conn.execute(sa.text("INSERT INTO file (id) VALUES ('fictional-file')"))
+    conn.execute(sa.text("INSERT INTO channel (id, name) VALUES ('fictional-channel', 'Fictional room')"))
+    conn.execute(
+        sa.text("""
+            INSERT INTO message (id, channel_id, content) VALUES
+            ('fictional-message', 'fictional-channel', 'Fictional conversation'),
+            ('fictional-orphan', NULL, 'Fictional orphan content')
+        """)
+    )
+    conn.execute(
+        sa.text("""
+            INSERT INTO message_reaction (id, user_id, message_id, name) VALUES
+            ('fictional-reaction', 'fictional-user', 'fictional-message', 'Fictional reaction')
+        """)
+    )
+    conn.execute(
+        sa.text("""
+            INSERT INTO channel_member (id, channel_id, user_id, joined_at) VALUES
+            ('fictional-member', 'fictional-channel', 'fictional-user', 1)
+        """)
+    )
+    conn.execute(
+        sa.text("""
+            INSERT INTO channel_file (id, user_id, channel_id, file_id, message_id, created_at, updated_at) VALUES
+            ('fictional-attachment', 'fictional-user', 'fictional-channel', 'fictional-file', 'fictional-message', 1, 1)
+        """)
+    )
+    conn.execute(
+        sa.text("""
+            INSERT INTO channel_webhook (id, user_id, channel_id, name, token, created_at, updated_at) VALUES
+            ('fictional-webhook', 'fictional-user', 'fictional-channel', 'Fictional webhook', 'fictional-token', 1, 1)
+        """)
+    )
+
+
+def assert_counts_logged(caplog, expected):
+    records = [record for record in caplog.records if record.name == migration.log.name]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+    assert records[0].getMessage() == f'Dropped channel rows: {expected}'
 
 
 @pytest.fixture(params=['sqlite', 'postgres'])
@@ -71,17 +115,38 @@ def shape(conn):
     }
 
 
-def test_upgrade_and_downgrade(connection):
+@pytest.mark.parametrize('populated', [False, True])
+def test_upgrade_and_downgrade(connection, populated, caplog):
     before = shape(connection)
-    migration.upgrade()
+    if populated:
+        seed_channel_content(connection)
+    with caplog.at_level(logging.INFO, logger=migration.log.name):
+        migration.upgrade()
+    assert_counts_logged(
+        caplog,
+        {
+            'channel_file': int(populated),
+            'channel_webhook': int(populated),
+            'channel_member': int(populated),
+            'message_reaction': int(populated),
+            'message': 2 if populated else 0,
+            'channel': int(populated),
+            'access_grant': 1,
+            'config': 2,
+        },
+    )
     assert not set(migration.TABLES) & set(sa.inspect(connection).get_table_names())
+    assert connection.execute(sa.text('SELECT id FROM file')).all() == ([('fictional-file',)] if populated else [])
     assert connection.execute(sa.text('SELECT * FROM chat')).all() == [('fictional-chat',)]
     assert connection.execute(sa.text('SELECT * FROM access_grant')).all() == [('kept-note', 'note')]
     config = sa.table('config', sa.column('key'), sa.column('value', sa.JSON))
     assert dict(connection.execute(sa.select(config)).all()) == {'user.permissions': {'features': {'notes': True}}}
     groups = sa.table('group', sa.column('permissions', sa.JSON))
     assert connection.execute(sa.select(groups.c.permissions)).scalar() == {'features': {'notes': False}}
-    migration.upgrade()
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=migration.log.name):
+        migration.upgrade()
+    assert_counts_logged(caplog, {'access_grant': 0, 'config': 0})
     migration.downgrade()
     assert shape(connection) == before
     for name in migration.TABLES:
@@ -90,15 +155,14 @@ def test_upgrade_and_downgrade(connection):
 
 
 @pytest.mark.parametrize('table', ['channel', 'message'])
-def test_existing_content_stops_before_any_mutation(connection, table):
+def test_existing_content_migrates_without_other_channel_rows(connection, table):
     if table == 'channel':
         connection.execute(sa.text("INSERT INTO channel (id) VALUES ('fictional-channel')"))
     else:
         connection.execute(sa.text("INSERT INTO message (id) VALUES ('fictional-message')"))
-    with pytest.raises(RuntimeError, match='stop and report counts'):
-        migration.upgrade()
-    assert set(migration.TABLES) <= set(sa.inspect(connection).get_table_names())
-    assert connection.execute(sa.text('SELECT COUNT(*) FROM access_grant')).scalar() == 2
+    migration.upgrade()
+    assert not set(migration.TABLES) & set(sa.inspect(connection).get_table_names())
+    assert connection.execute(sa.text('SELECT * FROM access_grant')).all() == [('kept-note', 'note')]
 
 
 @pytest.mark.parametrize('dialect', ['sqlite', 'postgres'])
@@ -120,8 +184,9 @@ def test_alembic_chain_restores_the_actual_previous_schema(dialect, request, mon
     command.upgrade(config, migration.down_revision)
     engine = sa.create_engine(url)
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             previous = shape(conn)
+            seed_channel_content(conn)
         command.upgrade(config, migration.revision)
         with engine.connect() as conn:
             assert not set(migration.TABLES) & set(sa.inspect(conn).get_table_names())

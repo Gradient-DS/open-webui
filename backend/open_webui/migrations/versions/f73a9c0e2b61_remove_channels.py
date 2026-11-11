@@ -1,4 +1,6 @@
-"""Remove unused channels and their grants; refuse unexpected channel content."""
+"""Drop retired channel data and grants, logging only deleted row counts."""
+
+import logging
 
 import sqlalchemy as sa
 from alembic import op
@@ -9,17 +11,19 @@ branch_labels = None
 depends_on = None
 
 TABLES = ('channel_file', 'channel_webhook', 'channel_member', 'message_reaction', 'message', 'channel')
+log = logging.getLogger(__name__)
 
 
 def _has_feature_permissions(permissions: object) -> bool:
     return isinstance(permissions, dict) and isinstance(permissions.get('features'), dict)
 
 
-def _remove_channel_settings(connection: sa.Connection, tables: set[str]) -> None:
+def _remove_channel_settings(connection: sa.Connection, tables: set[str]) -> int:
+    deleted = 0
     if 'config' in tables:
-        connection.execute(
+        deleted = connection.execute(
             sa.text("DELETE FROM config WHERE key IN ('channels.enable', 'channels.model_response_mode')")
-        )
+        ).rowcount
         config = sa.table('config', sa.column('key'), sa.column('value', sa.JSON))
         permissions = connection.execute(sa.select(config.c.value).where(config.c.key == 'user.permissions')).scalar()
         if _has_feature_permissions(permissions):
@@ -31,25 +35,34 @@ def _remove_channel_settings(connection: sa.Connection, tables: set[str]) -> Non
             if _has_feature_permissions(permissions):
                 permissions['features'].pop('channels', None)
                 connection.execute(groups.update().where(groups.c.id == id).values(permissions=permissions))
+    return deleted
 
 
 def upgrade() -> None:
     connection = op.get_bind()
     tables = set(sa.inspect(connection).get_table_names())
-    for name in ('channel', 'message'):
-        if name in tables and connection.execute(sa.text(f'SELECT COUNT(*) FROM {name}')).scalar():
-            raise RuntimeError('Channels or messages exist; stop and report counts before removing channels')
+    # Count before any drops so cascading deletes cannot hide dependent rows.
+    counts = {
+        name: connection.execute(sa.text(f'SELECT COUNT(*) FROM {name}')).scalar_one()
+        for name in TABLES
+        if name in tables
+    }
 
     if 'access_grant' in tables:
-        connection.execute(sa.text("DELETE FROM access_grant WHERE resource_type = 'channel'"))
-    _remove_channel_settings(connection, tables)
+        counts['access_grant'] = connection.execute(
+            sa.text("DELETE FROM access_grant WHERE resource_type = 'channel'")
+        ).rowcount
+    deleted_settings = _remove_channel_settings(connection, tables)
+    if 'config' in tables:
+        counts['config'] = deleted_settings
     for name in TABLES:
         if name in tables:
             op.drop_table(name)
+    log.info('Dropped channel rows: %s', counts)
 
 
 def downgrade() -> None:
-    # Restore the prior schema only. Deleted grants and configuration stay removed.
+    # Restore the prior schema only. Deleted data, grants and configuration stay removed.
     op.create_table(
         'channel',
         sa.Column('id', sa.TEXT(), nullable=False),
