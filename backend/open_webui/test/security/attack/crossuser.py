@@ -107,7 +107,7 @@ def expected_refusals(surface=None):
     """Route -> the [[control]] declaring an owner refusal that is a guard working, not a gap."""
     surface = seeds.SURFACE if surface is None else surface
     return {
-        entry['route']: entry
+        entry['route']: {**entry, **(entry.get('v2', {}) if seeds.runtime_soev_backed() == 'drive' else {})}
         for entry in surface.get('control', [])
         if entry.get('runtime_soev_backed', seeds.runtime_soev_backed()) == seeds.runtime_soev_backed()
     }

@@ -24,6 +24,7 @@
 # v2_refused_value is an explicit fictional probe id in drive mode only, where
 # the router refuses before looking up a resource. [[control]] pins that refusal.
 # backed_by="soev-solutions" seeds and field setup run only with RUNTIME_SOEV_BACKED=drive.
+# v2 overrides a field or refusal control only in drive mode; each route has one control.
 
 # Compare the complete public configuration around every pass and mutation.
 # Any change fails the sweep; no local management writer remains to restore it.
@@ -966,7 +967,7 @@ files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack up
 
 [[field]]
 route = "POST /api/v1/audio/speech"
-description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. The private stack resolves the platform speech role to the stub. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
+description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. The platform product configuration disables read aloud and voice calls, so private drive mode requires the exact plan refusal. With these features enabled, the platform speech role reaches the stub. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
 json = { input = "Fictional speech probe {token}.", response_format = "mp3" }
 
 [[field]]
@@ -1032,11 +1033,11 @@ allow = ["same-object", "write"]
 reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
 
 [[control]]
-runtime_soev_backed = "waive"
 route = "POST /api/v1/audio/speech"
+v2 = { status = 403, detail = "Feature 'read_aloud' is not available in your plan", json = { detail = "Feature 'read_aloud' is not available in your plan" }, all_actors = true, reason = "soev/product_config_schema.json disables read_aloud and voice_call. routers/audio.py:speech refuses before permission checks or upstream I/O for every actor, including admins. The valid SpeechForm remains driven." }
 status = 401
 detail = "identity:platform_login"
-reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
+reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode has a separate exact plan refusal for the disabled read-aloud feature."
 
 [[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"
@@ -2005,3 +2006,62 @@ status = 400
 detail = "Autocompletion generation is disabled"
 json = { detail = "Autocompletion generation is disabled" }
 reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplete.enable is false, the platform default. Every actor must receive this exact disabled-feature refusal; enabled task controls still require model output."
+
+
+
+[[field]]
+route = "POST /ollama/api/embed/{url_idx}"
+description = "A valid api/embed request uses the discovered upstream model to exercise OWUI model authorization before proxying."
+json = { model = "{upstream_model}", input = "Fictional embedding probe {token}" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/api/embed/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
+
+[[field]]
+route = "POST /ollama/api/embeddings/{url_idx}"
+description = "A valid api/embeddings request uses the discovered upstream model to exercise OWUI model authorization before proxying."
+json = { model = "{upstream_model}", prompt = "Fictional embedding probe {token}" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/api/embeddings/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
+
+[[field]]
+route = "POST /ollama/api/generate/{url_idx}"
+description = "A valid api/generate request uses the discovered upstream model to exercise OWUI model authorization before proxying."
+json = { model = "{upstream_model}", prompt = "Fictional generation probe {token}" }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/api/generate/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
+
+[[field]]
+route = "POST /ollama/v1/responses/{url_idx}"
+description = "A valid v1/responses request uses the discovered upstream model to exercise OWUI model authorization before proxying."
+json = { model = "{upstream_model}" }
+v2 = { json = { model = "{upstream_model}", input = "Fictional response probe {token}" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/v1/responses/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."

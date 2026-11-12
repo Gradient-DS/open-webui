@@ -1,3 +1,5 @@
+# Platform speech and indexed Ollama model authorization have exact all-actor
+# refusal controls in attack-surface.toml; coverage requires their recorded evidence.
 # Terminal HEAD refusal evidence requires exact status 403 and an empty body;
 # its GET sibling requires the exact Feature is unavailable detail.
 # Platform autocomplete has an exact all-actor 400 disabled-feature control in

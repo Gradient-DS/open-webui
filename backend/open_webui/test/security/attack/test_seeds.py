@@ -979,6 +979,10 @@ def test_connection_proxy_fields_use_the_upstream_model():
     # These routes resolve the model against a connection's own list, not the registry.
     direct = {
         'POST /ollama/api/chat/{url_idx}',
+        'POST /ollama/api/embed/{url_idx}',
+        'POST /ollama/api/embeddings/{url_idx}',
+        'POST /ollama/api/generate/{url_idx}',
+        'POST /ollama/v1/responses/{url_idx}',
         'POST /ollama/v1/chat/completions/{url_idx}',
         'POST /ollama/v1/messages/{url_idx}',
         'POST /ollama/v1/completions/{url_idx}',
