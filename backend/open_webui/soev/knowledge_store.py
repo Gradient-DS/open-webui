@@ -1159,7 +1159,13 @@ class SoevKnowledgeTable:
         else:
             for source_id in await self.get_file_ids_in_directory_subtree(key, directory_id):
                 await self.remove_file_from_knowledge_by_id(key, source_id)
-        await self._delete_folder(key, '/'.join(path))
+        try:
+            await self._delete_folder(key, '/'.join(path))
+        except SoevApiError as error:
+            # Nested files or deletions still queued: the caller retries once they have landed.
+            if error.code != 'folder_not_empty':
+                raise
+            return False
         return True
 
     async def _move_document(self, key, source_id, path, *, user_id=None):
