@@ -923,28 +923,46 @@ def test_product_config_inventory_has_real_routes_proofs_and_seeds():
     assert set(coverage['skill_files']['routes']) == expected
 
 
-def test_ollama_seed_uses_a_model_from_its_connection_instead_of_the_catalog():
+def test_ollama_seed_uses_the_configured_upstream_catalog(monkeypatch):
     entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
     ctx.values['model'] = 'fictional/catalog-model'
-    ctx.request = Mock(
-        side_effect=[
-            {'models': [{'model': 'fictional-ollama', 'urls': [2]}]},
-        ]
-    )
-    assert seeds.seed_ollama_connection(ctx, entry) == '2'
+    ctx.request = Mock(side_effect=AssertionError('No retired OWUI discovery route'))
+    monkeypatch.setenv('OLLAMA_BASE_URLS', 'http://empty.invalid;http://ollama.invalid')
+    responses = [Mock(), Mock()]
+    responses[0].json.return_value = {'models': []}
+    responses[1].json.return_value = {'models': [{'model': 'fictional-ollama'}]}
+    get = Mock(side_effect=responses)
+    monkeypatch.setattr(seeds.requests, 'get', get)
+    assert seeds.seed_ollama_connection(ctx, entry) == '1'
     assert ctx.values['upstream_model'] == 'fictional-ollama'
-    assert ctx.request.call_args.args == ('GET', '/ollama/api/tags')
-    assert ctx.request.call_args.kwargs == {'actor': ctx.client}
+    assert [call.args for call in get.call_args_list] == [
+        ('http://empty.invalid/api/tags',), ('http://ollama.invalid/api/tags',)
+    ]
+    for response in responses:
+        response.raise_for_status.assert_called_once_with()
+        response.close.assert_called_once_with()
+    ctx.request.assert_not_called()
 
 
-def test_ollama_seed_refuses_an_empty_connection_instead_of_substituting_the_catalog():
+def test_ollama_seed_refuses_an_empty_catalog_instead_of_substituting_a_model(monkeypatch):
     entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.request = Mock(return_value={'models': []})
-    with pytest.raises(RuntimeError, match='caller-readable Ollama connection'):
+    ctx.values['model'] = 'fictional/catalog-model'
+    monkeypatch.setenv('OLLAMA_BASE_URLS', 'http://ollama.invalid')
+    response = Mock()
+    response.json.return_value = {'models': []}
+    monkeypatch.setattr(seeds.requests, 'get', Mock(return_value=response))
+    with pytest.raises(RuntimeError, match='No model is available'):
         seeds.seed_ollama_connection(ctx, entry)
     assert 'upstream_model' not in ctx.values
+    response.close.assert_called_once_with()
+
+
+def test_ollama_seed_requires_explicit_upstream_configuration(monkeypatch):
+    monkeypatch.delenv('OLLAMA_BASE_URLS', raising=False)
+    with pytest.raises(KeyError, match='OLLAMA_BASE_URLS'):
+        seeds.seed_ollama_connection(Mock(), {})
 
 
 @pytest.mark.parametrize('default', [None, '', 'a/b,c/d', ['ci/chat']])
