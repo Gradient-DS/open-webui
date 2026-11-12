@@ -779,7 +779,7 @@ params = { id = "{assistant}" }
 backed_by = "soev-solutions"
 route = "POST /api/v1/meetings/audio"
 v2 = { params = { name = "attack-{token}.wav", thread_id = "{meeting}" } }
-description = "A valid mono 16-bit PCM WAV with one silent frame at 16 kHz exercises the platform's owner-scoped audio upload."
+description = "A valid mono 16-bit PCM WAV with one silent frame at 16 kHz exercises the platform's owner-scoped audio upload. The thread_id query references the meeting fixture seeded by user; the positive control must use that owner, with admin and intruder kept as refusal probes."
 params = { name = "attack-{token}.wav" }
 body_base64 = "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA=="
 
