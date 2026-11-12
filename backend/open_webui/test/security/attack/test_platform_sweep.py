@@ -43,7 +43,7 @@ DISABLED = [
     f'{method.upper()} {path}'
     for path, operations in seeds.SPEC['paths'].items()
     if path.startswith(('/api/v1/tools/', '/api/v1/skills/'))
-    for method in operations.keys() & seeds.METHODS
+    for method in sorted(operations.keys() & seeds.METHODS)
 ]
 
 
