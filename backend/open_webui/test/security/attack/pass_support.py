@@ -29,14 +29,14 @@ def fresh_surface():
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
+        parameters = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
         yield identities, parameters
     finally:
         try:
             if parameters is not None:
                 task = parameters.get(('/api/tasks/stop/{task_id}', 'task_id'))
                 if task:
-                    response = identities.admin.request('POST', f'/api/tasks/stop/{quote(task, safe="")}')
+                    response = identities.user.request('POST', f'/api/tasks/stop/{quote(task, safe="")}')
                     response.close()
         finally:
             identities.close()

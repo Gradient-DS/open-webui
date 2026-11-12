@@ -8,7 +8,7 @@ from .pass_support import crash_details, fresh_surface
 @pytest.fixture(scope='module')
 def live_query():
     with fresh_surface() as (identities, parameters):
-        yield query.drive_query_parameters(identities.admin, parameters)
+        yield query.drive_query_parameters(identities.user, parameters)
 
 
 def test_live_query_has_its_own_5xx_assertion(live_query):

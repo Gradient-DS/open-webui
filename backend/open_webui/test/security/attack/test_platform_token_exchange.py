@@ -40,8 +40,10 @@ def test_exchange_probe_resolution_never_calls_an_identity_provider(monkeypatch,
     spec = {'paths': {PATH: {'post': {}}}}
     parameters = seeds.resolve_parameters(client, surface=surface, spec=spec)
     if mode == 'drive':
-        assert parameters[PATH, 'provider'] == 'attack-oidc-provider'
-        assert plane._fill(PATH, parameters) == '/api/v1/auths/oauth/attack-oidc-provider/token/exchange'
+        provider = parameters[PATH, 'provider']
+        assert provider.startswith('fictional-provider-')
+        assert len(provider.removeprefix('fictional-provider-')) == 24
+        assert plane._fill(PATH, parameters) == f'/api/v1/auths/oauth/{provider}/token/exchange'
     else:
         assert parameters == {}
         with pytest.raises(plane.UnseedableRoute):

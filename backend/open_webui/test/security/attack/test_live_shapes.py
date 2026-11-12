@@ -8,7 +8,7 @@ from .pass_support import crash_details, fresh_surface
 @pytest.fixture(scope='module')
 def live_shapes():
     with fresh_surface() as (identities, parameters):
-        yield shapes.drive_shapes(identities.admin, parameters)
+        yield shapes.drive_shapes(identities.user, parameters)
 
 
 def test_live_shapes_has_its_own_5xx_assertion(live_shapes):

@@ -291,12 +291,22 @@ def seed_console_access(ctx, parameter):
 
 
 def seed_ollama_connection(ctx, parameter):
-    body = ctx.request('GET', '/ollama/api/tags', actor=ctx.client)
-    model = next((entry for entry in body.get('models', []) if entry.get('urls')), None)
-    if model is None:
-        raise RuntimeError('No caller-readable Ollama connection is available')
-    ctx.provide(parameter, 'upstream_model', model['model'])
-    return str(model['urls'][0])
+    # The platform picker has catalog ids, while these surviving proxies require
+    # a backend's own model id. Read the sealed stack's configured upstream
+    # catalog: OWUI's administrative tags endpoint no longer exists.
+    urls = os.environ['OLLAMA_BASE_URLS'].split(';')
+    for index, url in enumerate(urls):
+        response = requests.get(url.rstrip('/') + '/api/tags', timeout=60)
+        try:
+            response.raise_for_status()
+            models = response.json()['models']
+        finally:
+            response.close()
+        if models:
+            model = _extract(models, '0.model', name=parameter['key'], via='configured Ollama catalog')
+            ctx.provide(parameter, 'upstream_model', model)
+            return str(index)
+    raise RuntimeError('No model is available in the configured Ollama catalogs')
 
 
 def upstream_path(ctx, parameter):
@@ -623,6 +633,11 @@ def resolve_fields(ctx, *, entries=None):
         }
         for name in entry.get('json_integer_fields', []):
             resolved['json'][name] = int(resolved['json'][name])
+        if 'params' in resolved:
+            resolved['params'] = {
+                key: str(value).lower() if isinstance(value, bool) else value
+                for key, value in resolved['params'].items()
+            }
         if 'body_base64' in entry:
             resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:
