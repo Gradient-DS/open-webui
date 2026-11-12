@@ -633,6 +633,11 @@ def resolve_fields(ctx, *, entries=None):
         }
         for name in entry.get('json_integer_fields', []):
             resolved['json'][name] = int(resolved['json'][name])
+        if 'params' in resolved:
+            resolved['params'] = {
+                key: str(value).lower() if isinstance(value, bool) else value
+                for key, value in resolved['params'].items()
+            }
         if 'body_base64' in entry:
             resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:

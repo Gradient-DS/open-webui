@@ -937,7 +937,8 @@ def test_ollama_seed_uses_the_configured_upstream_catalog(monkeypatch):
     assert seeds.seed_ollama_connection(ctx, entry) == '1'
     assert ctx.values['upstream_model'] == 'fictional-ollama'
     assert [call.args for call in get.call_args_list] == [
-        ('http://empty.invalid/api/tags',), ('http://ollama.invalid/api/tags',)
+        ('http://empty.invalid/api/tags',),
+        ('http://ollama.invalid/api/tags',),
     ]
     for response in responses:
         response.raise_for_status.assert_called_once_with()
@@ -1192,3 +1193,21 @@ def test_bug_report_has_an_authenticated_positive_control_and_no_waiver():
     assert set(field['json']) == {'category', 'description', 'context.route', 'context.trace_id'}
     assert route in seeds.ordinary_targets()
     assert route not in seeds.SOEV_BACKED
+
+
+def test_query_boolean_fields_use_the_platform_wire_format():
+    ctx = seeds.SeedContext(
+        Mock(),
+        Mock(),
+        {
+            'field': [
+                {
+                    'route': 'GET /fictional',
+                    'params': {'include_sidebar': True, 'include_archived': False, 'page': 1},
+                }
+            ]
+        },
+    )
+    fields = seeds.resolve_fields(ctx)
+    request = requests.Request('GET', 'https://owui.invalid/fictional', **fields['GET /fictional']).prepare()
+    assert request.url.endswith('include_sidebar=true&include_archived=false&page=1')
