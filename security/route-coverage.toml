@@ -1,3 +1,9 @@
+# Platform speech and indexed Ollama model authorization have exact all-actor
+# refusal controls in attack-surface.toml; coverage requires their recorded evidence.
+# Terminal HEAD refusal evidence requires exact status 403 and an empty body;
+# its GET sibling requires the exact Feature is unavailable detail.
+# Platform autocomplete has an exact all-actor 400 disabled-feature control in
+# attack-surface.toml. It remains driven and requires refusal evidence, with no waiver.
 # Product configuration boundaries are classified in product-config-coverage.toml.
 # Skill-file routes have ordinary owner seeds and no coverage exemption.
 # Routes no security test drives, each with the reason it cannot be driven on
@@ -138,7 +144,7 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 [[waived]]
 id = "DELETE /api/v1/knowledge/{id}/dirs/{dir_id}/delete"
 backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live. Private drive mode keeps the owner control and platform refusals propagate through the shared SoevApiError handler; failures are not converted to a successful deletion."
 
 [[waived]]
 id = "GET /api/v1/knowledge/"

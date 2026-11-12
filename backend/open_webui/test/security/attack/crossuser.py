@@ -107,14 +107,18 @@ def expected_refusals(surface=None):
     """Route -> the [[control]] declaring an owner refusal that is a guard working, not a gap."""
     surface = seeds.SURFACE if surface is None else surface
     return {
-        entry['route']: entry
+        entry['route']: {**entry, **(entry.get('v2', {}) if seeds.runtime_soev_backed() == 'drive' else {})}
         for entry in surface.get('control', [])
         if entry.get('runtime_soev_backed', seeds.runtime_soev_backed()) == seeds.runtime_soev_backed()
     }
 
 
 def refused_as_expected(declaration, status, body):
-    if not declaration or status != declaration['status'] or declaration['detail'] not in body:
+    if not declaration or status != declaration['status']:
+        return False
+    if declaration.get('route', '').startswith('HEAD '):
+        return body == ''
+    if declaration['detail'] not in body:
         return False
     if 'json' in declaration:
         try:
@@ -167,6 +171,28 @@ def _owner_key(path, surface):
     while 'same_as' in declaration:
         declaration = entries[declaration['same_as']]
     return 'user'
+
+
+def _field_owner_key(route, surface):
+    entries = [*surface.get('parameter', []), *surface.get('fixture', [])]
+    by_key = {key: entry for entry in entries for key in [entry['key'], *entry.get('provides', [])]}
+    owners = set()
+    for declaration in surface.get('field', []):
+        if declaration['route'] != route or seeds.backed_seed_waived(declaration):
+            continue
+        if seeds.runtime_soev_backed() == 'drive':
+            declaration = {**declaration, **declaration.get('v2', {})}
+        fields = {key: declaration[key] for key in ('params', 'json', 'form', 'files') if key in declaration}
+        for key in re.findall(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', json.dumps(fields)):
+            if key not in by_key:
+                continue
+            entry = by_key[key]
+            while 'same_as' in entry:
+                entry = by_key[entry['same_as']]
+            owners.add(entry.get('actor', 'user'))
+    if len(owners) > 1:
+        raise ValueError(f'{route}: referenced fixtures have different owners: {sorted(owners)}')
+    return next(iter(owners), None)
 
 
 @contextmanager
@@ -354,9 +380,16 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                 if target is None:
                     continue
                 path = route.split(' ', 1)[1]
+                field_owner = _field_owner_key(route, surface) if '{' not in path else None
                 subject_scoped = route in platform and '{' not in path
                 owner = (
-                    owners[_owner_key(path, surface)] if '{' in path else owners['admin'] if subject_scoped else None
+                    owners[_owner_key(path, surface)]
+                    if '{' in path
+                    else owners[field_owner]
+                    if field_owner
+                    else owners['admin']
+                    if subject_scoped
+                    else None
                 )
                 resource_ids = (
                     list(parameters.values())
@@ -364,20 +397,28 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                     else [parameters[path, name] for name in re.findall(r'\{([^}]+)\}', path)]
                 )
                 service = _service(path)
-                with _as_service(service, identities.admin.base_url, identities.intruder, owner) as (intruder, owner):
+                other_actors = [identities.intruder]
+                if field_owner == 'user':
+                    other_actors.append(identities.admin)
+                with _as_service(service, identities.admin.base_url, *other_actors, owner) as clients:
+                    *stranger_clients, owner = clients
                     for control, kwargs in _requests(route, parameters, spec, fields, payloads, full):
-                        stranger = _request(identities.admin, intruder, route, target, tally, kwargs)
+                        answers = [
+                            _request(identities.admin, actor, route, target, tally, kwargs)
+                            for actor in stranger_clients
+                        ]
                         positive = _request(identities.admin, owner, route, target, tally, kwargs) if owner else None
-                        _check(
-                            result,
-                            route,
-                            stranger,
-                            positive,
-                            _markers_outside(target + (repr(kwargs) if subject_scoped else ''), markers),
-                            admin_only=route in admins,
-                            control=control,
-                            resource_ids=resource_ids,
-                            subject_scoped=subject_scoped,
-                        )
+                        for stranger in answers:
+                            _check(
+                                result,
+                                route,
+                                stranger,
+                                positive,
+                                _markers_outside(target + (repr(kwargs) if subject_scoped else ''), markers),
+                                admin_only=route in admins,
+                                control=control,
+                                resource_ids=resource_ids,
+                                subject_scoped=subject_scoped,
+                            )
                 plane.flush_hits()
     return result
