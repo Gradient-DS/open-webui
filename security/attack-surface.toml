@@ -1457,6 +1457,7 @@ reason = "Platform terminal servers are disabled; every actor must reach the fea
 route = "GET /api/v1/terminals/{server_id}/{path}"
 status = 403
 detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
 all_actors = true
 reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
 
@@ -1465,7 +1466,7 @@ route = "HEAD /api/v1/terminals/{server_id}/{path}"
 status = 403
 detail = "Feature is unavailable"
 all_actors = true
-reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
+reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup. HEAD requires exactly status 403 and an empty body; the GET control requires the exact detail."
 
 [[control]]
 route = "OPTIONS /api/v1/terminals/{server_id}/{path}"

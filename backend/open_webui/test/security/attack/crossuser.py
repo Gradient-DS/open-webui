@@ -114,7 +114,11 @@ def expected_refusals(surface=None):
 
 
 def refused_as_expected(declaration, status, body):
-    if not declaration or status != declaration['status'] or declaration['detail'] not in body:
+    if not declaration or status != declaration['status']:
+        return False
+    if declaration.get('route', '').startswith('HEAD '):
+        return body == ''
+    if declaration['detail'] not in body:
         return False
     if 'json' in declaration:
         try:

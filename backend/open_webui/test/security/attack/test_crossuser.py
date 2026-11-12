@@ -772,3 +772,34 @@ def test_meeting_audio_control_uses_meeting_owner_and_keeps_both_refusal_probes(
     assert all(kwargs['params']['thread_id'] == 'fictional-meeting' for _, _, _, kwargs in order)
     assert result.controls == {route: 200}
     assert not result.violations
+
+
+@pytest.mark.parametrize(
+    'status,body,expected',
+    [
+        (403, '', True),
+        (401, '', False),
+        (404, '', False),
+        (200, '', False),
+        (403, '{"detail":"Feature is unavailable"}', False),
+        (403, ' ', False),
+    ],
+)
+def test_head_refusal_requires_exact_status_and_empty_body(status, body, expected):
+    route = 'HEAD /api/v1/terminals/{server_id}/{path}'
+    declaration = crossuser.expected_refusals()[route]
+    assert crossuser.refused_as_expected(declaration, status, body) is expected
+
+
+@pytest.mark.parametrize(
+    'body,expected',
+    [
+        ('', False),
+        ('{"detail":"Feature is unavailable"}', True),
+        ('{"detail":"Other feature is unavailable"}', False),
+        ('{"detail":"Feature is unavailable today"}', False),
+    ],
+)
+def test_terminal_get_still_requires_the_exact_detail(body, expected):
+    declaration = crossuser.expected_refusals()['GET /api/v1/terminals/{server_id}/{path}']
+    assert crossuser.refused_as_expected(declaration, 403, body) is expected

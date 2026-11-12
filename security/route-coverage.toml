@@ -1,3 +1,5 @@
+# Terminal HEAD refusal evidence requires exact status 403 and an empty body;
+# its GET sibling requires the exact Feature is unavailable detail.
 # Platform autocomplete has an exact all-actor 400 disabled-feature control in
 # attack-surface.toml. It remains driven and requires refusal evidence, with no waiver.
 # Product configuration boundaries are classified in product-config-coverage.toml.
