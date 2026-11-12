@@ -620,7 +620,7 @@ prefix = "/oauth/clients/{client_id}/authorize"
 backed_by = "soev-solutions"
 seeded_by = "seed_disabled_oauth_client"
 depends_on = []
-description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id drives this boundary for every authenticated actor."
+description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id containing the fresh pass token drives this boundary for every authenticated actor without reusing a previous pass fixture."
 
 [[control]]
 runtime_soev_backed = "drive"

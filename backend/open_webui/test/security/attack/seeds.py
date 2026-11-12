@@ -270,7 +270,7 @@ class SeedContext:
 
 
 def seed_disabled_oauth_client(ctx, parameter):
-    return 'mcp:fictional-disabled'
+    return f'mcp:fictional-disabled-{ctx.token}'
 
 
 def seed_refused_target(ctx, parameter):
