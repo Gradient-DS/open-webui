@@ -138,7 +138,7 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 [[waived]]
 id = "DELETE /api/v1/knowledge/{id}/dirs/{dir_id}/delete"
 backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live. Private drive mode keeps the owner control and platform refusals propagate through the shared SoevApiError handler; failures are not converted to a successful deletion."
 
 [[waived]]
 id = "GET /api/v1/knowledge/"

@@ -201,7 +201,7 @@ backed_by = "soev-solutions"
 key = "directory"
 name = "dir_id"
 prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
-description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the caller-owned soev-api KB."
+description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by the user's KB. Directory deletion propagates platform refusals through the SoevApiError handler; unexpected failures remain errors."
 via = "POST /api/v1/knowledge/{knowledge}/dirs/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
