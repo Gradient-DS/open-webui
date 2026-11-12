@@ -209,3 +209,32 @@ def test_validation_rejection_does_not_borrow_entries_and_5xx_assertion_is_indep
     plane.record(CHAT, 200, {}, pass_name='model_path')
     with pytest.raises(AssertionError, match='model crash'):
         test_live_model_path_has_its_own_5xx_assertion(result)
+
+
+def test_platform_autocomplete_requires_exact_refusal_and_enabled_tasks_still_require_output(monkeypatch):
+    from .test_live_model_path import test_live_model_controls_produce_output
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    auto = 'POST /api/v1/tasks/auto/completions'
+    responses = [
+        {'route': route, 'probe': 'control', 'status': 200, 'errors': [], 'terminal': False, 'model_output': True}
+        for route in model_path.targets()
+    ]
+    from .crossuser import expected_refusals
+
+    for item in responses:
+        if declaration := expected_refusals().get(item['route']):
+            item.update(status=declaration['status'], body=json.dumps(declaration['json']), model_output=False)
+    result = model_path.ModelRun(plane.Seeding(), responses)
+    test_live_model_controls_produce_output(result)
+    item = next(item for item in responses if item['route'] == auto)
+    for status, body in [(403, {'detail': 'Autocompletion generation is disabled'}), (400, {'detail': 'other'})]:
+        item.update(status=status, body=json.dumps(body))
+        with pytest.raises(AssertionError, match='wrong refusal'):
+            test_live_model_controls_produce_output(result)
+    item.update(status=400, body='{"detail":"Autocompletion generation is disabled"}')
+    title = next(item for item in responses if item['route'] == 'POST /api/v1/tasks/title/completions')
+    for status, output in [(400, True), (200, False)]:
+        title.update(status=status, model_output=output)
+        with pytest.raises(AssertionError, match='no usable output'):
+            test_live_model_controls_produce_output(result)

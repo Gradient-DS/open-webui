@@ -1989,3 +1989,18 @@ status = 403
 detail = "Model not found"
 json = { detail = "Model not found" }
 reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
+
+[[field]]
+route = "POST /api/v1/tasks/auto/completions"
+description = "A valid autocomplete request reaches the disabled task feature in the platform runtime."
+json = { model = "{model}", prompt = "Complete this fictional sentence.", type = "text" }
+v2 = { json = { model = "{model}", chat_id = "{chat}", prompt = "Complete this fictional sentence.", type = "text" } }
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tasks/auto/completions"
+status = 400
+detail = "Autocompletion generation is disabled"
+json = { detail = "Autocompletion generation is disabled" }
+reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplete.enable is false, the platform default. Every actor must receive this exact disabled-feature refusal; enabled task controls still require model output."
