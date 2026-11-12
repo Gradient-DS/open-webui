@@ -326,6 +326,7 @@ same_as = "active_function"
 
 [[parameter]]
 key = "tool"
+v2_refused_value = "fictional-disabled-tool-{token}"
 name = "id"
 prefix = "/api/v1/tools/id/{id}"
 description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs. Admin satisfies workspace.tools/workspace.tools_import; no package installation or external import is needed."
@@ -336,6 +337,7 @@ actor = "user"
 
 [[parameter]]
 key = "skill"
+v2_refused_value = "fictional-disabled-skill-{token}"
 name = "id"
 prefix = "/api/v1/skills/id/{id}"
 description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token."
@@ -346,6 +348,7 @@ actor = "user"
 
 [[parameter]]
 key = "skill_bundle"
+v2_refused_value = "fictional-disabled-skill_bundle-{token}"
 name = "id"
 prefix = "/api/v1/skills/id/{id}/files"
 description = "Seed a private skill with separate inline text files for read/edit, move and removal. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
@@ -440,7 +443,7 @@ unseedable = "The only cache file the API creates is a data export, and services
 
 [[parameter]]
 key = "reset_token"
-v2_refused_value = "attack-reset-token"
+v2_refused_value = "fictional-reset-{token}"
 name = "token"
 prefix = "/api/v1/auths/password/reset/{token}"
 description = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
@@ -455,7 +458,7 @@ unseedable = "auths.py:delete_oauth_session_by_provider requires an OAuthSession
 
 [[parameter]]
 key = "oauth_exchange_provider"
-v2_refused_value = "attack-oidc-provider"
+v2_refused_value = "fictional-provider-{token}"
 name = "provider"
 prefix = "/api/v1/auths/oauth/{provider}"
 description = "With SOEV_API_URL configured, auths.py:token_exchange refuses 403 before feature flags, rate limiting, provider lookup, token inspection or session creation; login_attach.py logs oauth_platform_token_exchange_refused. Drive mode uses an explicit fictional provider to probe this all-actor boundary without an issuer. Standalone exchange still requires an environment-registered provider and issuer token."
@@ -770,7 +773,7 @@ params = { email = "attack-{token}@example.com" }
 [[field]]
 route = "POST /api/v1/models/model/toggle"
 description = "Toggle resolves the actual registered model from the required id query."
-params = { id = "{model}" }
+params = { id = "{assistant}" }
 
 [[field]]
 backed_by = "soev-solutions"
@@ -783,12 +786,12 @@ body_base64 = "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA=="
 [[field]]
 route = "GET /api/v1/models/model/sharing"
 description = "routers/models.py:get_model_sharing reads the seeded model; only its owner sees the items left out of sharing."
-params = { "id" = "{model}" }
+params = { "id" = "{assistant}" }
 
 [[field]]
 route = "GET /api/v1/models/model"
 description = "routers/models.py reads the model by the id query parameter; the seeded model exists and is readable."
-params = { "id" = "{model}" }
+params = { "id" = "{assistant}" }
 
 [[field]]
 route = "GET /api/v1/prompts/id/{prompt_id}/history/diff"
@@ -1425,6 +1428,15 @@ seeded_by = "seed_model"
 depends_on = []
 actor = "user"
 
+[[fixture]]
+key = "assistant"
+description = "Workspace model reads and toggles require an owned assistant row; the platform catalog base has no OWUI model row. Keep catalog completions and assistant curation as separate positive controls."
+via = "POST /api/v1/models/create"
+body = { id = "fictional-assistant-{token}", name = "Fictional assistant {token}", base_model_id = "{model}", meta = {}, params = {} }
+extract = "id"
+depends_on = ["model"]
+actor = "user"
+
 [[control]]
 runtime_soev_backed = "drive"
 all_actors = true
@@ -1671,3 +1683,309 @@ routes = [
   "POST /ollama/verify",
   "PUT /api/events/webhooks/{webhook_id}"
 ]
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/create"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/export"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/id/{id}"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/access/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/skills/id/{id}/delete"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/id/{id}/files"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/files"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "PUT /api/v1/skills/id/{id}/files"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/id/{id}/files/content"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/files/move"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/files/remove"
+status = 403
+detail = "Feature 'skills' is not available in your plan"
+json = { detail = "Feature 'skills' is not available in your plan" }
+reason = "routers/skill_files.py:require_skill_files calls require_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/toggle"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/skills/id/{id}/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/skills/list"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tools/create"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/export"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/id/{id}"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tools/id/{id}/access/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "DELETE /api/v1/tools/id/{id}/delete"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tools/id/{id}/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/id/{id}/valves"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/id/{id}/valves/spec"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tools/id/{id}/valves/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/id/{id}/valves/user"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/id/{id}/valves/user/spec"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /api/v1/tools/id/{id}/valves/user/update"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "GET /api/v1/tools/list"
+status = 403
+detail = "Feature is unavailable"
+json = { detail = "Feature is unavailable" }
+reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/api/chat/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/v1/chat/completions/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/v1/messages/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/v1/completions/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
+
+[[control]]
+runtime_soev_backed = "drive"
+all_actors = true
+route = "POST /ollama/v1/embeddings/{url_idx}"
+status = 403
+detail = "Model not found"
+json = { detail = "Model not found" }
+reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."

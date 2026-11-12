@@ -82,6 +82,13 @@ def test_live_ids_address_real_resources(live_seeds, template):
 
     if seeds.route_waived(f'GET {template}'):
         pytest.skip('soev-solutions resource is waived in this runtime mode')
+    if f'GET {template}' in seeds.SURFACE['removed']['routes']:
+        path = re.sub(r'\{[^}]+\}', 'fictional-retired-resource', template)
+        for client in identities.clients:
+            result = client.request('GET', path)
+            assert result.status_code == 404, (template, result.text)
+            assert result.json() == {'detail': 'Not Found'}, (template, result.text)
+        return
     path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
     result = identities.user.request('GET', path)
     refusal = expected_refusals().get(f'GET {template}')
@@ -153,7 +160,7 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
 
 
 @pytest.mark.parametrize('role', ['admin', 'user', 'intruder'])
-def test_live_v2_function_routes_refuse_every_operation(live_seeds, role):
+def test_live_platform_disabled_routes_refuse_every_operation(live_seeds, role):
     from . import plane
     from .benign_requests import benign_request
     from .crossuser import expected_refusals, refused_as_expected

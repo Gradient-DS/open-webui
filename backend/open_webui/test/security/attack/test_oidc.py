@@ -283,11 +283,11 @@ def test_disposable_and_seed_identities_use_oidc(stack, tmp_path):
 
 
 def test_password_endpoint_negative_probe_remains_enabled_in_oidc_mode(stack, tmp_path):
-    from .test_live_client import test_wrong_password_is_a_loud_400
+    from .test_live_client import test_wrong_password_login_is_refused
 
     actors = identities.ensure_identities('http://app')
     try:
-        test_wrong_password_is_a_loud_400(actors)
+        test_wrong_password_login_is_refused(actors)
         assert oidc.enabled()
         assert stack.identities.attempts == {identities.USER_EMAIL: 1}
         actors.user.verify_identity(email=identities.USER_EMAIL, role='user')

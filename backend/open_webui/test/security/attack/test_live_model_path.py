@@ -9,7 +9,7 @@ from .pass_support import crash_details, fresh_surface
 @pytest.fixture(scope='module')
 def live_model_paths():
     with fresh_surface() as (identities, parameters):
-        yield model_path.drive_model_paths(identities.admin, parameters)
+        yield model_path.drive_model_paths(identities.user, parameters)
 
 
 def test_live_model_path_has_its_own_5xx_assertion(live_model_paths):
