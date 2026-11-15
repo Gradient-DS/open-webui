@@ -128,7 +128,7 @@ async def test_standalone_setup_token_still_enables_and_issues_session(issuers, 
         'get_auth_by_user_id',
         AsyncMock(return_value=SimpleNamespace(totp_enabled=False, password='fictional-hash')),
     )
-    monkeypatch.setattr(totp, 'verify_password', lambda *args: True)
+    monkeypatch.setattr(totp, 'verify_password', AsyncMock(return_value=True))
     monkeypatch.setattr(totp, 'verify_totp', lambda *args: (True, 42))
     monkeypatch.setattr(totp, 'encrypt_secret', lambda _: 'encrypted')
     issuers.write.return_value = ['ABCDE-FGHIJ']
