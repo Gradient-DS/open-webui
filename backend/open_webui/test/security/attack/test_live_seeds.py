@@ -162,8 +162,7 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
 @pytest.mark.parametrize('role', ['admin', 'user', 'intruder'])
 def test_live_platform_disabled_routes_refuse_every_operation(live_seeds, role):
     from . import plane
-    from .benign_requests import benign_request
-    from .crossuser import expected_refusals, refused_as_expected
+    from .crossuser import _benign, expected_refusals, refused_as_expected
 
     if seeds.runtime_soev_backed() != 'drive':
         pytest.skip('v2 custom-function refusals apply only to the private sweep')
@@ -173,7 +172,7 @@ def test_live_platform_disabled_routes_refuse_every_operation(live_seeds, role):
         if not template.startswith('/api/v1/functions/') and not declaration.get('all_actors'):
             continue
         target = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe=''), template)
-        response = getattr(identities, role).request(method, target, **benign_request(route, resolved))
+        response = getattr(identities, role).request(method, target, **_benign(route, resolved, seeds.SPEC))
         try:
             assert refused_as_expected(declaration, response.status_code, response.text), (route, response.text)
             plane.record_design_refusal(route, role, response)
