@@ -979,6 +979,10 @@ def test_connection_proxy_fields_use_the_upstream_model():
     # These routes resolve the model against a connection's own list, not the registry.
     direct = {
         'POST /ollama/api/chat/{url_idx}',
+        'POST /ollama/api/embed/{url_idx}',
+        'POST /ollama/api/embeddings/{url_idx}',
+        'POST /ollama/api/generate/{url_idx}',
+        'POST /ollama/v1/responses/{url_idx}',
         'POST /ollama/v1/chat/completions/{url_idx}',
         'POST /ollama/v1/messages/{url_idx}',
         'POST /ollama/v1/completions/{url_idx}',
@@ -1211,3 +1215,19 @@ def test_query_boolean_fields_use_the_platform_wire_format():
     fields = seeds.resolve_fields(ctx)
     request = requests.Request('GET', 'https://owui.invalid/fictional', **fields['GET /fictional']).prepare()
     assert request.url.endswith('include_sidebar=true&include_archived=false&page=1')
+
+
+def test_disabled_oauth_client_is_fresh_in_each_resolution_without_http(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = '/oauth/clients/{client_id}/authorize'
+    parameter = seeds.parameter_for(route, 'client_id')
+    surface = {'parameter': [parameter]}
+    spec = {'paths': {route: {'get': {}}}}
+    actor = Mock()
+    tokens = ['fictional-first-pass', 'fictional-second-pass']
+    monkeypatch.setattr(seeds.secrets, 'token_hex', Mock(side_effect=tokens))
+    resolved = [seeds.resolve_parameters(actor, surface=surface, spec=spec) for _ in tokens]
+    assert [result[route, 'client_id'] for result in resolved] == [
+        f'mcp:fictional-disabled-{token}' for token in tokens
+    ]
+    actor.request.assert_not_called()

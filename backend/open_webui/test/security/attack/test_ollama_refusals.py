@@ -31,20 +31,26 @@ async def test_indexed_ollama_proxies_refuse_unregistered_models_for_all_actors(
     path = path.replace('{url_idx}', '0')
     declaration = crossuser.expected_refusals()[route]
     assert declaration['all_actors'] and route in seeds.ordinary_targets()
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE, values={'upstream_model': 'fictional-upstream-model'})
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    assert request['json']['model'] == 'fictional-upstream-model'
+    required_inputs = {
+        'POST /ollama/api/embed/{url_idx}': 'input',
+        'POST /ollama/api/embeddings/{url_idx}': 'prompt',
+        'POST /ollama/api/generate/{url_idx}': 'prompt',
+        'POST /ollama/v1/responses/{url_idx}': 'input',
+    }
+    if route in required_inputs:
+        assert request['json'][required_inputs[route]].startswith('Fictional ')
+        assert '{token}' not in request['json'][required_inputs[route]]
+    assert declaration['status'] == 403 and declaration['json'] == {'detail': 'Model not found'}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as client:
-        for actor in ('owner', 'member', 'intruder'):
-            app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id=actor, role='user')
-            response = await client.request(
-                method,
-                path,
-                json={
-                    'model': 'fictional-upstream-model',
-                    'messages': [],
-                    'prompt': 'Fictional probe.',
-                    'input': 'Fictional probe.',
-                    'max_tokens': 1,
-                    'stream': False,
-                },
+        for actor in ('admin', 'user', 'intruder'):
+            app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(
+                id=actor, role='admin' if actor == 'admin' else 'user'
             )
+            response = await client.request(method, path, **request)
             assert crossuser.refused_as_expected(declaration, response.status_code, response.text), response.text
     upstream.assert_not_awaited()

@@ -735,3 +735,71 @@ def test_batched_view_reads_keep_owner_controls_and_cross_user_oracles(monkeypat
     assert expected <= set(routes) & set(seeds.ordinary_targets())
     assert expected <= set(seeds.SURFACE['required_drive_routes'])
     assert not expected & set(crossuser.expected_refusals())
+
+
+@pytest.mark.parametrize('kind', ['params', 'json', 'form'])
+@pytest.mark.parametrize('mode', ['drive', 'waive'])
+def test_field_owner_resolves_query_body_and_alias_references(monkeypatch, kind, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    surface = {
+        'parameter': [{'key': 'resource', 'actor': 'user'}, {'key': 'alias', 'same_as': 'resource'}],
+        'field': [
+            {'route': 'POST /resource', kind: {'nested': ['prefix-{alias}']}, 'v2': {kind: {'id': '{resource}'}}}
+        ],
+    }
+    assert crossuser._field_owner_key('POST /resource', surface) == 'user'
+    assert crossuser._field_owner_key('POST /other', surface) is None
+
+
+def test_meeting_audio_control_uses_meeting_owner_and_keeps_both_refusal_probes(offline, monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/meetings/audio'
+    spec = {'paths': {'/api/v1/meetings/audio': {'post': {}}}}
+    identities, order = setup_pass(
+        monkeypatch, spec, {'admin': (403, {'detail': 'refused'}), 'intruder': (403, {'detail': 'refused'})}
+    )
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    ctx = seeds.SeedContext(None, None, seeds.SURFACE, values={'meeting': 'fictional-meeting'})
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(ctx, entries=[entry]))
+
+    @contextmanager
+    def fixtures(*args, **kwargs):
+        yield parameters, (), seeds.SURFACE, {'admin': identities.admin, 'user': identities.user}
+
+    monkeypatch.setattr(crossuser, 'own_fixtures', fixtures)
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=[])
+    assert [actor for actor, _, _, _ in order] == ['intruder', 'admin', 'user']
+    assert all(kwargs['params']['thread_id'] == 'fictional-meeting' for _, _, _, kwargs in order)
+    assert result.controls == {route: 200}
+    assert not result.violations
+
+
+@pytest.mark.parametrize(
+    'status,body,expected',
+    [
+        (403, '', True),
+        (401, '', False),
+        (404, '', False),
+        (200, '', False),
+        (403, '{"detail":"Feature is unavailable"}', False),
+        (403, ' ', False),
+    ],
+)
+def test_head_refusal_requires_exact_status_and_empty_body(status, body, expected):
+    route = 'HEAD /api/v1/terminals/{server_id}/{path}'
+    declaration = crossuser.expected_refusals()[route]
+    assert crossuser.refused_as_expected(declaration, status, body) is expected
+
+
+@pytest.mark.parametrize(
+    'body,expected',
+    [
+        ('', False),
+        ('{"detail":"Feature is unavailable"}', True),
+        ('{"detail":"Other feature is unavailable"}', False),
+        ('{"detail":"Feature is unavailable today"}', False),
+    ],
+)
+def test_terminal_get_still_requires_the_exact_detail(body, expected):
+    declaration = crossuser.expected_refusals()['GET /api/v1/terminals/{server_id}/{path}']
+    assert crossuser.refused_as_expected(declaration, 403, body) is expected

@@ -91,3 +91,36 @@ def test_workspace_model_routes_use_an_owned_assistant_and_keep_catalog_completi
     for route in ('GET /api/v1/models/model', 'GET /api/v1/models/model/sharing', 'POST /api/v1/models/model/toggle'):
         assert fields[route]['params'] == {'id': '{assistant}'}
     assert fields['POST /api/v1/tasks/title/completions']['v2']['json']['model'] == '{model}'
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_disabled_control_refuses_every_actor_with_a_valid_body(monkeypatch):
+    from open_webui.routers import tasks
+    from open_webui.services.model_request_bodies import TaskCompletionBody
+    from open_webui.utils.auth import get_verified_user
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/tasks/auto/completions'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    ctx = seeds.SeedContext(None, None, seeds.SURFACE, values={'model': 'fictional-model', 'chat': 'fictional-chat'})
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(ctx, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    TaskCompletionBody.model_validate(request['json'])
+    assert request['json']['prompt'] and request['json']['chat_id'] == 'fictional-chat'
+    declaration = crossuser.expected_refusals()[route]
+    assert declaration['all_actors'] and route in seeds.ordinary_targets()
+    assert declaration['status'] == 400
+    assert declaration['json'] == {'detail': 'Autocompletion generation is disabled'}
+    monkeypatch.setattr(tasks.Config, 'get', AsyncMock(return_value=False))
+    completion = AsyncMock(side_effect=AssertionError('Disabled autocomplete must not call a model'))
+    monkeypatch.setattr(tasks, 'generate_chat_completion', completion)
+    app = FastAPI()
+    app.include_router(tasks.router, prefix='/api/v1/tasks')
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as client:
+        for actor in ('admin', 'user', 'intruder'):
+            app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(
+                id=actor, role=actor if actor == 'admin' else 'user'
+            )
+            response = await client.post('/api/v1/tasks/auto/completions', **request)
+            assert crossuser.refused_as_expected(declaration, response.status_code, response.text), response.text
+    completion.assert_not_awaited()

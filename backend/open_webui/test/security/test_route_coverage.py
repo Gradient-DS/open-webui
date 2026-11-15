@@ -184,3 +184,24 @@ def test_a_waiver_covers_an_uncovered_route(monkeypatch, tmp_path):
     monkeypatch.setenv('ROUTE_HITS_PATH', str(path))
     monkeypatch.setattr(__name__ + '.waivers', lambda: {covered[0]: 'a written reason'})
     assert_every_route_is_driven_or_waived()
+
+
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+def test_terminal_refusal_coverage_validates_the_method_for_every_actor(monkeypatch, method):
+    route = f'{method} /api/v1/terminals/{{server_id}}/{{path}}'
+    module = __import__(__name__, fromlist=['operations'])
+    monkeypatch.setattr(module, 'operations', lambda: {route})
+    monkeypatch.setattr(module, 'waivers', lambda: {})
+    body = '' if method == 'HEAD' else '{"detail":"Feature is unavailable"}'
+    actors = {actor: {'status': 403, 'body': body} for actor in ('admin', 'user', 'intruder')}
+    monkeypatch.setattr(module, 'evidence', lambda: {'hits': [], 'refused_by_design': {route: actors}})
+    assert_every_route_is_driven_or_waived()
+    for actor in actors:
+        actors[actor]['body'] = '{"detail":"Feature is unavailable"}' if method == 'HEAD' else ''
+        with pytest.raises(AssertionError, match='terminals'):
+            assert_every_route_is_driven_or_waived()
+        actors[actor]['body'] = body
+        actors[actor]['status'] = 401
+        with pytest.raises(AssertionError, match='terminals'):
+            assert_every_route_is_driven_or_waived()
+        actors[actor]['status'] = 403

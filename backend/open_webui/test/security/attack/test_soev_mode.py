@@ -396,7 +396,8 @@ def test_platform_oauth_authorization_has_a_seed_and_an_exact_refusal(monkeypatc
     parameter = seeds.parameter_for('/oauth/clients/{client_id}/authorize', 'client_id')
     assert seeds.seed_enabled(parameter)
     assert parameter['seeded_by'] == 'seed_disabled_oauth_client'
-    assert seeds.seed_disabled_oauth_client(None, parameter) == 'mcp:fictional-disabled'
+    ctx = seeds.SeedContext(None, None, seeds.SURFACE, token='fictional-pass')
+    assert seeds.seed_disabled_oauth_client(ctx, parameter) == 'mcp:fictional-disabled-fictional-pass'
     assert route in seeds.ordinary_targets()
     declaration = crossuser.expected_refusals()[route]
     assert declaration['all_actors'] is True

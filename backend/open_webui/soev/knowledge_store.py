@@ -1150,22 +1150,23 @@ class SoevKnowledgeTable:
         await self._send('DELETE', self._path(key) + '/folders?' + urlencode({'path': path}))
 
     async def delete_directory(self, directory_id, move_files_to_parent=True, db=None):
+        key, path = self._projection.directory_of(directory_id)
+        self._assert_writable_path(path)
+        if move_files_to_parent:
+            _, documents = await self._folder_entries(key, path)
+            for document in documents:
+                await self._move_document(key, document['source_id'], path[:-1])
+        else:
+            for source_id in await self.get_file_ids_in_directory_subtree(key, directory_id):
+                await self.remove_file_from_knowledge_by_id(key, source_id)
         try:
-            key, path = self._projection.directory_of(directory_id)
-            self._assert_writable_path(path)
-            if move_files_to_parent:
-                _, documents = await self._folder_entries(key, path)
-                for document in documents:
-                    await self._move_document(key, document['source_id'], path[:-1])
-            else:
-                for source_id in await self.get_file_ids_in_directory_subtree(key, directory_id):
-                    await self.remove_file_from_knowledge_by_id(key, source_id)
             await self._delete_folder(key, '/'.join(path))
-            return True
-        except SoevNotConfigured:
-            raise
-        except SoevApiError:
+        except SoevApiError as error:
+            # Nested files or deletions still queued: the caller retries once they have landed.
+            if error.code != 'folder_not_empty':
+                raise
             return False
+        return True
 
     async def _move_document(self, key, source_id, path, *, user_id=None):
         self._assert_writable_path(path)
