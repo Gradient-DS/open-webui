@@ -10,10 +10,11 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 536 operations. Audit bodies across all
-# OpenAPI methods (540 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 372 operations. Audit bodies across all
+# OpenAPI methods (376 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
+# Shared mailbox routes add three operations and one writable address field.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
 OPENAPI_METHODS = FIVE_METHODS | {'head', 'options', 'trace'}
 
@@ -33,8 +34,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (369, 373), (
-        f'Expected 536 five-method operations / 540 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (369 + 3, 373 + 3), (
+        f'Expected 372 five-method operations / 376 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,9 +64,9 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        138,
-        1845,
-    ), f'Expected 199 routes / 2160 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        138 + 1,
+        1845 + 1,
+    ), f'Expected 139 routes / 1846 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     # image_prompt refuses platform mode before consuming either field.
     for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
@@ -82,7 +83,7 @@ def test_derived_counts(surface):
     assert query_counts == (
         36,
         78,
-    ), f'Expected 49 routes / 99 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    ), f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):
@@ -104,14 +105,12 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 9 and media == {'application/json': 7, 'multipart/form-data': 2}, (
-        'Expected 20 blind body operations (16 JSON: 15 write + 1 read; 4 multipart); '
-        f'measured {len(blind)}: {dict(media)}.'
+    assert len(blind) == 9 + 1 and media == {'application/json': 7 + 1, 'multipart/form-data': 2}, (
+        f'Expected 10 blind body operations (8 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == set(), (
-        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 15 JSON write bodies; '
-        f'measured read bodies: {sorted(read_bodies)}.'
+        f'Expected no blind read bodies alongside 8 JSON write bodies; measured read bodies: {sorted(read_bodies)}.'
     )
 
 
@@ -129,8 +128,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        'Expected exact waivers for 20 blind operations (15 JSON write + 1 JSON read + 4 multipart); '
-        f'measured {len(blind)} blind.'
+        f'Expected exact waivers for 10 blind operations (8 JSON writes + 2 multipart); measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')
     for route in sorted(missing):
@@ -203,3 +201,16 @@ def test_bug_report_schema_forbids_extra_content_and_bounds_every_context_field(
         'trace_id',
     }
     assert all(any(part.get('maxLength', 0) > 0 for part in field['anyOf']) for field in context['properties'].values())
+
+
+def test_shared_mailbox_surface_keeps_all_methods_and_the_address_field(surface):
+    operations, fields, queries = surface
+    path = '/api/v1/cloud-sync/connections/{connection_id}/mailboxes'
+    for method in ('GET', 'POST', 'DELETE'):
+        route = f'{method} {path}' + ('/{address}' if method == 'DELETE' else '')
+        assert route in operations
+        assert operations[route]['security'] == [{'HTTPBearer': []}]
+        assert not queries.get(route)
+    assert fields[f'POST {path}'] == ['address']
+    assert not fields.get(f'GET {path}')
+    assert not fields.get(f'DELETE {path}/{{address}}')

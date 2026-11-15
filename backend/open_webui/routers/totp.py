@@ -200,7 +200,7 @@ async def enable_totp(
         raise HTTPException(status_code=400, detail='TOTP is already enabled')
 
     # Re-verify password
-    if not verify_password(form_data.password, auth.password):
+    if not await verify_password(form_data.password, auth.password):
         raise HTTPException(status_code=403, detail='Invalid password')
 
     # Verify the TOTP code against the provided secret
@@ -250,7 +250,7 @@ async def disable_totp(
         raise HTTPException(status_code=400, detail='TOTP is not enabled')
 
     # Re-verify password
-    if not verify_password(form_data.password, auth.password):
+    if not await verify_password(form_data.password, auth.password):
         raise HTTPException(status_code=403, detail='Invalid password')
 
     await Auths.update_totp(user.id, None, False, db=db)
@@ -351,7 +351,7 @@ async def regenerate_recovery_codes(
         raise HTTPException(status_code=400, detail='TOTP is not enabled')
 
     # Re-verify password
-    if not verify_password(form_data.password, auth.password):
+    if not await verify_password(form_data.password, auth.password):
         raise HTTPException(status_code=403, detail='Invalid password')
 
     recovery_codes = await RecoveryCodes.generate_codes(user.id, db=db)

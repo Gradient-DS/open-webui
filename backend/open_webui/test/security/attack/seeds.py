@@ -495,8 +495,21 @@ def seed_cloud_family(ctx, parameter):
     return 'live_documents'
 
 
+def seed_cloud_mailbox_address(ctx, parameter):
+    connection = ctx.values['cloud_mail_connection']
+    mailbox = ctx.request(
+        'POST',
+        f'/api/v1/cloud-sync/connections/{connection}/mailboxes',
+        actor=ctx.admin,
+        json={'address': 'gedeeld@example.test'},
+    )
+    return _extract(mailbox, 'address', name=parameter['key'], via='POST cloud mailbox')
+
+
 def seed_cloud_connection(ctx, parameter):
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.client, json={'provider': 'onedrive'})
+    provider, family = parameter['provider'], parameter['family']
+    actor = {'user': ctx.client, 'admin': ctx.admin}[parameter['actor']]
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=actor, json={'provider': provider})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
     # soev-api keeps one connection per owner and provider: a later pass gets the
     # consented connection back, without an authorize URL, and needs no new consent.
@@ -522,8 +535,9 @@ def seed_cloud_connection(ctx, parameter):
                 raise RuntimeError('Consent fixture returned invalid JSON') from None
             if not isinstance(accepted, dict) or accepted.get('id') != connection:
                 raise RuntimeError('Consent fixture did not acknowledge this connection')
-    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.client)
-    ctx.provide(parameter, 'cloud_grant', grant['id'])
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/{family}', actor=actor)
+    if 'cloud_grant' in parameter.get('provides', []):
+        ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
 
 
@@ -559,6 +573,7 @@ _SEEDERS = {
         seed_cloud_connection,
         seed_cloud_authorize_connection,
         seed_cloud_family,
+        seed_cloud_mailbox_address,
         seed_knowledge_file,
     )
 }

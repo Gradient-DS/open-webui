@@ -29,7 +29,8 @@ export const DEFAULT_RECONNECT_CODES = [
 	'suspended:reauth',
 	'pending',
 	'revoked',
-	'access_revoked',
+	'reauth_required',
+	'refresh_rejected',
 	'credential_unusable',
 	'owner_mismatch'
 ];

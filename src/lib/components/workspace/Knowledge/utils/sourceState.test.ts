@@ -73,9 +73,53 @@ describe('source states', () => {
 				state: 'needs_reconnect',
 				primary: 'reconnect'
 			});
-		for (const last_error of ['access_revoked', 'credential_unusable', 'owner_mismatch'])
+		for (const last_error of ['credential_unusable', 'owner_mismatch'])
 			expect(view({ last_error }).state).toBe('needs_reconnect');
 	});
+	it.each(['onedrive', 'google_drive', 'confluence'])(
+		'shows an unavailable source on an enabled %s connection without a reconnect or sync action',
+		(source_kind) => {
+			const account = { ...connection, source_kind };
+			expect(
+				view(
+					{
+						source_kind,
+						connection: account,
+						lifecycle: 'suspended',
+						last_error: 'access_revoked',
+						document_count: 0,
+						last_run: { ...run, outcome: 'failed', counts: { landed: 5 } }
+					},
+					account
+				)
+			).toMatchObject({ state: 'source_unavailable', primary: null, documents: 0 });
+			expect(view({ source_kind, last_run: run }, account).state).toBe('up_to_date');
+		}
+	);
+	it('does not let stale credential errors suggest reconnect for an unavailable source', () => {
+		const content = schedule({ lifecycle: 'suspended', last_error: 'access_revoked' });
+		const acl = schedule({ kind: 'acl_refresh', last_error: 'credential_unusable' });
+		expect(sourceState({ content, acl }, connection)).toMatchObject({
+			state: 'source_unavailable',
+			primary: null
+		});
+	});
+	it.each(['reauth_required', 'refresh_rejected', 'access_revoked', null])(
+		'keeps reconnect and documents for suspended:reauth with connection error %s',
+		(last_error) => {
+			expect(
+				view(
+					{
+						lifecycle: 'suspended',
+						last_error: 'access_revoked',
+						document_count: 5,
+						last_run: { ...run, outcome: 'failed', error_code: 'access_revoked' }
+					},
+					{ ...connection, lifecycle: 'suspended:reauth', last_error }
+				)
+			).toMatchObject({ state: 'needs_reconnect', primary: 'reconnect', documents: 5 });
+		}
+	);
 	it('needs reconnect for a provider without a frontend adapter', () => {
 		const account = { ...connection, source_kind: 'confluence', last_error: 'owner_mismatch' };
 		expect(view({ source_kind: 'confluence', connection: account }, account)).toMatchObject({
@@ -127,7 +171,7 @@ it('applies precedence across both schedules and the connection', () => {
 	];
 	const states = [
 		'syncing',
-		'needs_reconnect',
+		'source_unavailable',
 		'needs_access',
 		'paused',
 		'error',

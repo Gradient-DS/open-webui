@@ -24,6 +24,7 @@
 	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
 
 	import { deleteOAuthSession } from '$lib/apis/auths';
+	import { listMailboxes, type MailboxList } from '$lib/apis/cloudSync';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 
@@ -53,6 +54,8 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import Cog6 from '$lib/components/icons/Cog6.svelte';
+	import SharedMailboxesModal from './SharedMailboxesModal.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -160,8 +163,10 @@
 			const prompt = relinkPrompt(error);
 			toast.error(prompt ? $i18n.t(prompt) : String(error));
 		} finally {
-			if (mail) connectingMail = false;
-			else connectingDocuments = false;
+			if (mail) {
+				connectingMail = false;
+				void prefetchMailSettings();
+			} else connectingDocuments = false;
 		}
 	}
 	export const toggleLiveDocuments = () => toggleLive('live_documents');
@@ -188,8 +193,29 @@
 	) {
 		void prefetchLiveConnections(localStorage.token).catch(() => {});
 	}
+	// [Gradient] The platform's mailbox response gates the settings entry, independently of the switch.
+	let mailboxSettings: { connectionId: string; state: MailboxList } | null = null;
+	let showSharedMailboxes = false;
+	let mailboxLoad = 0;
+	async function prefetchMailSettings() {
+		const load = ++mailboxLoad;
+		const token = localStorage.token;
+		mailboxSettings = null;
+		try {
+			const rows = await prefetchLiveConnections(token, 'outlook_mail', 'mail');
+			const connection =
+				rows.find((row) => row.connection.lifecycle === 'enabled')?.connection ??
+				rows[0]?.connection;
+			if (!connection) return;
+			const state = await listMailboxes(token, connection.id);
+			if (load === mailboxLoad && token === localStorage.token && state.enabled)
+				mailboxSettings = { connectionId: connection.id, state };
+		} catch {
+			// Disabled deployments return policy_forbids; no settings entry until support is confirmed.
+		}
+	}
 	$: if (show && $config?.features?.enable_live_mail) {
-		void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
+		void prefetchMailSettings();
 	}
 	$: if (show && $config?.features?.enable_onedrive_business) {
 		void prepareBusinessDocumentPicker().catch(() => {});
@@ -850,6 +876,20 @@
 						>
 							<MailSearch slot="icon" className="size-3.5" />
 							<svelte:fragment slot="actions">
+								{#if mailboxSettings && $config?.features?.enable_live_mail}
+									<Tooltip content={$i18n.t('Shared mailboxes')}>
+										<button
+											type="button"
+											class="p-0.5 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+											disabled={connectingMail}
+											aria-label={$i18n.t('Shared mailboxes')}
+											on:click|stopPropagation|preventDefault={() => {
+												showSharedMailboxes = true;
+												closeMenu();
+											}}><Cog6 className="size-3.5" /></button
+										>
+									</Tooltip>
+								{/if}
 								{#if connectingMail}
 									<Spinner className="size-3.5 shrink-0" />
 								{:else if !mailGranted}
@@ -1372,3 +1412,11 @@
 		</DropdownMenu>
 	</div>
 </Dropdown>
+
+{#if showSharedMailboxes && mailboxSettings}
+	<SharedMailboxesModal
+		bind:show={showSharedMailboxes}
+		connectionId={mailboxSettings.connectionId}
+		initial={mailboxSettings.state}
+	/>
+{/if}

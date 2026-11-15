@@ -24,6 +24,8 @@ async def cloud_sync(request: Request, user=Depends(get_verified_user)):
     ensure_configured()
     if 'knowledge_id' in request.path_params or request.url.path.endswith('/usage'):
         await capabilities.require(capabilities.CLOUD_SYNC)
+    elif '/mailboxes' in request.url.path:
+        await capabilities.require(capabilities.LIVE_MAIL)
     elif 'family' in request.path_params:
         family = request.path_params['family']
         await capabilities.require(capabilities.LIVE_MAIL if family == 'mail' else capabilities.LIVE_DOCUMENTS)
@@ -75,6 +77,16 @@ class ConnectionForm(BaseModel):
     provider: Literal['onedrive', 'outlook_mail', 'google_drive', 'confluence']
 
 
+class MailboxForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    address: str
+
+
+class AuthorizationForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    silent: bool = False
+
+
 class ScheduleForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
     connection_id: str = Field(min_length=1, max_length=256)
@@ -120,10 +132,16 @@ async def grant_live(sync=Depends(cloud_sync), user=Depends(get_verified_user)):
 
 
 @router.post('/connections/{connection_id}/authorize')
-async def authorize_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+async def authorize_connection(
+    connection_id: str,
+    body: AuthorizationForm | None = None,
+    sync=Depends(cloud_sync),
+    user=Depends(get_verified_user),
+):
     connection = await sync.connection(connection_id)
-    owner_email = user.email if connection['source_kind'] == 'google_drive' else None
-    return await sync.authorize(connection_id, owner_email=owner_email)
+    silent = body is not None and body.silent
+    owner_email = user.email if silent or connection['source_kind'] == 'google_drive' else None
+    return await sync.authorize(connection_id, owner_email=owner_email, silent=silent)
 
 
 @router.get('/connect/done', response_class=HTMLResponse)
@@ -150,7 +168,8 @@ async def connect_done(
         '<!DOCTYPE html><html><body><script>'
         f'if (window.opener) {{ for (const origin of new Set([window.location.origin, ...{origins}])) '
         f'window.opener.postMessage({data}, origin); }}'
-        'window.close();</script></body></html>',
+        # Keep the silent attempt's popup for the opener to continue interactive consent.
+        f'{"" if result == "interaction_required" else "window.close();"}</script></body></html>',
         headers={'Cache-Control': 'no-store'},
     )
 
@@ -237,3 +256,19 @@ async def live_grants(connection_id: str, family: Literal['live_documents', 'mai
 @router.post('/connections/{connection_id}/live/{family}')
 async def enable_live_family(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
     return await sync.enable_live_family(connection_id, family)
+
+
+@router.get('/connections/{connection_id}/mailboxes')
+async def list_mailboxes(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.mailboxes(connection_id)
+
+
+@router.post('/connections/{connection_id}/mailboxes')
+async def add_mailbox(connection_id: str, body: MailboxForm, sync=Depends(cloud_sync)):
+    return await sync.add_mailbox(connection_id, body.address)
+
+
+@router.delete('/connections/{connection_id}/mailboxes/{address:path}', status_code=204)
+async def remove_mailbox(connection_id: str, address: str, sync=Depends(cloud_sync)):
+    await sync.remove_mailbox(connection_id, address)
+    return Response(status_code=204)

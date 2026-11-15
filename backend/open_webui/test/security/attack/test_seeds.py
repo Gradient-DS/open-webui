@@ -237,10 +237,17 @@ def test_synchronous_file_processing_does_not_poll():
 
 
 @pytest.mark.parametrize('consent_status', [200, 400, 403])
-def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, consent_status):
+@pytest.mark.parametrize(
+    ('provider', 'family', 'provides', 'actor'),
+    [('onedrive', 'live_documents', ['cloud_grant'], 'user'), ('outlook_mail', 'mail', [], 'admin')],
+)
+def test_cloud_seed_requires_consent_then_creates_the_owner_grant(
+    monkeypatch, consent_status, provider, family, provides, actor
+):
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    client.request.side_effect = [
+    owner, other = (client, admin) if actor == 'user' else (admin, client)
+    owner.request.side_effect = [
         response(
             201,
             {
@@ -258,17 +265,24 @@ def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, c
     monkeypatch.setattr(seeds.requests, 'Session', Mock(return_value=manager))
     monkeypatch.setenv('CI_PLATFORM_FIXTURE_URL', 'http://fixture:8040')
     monkeypatch.setenv('CI_PLATFORM_FIXTURE_KEY', 'test-fixture-key')
-    parameter = {'key': 'cloud_connection', 'provides': ['cloud_grant']}
+    parameter = {
+        'key': 'cloud_connection',
+        'provider': provider,
+        'family': family,
+        'provides': provides,
+        'actor': actor,
+    }
     if consent_status != 200:
         with pytest.raises(RuntimeError, match=f'HTTP {consent_status}'):
             seeds.seed_cloud_connection(ctx, parameter)
-        assert client.request.call_count == 1
+        assert owner.request.call_count == 1
         assert not ctx.values
     else:
         assert seeds.seed_cloud_connection(ctx, parameter) == 'connection'
-        assert ctx.values == {'cloud_grant': 'grant'}
-        client.request.assert_called_with('POST', '/api/v1/cloud-sync/connections/connection/live/live_documents')
-    admin.request.assert_not_called()
+        assert ctx.values == ({'cloud_grant': 'grant'} if provides else {})
+        owner.request.assert_called_with('POST', f'/api/v1/cloud-sync/connections/connection/live/{family}')
+    assert owner.request.call_args_list[0].kwargs == {'json': {'provider': provider}}
+    other.request.assert_not_called()
     session.post.assert_called_once_with(
         'http://fixture:8040/ci/consent',
         headers={'Authorization': 'Bearer test-fixture-key'},
@@ -287,6 +301,9 @@ def test_consent_fixture_failure_is_recorded_and_never_enables_a_grant(monkeypat
         'name': 'connection_id',
         'prefix': '/connections/{connection_id}',
         'seeded_by': 'seed_cloud_connection',
+        'provider': 'onedrive',
+        'family': 'live_documents',
+        'actor': 'user',
         'provides': ['cloud_grant'],
         'depends_on': [],
     }
@@ -316,19 +333,24 @@ def test_consent_fixture_failure_is_recorded_and_never_enables_a_grant(monkeypat
     client.request.assert_called_once()
 
 
-def test_a_later_pass_reuses_the_consented_connection_without_new_consent(monkeypatch):
+@pytest.mark.parametrize(('key', 'actor'), [('cloud_connection', 'user'), ('cloud_mail_connection', 'admin')])
+def test_a_later_pass_reuses_the_consented_connection_without_new_consent(monkeypatch, key, actor):
     """One connection per owner and provider: the create returns the consented one, with no authorize URL."""
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    client.request.side_effect = [
+    parameter = next(item for item in seeds.SURFACE['parameter'] if item['key'] == key)
+    owner, other = (client, admin) if actor == 'user' else (admin, client)
+    owner.request.side_effect = [
         response(200, {'connection_id': 'connection', 'authorize_url': None}),
         response(200, {'id': 'grant'}),
     ]
     session_factory = Mock()
     monkeypatch.setattr(seeds.requests, 'Session', session_factory)
-    assert seeds.seed_cloud_connection(ctx, {'key': 'cloud_connection', 'provides': ['cloud_grant']}) == 'connection'
-    assert ctx.values == {'cloud_grant': 'grant'}
+    assert seeds.seed_cloud_connection(ctx, parameter) == 'connection'
+    assert ctx.values == ({'cloud_grant': 'grant'} if parameter.get('provides') else {})
     session_factory.assert_not_called()
+    owner.request.assert_called_with('POST', f'/api/v1/cloud-sync/connections/connection/live/{parameter["family"]}')
+    other.request.assert_not_called()
 
 
 def test_starting_consent_cannot_suspend_the_connection_used_by_positive_controls():
@@ -339,6 +361,9 @@ def test_starting_consent_cannot_suspend_the_connection_used_by_positive_control
     assert 'same_as' not in authorize
     assert live['seeded_by'] == 'seed_cloud_connection'
     assert 'cloud_grant' in live['provides']
+    mailbox = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/mailboxes', 'connection_id')
+    assert mailbox['provider'] == 'outlook_mail' and mailbox['family'] == 'mail'
+    assert authorize['actor'] == live['actor'] == 'user' and mailbox['actor'] == 'admin'
 
 
 def test_the_authorize_control_takes_a_separate_provider():
@@ -362,6 +387,24 @@ def test_authorize_control_never_reuses_the_consented_onedrive_connection():
         seeds.seed_cloud_authorize_connection(ctx, {'key': 'cloud_authorize_connection'})
     client.request.assert_called_once_with('GET', '/api/v1/cloud-sync/policy')
     admin.request.assert_not_called()
+
+
+def test_mailbox_seed_saves_a_real_mailbox_on_the_outlook_connection_each_pass():
+    client, admin = Mock(), Mock()
+    ctx = seeds.SeedContext(client, admin, seeds.SURFACE)
+    ctx.values.update(cloud_connection='onedrive', cloud_mail_connection='outlook')
+    admin.request.return_value = response(201, {'address': 'gedeeld@example.test'})
+    path = '/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}'
+    parameter = seeds.parameter_for(path, 'address')
+    assert parameter['depends_on'] == ['cloud_mail_connection']
+    assert seeds.parameter_for(path, 'connection_id')['key'] == 'cloud_mail_connection'
+    for _ in range(2):
+        assert seeds.seed_cloud_mailbox_address(ctx, parameter) == 'gedeeld@example.test'
+    assert admin.request.call_count == 2
+    admin.request.assert_called_with(
+        'POST', '/api/v1/cloud-sync/connections/outlook/mailboxes', json={'address': 'gedeeld@example.test'}
+    )
+    client.request.assert_not_called()
 
 
 def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
