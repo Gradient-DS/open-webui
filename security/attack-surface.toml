@@ -508,6 +508,8 @@ name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}"
 description = "routers/cloud_sync.py resolves an owned connection through soev-api. soev-api keeps one connection per owner and provider, so every pass resolves the same consented OneDrive connection."
 seeded_by = "seed_cloud_connection"
+provider = "onedrive"
+family = "live_documents"
 depends_on = []
 provides = ["cloud_grant"]
 fresh = false
@@ -518,7 +520,7 @@ backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Read the caller's policy, then seed a separate pending Outlook mail connection so this control cannot revoke OneDrive live-grant and schedule fixtures. soev-api keeps one connection per owner and provider; later passes reuse the pending connection."
+description = "Starting consent suspends an enabled connection. Read the caller's policy, then seed a separate pending Outlook mail connection so this control cannot revoke that caller's OneDrive live-grant and schedule fixtures or the other subject's Outlook mailbox fixture. soev-api keeps one connection per owner and provider; later passes reuse the pending connection."
 seeded_by = "seed_cloud_authorize_connection"
 depends_on = []
 fresh = false
@@ -534,6 +536,30 @@ seeded_by = "seed_cloud_family"
 depends_on = ["cloud_connection"]
 fresh = false
 actor = "user"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_mail_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Mailbox settings require an owned Outlook connection, shared-mailbox consent and a mail live grant. Keep the OneDrive fixture for document grants and schedules. The private provider fixture completes consent with Mail.Read.Shared; the real owner API creates the grant."
+seeded_by = "seed_cloud_connection"
+provider = "outlook_mail"
+family = "mail"
+depends_on = []
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_mailbox_address"
+name = "address"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}"
+description = "Save gedeeld@example.test through the owner API and the private provider's signed mailbox probe, so list and delete operate on an existing mailbox. Re-add it on every pass after earlier removals."
+seeded_by = "seed_cloud_mailbox_address"
+depends_on = ["cloud_mail_connection"]
+fresh = false
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -726,6 +752,12 @@ backed_by = "soev-solutions"
 route = "POST /api/v1/files/onedrive/attach"
 description = "Inspect and ingest the fixed provider document using the owner's real live grant."
 json = { grant_id = "{cloud_grant}", drive_id = "ci-picker-drive", item_id = "ci-document", name = "ci-document.txt", web_url = "https://ci.example.invalid/document", size = 59 }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Use the saved shared fixture's valid address; the schema's attack-control placeholder is not an email address."
+json = { address = "{cloud_mailbox_address}" }
 
 [[field]]
 backed_by = "soev-solutions"

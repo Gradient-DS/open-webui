@@ -22,6 +22,7 @@
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
 	import { removalTargets, sourceMenu } from './sources';
+	import { SOURCE_UNAVAILABLE_MESSAGE } from './syncStatus';
 	import {
 		runProgress,
 		sourceState,
@@ -78,6 +79,11 @@
 			label: 'Needs reconnect',
 			type: 'error',
 			definition: 'Needs reconnect: your {{provider}} sign-in expired; synced files stay searchable'
+		},
+		source_unavailable: {
+			label: 'Source unavailable',
+			type: 'error',
+			definition: SOURCE_UNAVAILABLE_MESSAGE
 		},
 		needs_access: {
 			label: 'Needs access',

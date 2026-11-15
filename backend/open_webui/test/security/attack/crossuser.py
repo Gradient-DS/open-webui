@@ -170,6 +170,8 @@ def _owner_key(path, surface):
     declaration = seeds.parameter_for(path, re.findall(r'\{([^}]+)\}', path)[-1], surface)
     while 'same_as' in declaration:
         declaration = entries[declaration['same_as']]
+    if declaration.get('actor') == 'admin':
+        return 'admin'
     return 'user'
 
 

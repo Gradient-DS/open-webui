@@ -220,11 +220,6 @@ constraint-dependencies = [
 ]
 
 [tool.uv.exclude-newer-package]
-# Security-fix exemption (2026-10-31): nltk 3.10.4 (published 2026-10-21) is the
-# first release fixing GHSA-j456-xh4h-cpf2 — see the pin comment in
-# [project.dependencies]. Remove this exemption once 3.10.4 ages past the 14-day
-# window on 2026-11-04.
-nltk = false
 # Security-fix exemption (2026-08-04): cryptography 50.0.0 (published
 # 2026-07-31) is the only release fixing CVE-2026-69247/69248/69249 — see the
 # pin comment in [project.dependencies]. Remove this exemption once 50.0.0 ages
@@ -244,6 +239,22 @@ accelerate = false
 # exemption is required here. Remove it once 70.0 ages past the 14-day window on
 # 2026-09-22.
 weasyprint = false
+# Security-fix exemption (2026-10-27): authlib 1.9.1 (published 2026-10-14) is
+# the first release line fixing CVE-2026-114618 (RFC 7523 JWT bearer grant
+# accepts an assertion for any audience) — see the pin comment in
+# [project.dependencies]. Remove this exemption once 1.9.1 ages past the 14-day
+# window on 2026-10-28.
+authlib = false
+# Security-fix exemption (2026-10-31): joserfc 1.7.6 (published 2026-10-18)
+# is the first release fixing both CVE-2026-119283 and CVE-2026-119284 — see
+# the pin comment in [project.dependencies]. Remove this exemption once 1.7.6
+# ages past the 14-day window on 2026-11-01.
+joserfc = false
+# Security-fix exemption (2026-10-31): nltk 3.10.4 (published 2026-10-21) is the
+# first release fixing GHSA-j456-xh4h-cpf2 — see the pin comment in
+# [project.dependencies]. Remove this exemption once 3.10.4 ages past the 14-day
+# window on 2026-11-04.
+nltk = false
 # Security-fix exemption (2026-10-21): pillow 13.0.0 (published 2026-10-16) is
 # the only release fixing CVE-2026-112403 (critical heap overflow in the JPEG
 # decoder) and eight more crafted-image CVEs; Pillow decodes user-supplied images
@@ -298,6 +309,11 @@ brotlicffi = false
 # CVE-2026-112907..112940) — see the pin comment in [project.optional-dependencies].
 # Remove this exemption once 0.27.37 ages past the 14-day window on 2026-11-20.
 unstructured = false
+# Security-fix exemption (2026-11-08): pyasn1 0.6.5 (published 2026-10-27) is the
+# first release fixing GHSA-2qm8-x737-gmw5, GHSA-mm57-4v3p-rchx,
+# GHSA-9m75-vc3g-4x39 and GHSA-fm9c-5rcf-2q5p. Remove this exemption once 0.6.5
+# ages past the 14-day window on 2026-11-10.
+pyasn1 = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]

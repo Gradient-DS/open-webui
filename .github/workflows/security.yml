@@ -11,6 +11,7 @@ on:
   # and the first scan happened on the test → main release PR — where a
   # pre-existing dependency advisory shows up looking like a release blocker.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, dev, test, feat/platform-target]
   # Daily: catches advisories published against code and images that have not
   # changed, which a push whose scans are reused (see `reuse`) does not.
@@ -48,19 +49,18 @@ jobs:
       hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
         with:
           workflow-key: security
 
   source:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
-    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
-      issues: write
     with:
       python-paths: 'backend/'
       # Both files are audited: the image built below installs
@@ -73,8 +73,8 @@ jobs:
   # docker-build-soev.yaml's `scan-image`, on the digest it published; the
   # daily run scans the published digests (`published-<branch>`).
   image:
-    if: github.event_name == 'pull_request'
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -120,12 +120,10 @@ jobs:
           done
 
   # One job per branch, not a matrix: the gate can then say which image failed.
-  # Issues are disabled on this public fork, so the notifier could only fail
-  # (and would publish CVE lists if they were enabled); the gate is the signal.
   published-dev:
     name: published dev
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -133,12 +131,11 @@ jobs:
     with:
       image-name: open-webui-dev
       image-ref: ${{ needs.resolve-published.outputs.dev }}
-      notify-on-schedule-failure: false
 
   published-test:
     name: published test
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -146,12 +143,11 @@ jobs:
     with:
       image-name: open-webui-test
       image-ref: ${{ needs.resolve-published.outputs.test }}
-      notify-on-schedule-failure: false
 
   published-main:
     name: published main
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -159,7 +155,6 @@ jobs:
     with:
       image-name: open-webui-main
       image-ref: ${{ needs.resolve-published.outputs.main }}
-      notify-on-schedule-failure: false
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
@@ -168,7 +163,7 @@ jobs:
     needs: reuse
     # Same reuse rule as `source`: a package only gets older, so a tree that
     # passed keeps passing.
-    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -186,7 +181,7 @@ jobs:
   gate:
     name: security-gate
     needs: [reuse, source, image, published-dev, published-test, published-main]
-    if: always()
+    if: ${{ always() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -236,9 +231,10 @@ jobs:
       && needs.image.result == 'success'
       && needs.lockfile-age.result == 'success'
       && needs.gate.result == 'success'
+      && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
         with:
           workflow-key: security

@@ -2,9 +2,9 @@
 
 RUN-TAG: owui-phase7a-plane-core
 
-The committed document has 530 operations, 193 writable routes and 2130
-derived string fields. At 63 payloads, all-fields alone costs about 13,000
-requests; unconditional leave-one-out costs another ~140,000 before
+The committed document has 376 operations, 139 writable routes and 1846
+derived string fields. At 63 payloads, all-fields alone costs about 9,000
+requests; unconditional leave-one-out costs another ~120,000 before
 single-field retries.
 Default PR mode therefore samples ONE payload per field using SHA-256 of the
 route id and field path. This is stable across processes and field traversal
