@@ -8,6 +8,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
+	import PagePlus from '$lib/components/icons/PagePlus.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import Eye from '$lib/components/icons/Eye.svelte';
@@ -25,6 +26,7 @@
 		{ key: 'image_generation', icon: Photo, label: 'Generate images' },
 		{ key: 'code_interpreter', icon: Terminal, label: 'Run code & analyze data' },
 		{ key: 'document_writer', icon: Document, label: 'Document writer' },
+		{ key: 'workspace', icon: PagePlus, label: 'Workspace' },
 		{ key: 'live_documents', icon: OneDriveSearch, label: 'OneDrive search' },
 		{ key: 'live_mail', icon: MailSearch, label: 'Mail search' },
 		{ key: 'vision', icon: Eye, label: 'Understand images' },

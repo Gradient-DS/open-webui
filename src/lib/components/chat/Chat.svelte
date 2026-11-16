@@ -29,6 +29,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { deliveredFileName, isDeliveredFile } from '$lib/utils/deliveredFile';
 
 	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -64,6 +65,8 @@
 		artifactContents,
 		showDocument,
 		documentContents,
+		openDocumentTabSignal,
+		requestedWorkspaceFile,
 		tools,
 		skills,
 		toolServers,
@@ -475,6 +478,8 @@
 		} = value);
 		composerInitialized = true;
 	};
+	// [Gradient] The Workspace switch (feature id `workspace`); not a remembered composer preference.
+	let workspaceEnabled = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -978,6 +983,7 @@
 
 		files = [];
 		composerInitialized = false;
+		workspaceEnabled = false;
 		acceptedDataWarnings = new Set();
 
 		const storageChatInput = sessionStorage.getItem(
@@ -1054,6 +1060,7 @@
 		files = [];
 		composerInitialized = false;
 		restoreComposerPreferences(composerPreferences($settings.composerTools));
+		workspaceEnabled = false;
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -1299,6 +1306,16 @@
 					) {
 						codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 					}
+
+					// [Gradient] The workspace switch follows the model default; it is not a saved composer choice.
+					if (
+						model.info?.meta?.capabilities?.['workspace'] &&
+						isFeatureEnabled('workspace') &&
+						$config?.features?.enable_workspace &&
+						$user?.permissions?.features?.workspace
+					) {
+						workspaceEnabled = model.info.meta.defaultFeatureIds.includes('workspace');
+					}
 				}
 
 				// Set Default Terminal — only if the referenced terminal actually exists
@@ -1528,6 +1545,18 @@
 				} else if (type === 'chat:message:files' || type === 'files') {
 					const previous = new Set((message.files ?? []).map((file: ChatAttachment) => file.id));
 					message.files = data.files;
+					// [Gradient] A delivered workspace file opens the document panel, like a generated document.
+					if (
+						(data.files ?? []).some(isDeliveredFile) &&
+						isFeatureEnabled('workspace') &&
+						($settings?.detectDocuments ?? true) &&
+						!$mobile
+					) {
+						requestedWorkspaceFile.set(data.files.filter(isDeliveredFile).at(-1) ?? null);
+						showDocument.set(true);
+						showControls.set(true);
+						openDocumentTabSignal.update((n) => n + 1);
+					}
 					chatFiles = mergeFiles(
 						chatFiles,
 						message.files.filter(
@@ -2204,6 +2233,7 @@
 		} else {
 			artifactContents.set([]);
 			documentContents.set([]);
+			requestedWorkspaceFile.set(null);
 		}
 	};
 
@@ -2328,6 +2358,19 @@
 						}))
 					];
 				}
+				// [Gradient] Workspace files an agent delivered open in the same panel.
+				const delivered = (message?.files ?? []).filter(isDeliveredFile);
+				docs = [
+					...docs,
+					...delivered.map((file) => ({
+						title: deliveredFileName(file),
+						content: '',
+						format: 'markdown' as const,
+						done: true,
+						file,
+						messageId: message.id
+					}))
+				];
 			}
 		});
 		documentContents.set(docs);
@@ -2477,6 +2520,7 @@
 		await showArtifacts.set(false);
 		await showDocument.set(false);
 		documentContents.set([]);
+		requestedWorkspaceFile.set(null);
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -2525,6 +2569,8 @@
 		if (writerParam !== null) {
 			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
 		}
+
+		if ($page.url.searchParams.get('workspace') === 'true') workspaceEnabled = true;
 
 		if ($page.url.searchParams.get('tools')) {
 			selectedToolIds = $page.url.searchParams
@@ -2703,6 +2749,7 @@
 
 				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
+				workspaceEnabled = chatContent?.features?.workspace ?? false;
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -3378,6 +3425,7 @@
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
 					document_writer: $i18n.t('Document writer'),
+					workspace: $i18n.t('Workspace'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3686,6 +3734,7 @@
 			image_generation: imageGenerationEnabled,
 			code_interpreter: codeInterpreterEnabled,
 			document_writer: documentWriterEnabled,
+			workspace: workspaceEnabled,
 			knowledge_local: hasLocalKb,
 			knowledge_external: hasExternalKb
 		};
@@ -3970,6 +4019,12 @@
 					$config?.features?.enable_document_writer &&
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
+						: false,
+				workspace:
+					isFeatureEnabled('workspace') &&
+					$config?.features?.enable_workspace &&
+					$user?.permissions?.features?.workspace
+						? workspaceEnabled
 						: false,
 				// [Gradient] A family known to have no grant is never sent on.
 				live_documents: $config?.features?.enable_live_documents
@@ -4603,7 +4658,10 @@
 			messages: createMessagesList(history, history.currentId),
 			params: structuredClone(params),
 			files: structuredClone(chatFiles),
-			features: composerFeatures(currentComposerPreferences())
+			features: {
+				...composerFeatures(currentComposerPreferences()),
+				workspace: workspaceEnabled
+			}
 		};
 		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
 		chatSaveQueue = chatSaveQueue
@@ -5124,6 +5182,7 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:workspaceEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
@@ -5219,6 +5278,7 @@
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
+										bind:workspaceEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
 										{oauthRedirectHandler}
@@ -5285,6 +5345,7 @@
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
 									bind:liveMailState
+									bind:workspaceEnabled
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands

@@ -1764,7 +1764,8 @@ export interface ModelMeta {
 	toolIds: never[];
 	description?: string;
 	hidden?: boolean;
-	capabilities?: object;
+	capabilities?: Record<string, boolean>;
+	defaultFeatureIds?: string[];
 	profile_image_url?: string;
 	data_warnings?: Record<string, boolean>;
 	data_warning_message?: string;

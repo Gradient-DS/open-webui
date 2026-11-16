@@ -26,6 +26,10 @@
 			label: $i18n.t('Document writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
+		workspace: {
+			label: $i18n.t('Workspace'),
+			description: $i18n.t('Model can work in the workspace: run code and make files')
+		},
 		live_documents: {
 			label: $i18n.t('OneDrive search'),
 			description: $i18n.t("Model can search the user's OneDrive files")

@@ -125,6 +125,16 @@ def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] 
     return None
 
 
+#: [Gradient] Names a status line lists before it counts the rest, so a long list cannot flood it.
+_LISTED = 3
+
+
+def _listed(names: list[str]) -> str:
+    """[Gradient] The first names, then `+N` for the rest."""
+    shown = ', '.join(names[:_LISTED])
+    return f'{shown} +{len(names) - _LISTED}' if len(names) > _LISTED else shown
+
+
 def _field(element: dict[str, Any], field: str) -> Any:
     """[Claude] A field of an element; a document without a title goes by its filename, as an attached one does."""
     value = element.get(field)
@@ -879,6 +889,7 @@ def _tools(
 ) -> dict[str, dict[str, str]]:
     """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
     default never decides for the user, and so is every turn where OWUI does not allow web search."""
+    features = metadata.get('features') or {}
     state = tool_state(metadata.get('features'), 'web_search') if web_search_allowed else 'off'
     documents = (metadata.get('features') or {}).get('live_documents') if live_documents_allowed else 'off'
     if documents not in ('auto', 'required'):
@@ -895,6 +906,9 @@ def _tools(
             'attach_live_document': documents,
             'search_mail': mail,
             'read_mail': mail,
+            # [Gradient] The Workspace switch (feature id `workspace`), gated upstream by
+            # gate_workspace_features; off is sent too.
+            'workspace_task': 'auto' if features.get('workspace') else 'off',
         }
     }
 
@@ -1272,7 +1286,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     snippet a file-snippet one: the file was not opened."""
     whole = whole or {}
     properties = {
-        'title': whole.get('title') or whole.get('filename'),
+        'title': whole.get('title') or whole.get('filename') or whole.get('name'),
         'source_id': whole.get('source_id'),
         'source_url': whole.get('source_url') or whole.get('web_url'),
         'page_numbers': element.get('pages'),
@@ -1295,6 +1309,47 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
     }
+
+
+# [Gradient] Workspace file bytes stay on the agent side; messages keep only their references.
+WORKSPACE_FILE = 'workspace-file'
+
+
+def _shown_name(name: str) -> str:
+    """[Gradient] A delivered file's name without characters that hide or reorder what it says (bidi overrides,
+    zero-width, controls) and without path separators; the frontend applies the same rule to stored names."""
+    kept = ''.join(char for char in name if unicodedata.category(char) not in {'Cc', 'Cf', 'Zl', 'Zp'})
+    return re.sub(r'[/\\]', '_', kept).strip() or 'file'
+
+
+def _workspace_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return {
+        'type': 'workspace',
+        'name': _shown_name(element['name']),
+        'content_type': element['content_type'],
+        'size': element['size'],
+        'thread_id': thread_id,
+        'element_id': element['id'],
+        'pages': len(element['pages']),
+        'version': element['version'],
+        'edits': element.get('edits'),
+    }
+
+
+_ROOT_STREAM = 'root'
+#: [Gradient] Delegations whose subagent shows one rolling line: each step replaces the call's own line while it
+#: runs, which ends on how long it took, instead of a line per step.
+_ROLLED = frozenset({'workspace_task'})
+#: [Gradient] A subagent's stream: the delegating tool and its call's place in the root output.
+_SUBAGENT = re.compile(r'^root/(?P<tool>[A-Za-z0-9_]+)#(?P<index>\d+)@')
+_WORKED = 'Worked in the sandbox for {{duration}}'
+#: [Claude] The error a call stopped by the tool budget ends with: it never ran.
+_NOT_RUN = 'budget_exceeded'
+
+
+def _call_key(stream: str, call_id: str) -> str:
+    """[Claude] A call's id as statuses name it: a subagent's prefixed with its stream."""
+    return call_id if stream == _ROOT_STREAM else f'{stream}:{call_id}'
 
 
 def _read(element: dict[str, Any]) -> bool:
@@ -1323,6 +1378,8 @@ class Citations:
                 'name': name,
                 'url': properties.get('source_url') or ref,
                 **({'provider': source['provider']} if source.get('provider') else {}),
+                # [Gradient] A note on a file the agent delivered opens that file, not the sources panel.
+                **({'delivered_file': source['delivered_file']} if source.get('delivered_file') else {}),
             },
             'document': [source['text']],
             'metadata': [
@@ -1393,6 +1450,13 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] The stream each shown call was made in.
+        self.call_streams: dict[str, str] = {}
+        # [Gradient] When each running rolled delegation (`_ROLLED`) started.
+        self.rolled_started: dict[str, float] = {}
+        # [Gradient] Its start as epoch seconds and the steps its subagent took, for the running line's clock.
+        self.rolled_since: dict[str, float] = {}
+        self.rolled_steps: dict[str, int] = {}
         # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
         # call's status never lands above the thoughts that led to it.
         self.pending_calls: list[dict] = []
@@ -1527,7 +1591,11 @@ class AgentTurn:
         added = []
         for element in elements:
             if _read(element) and element['id'] not in self.citations.sources:
-                source = self.citations.add(await _as_source(element, self.elements.get(element['ref'])))
+                whole = self.elements.get(element['ref'])
+                read = await _as_source(element, whole)
+                if whole is not None and whole.get('type') == WORKSPACE_FILE:
+                    read['delivered_file'] = _workspace_attachment(whole, self.thread_id)
+                source = self.citations.add(read)
                 if source:
                     added.append(source)
         return added
@@ -1576,17 +1644,25 @@ class AgentTurn:
         calls, self.pending_calls = self.pending_calls, []
         return await self.start_tools(calls)
 
-    async def start_tools(self, calls: list[dict]) -> list[dict[str, Any]]:
+    async def start_tools(self, calls: list[dict], stream: str = _ROOT_STREAM) -> list[dict[str, Any]]:
         """Show each call as running and anchor it in the content where it starts: the anchor ends the reasoning
         before it, so the call shows as the latest step while it runs. The frontend replaces a status by a later
-        one with the same `call_id`."""
+        one with the same `call_id`. [Claude] A subagent's calls are shown too, by an id that names their stream:
+        its model numbers its calls on its own."""
         anchors = []
         for call in calls:
             self.tool_calls += 1
             name, arguments = call['name'], call.get('arguments') or {}
-            self.running[call['id']] = (name, arguments)
+            call_id = _call_key(stream, call['id'])
+            self.running[call_id] = (name, arguments)
+            self.call_streams[call_id] = stream
             status = self.tool_status(name, arguments)
-            await self.emit('status', {**status, 'call_id': call['id'], 'done': False})
+            if name in _ROLLED and stream == _ROOT_STREAM:
+                self.rolled_started[call_id] = time.monotonic()
+                self.rolled_since[call_id] = time.time()
+                self.rolled_steps[call_id] = 0
+                status = {**status, 'started_at': self.rolled_since[call_id], 'steps': 0}
+            await self.emit('status', {**status, 'call_id': call_id, 'done': False})
             anchors.append(_marker(status))
         return anchors
 
@@ -1616,6 +1692,13 @@ class AgentTurn:
             return
         name, arguments = call
         status = self.tool_status(name, arguments, output)
+        started = self.rolled_started.pop(output['call_id'], None)
+        self.rolled_since.pop(output['call_id'], None)
+        self.rolled_steps.pop(output['call_id'], None)
+        if started is not None and output.get('error') is None:
+            dutch = (self.metadata.get('user_language') or '').lower().startswith('nl')
+            duration = _duration(time.monotonic() - started, dutch)
+            status = {**status, 'description': _WORKED, 'duration': duration}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
 
     async def settle(self) -> None:
@@ -1671,7 +1754,7 @@ class AgentTurn:
             if kind == 'argument':
                 value = arguments.get(rest)
                 if isinstance(value, list) and all(isinstance(item, str) for item in value):
-                    value = ', '.join(item for item in value if item.strip())
+                    value = _listed([item for item in value if item.strip()])
             elif kind == 'knowledge':
                 key = arguments.get(rest)
                 only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
@@ -1681,8 +1764,8 @@ class AgentTurn:
                 named = arguments.get(argument)
                 names = named if isinstance(named, list) else [named]
                 values = [_field(self.elements.get(name) or {}, field) for name in names if isinstance(name, str)]
-                value = ', '.join(
-                    str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
+                value = _listed(
+                    [str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()]
                 )
             elif kind == 'output' and output is not None:
                 value = _from_output(rest, output.get('elements') or [])
@@ -1690,11 +1773,14 @@ class AgentTurn:
                 params[param] = str(value)
         return params
 
-    def stop_tools(self) -> None:
-        """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
-        so each shows its failed line."""
-        for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
-            self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
+    def stop_tools(self, stream: str = _ROOT_STREAM) -> None:
+        """[Claude] End the calls of `stream` the tool budget stopped: they never get an output, and the model
+        answers next, so each shows its failed line."""
+        stopped = [
+            call_id for call_id in self.running if call_id != _COMPACTION and self.call_streams.get(call_id) == stream
+        ]
+        for call_id in stopped:
+            self.end_tool({'call_id': call_id, 'error': _NOT_RUN})
 
     async def clear_tools(self) -> None:
         """Forget the calls still shown as running: a call that ended without an output shows no done line."""
@@ -1739,7 +1825,22 @@ class AgentTurn:
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'])
+        await self.attach_files([e for e in payload.get('elements') or [] if e.get('type') == WORKSPACE_FILE])
         self.end_tool(payload)
+
+    async def attach_files(self, elements: list[dict[str, Any]]) -> None:
+        """[Gradient] Attach workspace file references using the same thread this message bookmarks."""
+        if not elements or not self.thread_id:
+            return
+        try:
+            files = [_workspace_attachment(element, self.thread_id) for element in elements]
+        except (KeyError, TypeError):
+            log.exception('Could not attach a workspace file', extra={'thread_id': self.thread_id})
+            return
+        chat_id = self.metadata.get('chat_id')
+        if is_temporary_chat_id(chat_id):
+            agent_threads.remember_temporary_workspace(chat_id, self.metadata['user_id'], files)
+        await self.emit('files', {'files': files})
 
     async def show_source(self, source_id: str) -> None:
         """[Claude] Send a source once per turn, when a tool reads it or the answer cites it, so its `[N]` resolves
@@ -1849,8 +1950,6 @@ class AgentTurn:
         if event.event == 'delta':
             if event.data['text']:
                 await self.settle()
-            if event.data['text'] and not self.running:
-                await self.summarize()
             self.partial += event.data['text']
             text = self.shown(event.data['text'])
             return [_chunk({'content': text})] if text else []
@@ -1864,6 +1963,8 @@ class AgentTurn:
         if event.event == 'tool_output' and event.data.get('stream') == 'root':
             await self.record_output(payload)
             return []
+        if event.event in {'model_output', 'tool_output', 'budget_exceeded'}:
+            return await self.subagent_step(event)
         if event.event in {'calling', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
@@ -1873,6 +1974,48 @@ class AgentTurn:
             await self.clear_tools()
         if event.event in {'status', 'error'}:
             return await self.finish(event)
+        return []
+
+    async def subagent_step(self, event: ChatEvent) -> list[dict[str, Any]]:
+        """[Claude] Show a subagent's work while its call runs: each tool it calls, running, then done and anchored
+        in the content as its output lands, so the steps read in the order they happened, before the done line of
+        the call that started the subagent. Its answer is that call's output, not text of this message."""
+        stream, payload = event.data.get('stream') or '', event.data.get('payload') or {}
+        if (rolled := self.rolled_call(stream)) is not None:
+            return await self.roll(rolled, event.event, payload)
+        chunks: list[dict[str, Any]] = []
+        if event.event == 'model_output':
+            await self.settle()
+            chunks = await self.start_tools(payload.get('tool_calls', []), stream)
+        elif event.event == 'tool_output':
+            self.end_tool({**payload, 'call_id': _call_key(stream, payload.get('call_id') or '')})
+        else:
+            self.stop_tools(stream)
+        await self.settle()
+        return chunks
+
+    def rolled_call(self, stream: str) -> str | None:
+        """[Gradient] The running rolled delegation call a subagent stream belongs to, or None."""
+        match = _SUBAGENT.match(stream)
+        if match is None or match['tool'] not in _ROLLED:
+            return None
+        calls = [call_id for call_id in self.rolled_started if self.running.get(call_id, ('',))[0] == match['tool']]
+        if not calls:
+            return None
+        return calls[min(int(match['index']), len(calls) - 1)]
+
+    async def roll(self, call_id: str, kind: str, payload: dict) -> list[dict[str, Any]]:
+        """[Gradient] Show a rolled subagent's newest step under its delegation's own running line, as `step`; its
+        steps are not counted as calls and leave no line of their own, and the done line has no step."""
+        if kind != 'model_output':
+            return []
+        name, arguments = self.running[call_id]
+        running = self.tool_status(name, arguments)
+        for call in payload.get('tool_calls', []):
+            step = self.tool_status(call['name'], call.get('arguments') or {})
+            self.rolled_steps[call_id] = self.rolled_steps.get(call_id, 0) + 1
+            clock = {'started_at': self.rolled_since.get(call_id), 'steps': self.rolled_steps[call_id]}
+            await self.emit('status', {**running, **clock, 'step': step, 'call_id': call_id, 'done': False})
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
@@ -1968,8 +2111,8 @@ class AgentTurn:
         return chunks
 
     async def summarize(self) -> None:
-        """[Claude] Settle the tools called since the last summary into the v1 closing line, which the frontend keeps
-        as the header of the tool list: once the answer starts, and at the end if more were called after it."""
+        """[Claude] Settle the tools the turn called into the v1 closing line, which the frontend keeps as the header
+        of the tool list: once, when the turn ends; text between tool calls is not its end."""
         if self.tool_calls == self.summarized:
             return
         self.summarized = self.tool_calls

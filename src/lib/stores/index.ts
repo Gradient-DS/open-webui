@@ -7,6 +7,7 @@ import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
 import type { ProfileRule } from '$lib/utils/models/profile';
+import type { DeliveredFile } from '$lib/utils/deliveredFile';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -164,6 +165,7 @@ export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
 export const openDocumentTabSignal = writable(0);
+export const requestedWorkspaceFile = writable<DeliveredFile | null>(null);
 
 export const submitPromptSignal: Writable<{ text: string; ts: number } | null> = writable(null);
 
@@ -177,7 +179,12 @@ export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceR
 	writable({});
 export const selectedDocumentIndex = writable(0);
 export const documentContents: Writable<Array<
-	AgentDocument & { sources?: any[]; messageId?: string }
+	AgentDocument & {
+		sources?: any[];
+		messageId?: string;
+		// [Gradient] A workspace file an agent delivered: the panel shows its rendered pages, not markdown.
+		file?: DeliveredFile;
+	}
 > | null> = writable(null);
 
 export const embed = writable(null);
@@ -397,6 +404,8 @@ type Config = {
 		enable_signup: boolean;
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
+		enable_workspace?: boolean;
+		feature_workspace?: boolean;
 		enable_web_search_confirmation?: boolean;
 		web_search_confirmation_content?: string;
 		whats_new_models?: Record<string, string[]>; // [Gradient] per release, from WHATS_NEW_MODELS

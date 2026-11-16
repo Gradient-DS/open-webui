@@ -279,3 +279,95 @@ class TestAllFeatureFlags:
         ]
         for feature in expected_features:
             assert feature in FEATURE_FLAGS, f'Feature {feature} not found in FEATURE_FLAGS'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('workspace', [False, True])
+async def test_workspace_requires_the_capability(workspace):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.utils.features import gate_workspace_features
+
+    with (
+        patch('open_webui.models.config.Config.get', AsyncMock(return_value=True)),
+        patch('open_webui.utils.access_control.has_permission', AsyncMock(return_value=True)),
+        patch.dict('open_webui.utils.features.FEATURE_FLAGS', {'workspace': True}),
+    ):
+        result = await gate_workspace_features(
+            {'workspace': True, 'web_search': True}, {'workspace': workspace}, SimpleNamespace(role='user', id='alice')
+        )
+    assert result == {'workspace': workspace, 'web_search': True}
+
+
+@pytest.mark.asyncio
+async def test_an_admin_without_the_workspace_permission_is_refused():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.utils.features import gate_workspace_features
+
+    permission = AsyncMock(side_effect=lambda uid, key, defaults: key != 'features.workspace')
+    with (
+        patch('open_webui.models.config.Config.get', AsyncMock(return_value=True)),
+        patch('open_webui.utils.access_control.has_permission', permission),
+        patch.dict('open_webui.utils.features.FEATURE_FLAGS', {'workspace': True}),
+    ):
+        result = await gate_workspace_features(
+            {'workspace': True}, {'workspace': True}, SimpleNamespace(role='admin', id='root')
+        )
+    assert result['workspace'] is False
+    permission.assert_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('gate', ['flag', 'enable', 'permission', 'missing_capability'])
+async def test_workspace_cannot_bypass_disabled_gate(gate):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.utils.features import gate_workspace_features
+
+    flags = {'workspace': gate != 'flag'}
+    capabilities = {} if gate == 'missing_capability' else {'workspace': True}
+    config = AsyncMock(side_effect=lambda key: not (gate == 'enable' and key == 'workspace.enable'))
+    permission = AsyncMock(
+        side_effect=lambda uid, key, defaults: not (gate == 'permission' and key == 'features.workspace')
+    )
+    with (
+        patch.dict('open_webui.utils.features.FEATURE_FLAGS', flags),
+        patch('open_webui.models.config.Config.get', config),
+        patch('open_webui.utils.access_control.has_permission', permission),
+    ):
+        result = await gate_workspace_features(
+            {'workspace': True}, capabilities, SimpleNamespace(role='user', id='alice')
+        )
+    assert result['workspace'] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved', [{}, {'workspace': False}])
+@pytest.mark.parametrize('granted', [False, True])
+async def test_the_workspace_permission_is_off_unless_saved_or_granted(saved, granted):
+    """Settings saved before the workspace existed lack its key: it reads as off, as has_permission decides."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.utils.access_control import get_permissions, has_permission
+
+    groups = [SimpleNamespace(permissions={'features': {'workspace': True}})] if granted else []
+    with patch('open_webui.models.groups.Groups.get_groups_by_member_id', AsyncMock(return_value=groups)):
+        reported = (await get_permissions('alice', {'features': dict(saved)}))['features'].get('workspace', False)
+        allowed = await has_permission('alice', 'features.workspace', {'features': dict(saved)})
+    assert reported is allowed is granted
+
+
+@pytest.mark.asyncio
+async def test_feature_defaults_allow_group_grants_without_mutating_global_defaults():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.config import DEFAULT_USER_PERMISSIONS
+    from open_webui.utils.access_control import get_permissions
+
+    defaults = dict(DEFAULT_USER_PERMISSIONS['features'])
+    groups = [SimpleNamespace(permissions={'features': {'api_keys': True}})]
+    with patch('open_webui.models.groups.Groups.get_groups_by_member_id', AsyncMock(return_value=groups)):
+        result = await get_permissions('alice', {})
+    assert result['features']['api_keys'] is True
+    assert DEFAULT_USER_PERMISSIONS['features'] == defaults

@@ -20,6 +20,7 @@
 		documentContents
 	} from '$lib/stores';
 
+	import { groupDocuments } from '$lib/utils/documentGroups';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
@@ -98,7 +99,12 @@
 		terminalFilesAvailable ||
 		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
-	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
+	$: showDocumentTab = ($documentContents ?? []).some((doc) =>
+		isFeatureEnabled(doc.file ? 'workspace' : 'document_writer')
+	);
+	// [Gradient] The tab is named in the plural once it holds more than one document (versions count once).
+	$: documentTabLabel =
+		groupDocuments($documentContents ?? []).length > 1 ? $i18n.t('Documents') : $i18n.t('Document');
 
 	$: showSourcesTab = true; // [Gradient]
 	// Tab fallback: if active tab becomes hidden, switch to next available
@@ -298,7 +304,7 @@
 											: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
 										on:click={() => (activeTab = 'document')}
 									>
-										{$i18n.t('Document')}
+										{documentTabLabel}
 									</button>
 								{/if}
 								{#if showFilesTab}
@@ -442,7 +448,7 @@
 											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
 										on:click={() => (activeTab = 'document')}
 									>
-										{$i18n.t('Document')}
+										{documentTabLabel}
 									</button>
 								{/if}
 								{#if showFilesTab}

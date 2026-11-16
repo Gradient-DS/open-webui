@@ -797,6 +797,27 @@ prefix = "/api/v1/agent-threads/{thread_id}"
 description = "routers/agent_threads.py reads a soev-api chat thread the caller owns; a meeting id is such a thread, started by the admin."
 same_as = "meeting"
 
+[[parameter]]
+key = "workspace_chat"
+name = "chat_id"
+prefix = "/api/v1/chats/{chat_id}/workspace"
+description = "routers/chats.py:get_workspace_content serves a workspace file only to the chat's owner (admins included) and only from an attachment recorded on that chat's messages."
+same_as = "chat"
+
+[[parameter]]
+key = "workspace_element"
+name = "element_id"
+prefix = "/api/v1/chats/{chat_id}/workspace/{element_id}"
+description = "routers/chats.py:get_workspace_content looks the element up in the chat's message files (type workspace, with a thread_id) and streams it from soev-api as the owner."
+unseedable = "A workspace element exists only after the soev-solutions workspace agent delivered a file in a turn with ENABLE_WORKSPACE, FEATURE_WORKSPACE and the user permission on; no HTTP route plants one, and a hand-written message file would name a thread soev-api does not hold. Closes when the sealed stack runs soev-solutions with a workspace sandbox."
+
+[[parameter]]
+key = "workspace_part"
+name = "part"
+prefix = "/api/v1/chats/{chat_id}/workspace/{element_id}/{part}"
+description = "routers/chats.py:get_workspace_content accepts only `file` or `page-N` (N from 1); anything else is 404 before any lookup."
+unseedable = "Only meaningful for a delivered workspace element, which is unseedable (key workspace_element)."
+
 [[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."

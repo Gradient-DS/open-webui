@@ -116,6 +116,7 @@ export const DEFAULT_CAPABILITIES = {
 	image_generation: true,
 	code_interpreter: true,
 	document_writer: true,
+	workspace: false,
 	terminal: true,
 	citations: true,
 	status_updates: true,
