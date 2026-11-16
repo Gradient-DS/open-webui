@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from open_webui.config import (
+from open_webui.soev.pgvector_config import (
     PGVECTOR_CREATE_EXTENSION,
     PGVECTOR_DB_URL,
     PGVECTOR_HNSW_EF_CONSTRUCTION,
@@ -17,7 +17,10 @@ from open_webui.config import (
     PGVECTOR_POOL_TIMEOUT,
     PGVECTOR_USE_HALFVEC,
 )
+from open_webui.env import ENABLE_DB_MIGRATIONS
 from open_webui.internal.db import ScopedSession, enable_iam_token_auth
+from open_webui.internal.migration_lock import migration_lock
+from open_webui.soev.db_schema import verify_pgvector_schema
 from open_webui.retrieval.vector.main import (
     GetResult,
     SearchResult,
@@ -110,6 +113,20 @@ class PgvectorClient(VectorDBBase):
             SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
             self.session = scoped_session(SessionLocal)
 
+        if not ENABLE_DB_MIGRATIONS:
+            try:
+                index_method, _ = self._vector_index_configuration()
+                verify_pgvector_schema(self.session, DocumentChunk.__table__, index_method, PGVECTOR_PGCRYPTO)
+                self.check_vector_length()
+            finally:
+                self.session.rollback()
+                self.session.remove()
+            return
+
+        with migration_lock(self.session.bind):
+            self._initialize_schema()
+
+    def _initialize_schema(self) -> None:
         try:
             # Ensure the pgvector extension is available
             # Use a conditional check to avoid permission issues on Azure PostgreSQL
