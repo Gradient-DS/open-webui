@@ -38,3 +38,22 @@ all chat branches/attachments accounted for, no pending upload/OAuth sessions, a
 no migration-only privileges remaining. Never rerun the old API reconciliation
 as users. Actual counts and unresolved imports belong in the rehearsal report;
 this change does not perform a tenant cutover.
+
+## Platform deletion feed contract (owui-db-role-1116)
+
+`backend/open_webui/soev/retention.py` polls
+`GET <SOEV_API_URL>/v1/retention/deletions?limit=100`, adding `after=<cursor>`
+once a cursor has been stored. `build_service_client()` sends
+`Authorization: Bearer <SOEV_API_KEY>` as product/service authority. It sends no
+`X-Soev-User-Token` and no service-principal header; `SOEV_API_SERVICE_PRINCIPAL`
+does not change this request's authentication.
+
+The expected response is a JSON object with `data` (a list of objects containing
+`thread_id`) and `next_cursor` (a cursor or null). On the final page, the last
+`thread_id` becomes the high-water mark; an empty page keeps the previous cursor.
+OWUI persists that cursor and soft-deletes a local chat only when all its
+bookmarked platform threads have been deleted. The worker retries every 60
+seconds while v2 is enabled and platform thread storage is disabled. A 404 is
+logged and retried; it does not indicate an empty feed. Check the platform route,
+service credential's access, and any ingress path prefix against this contract.
+This is an investigation finding; polling behavior is unchanged.
