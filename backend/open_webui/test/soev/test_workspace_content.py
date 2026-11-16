@@ -8,9 +8,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from open_webui import config
-from open_webui.models import chats as chat_models
+from open_webui.models import access_grants
 from open_webui.routers import chats
 from open_webui.soev.client import SoevApiError
+from open_webui.utils import features
 
 
 class WorkspaceBytes(httpx.AsyncByteStream):
@@ -38,8 +39,18 @@ def workspace(monkeypatch):
 
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id_and_user_id', owned)
     monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
-    monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr(access_grants.AccessGrants, 'has_access', AsyncMock(return_value=False))
     monkeypatch.setattr(chats.ChatMessages, 'get_files_by_chat_id', messages)
+    gate = {'flag': True, 'enable': True, 'permission': True}
+    monkeypatch.setattr(features, 'is_feature_enabled', lambda feature: gate['flag'])
+    monkeypatch.setattr(
+        'open_webui.models.config.Config.get',
+        AsyncMock(side_effect=lambda key: gate['enable'] if key == 'workspace.enable' else {}),
+    )
+    monkeypatch.setattr(
+        'open_webui.utils.access_control.has_permission',
+        AsyncMock(side_effect=lambda uid, key, defaults: gate['permission'] if key == 'features.workspace' else True),
+    )
     monkeypatch.setattr(
         chats.ChatMessages, 'get_messages_by_chat_id', AsyncMock(side_effect=AssertionError('Full messages loaded'))
     )
@@ -62,6 +73,7 @@ def workspace(monkeypatch):
     return SimpleNamespace(
         client=httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test'),
         user=user,
+        gate=gate,
         attachment=attachment,
         lookup=lookup,
         messages=messages,
@@ -113,7 +125,7 @@ async def test_unavailable_attachment_is_404_without_upstream_request(workspace,
         workspace.user.id, workspace.user.role = 'admin', 'admin'
     elif case == 'shared':
         workspace.user.id = 'bob'
-        monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=True))
+        monkeypatch.setattr(access_grants.AccessGrants, 'has_access', AsyncMock(return_value=True))
     elif case == 'unknown-chat':
         workspace.lookup.return_value = None
     elif case == 'unknown-element':
@@ -126,6 +138,21 @@ async def test_unavailable_attachment_is_404_without_upstream_request(workspace,
         response = await client.get('/api/v1/chats/chat/workspace/element/file')
     assert response.status_code == 404
     assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('off', ['flag', 'enable', 'permission'])
+@pytest.mark.parametrize('chat_id', ['chat', 'local:sid-1:chat'])
+async def test_download_is_404_while_the_workspace_is_off(workspace, monkeypatch, off, chat_id):
+    workspace.gate[off] = False
+    temporary = AsyncMock(side_effect=AssertionError('Temporary attachment looked up'))
+    monkeypatch.setattr(chats.agent_threads, 'temporary_workspace', temporary)
+    async with workspace.client as client:
+        response = await client.get(f'/api/v1/chats/{chat_id}/workspace/element/file')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.messages.assert_not_awaited()
     workspace.get.assert_not_awaited()
 
 

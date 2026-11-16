@@ -47,6 +47,7 @@ from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.auth import bearer_security, get_admin_user, get_current_user, get_verified_user
 from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.chat_fork import build_fork_history
+from open_webui.utils.features import workspace_allowed
 from open_webui.utils.context_compaction import compact_chat_branch, get_chat_context_usage
 from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import get_all_models
@@ -94,6 +95,9 @@ async def get_workspace_content(
     user=Depends(get_verified_user),
 ):
     if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
+    # [Gradient] With the feature, its switch or the user's permission off, no workspace file is served.
+    if not await workspace_allowed(user):
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
     if is_temporary_chat_id(chat_id):
         attachment = agent_threads.temporary_workspace(chat_id, element_id, user.id)

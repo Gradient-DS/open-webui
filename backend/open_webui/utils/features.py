@@ -136,19 +136,24 @@ def require_feature(feature: Feature):
     return check_feature
 
 
-async def gate_workspace_features(features: dict, capabilities: dict, user) -> dict:
+async def workspace_allowed(user) -> bool:
+    """[Gradient] The workspace feature flag, the admin switch and the user's permission all allow it."""
     from open_webui.models.config import Config
     from open_webui.utils.access_control import has_permission
 
-    features = dict(features)
-    features['workspace'] = bool(
-        features.get('workspace')
-        and capabilities.get('workspace', False)
-        and is_feature_enabled('workspace')
+    return bool(
+        is_feature_enabled('workspace')
         and await Config.get('workspace.enable')
         and (
             user.role == 'admin'
             or await has_permission(user.id, 'features.workspace', await Config.get('user.permissions'))
         )
+    )
+
+
+async def gate_workspace_features(features: dict, capabilities: dict, user) -> dict:
+    features = dict(features)
+    features['workspace'] = bool(
+        features.get('workspace') and capabilities.get('workspace', False) and await workspace_allowed(user)
     )
     return features
