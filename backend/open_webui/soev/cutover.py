@@ -13,6 +13,9 @@ class CutoverRefused(ValueError):
     pass
 
 
+ARCHIVE_SOURCE_ID = 'admins-archive'
+
+
 def _unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -86,6 +89,8 @@ async def run_cutover(db, person_map, group_map, excluded_ids, *, apply=False):
     from open_webui.soev.migrate_persons import cutover_persons
 
     _validate_inputs(person_map, group_map, excluded_ids)
+    # The platform's group map also names its synthetic archive readers group, which has no OWUI group.
+    group_map = {old: ref for old, ref in group_map.items() if old != ARCHIVE_SOURCE_ID}
     if db.in_transaction():
         raise CutoverRefused('Cutover requires a fresh transaction')
     tables = (User.__table__, Group.__table__, GroupMember.__table__, AccessGrant.__table__)
