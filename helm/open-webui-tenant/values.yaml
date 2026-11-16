@@ -104,8 +104,8 @@ openWebui:
     failureThreshold: 30
     periodSeconds: 10
 
-  # postgres.migration.user opts into a migration init container. Without it,
-  # the single runtime login runs migrations at application startup.
+  # Every pod upgrades its schema in a migration init container. The app never
+  # migrates; postgres.migration.user optionally selects a separate init login.
 
   # ---------------------------------------------------------------------------
   # PodDisruptionBudget
@@ -649,8 +649,8 @@ pgvector:
   createExtension: false
 
 # Shared by the app and migration init container; supports value and valueFrom.
-# With postgres.migration.user set, database login fields in init and
-# ENABLE_DB_MIGRATIONS in both containers are controlled by the chart.
+# ENABLE_DB_MIGRATIONS is always controlled by the chart. App per-pod OTel
+# identity is excluded from init. Separate init login fields are also protected.
 extraEnv: []
 # - name: EXAMPLE_SETTING
 #   value: "true"
@@ -702,13 +702,13 @@ postgres:
   user: openwebui
   # password is set via secrets
 
-  # Opt into python -m open_webui.soev.migrate in an init container (Alembic +
-  # pgvector schema, counts-only output); these credentials never reach
+  # The init container always runs python -m open_webui.soev.migrate (Alembic +
+  # pgvector schema, counts-only output). Optional separate credentials never reach
   # the app. Grant the login membership in the owner role; role uses libpq
   # PGOPTIONS (-c role=...) for every migration connection, including pgvector.
   # The runtime login needs table DML + sequence USAGE and no schema CREATE.
   migration:
-    user: ""  # e.g. raven_migrator; empty keeps single-login startup migrations.
+    user: ""  # e.g. raven_migrator; empty uses the runtime login in init.
     passwordSecretRef:
       name: ""  # Existing Kubernetes Secret, required with user.
       key: ""   # Password key in that Secret.

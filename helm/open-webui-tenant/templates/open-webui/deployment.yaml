@@ -50,7 +50,6 @@ spec:
           {{- end }}
           command: ['sh', '-c', 'until nc -z {{ include "open-webui-tenant.redis.fullname" . }} 6379; do echo "waiting for redis..."; sleep 2; done']
         {{- end }}
-        {{- if .Values.postgres.migration.user }}
         - name: migrate
           image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
           imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
@@ -69,7 +68,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
-        {{- end }}
       containers:
         - name: open-webui
           image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"

@@ -13,31 +13,74 @@ MIGRATION = {
 }
 
 
-def render(settings=None):
+def render(settings=None, values=None):
     command = ['helm', 'template', 'raven', str(CHART)]
+    if values:
+        command.extend(['-f', str(CHART / 'ci' / values)])
     for key, value in (settings or {}).items():
         command.extend(['--set-string', f'{key}={value}'])
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
-def objects(settings=None):
-    result = render(settings)
+def objects(settings=None, values=None):
+    result = render(settings, values)
     assert result.returncode == 0, result.stderr
     manifests = list(yaml.safe_load_all(result.stdout))
-    deployment = next(m for m in manifests if m and m['kind'] == 'Deployment')
+    deployment = next(
+        m
+        for m in manifests
+        if m
+        and m['kind'] == 'Deployment'
+        and any(c['name'] == 'open-webui' for c in m['spec']['template']['spec']['containers'])
+    )
     config = next(m for m in manifests if m and m['kind'] == 'ConfigMap' and 'DATABASE_USER' in m['data'])
     return deployment['spec']['template']['spec'], config['data']
 
 
 def env(container):
-    return {entry['name']: entry for entry in container['env']}
+    return {entry['name']: entry for entry in container.get('env', [])}
 
 
-def test_default_single_login_migrates_at_startup():
+def test_default_single_login_migrates_only_in_init():
     pod, config = objects()
-    assert all(c['name'] != 'migrate' for c in pod['initContainers'])
-    assert config['ENABLE_DB_MIGRATIONS'] == 'true'
-    assert env(pod['containers'][0])['DATABASE_PASSWORD']['valueFrom']['secretKeyRef']['key'] == 'postgres-password'
+    init_container = next(c for c in pod['initContainers'] if c['name'] == 'migrate')
+    init, app = env(init_container), env(pod['containers'][0])
+    assert init_container['command'] == ['python', '-m', 'open_webui.soev.migrate']
+    assert config['ENABLE_DB_MIGRATIONS'] == 'false'
+    assert init['ENABLE_DB_MIGRATIONS']['value'] == 'true'
+    assert app['ENABLE_DB_MIGRATIONS']['value'] == 'false'
+    assert init['DATABASE_PASSWORD'] == app['DATABASE_PASSWORD']
+    assert init['DATABASE_URL'] == app['DATABASE_URL']
+    assert init['DATABASE_PASSWORD']['valueFrom']['secretKeyRef']['key'] == 'postgres-password'
+
+
+@pytest.mark.parametrize(
+    'values',
+    [None, 'external-postgres-values.yaml', 'strict-egress-values.yaml', 'v2-values.yaml', 'migration-values.yaml'],
+)
+def test_only_migration_init_can_migrate_in_each_values_file(values):
+    pod, config = objects(values=values)
+    allowed = []
+    for container in pod['initContainers'] + pod['containers']:
+        effective = {}
+        if container.get('envFrom'):
+            effective.update(config)
+        effective.update({name: item.get('value') for name, item in env(container).items()})
+        if effective.get('ENABLE_DB_MIGRATIONS') == 'true':
+            allowed.append(container['name'])
+    assert allowed == ['migrate']
+    init = next(c for c in pod['initContainers'] if c['name'] == 'migrate')
+    assert init['command'] == ['python', '-m', 'open_webui.soev.migrate']
+    assert config['ENABLE_DB_MIGRATIONS'] == 'false'
+
+
+@pytest.mark.parametrize('settings', [{}, MIGRATION])
+def test_extra_env_cannot_change_migration_flags(settings):
+    pod, config = objects({**settings, 'extraEnv[0].name': 'ENABLE_DB_MIGRATIONS', 'extraEnv[0].value': 'true'})
+    assert config['ENABLE_DB_MIGRATIONS'] == 'false'
+    for container in (next(c for c in pod['initContainers'] if c['name'] == 'migrate'), pod['containers'][0]):
+        flags = [e for e in container['env'] if e['name'] == 'ENABLE_DB_MIGRATIONS']
+        assert flags == [{'name': 'ENABLE_DB_MIGRATIONS', 'value': str(container['name'] == 'migrate').lower()}]
 
 
 def test_separate_login_is_only_in_init_and_overrides_database_parts():
@@ -87,7 +130,7 @@ def test_init_shares_application_settings_and_secret_refs():
     init, app = env(init_container), env(app_container)
     assert init_container['envFrom'] == app_container['envFrom']
     for name, entry in app.items():
-        if name.startswith('DATABASE_') or name == 'ENABLE_DB_MIGRATIONS':
+        if name.startswith('DATABASE_') or name in ('ENABLE_DB_MIGRATIONS', 'POD_NAME', 'OTEL_RESOURCE_ATTRIBUTES'):
             continue
         assert init[name] == entry
     assert init['VECTOR_DB']['value'] == 'pgvector'
@@ -98,6 +141,29 @@ def test_init_shares_application_settings_and_secret_refs():
     for container in (init_container, app_container):
         names = [entry['name'] for entry in container['env']]
         assert len(names) == len(set(names))
+
+
+@pytest.mark.parametrize('settings', [{}, MIGRATION])
+@pytest.mark.parametrize('attributes', ['', 'deployment.environment=raven'])
+def test_app_keeps_original_otel_identity_without_giving_it_to_init(settings, attributes):
+    pod, _ = objects(
+        {
+            **settings,
+            'openWebui.config.telemetry.otel.enabled': 'true',
+            'openWebui.config.telemetry.otel.resourceAttributes': attributes,
+        }
+    )
+    app = env(pod['containers'][0])
+    assert app['POD_NAME'] == {'name': 'POD_NAME', 'valueFrom': {'fieldRef': {'fieldPath': 'metadata.name'}}}
+    assert app['OTEL_RESOURCE_ATTRIBUTES'] == {
+        'name': 'OTEL_RESOURCE_ATTRIBUTES',
+        'value': 'service.instance.id=$(POD_NAME)' + (f',{attributes}' if attributes else ''),
+    }
+    names = [entry['name'] for entry in pod['containers'][0]['env']]
+    assert names.index('POD_NAME') < names.index('OTEL_RESOURCE_ATTRIBUTES')
+    init = env(next(c for c in pod['initContainers'] if c['name'] == 'migrate'))
+    assert 'POD_NAME' not in init
+    assert 'OTEL_RESOURCE_ATTRIBUTES' not in init
 
 
 @pytest.mark.parametrize(

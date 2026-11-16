@@ -30,10 +30,12 @@ injects `SOEV_API_KEY` through `secretKeyRef`. Inline deployments use
 
 `extraEnv` is shared by the app and migration init container. Each entry supports
 `{name, value}` or `{name, valueFrom}`; quote scalar values as strings. Both use
-the same ConfigMap, secret references and telemetry settings. In separate-login
-mode, the init container replaces the database connection fields (including
-`PGVECTOR_DB_URL` and `PGOPTIONS`); `extraEnv` cannot override those fields or
-either container's `ENABLE_DB_MIGRATIONS`.
+the same ConfigMap and secret references. The app keeps its per-pod OTel identity
+(`POD_NAME` and `OTEL_RESOURCE_ATTRIBUTES`) unchanged; these variables are excluded
+from init so it cannot claim the app's instance id. In separate-login mode, init
+replaces the database connection fields (including `PGVECTOR_DB_URL` and
+`PGOPTIONS`). `extraEnv` cannot override those fields or either container's
+`ENABLE_DB_MIGRATIONS`, regardless of login mode.
 
 ## PostgreSQL vectors
 
@@ -105,23 +107,24 @@ all public 443, so the policy only observes; with `fqdn.enforce` (requires
 
 ## Database migrations
 
-Set `postgres.migration.user`, `postgres.migration.passwordSecretRef.name` and
-`postgres.migration.passwordSecretRef.key` to run schema upgrades in a `migrate`
-init container using a separate login. Optional `postgres.migration.role` sets
+Every pod runs schema upgrades in a `migrate` init container. The app always has
+`ENABLE_DB_MIGRATIONS=false`. Set `postgres.migration.user`,
+`postgres.migration.passwordSecretRef.name` and
+`postgres.migration.passwordSecretRef.key` to give init a separate login. Optional `postgres.migration.role` sets
 `PGOPTIONS=-c role=<owner role>` on that container, so all its libpq connections
 assume the owner role. The login must be allowed to SET that role.
 
-The init container explicitly overrides all `DATABASE_*` connection parts as
-well as `DATABASE_URL` and `PGVECTOR_DB_URL`: `env.py` prefers the parts over a
+With a separate login, init explicitly overrides all `DATABASE_*` connection
+parts as well as `DATABASE_URL` and `PGVECTOR_DB_URL`: `env.py` prefers the parts over a
 URL. The app receives only runtime credentials and `ENABLE_DB_MIGRATIONS=false`,
 even if `extraEnv` attempts to enable it. Grant its login schema USAGE, table
 SELECT/INSERT/UPDATE/DELETE and sequence USAGE; grant no schema CREATE. Provision
 the `vector` extension before migration when `pgvector.createExtension=false`.
 
-Without `postgres.migration.user`, there is no migration init container and the
-single application login runs migrations at startup (`ENABLE_DB_MIGRATIONS=true`).
-Existing tenants can keep that mode until their database roles are separated.
-The separate init container uses the application image, resources, security
+Without `postgres.migration.user`, init uses the runtime login for schema
+upgrades. The app still never runs migrations. Existing tenants can keep that
+single-login mode until their database roles are separated.
+The init container uses the application image, resources, security
 context, ConfigMap and data volume. Kubernetes waits for its referenced Secrets.
 It runs `python -m open_webui.soev.migrate`: Alembic upgrade followed by pgvector
 extensions/table/index initialization when `VECTOR_DB=pgvector`, then exits 0.

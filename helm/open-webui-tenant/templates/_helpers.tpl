@@ -213,7 +213,7 @@ other app containers so they use the same credentials.
 # identical series — Mimir commingles them and increase()/rate()
 # inflate by orders of magnitude. Set here (not the ConfigMap)
 # because the pod name is only available via the downward API.
-{{- if .Values.openWebui.config.telemetry.otel.enabled }}
+{{- if and (not .migration) .Values.openWebui.config.telemetry.otel.enabled }}
 - name: POD_NAME
   valueFrom:
     fieldRef:
@@ -227,7 +227,7 @@ other app containers so they use the same credentials.
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: webui-secret-key
-{{- if .migration }}
+{{- if and .migration .Values.postgres.migration.user }}
 {{ include "open-webui-tenant.migrationDatabaseEnv" . }}
 {{- else }}
 - name: DATABASE_PASSWORD
@@ -353,14 +353,16 @@ other app containers so they use the same credentials.
 {{- end }}
 {{- $migrationKeys := list "DATABASE_TYPE" "DATABASE_USER" "DATABASE_PASSWORD" "DATABASE_HOST" "DATABASE_PORT" "DATABASE_NAME" "DATABASE_URL" "PGVECTOR_DB_URL" "PGOPTIONS" }}
 {{- range .Values.extraEnv }}
-{{- if and (not (and $.migration (has .name $migrationKeys))) (not (and $.Values.postgres.migration.user (eq .name "ENABLE_DB_MIGRATIONS"))) }}
+{{- $migrationLogin := and $.migration (not (empty $.Values.postgres.migration.user)) }}
+{{- $appIdentity := and $.migration (has .name (list "POD_NAME" "OTEL_RESOURCE_ATTRIBUTES")) }}
+{{- if and (not (and $migrationLogin (has .name $migrationKeys))) (not $appIdentity) (ne .name "ENABLE_DB_MIGRATIONS") }}
 {{ toYaml (list .) }}
 {{- end }}
 {{- end }}
 {{- if .migration }}
 - name: ENABLE_DB_MIGRATIONS
   value: "true"
-{{- else if .Values.postgres.migration.user }}
+{{- else }}
 - name: ENABLE_DB_MIGRATIONS
   value: "false"
 {{- end }}

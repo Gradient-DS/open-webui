@@ -519,8 +519,8 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Separate migration credentials opt into an init step; otherwise migrate at startup.
-  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" (not (empty .Values.postgres.migration.user)) | quote }}
+  # Only the migration init container may upgrade the schema.
+  ENABLE_DB_MIGRATIONS: "false"
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
