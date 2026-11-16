@@ -7,6 +7,7 @@
 
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
 	import { config } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	export let permissions: Record<string, Record<string, boolean>> = {};
 	export let defaultPermissions: Record<string, Record<string, boolean>> = {};
@@ -1128,21 +1129,24 @@
 			{/if}
 		</div>
 
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Workspace')}
-				</div>
-				<Switch bind:state={permissions.features.workspace} />
-			</div>
-			{#if defaultPermissions?.features?.workspace && !permissions.features.workspace}
-				<div>
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
+		<!-- [Gradient] The workspace permission shows only where the tenant has the workspace feature. -->
+		{#if isFeatureEnabled('workspace')}
+			<div class="flex flex-col w-full">
+				<div class="flex w-full justify-between my-1">
+					<div class=" self-center text-xs font-medium">
+						{$i18n.t('Workspace')}
 					</div>
+					<Switch bind:state={permissions.features.workspace} />
 				</div>
-			{/if}
-		</div>
+				{#if defaultPermissions?.features?.workspace && !permissions.features.workspace}
+					<div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('This is a default user permission and will remain enabled.')}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="flex flex-col w-full">
 			<Tooltip

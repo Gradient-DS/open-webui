@@ -17,7 +17,7 @@ export function getDefaultCapabilities() {
 		code_interpreter:
 			features?.enable_code_interpreter !== false ? DEFAULT_CAPABILITIES.code_interpreter : false,
 		document_writer:
-			features.enable_document_writer !== false && features.feature_document_writer !== false
+			features?.enable_document_writer !== false && features?.feature_document_writer !== false
 				? DEFAULT_CAPABILITIES.document_writer
 				: false,
 		workspace: features?.enable_workspace !== false ? DEFAULT_CAPABILITIES.workspace : false,
