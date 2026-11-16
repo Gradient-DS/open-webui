@@ -50,6 +50,7 @@ spec:
           {{- end }}
           command: ['sh', '-c', 'until nc -z {{ include "open-webui-tenant.redis.fullname" . }} 6379; do echo "waiting for redis..."; sleep 2; done']
         {{- end }}
+        {{- if .Values.postgres.migration.user }}
         - name: migrate
           image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
           imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
@@ -57,10 +58,6 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # Import-time trigger: run_migrations() fires when open_webui.config
-          # is imported, gated on ENABLE_DB_MIGRATIONS. This explicit override
-          # forces it on regardless of the configmap value (which is false on
-          # the main Deployment so its pods don't also try to migrate).
           command: ["python", "-c", "import open_webui.config"]
           envFrom:
             - configMapRef:
@@ -73,18 +70,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: webui-secret-key
-            - name: DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: postgres-password
-            - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
+            {{- include "open-webui-tenant.migrationDatabaseEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.openWebui.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
+        {{- end }}
       containers:
         - name: open-webui
           image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
@@ -115,6 +107,10 @@ spec:
               value: "service.instance.id=$(POD_NAME){{ with .Values.openWebui.config.telemetry.otel.resourceAttributes }},{{ . }}{{ end }}"
             {{- end }}
             {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}
+            {{- if .Values.postgres.migration.user }}
+            - name: ENABLE_DB_MIGRATIONS
+              value: "false"
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /app/backend/data

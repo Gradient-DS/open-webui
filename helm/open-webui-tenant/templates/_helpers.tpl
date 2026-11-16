@@ -480,3 +480,30 @@ Output: YAML list of {matchName} / {matchPattern}.
 - matchPattern: {{ . | quote }}
 {{- end }}
 {{- end }}
+
+{{/* Explicit parts override the runtime ConfigMap; env.py prefers them to DATABASE_URL. */}}
+{{- define "open-webui-tenant.migrationDatabaseEnv" -}}
+- name: DATABASE_TYPE
+  value: "postgresql"
+- name: DATABASE_USER
+  value: {{ .Values.postgres.migration.user | quote }}
+- name: DATABASE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.postgres.migration.passwordSecretRef.name | quote }}
+      key: {{ .Values.postgres.migration.passwordSecretRef.key | quote }}
+- name: DATABASE_HOST
+  value: {{ include "open-webui-tenant.postgres.host" . | quote }}
+- name: DATABASE_PORT
+  value: {{ include "open-webui-tenant.postgres.port" . | quote }}
+- name: DATABASE_NAME
+  value: {{ .Values.postgres.database | quote }}
+- name: DATABASE_URL
+  value: "postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)"
+- name: PGVECTOR_DB_URL
+  value: "$(DATABASE_URL)"
+{{- with .Values.postgres.migration.role }}
+- name: PGOPTIONS
+  value: {{ printf "-c role=%s" . | quote }}
+{{- end }}
+{{- end }}

@@ -519,8 +519,8 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Migrations run in each pod's init container, serialized on PostgreSQL.
-  ENABLE_DB_MIGRATIONS: "false"
+  # Separate migration credentials opt into an init step; otherwise migrate at startup.
+  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" (not (empty .Values.postgres.migration.user)) | quote }}
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}

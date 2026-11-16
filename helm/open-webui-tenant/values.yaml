@@ -104,9 +104,8 @@ openWebui:
     failureThreshold: 30
     periodSeconds: 10
 
-  # Every pod runs migrations in an init container, on installs and upgrades.
-  # PostgreSQL migrations serialize with an advisory lock. The main container
-  # always has ENABLE_DB_MIGRATIONS=false; init uses this image and resources.
+  # postgres.migration.user opts into a migration init container. Without it,
+  # the single runtime login runs migrations at application startup.
 
   # ---------------------------------------------------------------------------
   # PodDisruptionBudget
@@ -700,6 +699,17 @@ postgres:
   database: openwebui
   user: openwebui
   # password is set via secrets
+
+  # Opt into a separate migration init container; these credentials never reach
+  # the app. Grant the login membership in the owner role; role uses libpq
+  # PGOPTIONS (-c role=...) for every migration connection, including pgvector.
+  # The runtime login needs table DML + sequence USAGE and no schema CREATE.
+  migration:
+    user: ""  # e.g. raven_migrator; empty keeps single-login startup migrations.
+    passwordSecretRef:
+      name: ""  # Existing Kubernetes Secret, required with user.
+      key: ""   # Password key in that Secret.
+    role: ""  # Optional owner role, e.g. raven_admin; init container only.
 
 # -----------------------------------------------------------------------------
 # Weaviate (Vector Database)
