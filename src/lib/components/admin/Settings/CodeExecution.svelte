@@ -272,14 +272,7 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
-			{#if isFeatureEnabled('workspace')}
-				<AdminSettingSection title={$i18n.t('Workspace')}>
-					<AdminSettingRow label={$i18n.t('Workspace')} let:labelId>
-						<Switch bind:state={config.ENABLE_WORKSPACE} ariaLabelledbyId={labelId} />
-					</AdminSettingRow>
-				</AdminSettingSection>
-			{/if}
-			<!-- [Gradient] Document Writer remains tenant gated. -->
+			<!-- [Gradient] Document writer remains tenant gated. -->
 			{#if isFeatureEnabled('document_writer')}
 				<AdminSettingSection title={$i18n.t('Document writer')}>
 					<AdminSettingRow label={$i18n.t('Enable document writer')} let:labelId

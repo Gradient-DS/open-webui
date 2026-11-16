@@ -159,3 +159,32 @@ async def test_normal_key_admin_write_persists_to_db(db_session):
     assert row is not None
     assert row.value == 'admin-set value'
     assert await Config.get('rag.template') == 'admin-set value'
+
+
+# --- [Gradient] workspace.enable: the deployment decides ----------------------
+
+
+def test_workspace_switch_is_env_authoritative():
+    assert Config.persistent_enabled_for('workspace.enable') is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stored,env', [(False, True), (True, False)])
+async def test_workspace_switch_reads_the_env_over_a_stored_value(db_session, stored, env):
+    # A tenant that booted the workspace build before ENABLE_WORKSPACE was set has False stored.
+    async with db_session() as s:
+        s.add(Config(key='workspace.enable', value=stored, updated_at=int(time.time())))
+        await s.commit()
+    Config.DEFAULTS['workspace.enable'] = env
+
+    assert await Config.get('workspace.enable') is env
+    assert (await Config.get_many('workspace.enable'))['workspace.enable'] is env
+
+
+@pytest.mark.asyncio
+async def test_seed_defaults_does_not_write_the_workspace_switch(db_session):
+    await Config.seed_defaults({'workspace.enable': False, 'rag.template': 'seeded'})
+
+    async with db_session() as s:
+        assert await s.get(Config, 'workspace.enable') is None
+        assert (await s.get(Config, 'rag.template')).value == 'seeded'

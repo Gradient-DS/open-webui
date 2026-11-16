@@ -29,27 +29,13 @@ def client(monkeypatch):
         yield client, values
 
 
-@pytest.mark.parametrize('workspace', [False, True])
-def test_workspace_runtime_settings_round_trip_through_admin_endpoint(client, workspace):
+def test_the_admin_settings_carry_no_workspace_switch(client):
+    """workspace.enable is deployment-authoritative (models/config.py): ENABLE_WORKSPACE decides, not an admin."""
     api, values = client
-    response = api.get('/code_execution')
-    assert response.status_code == 200
-    payload = {**response.json(), 'ENABLE_WORKSPACE': workspace}
-    updated = api.post('/code_execution', json=payload)
-    assert updated.status_code == 200
-    assert updated.json()['ENABLE_WORKSPACE'] is workspace
-    assert values['workspace.enable'] is workspace
-    assert api.get('/code_execution').json() == updated.json()
-
-
-def test_older_settings_clients_preserve_new_fields(client):
-    api, values = client
-    values.update({'workspace.enable': False, 'document_writer.enable': True})
     payload = api.get('/code_execution').json()
-    payload.pop('ENABLE_WORKSPACE')
-    assert api.post('/code_execution', json=payload).status_code == 200
-    assert values['workspace.enable'] is False
-    assert values['document_writer.enable'] is True
+    assert 'ENABLE_WORKSPACE' not in payload
+    assert api.post('/code_execution', json={**payload, 'ENABLE_WORKSPACE': True}).status_code == 200
+    assert values['workspace.enable'] is DEFAULT_CONFIG['workspace.enable']
 
 
 def test_document_writer_switch_in_the_same_section_round_trips(client):

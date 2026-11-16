@@ -137,8 +137,8 @@ def require_feature(feature: Feature):
 
 
 async def workspace_allowed(user) -> bool:
-    """[Gradient] The workspace feature flag, the admin switch and the user's permission all allow it; admins need
-    the permission too."""
+    """[Gradient] The workspace feature flag, ENABLE_WORKSPACE (deployment-authoritative) and the user's permission
+    all allow it; admins need the permission too."""
     from open_webui.models.config import Config
     from open_webui.utils.access_control import has_permission
 
