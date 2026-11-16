@@ -4464,11 +4464,6 @@
           "ENABLE_DOCUMENT_WRITER": {
             "title": "Enable Document Writer",
             "type": "boolean"
-          },
-          "ENABLE_WORKSPACE": {
-            "default": false,
-            "title": "Enable Workspace",
-            "type": "boolean"
           }
         },
         "required": [

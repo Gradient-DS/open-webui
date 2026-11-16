@@ -501,10 +501,12 @@ need inline scripts, and sign-in, the OneDrive picker and the agent stream need 
 ## Workspace: delivered HTML pages, files and flags
 
 `ENABLE_WORKSPACE`, `FEATURE_WORKSPACE`, `USER_PERMISSIONS_FEATURES_WORKSPACE` and the group permission default
-to off: the workspace agent runs model-written code, so a tenant opts in. The download route
+to off: the workspace agent runs model-written code, so a tenant opts in. `workspace.enable` is deployment-authoritative
+(`models/config.py:persistent_enabled_for`, like `sync_daemon.*`, `rag.file.*` and `audio.stt.*`): `ENABLE_WORKSPACE`
+always wins, a stored value is ignored and never seeded, and there is no admin switch for it. The download route
 `/api/v1/chats/{id}/workspace/{element}/{part}` is owner-only, admins included (404 otherwise): it asserts the
 owner to the agent, so `ENABLE_ADMIN_CHAT_ACCESS` or a chat share must not reach the owner's files. It is also 404
-while the feature flag, the admin switch or the user's permission is off (`utils/features.workspace_allowed`, the
+while the feature flag, `ENABLE_WORKSPACE` or the user's permission is off (`utils/features.workspace_allowed`, the
 same gate a turn's `workspace` feature passes; admins need the permission like users, and the frontend shows the
 switch on the same three). The route is in `security/openapi.json` and waived in `security/route-coverage.toml` as
 never attempted: its `element_id` is unseedable on the sealed stack. Delivered file

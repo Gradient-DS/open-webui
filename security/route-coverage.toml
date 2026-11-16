@@ -108,7 +108,7 @@ reason = "Never attempted: `path` is unseedable (attack-surface.toml, key cache)
 
 [[waived]]
 id = "GET /api/v1/chats/{chat_id}/workspace/{element_id}/{part}"
-reason = "Never attempted: `element_id` is unseedable (attack-surface.toml, key workspace_element). routers/chats.py streams a file the soev-solutions workspace agent delivered, asserted as the chat owner; it answers 404 unless FEATURE_WORKSPACE, the workspace.enable switch and the user's workspace permission allow it, to anyone but the owner (admins included), for a part other than file or page-N, and for an element not recorded on the chat. These checks are unit-tested in test/soev/test_workspace_content.py. Closes when the sealed stack runs soev-solutions with a workspace sandbox that can deliver a file."
+reason = "Never attempted: `element_id` is unseedable (attack-surface.toml, key workspace_element). routers/chats.py streams a file the soev-solutions workspace agent delivered, asserted as the chat owner; it answers 404 unless FEATURE_WORKSPACE, ENABLE_WORKSPACE and the user's workspace permission allow it, to anyone but the owner (admins included), for a part other than file or page-N, and for an element not recorded on the chat. These checks are unit-tested in test/soev/test_workspace_content.py. Closes when the sealed stack runs soev-solutions with a workspace sandbox that can deliver a file."
 
 # --- Admin bypass: refused to every caller where admins follow access control --
 # BYPASS_ADMIN_ACCESS_CONTROL is environment-only (config.py), "false" on every
