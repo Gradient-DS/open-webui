@@ -63,14 +63,7 @@ spec:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
-            - name: ENABLE_DB_MIGRATIONS
-              value: "true"
-            - name: WEBUI_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: webui-secret-key
-            {{- include "open-webui-tenant.migrationDatabaseEnv" . | nindent 12 }}
+            {{- include "open-webui-tenant.openWebui.env" (merge (dict "migration" true) .) | nindent 12 }}
           resources:
             {{- toYaml .Values.openWebui.resources | nindent 12 }}
           volumeMounts:
@@ -93,24 +86,7 @@ spec:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
-            # [Gradient] Per-pod OTel identity. Without a unique
-            # service.instance.id each HA replica exports metrics under an
-            # identical series — Mimir commingles them and increase()/rate()
-            # inflate by orders of magnitude. Set here (not the ConfigMap)
-            # because the pod name is only available via the downward API.
-            {{- if .Values.openWebui.config.telemetry.otel.enabled }}
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: OTEL_RESOURCE_ATTRIBUTES
-              value: "service.instance.id=$(POD_NAME){{ with .Values.openWebui.config.telemetry.otel.resourceAttributes }},{{ . }}{{ end }}"
-            {{- end }}
             {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}
-            {{- if .Values.postgres.migration.user }}
-            - name: ENABLE_DB_MIGRATIONS
-              value: "false"
-            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /app/backend/data

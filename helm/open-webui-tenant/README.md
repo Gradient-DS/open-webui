@@ -28,9 +28,12 @@ ExternalSecret fetches `soevApiKey` from the configured 1Password item and
 injects `SOEV_API_KEY` through `secretKeyRef`. Inline deployments use
 `secrets.soevApiKey`. User authority comes from each person's login token.
 
-`extraEnv` is appended to the main Open WebUI container's environment. Each
-entry supports either `{name, value}` or `{name, valueFrom}`; quote scalar
-values as strings. It does not modify the migration init container.
+`extraEnv` is shared by the app and migration init container. Each entry supports
+`{name, value}` or `{name, valueFrom}`; quote scalar values as strings. Both use
+the same ConfigMap, secret references and telemetry settings. In separate-login
+mode, the init container replaces the database connection fields (including
+`PGVECTOR_DB_URL` and `PGOPTIONS`); `extraEnv` cannot override those fields or
+either container's `ENABLE_DB_MIGRATIONS`.
 
 ## PostgreSQL vectors
 

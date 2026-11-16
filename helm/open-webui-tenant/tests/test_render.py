@@ -64,6 +64,40 @@ def test_migration_role_is_optional():
     assert 'PGOPTIONS' not in env(next(c for c in pod['initContainers'] if c['name'] == 'migrate'))
 
 
+def test_init_shares_application_settings_and_secret_refs():
+    pod, _ = objects(
+        {
+            **MIGRATION,
+            'openWebui.config.telemetry.otel.enabled': 'true',
+            'extraEnv[0].name': 'VECTOR_DB',
+            'extraEnv[0].value': 'pgvector',
+            'extraEnv[1].name': 'PGVECTOR_PGCRYPTO_KEY',
+            'extraEnv[1].valueFrom.secretKeyRef.name': 'raven-vector',
+            'extraEnv[1].valueFrom.secretKeyRef.key': 'key',
+            'extraEnv[2].name': 'ENABLE_DB_MIGRATIONS',
+            'extraEnv[2].value': 'true',
+            'extraEnv[3].name': 'DATABASE_USER',
+            'extraEnv[3].value': 'raven_runtime',
+        }
+    )
+    init_container = next(c for c in pod['initContainers'] if c['name'] == 'migrate')
+    app_container = pod['containers'][0]
+    init, app = env(init_container), env(app_container)
+    assert init_container['envFrom'] == app_container['envFrom']
+    for name, entry in app.items():
+        if name.startswith('DATABASE_') or name == 'ENABLE_DB_MIGRATIONS':
+            continue
+        assert init[name] == entry
+    assert init['VECTOR_DB']['value'] == 'pgvector'
+    assert init['PGVECTOR_PGCRYPTO_KEY']['valueFrom']['secretKeyRef']['name'] == 'raven-vector'
+    assert init['DATABASE_USER']['value'] == 'raven_migrator'
+    assert app['ENABLE_DB_MIGRATIONS']['value'] == 'false'
+    assert init['ENABLE_DB_MIGRATIONS']['value'] == 'true'
+    for container in (init_container, app_container):
+        names = [entry['name'] for entry in container['env']]
+        assert len(names) == len(set(names))
+
+
 @pytest.mark.parametrize(
     'settings',
     [

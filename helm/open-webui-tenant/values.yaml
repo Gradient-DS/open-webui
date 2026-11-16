@@ -648,7 +648,9 @@ pgvector:
   maxVectorLength: 1024  # bge-m3 dimensions; match the platform memory embedding dimensions.
   createExtension: false
 
-# Appended to the open-webui container env. Supports value and valueFrom.
+# Shared by the app and migration init container; supports value and valueFrom.
+# With postgres.migration.user set, database login fields in init and
+# ENABLE_DB_MIGRATIONS in both containers are controlled by the chart.
 extraEnv: []
 # - name: EXAMPLE_SETTING
 #   value: "true"

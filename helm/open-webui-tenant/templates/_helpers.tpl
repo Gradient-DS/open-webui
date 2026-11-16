@@ -208,12 +208,28 @@ Shared services URLs
 other app containers so they use the same credentials.
 */}}
 {{- define "open-webui-tenant.openWebui.env" -}}
+# [Gradient] Per-pod OTel identity. Without a unique
+# service.instance.id each HA replica exports metrics under an
+# identical series — Mimir commingles them and increase()/rate()
+# inflate by orders of magnitude. Set here (not the ConfigMap)
+# because the pod name is only available via the downward API.
+{{- if .Values.openWebui.config.telemetry.otel.enabled }}
+- name: POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: "service.instance.id=$(POD_NAME){{ with .Values.openWebui.config.telemetry.otel.resourceAttributes }},{{ . }}{{ end }}"
+{{- end }}
 # Secrets
 - name: WEBUI_SECRET_KEY
   valueFrom:
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: webui-secret-key
+{{- if .migration }}
+{{ include "open-webui-tenant.migrationDatabaseEnv" . }}
+{{- else }}
 - name: DATABASE_PASSWORD
   valueFrom:
     secretKeyRef:
@@ -221,6 +237,7 @@ other app containers so they use the same credentials.
       key: postgres-password
 - name: DATABASE_URL
   value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
+{{- end }}
 # Google OAuth (only if configured)
 {{- if or .Values.secrets.googleClientSecret .Values.externalSecrets.onepassword.fields.googleClientSecret }}
 - name: GOOGLE_CLIENT_SECRET
@@ -334,8 +351,18 @@ other app containers so they use the same credentials.
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: s3-secret-access-key
 {{- end }}
-{{- with .Values.extraEnv }}
-{{- toYaml . | nindent 0 }}
+{{- $migrationKeys := list "DATABASE_TYPE" "DATABASE_USER" "DATABASE_PASSWORD" "DATABASE_HOST" "DATABASE_PORT" "DATABASE_NAME" "DATABASE_URL" "PGVECTOR_DB_URL" "PGOPTIONS" }}
+{{- range .Values.extraEnv }}
+{{- if and (not (and $.migration (has .name $migrationKeys))) (not (and $.Values.postgres.migration.user (eq .name "ENABLE_DB_MIGRATIONS"))) }}
+{{ toYaml (list .) }}
+{{- end }}
+{{- end }}
+{{- if .migration }}
+- name: ENABLE_DB_MIGRATIONS
+  value: "true"
+{{- else if .Values.postgres.migration.user }}
+- name: ENABLE_DB_MIGRATIONS
+  value: "false"
 {{- end }}
 {{- end }}
 
