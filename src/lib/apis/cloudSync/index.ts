@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export type CloudProvider = string;
 export type ScheduleKind = 'content' | 'acl_refresh';
-export type ScheduleAction = 'run' | 'cancel' | 'suspend' | 'resume';
+export type ScheduleAction = 'run' | 'retry_failed' | 'cancel' | 'suspend' | 'resume';
 
 export interface Connection {
 	id: string;
@@ -95,17 +95,29 @@ const knowledgePath = (id: string) => `/knowledge/${encodeURIComponent(id)}`;
 const schedulePath = (knowledgeId: string, id: string) =>
 	`${knowledgePath(knowledgeId)}/schedules/${encodeURIComponent(id)}`;
 
+// [Gradient] No authorize_url: the user already holds a healthy connection of this provider,
+// which soev-api returns instead of creating another one.
 export const createConnection = (token: string, provider: CloudProvider) =>
-	request<Authorization & { connection_id: string }>(token, '/connections', 'POST', { provider });
+	request<
+		Omit<Authorization, 'authorize_url'> & { connection_id: string; authorize_url: string | null }
+	>(token, '/connections', 'POST', { provider });
 export const listConnections = (token: string) => request<Connection[]>(token, '/connections');
 export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));
 export const getConnectionUsage = (token: string, id: string) =>
 	request<{ knowledge_ids: string[] }>(token, `${connectionPath(id)}/usage`);
-export const authorizeConnection = (token: string, id: string) =>
-	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
+export const authorizeConnection = (token: string, id: string, silent = false) =>
+	request<Authorization>(
+		token,
+		`${connectionPath(id)}/authorize`,
+		'POST',
+		silent ? { silent: true } : undefined
+	);
 export const revokeConnection = (token: string, id: string) =>
 	request<void>(token, connectionPath(id), 'DELETE');
+// [Gradient] Live search on for what the Microsoft login connected; the families turned on now.
+export const grantAutoConnected = (token: string) =>
+	request<{ families: string[] }>(token, '/live/auto', 'POST');
 export const createSchedule = (token: string, knowledgeId: string, form: ScheduleForm) =>
 	request<Schedule>(token, `${knowledgePath(knowledgeId)}/schedules`, 'POST', form);
 export const deleteSchedule = (token: string, knowledgeId: string, id: string) =>
@@ -123,6 +135,9 @@ export const syncKnowledge = (token: string, knowledgeId: string) =>
 	request<{ data: KnowledgeRun[] }>(token, `${knowledgePath(knowledgeId)}/sync`, 'POST');
 export const runSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/run`, 'POST');
+// A run that lists the whole folder, so every file without a landed version is fetched again.
+export const retryFailedSchedule = (token: string, knowledgeId: string, id: string) =>
+	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/retry_failed`, 'POST');
 export const cancelSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<void>(token, `${schedulePath(knowledgeId, id)}/cancel`, 'POST');
 export const suspendSchedule = (token: string, knowledgeId: string, id: string) =>
@@ -134,6 +149,8 @@ export interface SkippedItem {
 	source_id: string;
 	name?: string;
 	code: string;
+	// The fixed code soev-sync stored for the failure; absent on older platforms.
+	reason?: string | null;
 }
 
 export const getSkippedItems = (token: string, knowledgeId: string, id: string) =>
@@ -164,3 +181,19 @@ export const enableLiveFamily = (
 	id: string,
 	family: 'live_documents' | 'mail' = 'live_documents'
 ) => request<LiveGrant>(token, `${connectionPath(id)}/live/${family}`, 'POST');
+
+export interface SharedMailbox {
+	address: string;
+	added_at: string;
+}
+export interface MailboxList {
+	enabled: boolean;
+	consented: boolean;
+	mailboxes: SharedMailbox[];
+}
+export const listMailboxes = (token: string, id: string) =>
+	request<MailboxList>(token, `${connectionPath(id)}/mailboxes`);
+export const addMailbox = (token: string, id: string, address: string) =>
+	request<SharedMailbox>(token, `${connectionPath(id)}/mailboxes`, 'POST', { address });
+export const removeMailbox = (token: string, id: string, address: string) =>
+	request<void>(token, `${connectionPath(id)}/mailboxes/${encodeURIComponent(address)}`, 'DELETE');

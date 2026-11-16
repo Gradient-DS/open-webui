@@ -1,3 +1,5 @@
+import { DOCUMENT_OPEN, tagEnd } from './agentDocument';
+
 // [Gradient] Markup the stream pipeline consumes instead of displaying.
 //
 // Tool/reasoning markers are hidden; documents become cards as soon as their
@@ -50,13 +52,27 @@ export const maskInFlightTag = (content: string): string => {
 // a `**` or inline-code run, or a `[n]` citation shows once its closing part is
 // revealed with it, or waits while the model is still writing that part.
 const INLINE_PAIRS = ['**', '`'];
+const DOCUMENT_TAG = new RegExp(`^${DOCUMENT_OPEN.source}`);
+
+// The last `<document` before `end` that is or may still become a document's opening tag; -1 for none. An echoed
+// context tag (`<document-text …>`, `<document id="1"/>`) is an ordinary tag.
+const documentAt = (text: string, end: number): number => {
+	const start = text.lastIndexOf('<document', end - 1);
+	if (start === -1) return -1;
+	const rest = text.slice(start);
+	if (DOCUMENT_TAG.test(rest)) return start;
+	// Still being typed: `<document` alone, or with whitespace and an unfinished attribute list.
+	const name = rest.charAt('<document'.length);
+	return (name === '' || /\s/.test(name)) && tagEnd(rest, 0) === -1 ? start : -1;
+};
+
 export const markupSafeEnd = (text: string, end: number): number => {
 	const code = text.charCodeAt(end - 1);
 	if (code >= 0xd800 && code <= 0xdbff) end += 1;
 
-	const document = text.lastIndexOf('<document', end - 1);
+	const document = documentAt(text, end);
 	if (document !== -1) {
-		const opening = text.slice(document).match(/^<document\b(?:[^>"']|"[^"]*"|'[^']*')*>/);
+		const opening = text.slice(document).match(DOCUMENT_TAG);
 		if (!opening) return document;
 		const close = text.indexOf('</document>', document + opening[0].length);
 		if (close === -1) return text.length;

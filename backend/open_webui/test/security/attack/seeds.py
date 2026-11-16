@@ -523,23 +523,49 @@ def seed_cloud_family(ctx, parameter):
     return 'live_documents'
 
 
+def seed_cloud_mailbox_address(ctx, parameter):
+    connection = ctx.values['cloud_mail_connection']
+    mailbox = ctx.request(
+        'POST',
+        f'/api/v1/cloud-sync/connections/{connection}/mailboxes',
+        actor=ctx.admin,
+        json={'address': 'gedeeld@example.test'},
+    )
+    return _extract(mailbox, 'address', name=parameter['key'], via='POST cloud mailbox')
+
+
 def seed_cloud_connection(ctx, parameter):
-    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
+    provider = parameter.get('provider', 'onedrive')
+    family = parameter.get('family', 'live_documents')
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
-    # OAuth cannot return from Microsoft on the sealed network. Only consent
-    # state is seeded; the application must admit the owner and create its grant.
-    with requests.Session() as session:
-        session.trust_env = False
-        response = session.post(
-            os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
-            headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
-            json={'connection_id': connection},
-            timeout=30,
-        )
-        response.raise_for_status()
-    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
-    ctx.provide(parameter, 'cloud_grant', grant['id'])
+    # soev-api keeps one connection per owner and provider: a later pass gets the
+    # consented connection back, without an authorize URL, and needs no new consent.
+    if created.get('authorize_url') is not None:
+        # OAuth cannot return from Microsoft on the sealed network. Only consent
+        # state is seeded; the application must admit the owner and create its grant.
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.post(
+                os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+                headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+                json={'connection_id': connection},
+                timeout=30,
+            )
+            response.raise_for_status()
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/{family}', actor=ctx.admin)
+    if 'cloud_grant' in parameter.get('provides', []):
+        ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
+
+
+def seed_cloud_authorize_connection(ctx, parameter):
+    # Consent suspends enabled connections. Use the ordinary caller's connection,
+    # leaving the admin's consented OneDrive and Outlook fixtures untouched.
+    policy = ctx.request('GET', '/api/v1/cloud-sync/policy')
+    provider = 'outlook_mail' if 'outlook_mail' in policy.get('providers_enabled', []) else 'onedrive'
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', json={'provider': provider})
+    return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
 
 def seed_external_source(ctx, parameter):
@@ -583,7 +609,9 @@ _SEEDERS = {
         seed_active_function,
         seed_totp_user,
         seed_cloud_connection,
+        seed_cloud_authorize_connection,
         seed_cloud_family,
+        seed_cloud_mailbox_address,
         seed_knowledge_file,
         seed_external_source,
     )

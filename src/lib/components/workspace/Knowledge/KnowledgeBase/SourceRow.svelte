@@ -15,7 +15,8 @@
 	const i18n = getContext<Writable<I18n>>('i18n');
 	// [Gradient] A cloud source that is not a folder (a single synced file) has
 	// no directory row of its own, so it gets one line in the listing. Its path
-	// lives in the ⋯ menu, not inline.
+	// lives in the ⋯ menu, not inline. It stays one line on a narrow screen:
+	// the meta after the name is hidden below `sm` (the badge tooltip has it).
 	export let knowledgeId: string;
 	export let pair: SchedulePair;
 	export let writeAccess = false;
@@ -50,23 +51,30 @@
 	</div>
 	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 	<div
-		class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left"
+		class="flex min-w-0 flex-[1_1_12rem] items-center gap-2 p-2 text-left"
 		on:click={(e) => {
 			if (selectable) onRowClick(e);
 		}}
 	>
-		<div class="line-clamp-1 text-xs">{schedule.label || $i18n.t(view.label)}</div>
-		<span class="shrink-0 text-xs text-gray-400"
+		<div class="min-w-0 truncate text-xs sm:max-w-[60%] sm:shrink-0">
+			{schedule.label || $i18n.t(view.label)}
+		</div>
+		<span class="hidden shrink-0 text-xs text-gray-400 sm:inline"
 			>&middot; {$i18n.t(view.kind === 'file' ? 'File' : 'Folder')}</span
 		>
 		{#if view.lastSyncedAt}
-			<Tooltip content={dayjs(view.lastSyncedAt).format('LLLL')} className="shrink-0">
+			<Tooltip
+				content={dayjs(view.lastSyncedAt).format('LLLL')}
+				className="hidden min-w-0 truncate sm:block"
+			>
 				<span class="text-xs text-gray-400">
 					&middot; {$i18n.t('Updated {{time}}', { time: dayjs(view.lastSyncedAt).fromNow() })}
 				</span>
 			</Tooltip>
 		{:else if view.state !== 'syncing'}
-			<span class="shrink-0 text-xs text-gray-400">&middot; {$i18n.t('Not synced yet')}</span>
+			<span class="hidden shrink-0 text-xs text-gray-400 sm:inline"
+				>&middot; {$i18n.t('Not synced yet')}</span
+			>
 		{/if}
 	</div>
 	<SourceControls {knowledgeId} {pair} {writeAccess} {busy} {isAdmin} on:action on:reconnect />

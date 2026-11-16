@@ -28,7 +28,7 @@ MATRIX = [
     ('folder', 'read', 'DAAADDA', 'AAAADDA'),
     ('folder', 'update', 'DADADDD', 'AADADDD'),
     ('folder', 'delete', 'DADDDDD', 'AADDDDD'),  # Cascading deletion is reserved for owner/admin.
-    ('folder', 'share', 'DADADDD', 'AADADDD'),
+    ('folder', 'share', 'DADDDDD', 'DADDDDD'),  # Sharing a folder shares its owner's knowledge: owner-only.
     ('model', 'read', 'DAAADDA', 'AAAADDA'),
     ('model', 'update', 'DADADDD', 'AADADDD'),
     ('model', 'delete', 'DADADDD', 'AADADDD'),
@@ -48,7 +48,7 @@ MATRIX = [
     ('knowledge', 'read', 'DAAADDA', 'AAAADDA'),
     ('knowledge', 'update', 'DADADDD', 'AADADDD'),
     ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
-    ('knowledge', 'share', 'DADADDD', 'AADADDD'),
+    ('knowledge', 'share', 'DADDDDD', 'DADDDDD'),  # Access changes are owner-only; writers edit content.
     ('skill', 'read', 'DAAADDA', 'AAAADDA'),
     ('skill', 'update', 'DADADDD', 'AADADDD'),
     ('skill', 'delete', 'DADADDD', 'AADADDD'),

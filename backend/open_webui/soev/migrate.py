@@ -3,7 +3,7 @@
 python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
 (identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
 --models with --apply or --dry-run rewrites stored model ids alone, under its own id.
---uploads with --apply or --dry-run ingests only the chat uploads stored chats attach (step 5).
+--uploads with --apply or --dry-run ingests chat uploads and assistant files (step 5).
 """
 
 import argparse
@@ -15,6 +15,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
+from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from open_webui.models.access_grants import AccessGrantModel
+    from open_webui.models.knowledge import KnowledgeModel
+    from open_webui.soev.client import SoevClient
 
 # 1 is retried (soev-api unreachable, collection mismatch); 2 is bad input a retry cannot fix;
 # 75 (EX_TEMPFAIL) means ingest jobs are still running. The chart's Job fails fast only on 2.
@@ -79,7 +85,10 @@ async def _push_directory(users, groups, client, *, dry_run, db):
     from open_webui.models.users import Users
     from open_webui.soev import identity
 
+    print(f'4 directory: skipped pending users {sum(user.role == "pending" for user in users)}')
     for user in sorted(users, key=lambda user: user.id):
+        if user.role not in ('user', 'admin'):
+            continue
         ref = identity.external_ref(user)
         if dry_run:
             print(
@@ -110,46 +119,71 @@ async def _push_directory(users, groups, client, *, dry_run, db):
         )
 
 
+def _collection_grants(
+    kb: 'KnowledgeModel', grants: Sequence['AccessGrantModel'], counts: Dict[str, int]
+) -> List[dict]:
+    if kb.type in ('onedrive', 'google_drive', 'confluence'):
+        counts['dropped cloud grants'] += len(grants)
+        for grant in grants:
+            print(f'{kb.id}: dropped cloud grant {grant.principal_type}:{grant.principal_id}:{grant.permission}')
+        return []
+    for grant in grants:
+        kind = grant.principal_type
+        if kind not in ('user', 'group') or grant.permission not in ('read', 'write'):
+            continue
+        if grant.principal_id == '*':
+            if kind != 'user':
+                continue
+            kind = 'everyone'
+        counts[f'{kind} {grant.permission}'] += 1
+    return [grant.model_dump() for grant in grants]
+
+
 async def _create_collections(rows, users, grants, client, *, dry_run, db):
     from open_webui import config
+    from open_webui.models.knowledge import KnowledgeForm
     from open_webui.soev import projection
-    from open_webui.soev.client import SoevApiError
 
+    counts = {f'{kind} {permission}': 0 for kind in ('everyone', 'user', 'group') for permission in ('read', 'write')}
+    counts['dropped cloud grants'] = 0
     user_ids = {user.id for user in users}
     conflicts = set()
     for kb in rows:
-        acl = await grants.get_grants_by_resource('knowledge', kb.id, db=db)
-        visibility, readers, writers = projection.access_of(
-            [grant.model_dump() for grant in acl],
-            service_principal=config.SOEV_API_SERVICE_PRINCIPAL,
-        )
+        acl = _collection_grants(kb, await grants.get_grants_by_resource('knowledge', kb.id, db=db), counts)
+        form = KnowledgeForm(name=kb.name, description=kb.description, type=kb.type, access_grants=acl)
+        body = projection.collection_create_body(form, service_principal=config.SOEV_API_SERVICE_PRINCIPAL)
         owner = f'owui:user:{kb.user_id}' if kb.user_id in user_ids else None
         if owner is None:
             print(f'{kb.id}: owner missing, created without created_by')
-        try:
-            await _send(
-                client,
-                'POST',
-                '/v1/collections',
-                {
-                    'key': kb.id,
-                    'name': kb.name,
-                    'description': kb.description,
-                    'visibility': visibility,
-                    'principals': readers,
-                    'writers': writers,
-                },
-                key=f'kb:{kb.id}',
-                dry_run=dry_run,
-                as_user=owner,
-            )
-        except SoevApiError as error:
-            if error.status != 409:
-                raise
+        if not await _create_collection(kb.id, body, owner, client, dry_run=dry_run):
             conflicts.add(kb.id)
-            reason = 'collection_exists' if error.code == 'collection_exists' else 'collection create conflict'
-            print(f'{kb.id}: {reason} (409); not overwritten')
+    for mapping, count in counts.items():
+        print(f'4 directory: {mapping} {count}')
     return conflicts
+
+
+async def _create_collection(
+    key: str, body: dict, owner: Optional[str], client: 'SoevClient', *, dry_run: bool
+) -> bool:
+    from open_webui.soev.client import SoevApiError
+
+    try:
+        await _send(
+            client,
+            'POST',
+            '/v1/collections',
+            {'key': key, **body},
+            key=f'kb:{key}',
+            dry_run=dry_run,
+            as_user=owner,
+        )
+    except SoevApiError as error:
+        if error.status != 409:
+            raise
+        reason = 'collection_exists' if error.code == 'collection_exists' else 'collection create conflict'
+        print(f'{key}: {reason} (409); not overwritten')
+        return False
+    return True
 
 
 def _cloud_scope(provider, source):
@@ -261,6 +295,15 @@ async def _cloud_coverage(cloud_owners, client, *, dry_run):
     return {key: f'{"not read" if dry_run else int(key in scheduled)} / 1' for key in cloud_owners}
 
 
+async def _reconcile_collections(client: 'SoevClient', cloud_owners: Mapping[str, Optional[str]]) -> Dict[str, dict]:
+    collections = {row['key']: row async for row in client.pages('/v1/collections')}
+    for owner in sorted({owner for owner in cloud_owners.values() if owner is not None}):
+        async for row in client.pages('/v1/collections', as_user=owner):
+            if cloud_owners.get(row['key']) == owner:
+                collections[row['key']] = row
+    return collections
+
+
 async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owners=None):
     coverage = await _cloud_coverage(cloud_owners or {}, client, dry_run=dry_run)
     header = 'Collection | OWUI files | document_count | gap | KBs with a schedule / KBs of a cloud type'
@@ -270,7 +313,7 @@ async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owne
         for key, count in sorted(file_counts.items()):
             print(f'{key} | {count} | not read | not read | {coverage.get(key, "0 / 0")}')
         return 0
-    collections = {row['key']: row async for row in client.pages('/v1/collections')}
+    collections = await _reconcile_collections(client, cloud_owners or {})
     print(f'KB count: {len(file_counts)} | collection count: {len(collections)}')
     print(header)
     missing = set(file_counts) - collections.keys()
@@ -358,6 +401,8 @@ class Options:
     model_map: dict = field(default_factory=dict)
     ingest_concurrency: int = 4
     wait_seconds: int = 0
+    # [Gradient] The base model whose system prompt becomes the global one, 'none', or None (only one exists).
+    system_prompt: str | None = None
 
 
 def options_from_env(
@@ -381,6 +426,7 @@ def options_from_env(
         model_map=model_map,
         ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
         wait_seconds=_positive_int(environ, 'SOEV_V2_WAIT_SECONDS', 0, minimum=0),
+        system_prompt=(environ.get('SOEV_V2_SYSTEM_PROMPT') or '').strip() or None,
     )
 
 
@@ -423,15 +469,89 @@ def _print_uploads(state, *, prefix: str) -> None:
         print(f'{prefix}: original missing, skipped {line}')
 
 
-def _print_model_report(report, *, prefix: str) -> None:
+async def _model_catalog(options: Options) -> tuple[str, dict[str, str]]:
+    """Step 3's one soev-api read: the catalog's default model and its ids with their labels. Read before any write, so it fails first."""
+    from open_webui.soev import identity
+    from open_webui.soev.migrate_models import catalog_default
+
+    return catalog_default(await identity.build_client().get('/v1/models'), options.model_map)
+
+
+async def _rewrite_models(
+    session,
+    options: Options,
+    catalog: tuple[str, dict[str, str]],
+    *,
+    v2_apply: bool,
+    prompts: bool | None = None,
+    dry_run: bool = False,
+):
+    """The v2 apply clears selections and moves the system prompts to the global one; a --models run only maps."""
+    from open_webui.soev import migrate_models
+
+    default, labels = catalog
+    return await migrate_models.rewrite(
+        session,
+        options.model_map,
+        options.migration_id,
+        default=default,
+        catalog=labels,
+        clear_selection=v2_apply,
+        prompts=v2_apply if prompts is None else prompts,
+        prompt_choice=options.system_prompt,
+        dry_run=dry_run,
+    )
+
+
+def _print_model_report(report, *, prefix: str, default: str | None = None) -> None:
+    if default is not None:
+        print(f'{prefix}: default model {default}')
     for site, count in sorted(report.changed.items()):
         print(f'{prefix}: {site} {count}')
+    for site, count in sorted(report.defaulted.items()):
+        print(f'{prefix}: defaulted {site} {count}')
+    if report.cleared:
+        print(f'{prefix}: cleared the default model selection of {report.cleared} users')
+    for model_id, count in sorted(report.defaulted_ids.items()):
+        print(f'{prefix}: defaulted {model_id} -> {default} ({count} references)')
     for line in report.merged:
         print(f'{prefix}: merged {line}')
+    if report.prompt_step:
+        kept = f'{len(report.prompt)} chars' if report.prompt is not None else 'none'
+        print(f'{prefix}: global system prompt: {kept}')
+        if report.cleared_prompts:
+            print(f'{prefix}: own system prompt cleared on {", ".join(report.cleared_prompts)}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
-    for model_id, count in sorted(report.unmapped.items()):
-        print(f'{prefix}: unmapped {model_id} ({count} references left as they are)')
+
+
+def _print_prompt_candidates(candidates, options: Options, *, prefix: str) -> bool:
+    """[Gradient] Every distinct base-model system prompt in full, for choosing SOEV_V2_SYSTEM_PROMPT; False when
+    an apply would stop on the choice."""
+    import datetime as dt
+
+    from open_webui.soev.migrate_models import choose_prompt
+    from open_webui.soev.migrate_state import MigrationError
+
+    print(f'{prefix}: {len(candidates)} distinct base-model system prompts')
+    for number, candidate in enumerate(candidates, 1):
+        rows = '; '.join(
+            f'{model_id} ({name or model_id}, updated '
+            f'{dt.datetime.fromtimestamp(updated or 0, dt.UTC).strftime("%Y-%m-%d %H:%M UTC")})'
+            for model_id, name, updated in candidate.rows
+        )
+        print(f'{prefix}: [{number}] {len(candidate.text)} chars, on {rows}')
+        print(f'----- [{number}] begin -----')
+        print(candidate.text)
+        print(f'----- [{number}] end -----')
+    try:
+        choose_prompt(candidates, options.system_prompt)
+    except MigrationError as error:
+        print(f'{prefix}: an apply would stop: {error}')
+        return False
+    choice = options.system_prompt or ('the only one' if candidates else 'none exists')
+    print(f'{prefix}: kept as the global prompt: {choice}')
+    return True
 
 
 def _uploads_running(state) -> int:
@@ -448,8 +568,8 @@ def verdict(collections: int, ingest_state, memory_state, uploads_state) -> int:
     print(
         f'7 reconcile: collections {"ok" if not collections else "MISMATCH"} | ingest running {running}'
         f' | ingest failed {len(ingest_state.failures)} | memory vectors missing {memory_state.missing}'
-        f' | chat uploads failed {len(uploads_state.failures)}'
-        f' | chat upload originals missing {len(uploads_state.missing)}'
+        f' | uploads failed {len(uploads_state.failures)}'
+        f' | upload originals missing {len(uploads_state.missing)}'
     )
     if collections or memory_state.missing:
         return EXIT_FAILED
@@ -483,7 +603,15 @@ async def apply(options: Options, *, db=None) -> int:
         migrate_uploads,
     )
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
+        # [Gradient] An unresolved system prompt choice stops the run before its first write.
+        if not (
+            await migrate_state.tables_exist(session)
+            and await migrate_state.has_marker(session, options.migration_id, 'model_ids')
+        ):
+            migrate_models.choose_prompt(await migrate_models.prompt_candidates(session), options.system_prompt)
         await migrate_state.ensure_tables(session)
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
         print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
@@ -497,16 +625,16 @@ async def apply(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
         else:
-            report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+            report = await _rewrite_models(session, options, catalog, v2_apply=True)
             await migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
-            _print_model_report(report, prefix='3 model ids')
+            _print_model_report(report, prefix='3 model ids', default=catalog[0])
     directory = await copy_directory(db=db)
     print(f'4 directory: {len(directory.rows)} KBs, {len(directory.conflicts)} conflicts')
     ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
     _print_ingest(ingest_state, prefix='5 re-ingest')
     uploads_state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-    _print_uploads(uploads_state, prefix='5 chat uploads')
+    _print_uploads(uploads_state, prefix='5 uploads')
     memory_state = await migrate_memories.reembed(db=db)
     _print_memories(memory_state, prefix='6 memories')
     deadline = time.monotonic() + options.wait_seconds
@@ -525,22 +653,22 @@ async def apply(options: Options, *, db=None) -> int:
         ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
         _print_ingest(ingest_state, prefix='5 re-ingest')
         uploads_state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-        _print_uploads(uploads_state, prefix='5 chat uploads')
+        _print_uploads(uploads_state, prefix='5 uploads')
 
 
 async def apply_uploads(options: Options, *, db=None) -> int:
-    """Only the chat uploads of step 5, for a tenant migrated before the step existed: no config switch, model
+    """Only the uploads of step 5, for a tenant migrated before the step existed: no config switch, model
     ids, directory, KB re-ingest, memories or sign-out. 0 once every upload is ingested or terminally failed."""
     from open_webui.soev import migrate_uploads
 
     deadline = time.monotonic() + options.wait_seconds
     while True:
         state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-        _print_uploads(state, prefix='5 chat uploads')
+        _print_uploads(state, prefix='5 uploads')
         running = _uploads_running(state)
         print(
-            f'7 reconcile: chat uploads running {running} | chat uploads failed {len(state.failures)}'
-            f' | chat upload originals missing {len(state.missing)}'
+            f'7 reconcile: uploads running {running} | uploads failed {len(state.failures)}'
+            f' | upload originals missing {len(state.missing)}'
         )
         if not running:
             return EXIT_OK
@@ -555,7 +683,7 @@ async def plan_uploads(options: Options, *, db=None) -> int:
     from open_webui.soev import migrate_uploads
 
     state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, dry_run=True, db=db)
-    _print_uploads(state, prefix='5 chat uploads')
+    _print_uploads(state, prefix='5 uploads')
     return EXIT_OK
 
 
@@ -565,9 +693,11 @@ async def apply_models(options: Options, *, db=None) -> int:
     The snapshot covers just the config rows the rewrite touches, so --restore with this id undoes it.
     """
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_config, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_state
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         await migrate_state.ensure_tables(session)
         keys = migrate_config.MODEL_ID_KEYS
         taken = await migrate_state.snapshot(session, options.migration_id, keys)
@@ -575,23 +705,23 @@ async def apply_models(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
             return EXIT_OK
-        report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+        report = await _rewrite_models(session, options, catalog, v2_apply=False)
         await migrate_state.add_marker(session, options.migration_id, 'model_ids')
         await session.commit()
-        _print_model_report(report, prefix='3 model ids')
+        _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
 
 async def plan_models(options: Options, *, db=None) -> int:
     """Preview apply_models: the map and what it would rewrite; nothing is written."""
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_models
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
-        report = await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True)
-        _print_model_report(report, prefix='3 model ids')
+        report = await _rewrite_models(session, options, catalog, v2_apply=False, dry_run=True)
+        _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
 
@@ -600,6 +730,7 @@ async def restore(migration_id: str, *, db=None) -> int:
     from open_webui.soev import migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         restored = await migrate_state.restore_config(session, migration_id)
         report = await migrate_models.restore(session, migration_id)
         # The snapshot stays: it is the v1 state, and a later --apply switches again from it.
@@ -623,7 +754,9 @@ async def plan(options: Options, *, db=None) -> int:
         migrate_uploads,
     )
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         # A preview creates nothing, not even the state tables the first --apply creates.
         snapshotted = None
         if await migrate_state.tables_exist(session):
@@ -639,15 +772,18 @@ async def plan(options: Options, *, db=None) -> int:
             print(f'2 config switch: {key} = {json.dumps(value, sort_keys=True)}')
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
+        candidates = await migrate_models.prompt_candidates(session)
+        resolved = _print_prompt_candidates(candidates, options, prefix='3 system prompt')
         _print_model_report(
-            await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True),
+            await _rewrite_models(session, options, catalog, v2_apply=True, prompts=resolved, dry_run=True),
             prefix='3 model ids',
+            default=catalog[0],
         )
     directory = await copy_directory(dry_run=True, db=db)
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
     _print_ingest(state, prefix='5 re-ingest')
     uploads = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, dry_run=True, db=db)
-    _print_uploads(uploads, prefix='5 chat uploads')
+    _print_uploads(uploads, prefix='5 uploads')
     _print_memories(await migrate_memories.reembed(dry_run=True, db=db), prefix='6 memories')
     print(f'8 sign-out: {"already done" if signed_out else "every user, after a successful apply"}')
     return await reconcile(
@@ -675,11 +811,15 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--apply', action='store_true', help='Run every step; safe to rerun')
     mode.add_argument('--restore', action='store_true', help='Put back the config snapshot and model ids')
-    mode.add_argument('--dry-run', action='store_true', help='Print the plan; no writes and no HTTP requests')
+    mode.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Print the plan; no writes and no HTTP request but the model catalog read',
+    )
     only = parser.add_mutually_exclusive_group()
     only.add_argument('--models', action='store_true', help='With --apply or --dry-run: only rewrite model ids')
     only.add_argument(
-        '--uploads', action='store_true', help='With --apply or --dry-run: only ingest the uploads chats attach'
+        '--uploads', action='store_true', help='With --apply or --dry-run: only ingest chat uploads and assistant files'
     )
     parser.add_argument('--migration-id', help='Defaults to SOEV_V2_MIGRATION_ID')
     args = parser.parse_args()
@@ -687,9 +827,8 @@ def main():
         parser.error('--restore takes no --models: the migration id says what to undo')
     if args.uploads and args.restore:
         parser.error('--restore takes no --uploads: ingested uploads stay, and v1 never reads them')
-    if args.dry_run:
-        # Config otherwise runs schema migrations on import, which would write OWUI tables.
-        os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
+    # OWUI owns schema upgrades; this job waits for its Alembic head before step 1.
+    os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
 
     import httpx
 

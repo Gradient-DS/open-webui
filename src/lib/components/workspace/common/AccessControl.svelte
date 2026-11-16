@@ -32,6 +32,7 @@
 	export let accessGrants: AccessGrant[] | any = [];
 	export let accessControl: any = undefined;
 
+	export let readOnly = false;
 	export let share = true;
 	export let sharePublic = true;
 	export let shareOpen = false;
@@ -210,6 +211,7 @@
 		);
 
 	const commitAccessGrants = (nextGrants: AccessGrant[]) => {
+		if (readOnly) return;
 		accessGrants = dedupeAccessGrants(nextGrants);
 		onChange(accessGrants);
 	};
@@ -521,6 +523,7 @@
 						: ''}
 				>
 					<select
+						disabled={readOnly}
 						id="models"
 						class="outline-none bg-transparent text-sm font-normal block w-fit pr-8 max-w-full placeholder-gray-400"
 						value={getVisibility(accessGrants ?? [])}
@@ -555,23 +558,28 @@
 				<div class="self-center text-xs">
 					{$i18n.t('Allow public write access')}
 				</div>
-				<Switch
-					state={hasPublicWriteGrant(accessGrants ?? [])}
-					on:change={() => {
-						togglePublicWrite();
-					}}
-				/>
+				{#if readOnly}
+					<Badge type={'info'} content={$i18n.t(hasPublicWriteGrant(accessGrants ?? []) ? 'Write' : 'Read')} />
+				{:else}
+					<Switch
+						state={hasPublicWriteGrant(accessGrants ?? [])}
+						on:change={() => {
+							togglePublicWrite();
+						}}
+					/>
+				{/if}
 			</div>
 		{/if}
 	</div>
 
-	{#if share}
+	{#if share || readOnly}
 		<div class="flex items-center justify-between text-xs font-normal text-gray-500 my-0.5">
 			<div>
 				{$i18n.t('Access List')}
 			</div>
 			<div class="flex gap-1">
 				<button
+					disabled={readOnly}
 					class="px-2 py-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition text-xs font-normal flex items-center gap-1"
 					type="button"
 					on:click={() => {
@@ -608,6 +616,7 @@
 					<div class="flex justify-end items-center gap-1.5 shrink-0">
 						{#if accessRoles.includes('write')}
 							<select
+								disabled={readOnly}
 								aria-label={$i18n.t('Access level')}
 								class="bg-transparent text-sm outline-none"
 								value={writeGroupIds.includes(group.id) ? 'write' : 'read'}
@@ -628,6 +637,7 @@
 						{/if}
 
 						<button
+							disabled={readOnly}
 							class="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
 							on:click={() => {
@@ -641,7 +651,7 @@
 			{/each}
 
 			<!-- Users -->
-			{#if shareUsers}
+			{#if shareUsers || readOnly}
 				{#each selectedUsers as user}
 					<div
 						class="flex items-center gap-2 justify-between text-sm w-full transition border-b border-gray-50 dark:border-gray-850 pb-1.5 last:border-0"
@@ -662,6 +672,7 @@
 						<div class="flex justify-end items-center gap-1.5 shrink-0">
 							{#if accessRoles.includes('write')}
 								<select
+									disabled={readOnly}
 									aria-label={$i18n.t('Access level')}
 									class="bg-transparent text-sm outline-none"
 									value={writeUserIds.includes(user.id) ? 'write' : 'read'}
@@ -682,6 +693,7 @@
 							{/if}
 
 							<button
+								disabled={readOnly}
 								class="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 								type="button"
 								on:click={() => {

@@ -1,13 +1,20 @@
 <script lang="ts">
 	// [Gradient] Explicit scroll intent keeps initial positioning instant.
 	type ScrollBehavior = 'auto' | 'smooth';
-	import { onMount, onDestroy, tick } from 'svelte';
-	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+	import { getContext, onMount, onDestroy, tick } from 'svelte';
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
+	// [Gradient] The legacy build polyfills the newest JS APIs the modern build calls
+	// directly (Map.getOrInsertComputed, Math.sumPrecise, ...), which iOS WebKit lacks.
+	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import { clampDocumentTargetPage } from '$lib/utils/documentPreview';
 	import Spinner from './Spinner.svelte';
 	import { matchItemsToNeedle, type PageTextItem } from '$lib/utils/citationMatch';
 	import { pickAnchorRect, type HighlightRect } from '$lib/utils/citationRects';
+	import { PreviewPendingError, loadWithPreviewRetry } from '$lib/utils/previewRetry';
+
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
@@ -100,6 +107,8 @@
 	let sceneElement: HTMLDivElement;
 	let loading = true;
 	let error = '';
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let pending = false;
 	let pdfDoc: PdfDocument | null = null;
 	let pzInstance: PanZoom | null = null;
 	let zoomLevel = 1;
@@ -520,7 +529,7 @@
 		width: number,
 		scrollRatio: number
 	) => {
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
 
@@ -660,7 +669,7 @@
 		bboxLayerDivs = [];
 		pageBaseDims = [];
 
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
 		const wrappers: HTMLElement[] = [];
@@ -820,6 +829,7 @@
 		activeRenderToken = null;
 		layersRendered = false;
 		error = '';
+		pending = false;
 		renderedPage = 0;
 		scrolledPage = 0;
 		pageCount = 0;
@@ -829,7 +839,7 @@
 		pdfDoc = null;
 
 		try {
-			const pdfjs = await import('pdfjs-dist');
+			const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 			pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 			let pdfData: ArrayBuffer | Uint8Array;
@@ -842,12 +852,23 @@
 				// isn't sent (OAuth login, non-localhost host, SameSite/expiry) —
 				// which surfaces as "Failed to load PDF". credentials kept as a fallback.
 				const authToken = localStorage.getItem('token');
-				const res = await fetch(url!, {
-					credentials: 'include',
-					headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
-				});
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
-				pdfData = await res.arrayBuffer();
+				// [Gradient] A 409 means the original is still being prepared: wait and retry.
+				const result = await loadWithPreviewRetry(
+					async () => {
+						const res = await fetch(url!, {
+							credentials: 'include',
+							headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
+						});
+						if (res.status === 409) throw new PreviewPendingError();
+						if (!res.ok) throw new Error(`HTTP ${res.status}`);
+						return res.arrayBuffer();
+					},
+					{ isCurrent: () => token === loadToken, onPending: () => (pending = true) }
+				);
+				if (result.status === 'cancelled') return;
+				pending = false;
+				if (result.status === 'failed') throw result.error;
+				pdfData = result.value;
 			}
 			pdfDoc = await pdfjs.getDocument({ data: pdfData }).promise;
 			if (token !== loadToken) return;
@@ -910,8 +931,12 @@
 
 <div class="relative {className}">
 	{#if loading}
-		<div class="absolute inset-0 flex items-center justify-center">
+		<div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
 			<Spinner className="size-5" />
+			<!-- [Gradient] -->
+			{#if pending}
+				<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+			{/if}
 		</div>
 	{:else if error}
 		<div class="absolute inset-0 flex items-center justify-center text-sm text-red-500">

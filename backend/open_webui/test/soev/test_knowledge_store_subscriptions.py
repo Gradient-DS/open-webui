@@ -74,52 +74,6 @@ async def test_counts_include_reached_documents(subscribed_store):
     assert not env.responses
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
-async def test_every_subscriber_keeps_its_synced_type(subscribed_store, provider):
-    """A corpus schedule projects the provider to every subscribing KB, preserving its guards."""
-    from open_webui.models.knowledge import is_synced_kb
-
-    env = subscribed_store
-    env.responses.append(
-        httpx.Response(
-            200,
-            json={
-                'data': [
-                    {
-                        'id': 'shared-schedule',
-                        'kind': 'content',
-                        'lifecycle': 'enabled',
-                        'collection_key': 'corpus:drive',
-                        'subscribers': ['kb', 'other-kb'],
-                        'subscriber_count': 2,
-                        'source_kind': provider,
-                    }
-                ],
-                'next_cursor': None,
-            },
-        )
-    )
-    types = await env.store._types(user_id='alice')
-    assert types == {'kb': provider, 'other-kb': provider}
-    for key in ('kb', 'other-kb', 'unsubscribed'):
-        row = {
-            'key': key,
-            'name': key,
-            'description': '',
-            'created_by': 'owui:user:alice',
-            'created_at': '2026-09-18T12:00:00Z',
-            'updated_at': '2026-09-18T12:00:00Z',
-            'visibility': 'restricted',
-            'principals': [],
-            'writers': [],
-            'meta': {},
-        }
-        assert is_synced_kb(env.store._knowledge(row, types)) == (key != 'unsubscribed')
-    assert env.requests[0].url.path == '/v1/schedules'
-    assert not env.responses
-
-
 @pytest.fixture
 def folder_store(monkeypatch, identity_config):
     """Serve subscribed folders, a single file and owned content through a counted HTTP stub."""
@@ -139,6 +93,7 @@ def folder_store(monkeypatch, identity_config):
         'writers': [],
         'meta': {},
         'subscriptions': ['onedrive'],
+        'source_kind': 'onedrive',
         'document_count': 4,
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-01T00:00:00Z',

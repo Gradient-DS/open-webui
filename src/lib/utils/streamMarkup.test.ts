@@ -85,3 +85,13 @@ it('does not let HTML details inside a completed document hold back following te
 	const text = '<document format="html"><details>Body</details></document> After';
 	expect(markupSafeEnd(text, text.length)).toBe(text.length);
 });
+
+it('reveals text after an echoed context tag', () => {
+	for (const text of [
+		'Ik lees <document id="1" filename="a.txt"/>. Klaar',
+		'Zie <document-text cite="[1]">x. Klaar'
+	]) {
+		expect(markupSafeEnd(text, text.length)).toBe(text.length);
+	}
+	expect(markupSafeEnd('Zie <document-text cite="[1', 10)).toBe(4);
+});

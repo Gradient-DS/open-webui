@@ -52,8 +52,11 @@
 			if (await loadSharedChat()) {
 				await tick();
 				loaded = true;
-			} else {
+			} else if (localStorage.token) {
 				await goto('/');
+			} else {
+				// [Gradient] Signed out, a share for signed-in users opens after signing in.
+				await signIn();
 			}
 		})();
 	}
@@ -102,10 +105,7 @@
 				: []
 		);
 		await chatId.set(shareId);
-		chat = await getChatByShareId(token, shareId).catch(async (error) => {
-			await goto('/');
-			return null;
-		});
+		chat = await getChatByShareId(token, shareId).catch(() => null);
 
 		if (chat) {
 			user = token
@@ -145,7 +145,19 @@
 		}
 	};
 
+	// [Gradient] Back to this share once signed in; a session that ended in another tab is let go first.
+	const signIn = async () => {
+		localStorage.removeItem('token');
+		await sessionUser.set(null);
+		await goto(`/auth?redirect=${encodeURIComponent($page.url.pathname)}`);
+	};
+
 	const cloneSharedChat = async () => {
+		if (!localStorage.token) {
+			await signIn();
+			return;
+		}
+
 		if (!canClone) {
 			toast.error($i18n.t('Access prohibited'));
 			return;

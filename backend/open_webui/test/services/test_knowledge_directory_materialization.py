@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 import uuid
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -33,6 +34,8 @@ from open_webui.models.knowledge import (
     _directory_segments_for_link,
 )
 from open_webui.models.users import User
+
+OWNER = SimpleNamespace(id='user-1', role='user')
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -584,7 +587,7 @@ async def test_delete_directory_contents_full_cascade(db_session, deletion_env):
     directories = await _dirs(db_session, kb_id)
     docs_id = next(d for d, (p, n) in directories.items() if n == 'docs')
 
-    report = await DeletionService.delete_directory(kb_id, docs_id, move_files_to_parent=False)
+    report = await DeletionService.delete_directory(kb_id, docs_id, move_files_to_parent=False, user=OWNER)
 
     assert not report.has_errors
     # Directory subtree gone (docs + sub), source root remains.
@@ -618,7 +621,7 @@ async def test_delete_directory_shared_file_survives(db_session, deletion_env):
     directories = await _dirs(db_session, 'kb-a')
     docs_id = next(d for d, (p, n) in directories.items() if n == 'docs')
 
-    report = await DeletionService.delete_directory('kb-a', docs_id, move_files_to_parent=False)
+    report = await DeletionService.delete_directory('kb-a', docs_id, move_files_to_parent=False, user=OWNER)
 
     assert not report.has_errors
     # kb-a vectors removed, but the File row + kb-b link survive.
@@ -645,7 +648,7 @@ async def test_delete_directory_move_files_keeps_files(db_session, deletion_env)
     docs_id = next(d for d, (p, n) in directories.items() if n == 'docs')
     root_id = next(d for d, (p, n) in directories.items() if n == 'Alpha Folder')
 
-    report = await DeletionService.delete_directory(kb_id, docs_id, move_files_to_parent=True)
+    report = await DeletionService.delete_directory(kb_id, docs_id, move_files_to_parent=True, user=OWNER)
 
     assert not report.has_errors
     assert vector.deleted_filters == [] and storage.deleted_paths == []
@@ -668,7 +671,40 @@ async def test_delete_directory_wrong_kb_refused(db_session, deletion_env):
     directories = await _dirs(db_session, 'kb-a')
     docs_id = next(d for d, (p, n) in directories.items() if n == 'docs')
 
-    report = await DeletionService.delete_directory('kb-b', docs_id, move_files_to_parent=False)
+    report = await DeletionService.delete_directory('kb-b', docs_id, move_files_to_parent=False, user=OWNER)
 
     assert report.has_errors
     assert docs_id in await _dirs(db_session, 'kb-a')  # untouched
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_by_a_co_writer_only_unlinks_files_it_does_not_own(db_session, deletion_env):
+    from open_webui.services.deletion import DeletionService
+
+    vector, storage = deletion_env
+    kb_id = await _insert_kb(db_session, meta=_drive_meta())
+    theirs = await _insert_file(
+        db_session, meta={'name': 't.pdf', 'relative_path': 'docs/t.pdf', 'source_item_id': 'SRC-1'}, hash='h-t'
+    )
+    mine = await _insert_file(
+        db_session,
+        user_id='co-writer',
+        meta={'name': 'm.pdf', 'relative_path': 'docs/m.pdf', 'source_item_id': 'SRC-1'},
+        hash='h-m',
+    )
+    await Knowledges.add_file_to_knowledge_by_id(kb_id, theirs, 'user-1')
+    await Knowledges.add_file_to_knowledge_by_id(kb_id, mine, 'co-writer')
+    docs_id = next(d for d, (p, n) in (await _dirs(db_session, kb_id)).items() if n == 'docs')
+
+    report = await DeletionService.delete_directory(
+        kb_id, docs_id, move_files_to_parent=False, user=SimpleNamespace(id='co-writer', role='user')
+    )
+
+    assert not report.has_errors
+    assert (kb_id, {'file_id': theirs}) in vector.deleted_filters
+    assert vector.deleted_collections == [f'file-{mine}']
+    assert storage.deleted_paths == [f'/files/{mine}.pdf']
+    async with db_session() as s:
+        assert (await s.get(File, theirs)) is not None
+        assert (await s.get(File, mine)) is None
+    assert (await _link(db_session, kb_id, theirs)) is None

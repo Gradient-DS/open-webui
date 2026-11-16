@@ -200,15 +200,34 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b'data: [DONE]\n\n')
             self.wfile.flush()
 
-    def do_POST(self):
+    def _read_body(self):
+        """The whole request body, or None after answering 400 for a malformed one.
+
+        A body streamed from a generator (pipelines.py:upload_pipeline) arrives
+        chunked, with no Content-Length. Answering it unread and closing the
+        connection broke the sender's pipe mid-upload.
+        """
         try:
+            if 'chunked' in self.headers.get('Transfer-Encoding', '').lower():
+                chunks = []
+                while size := int(self.rfile.readline().split(b';')[0], 16):
+                    chunks.append(self.rfile.read(size))
+                    self.rfile.readline()
+                while self.rfile.readline().strip():
+                    pass
+                return b''.join(chunks)
             length = int(self.headers.get('Content-Length', '0'))
             if length < 0:
                 raise ValueError
         except ValueError:
             self._send({'error': 'invalid Content-Length'}, 400)
+            return None
+        return self.rfile.read(length)
+
+    def do_POST(self):
+        raw = self._read_body()
+        if raw is None:
             return
-        raw = self.rfile.read(length)
         path = urlsplit(self.path).path
         if self._capture_control(path):
             return
@@ -338,16 +357,11 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_PUT(self):
-        # ExternalDocumentLoader sends raw file bytes, not JSON or multipart.
+        raw = self._read_body()
+        if raw is None:
+            return
         if urlsplit(self.path).path == '/process':
-            try:
-                length = int(self.headers.get('Content-Length', '0'))
-                if length < 0:
-                    raise ValueError
-            except ValueError:
-                self._send({'error': 'invalid Content-Length'}, 400)
-                return
-            raw = self.rfile.read(length)
+            # ExternalDocumentLoader sends raw file bytes, not JSON or multipart.
             with _RECORD_LOCK:
                 _RECORDED.append(
                     {

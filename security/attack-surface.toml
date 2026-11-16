@@ -34,7 +34,7 @@ preserve_configuration = true
 # from its environment. Applied after configuration recovery and before any
 # pass snapshots, so every restore keeps it. Chart values only seed
 # PersistentConfig, so each key here is production surface; route-coverage.toml
-# states the rule. CI-005 in plane-findings.md.
+# states the rule.
 [stack_configuration]
 # Five tenants run self-signup. The first signup turns signup off in-process
 # (routers/auths.py:signup), and identity bootstrap is that signup, so an
@@ -57,7 +57,7 @@ config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" 
 key = "user"
 name = "user_id"
 prefix = "/api/v1/users/{user_id}"
-description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target."
+description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target. GET /api/v1/users/{user_id}/shared-data is an admin-only, read-only offboarding inventory of that user's shared KB and assistant ids and kinds, never content. It reuses this user target and has no sharing allowance. Without soev-api only local shared assistants are inventoried."
 via = "POST /api/v1/auths/add"
 body = { "email" = "attack-fixture-{token}@example.com", "name" = "Attack fixture {token}", "password" = "Attack-Fixture-Passw0rd!", "role" = "user" }
 extract = "id"
@@ -690,10 +690,11 @@ backed_by = "soev-solutions"
 key = "cloud_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}"
-description = "routers/cloud_sync.py resolves an owned connection through soev-api."
+description = "routers/cloud_sync.py resolves an owned connection through soev-api. soev-api keeps one connection per owner and provider, so every pass resolves the same consented OneDrive connection."
 seeded_by = "seed_cloud_connection"
 depends_on = []
 provides = ["cloud_grant"]
+fresh = false
 actor = "admin"
 
 [[parameter]]
@@ -701,11 +702,11 @@ backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent."
-via = "POST /api/v1/cloud-sync/connections"
-body = { provider = "onedrive" }
-extract = "connection_id"
-actor = "admin"
+description = "Starting consent suspends an enabled connection. Use the ordinary caller's pending connection, separate from the admin's consented OneDrive and Outlook fixtures: soev-api keeps one connection per owner and provider. A later pass gets the same pending connection."
+seeded_by = "seed_cloud_authorize_connection"
+depends_on = []
+fresh = false
+actor = "user"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -720,13 +721,49 @@ actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
+key = "cloud_mail_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Mailbox settings require an owned Outlook connection, shared-mailbox consent and a mail live grant. Keep the OneDrive fixture for document grants and schedules. The private provider fixture completes consent with Mail.Read.Shared; the real owner API creates the grant."
+seeded_by = "seed_cloud_connection"
+provider = "outlook_mail"
+family = "mail"
+depends_on = []
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_mailbox_address"
+name = "address"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/mailboxes/{address}"
+description = "Save gedeeld@example.test through the owner API and the private provider's signed mailbox probe, so list and delete operate on an existing mailbox. Re-add it on every pass after earlier removals."
+seeded_by = "seed_cloud_mailbox_address"
+depends_on = ["cloud_mail_connection"]
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
 key = "cloud_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
-description = "Use a separate KB: subscribing makes it cloud-synced and must not change the ordinary KB's reset or file controls."
+description = "Use a separate KB, created as OneDrive: a KB's source kind is fixed at creation and only a matching, unshared KB may subscribe."
 via = "POST /api/v1/knowledge/create"
-body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture" }
+body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "retry_schedule"
+name = "schedule_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed"
+description = "Retry failed files queues a run, and POST .../run -- driven right after it -- is refused run_active while that run is live. Retry gets a schedule nothing else touches (its own scope, so soev-api does not reuse the shared one)."
+via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
+body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-retry-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-retry-schedule-{token}" }
+extract = "id"
+depends_on = ["cloud_connection", "cloud_knowledge"]
 actor = "admin"
 
 [[parameter]]
@@ -751,6 +788,14 @@ via = "POST /api/v1/meetings"
 body = { input = { type = "start", title = "attack-meeting-{token}", consent = { text_version = "ci-fixture-v1", at = "2026-01-01T00:00:00Z" } } }
 extract = "id"
 actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "agent_thread"
+name = "thread_id"
+prefix = "/api/v1/agent-threads/{thread_id}"
+description = "routers/agent_threads.py reads a soev-api chat thread the caller owns; a meeting id is such a thread, started by the admin."
+same_as = "meeting"
 
 [[destructive]]
 id = "POST /api/v1/auths/signout"
@@ -782,7 +827,7 @@ reason = "Changes the caller password, and since v0.11.3 revokes every token tha
 
 [[destructive]]
 id = "DELETE /api/v1/users/{user_id}"
-reason = "Can delete the driving user and its owned resources. Schedule with a disposable identity after ordinary targets."
+reason = "Admin-only offboarding removes the target account after deleting, transferring or archiving its resources (mode=delete|transfer|archive). transfer_to selects the new owner; delete requires confirm_shared_deletion to exactly match the shared KB and assistant ids returned by GET /api/v1/users/{user_id}/shared-data. Primary-admin and self deletion are refused. Schedule with a disposable identity after ordinary targets."
 
 [[destructive]]
 id = "POST /api/v1/knowledge/{id}/reset"
@@ -825,6 +870,12 @@ backed_by = "soev-solutions"
 route = "POST /api/v1/files/onedrive/attach"
 description = "Inspect and ingest the fixed provider document using the owner's real live grant."
 json = { grant_id = "{cloud_grant}", drive_id = "ci-picker-drive", item_id = "ci-document", name = "ci-document.txt", web_url = "https://ci.example.invalid/document", size = 59 }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes"
+description = "Use the saved shared fixture's valid address; the schema's attack-control placeholder is not an email address."
+json = { address = "{cloud_mailbox_address}" }
 
 [[field]]
 backed_by = "soev-solutions"

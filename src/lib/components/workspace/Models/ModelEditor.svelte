@@ -81,6 +81,9 @@
 	}
 
 	let system = '';
+	// [Gradient] Base models use the global system prompt (Admin > Settings > System prompt); only one that still
+	// has its own prompt shows it here, so it can be cleared.
+	let ownBasePrompt = false;
 	let info = {
 		id: '',
 		base_model_id: null as string | null, // [Gradient] Hidden legacy assistant default.
@@ -455,6 +458,7 @@
 			}
 
 			system = model?.params?.system ?? '';
+			ownBasePrompt = !preset && system.trim() !== '';
 
 			params = { ...params, ...model?.params };
 			params.stop = params?.stop
@@ -811,77 +815,92 @@
 							</div>
 
 							<div class="space-y-2.5">
-								<div>
-									<div class="mb-1 text-xs text-gray-600 dark:text-gray-400">
-										{$i18n.t('System Prompt')}
+								{#if !preset && !ownBasePrompt}
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t(
+											'This model uses the global system prompt, set under Admin Settings > System Prompt.'
+										)}
 									</div>
+								{:else}
 									<div>
-										<Textarea
-											className="min-h-12 w-full resize-none overflow-y-hidden bg-transparent py-1 text-[0.8125rem] text-gray-700 outline-hidden placeholder:text-gray-300 dark:text-gray-300 dark:placeholder:text-gray-700"
-											placeholder={$i18n.t(
-												'Write your model system prompt content here\ne.g. You assist the HR department. Answer concisely and refer to internal policy where relevant.'
-											)}
-											rows={2}
-											minSize={48}
-											bind:value={system}
-										/>
-									</div>
-									{#if chatVariablesPreview.fields.length > 0 || chatVariablesPreview.userFields.length > 0 || chatVariablesPreview.warnings.length > 0}
-										<div class="mt-2 border-t border-gray-100/60 pt-2 dark:border-gray-850/60">
-											<div class="mb-1.5 flex items-center justify-between gap-2">
-												<div class="text-xs text-gray-500 dark:text-gray-400">
-													{$i18n.t('Detected Variables')}
+										<div class="mb-1 text-xs text-gray-600 dark:text-gray-400">
+											{$i18n.t('System Prompt')}
+										</div>
+										{#if ownBasePrompt}
+											<div class="mb-1 text-xs text-amber-600 dark:text-amber-400">
+												{$i18n.t(
+													'This prompt replaces the global system prompt for this model. Clear it to use the global one.'
+												)}
+											</div>
+										{/if}
+										<div>
+											<Textarea
+												className="min-h-12 w-full resize-none overflow-y-hidden bg-transparent py-1 text-[0.8125rem] text-gray-700 outline-hidden placeholder:text-gray-300 dark:text-gray-300 dark:placeholder:text-gray-700"
+												placeholder={$i18n.t(
+													'Write your model system prompt content here\ne.g. You assist the HR department. Answer concisely and refer to internal policy where relevant.'
+												)}
+												rows={2}
+												minSize={48}
+												bind:value={system}
+											/>
+										</div>
+										{#if chatVariablesPreview.fields.length > 0 || chatVariablesPreview.userFields.length > 0 || chatVariablesPreview.warnings.length > 0}
+											<div class="mt-2 border-t border-gray-100/60 pt-2 dark:border-gray-850/60">
+												<div class="mb-1.5 flex items-center justify-between gap-2">
+													<div class="text-xs text-gray-500 dark:text-gray-400">
+														{$i18n.t('Detected Variables')}
+													</div>
+													{#if chatVariablesPreview.fields.length + chatVariablesPreview.userFields.length > 0}
+														<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
+															{chatVariablesPreview.fields.length +
+																chatVariablesPreview.userFields.length}
+														</div>
+													{/if}
 												</div>
-												{#if chatVariablesPreview.fields.length + chatVariablesPreview.userFields.length > 0}
-													<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
-														{chatVariablesPreview.fields.length +
-															chatVariablesPreview.userFields.length}
+
+												{#if chatVariablesPreview.fields.length > 0}
+													<div class="mb-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+														{$i18n.t('Chat Variables')}
+													</div>
+													<div class="flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
+														{#each chatVariablesPreview.fields as field}
+															<div class="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+																<span class="font-medium">{field.key}</span>
+																<span class="text-gray-400 dark:text-gray-600">{field.type}</span>
+																{#if field.required}
+																	<span class="text-amber-600 dark:text-amber-400">required</span>
+																{/if}
+															</div>
+														{/each}
+													</div>
+												{/if}
+
+												{#if chatVariablesPreview.userFields.length > 0}
+													<div class="mb-1 mt-2 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+														{$i18n.t('User Variables')}
+													</div>
+													<div class="flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
+														{#each chatVariablesPreview.userFields as field}
+															<div class="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+																<span class="font-medium">{field.key}</span>
+															</div>
+														{/each}
+													</div>
+												{/if}
+
+												{#if chatVariablesPreview.warnings.length > 0}
+													<div
+														class="mt-2 flex flex-col gap-1 text-xs text-amber-600 dark:text-amber-400"
+													>
+														{#each chatVariablesPreview.warnings as warning}
+															<div>{warning}</div>
+														{/each}
 													</div>
 												{/if}
 											</div>
-
-											{#if chatVariablesPreview.fields.length > 0}
-												<div class="mb-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-													{$i18n.t('Chat Variables')}
-												</div>
-												<div class="flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
-													{#each chatVariablesPreview.fields as field}
-														<div class="flex items-center gap-1 text-gray-600 dark:text-gray-300">
-															<span class="font-medium">{field.key}</span>
-															<span class="text-gray-400 dark:text-gray-600">{field.type}</span>
-															{#if field.required}
-																<span class="text-amber-600 dark:text-amber-400">required</span>
-															{/if}
-														</div>
-													{/each}
-												</div>
-											{/if}
-
-											{#if chatVariablesPreview.userFields.length > 0}
-												<div class="mb-1 mt-2 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-													{$i18n.t('User Variables')}
-												</div>
-												<div class="flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
-													{#each chatVariablesPreview.userFields as field}
-														<div class="flex items-center gap-1 text-gray-600 dark:text-gray-300">
-															<span class="font-medium">{field.key}</span>
-														</div>
-													{/each}
-												</div>
-											{/if}
-
-											{#if chatVariablesPreview.warnings.length > 0}
-												<div
-													class="mt-2 flex flex-col gap-1 text-xs text-amber-600 dark:text-amber-400"
-												>
-													{#each chatVariablesPreview.warnings as warning}
-														<div>{warning}</div>
-													{/each}
-												</div>
-											{/if}
-										</div>
-									{/if}
-								</div>
+										{/if}
+									</div>
+								{/if}
 
 								<div class="flex h-7 w-full justify-between">
 									<div class="self-center text-xs text-gray-600 dark:text-gray-400">

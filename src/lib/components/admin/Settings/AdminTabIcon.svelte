@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CodeBracket from '$lib/components/icons/CodeBracket.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
+	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import Computer from '$lib/components/icons/Computer.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
@@ -52,6 +53,8 @@
 			d="M4 11.5v4C4 17.43 7.58 19 12 19s8-1.57 8-3.5v-4"
 		/>
 	</svg>
+{:else if id === 'system-prompt'}
+	<ChatBubbleOval {className} {strokeWidth} />
 {:else if id === 'subagents'}
 	<UserCircle {className} {strokeWidth} />
 {:else if id === 'evaluations'}

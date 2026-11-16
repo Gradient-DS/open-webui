@@ -508,7 +508,7 @@ def test_chat_bound_to_an_old_picker_agent_routes_like_any_chat(split_harness, a
         return {'choices': []}
 
     monkeypatch.setattr(application, 'call_agent_api', call_agent_api)
-    h.chats['chat'] = SimpleNamespace(meta={'agent_id': 'offertemachine'}, chat={}, variables={})
+    h.chats['chat'] = SimpleNamespace(meta={'agent_id': 'demo-assistent'}, chat={}, variables={})
     response = send(h, chat_id='chat')
     assert response.status_code == 200, response.text
     assert routed == [True]

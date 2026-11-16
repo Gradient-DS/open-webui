@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { WorkBook } from 'xlsx';
 
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
 	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
@@ -9,6 +9,11 @@
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
 	import { getFileById, getFileContentById } from '$lib/apis/files';
+	import {
+		isPendingFileStatus,
+		isPreviewPending,
+		loadWithPreviewRetry
+	} from '$lib/utils/previewRetry';
 
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -65,6 +70,40 @@
 	let pptxSlides: string[] = [];
 	let pptxCurrentSlide = 0;
 	let pptxError = '';
+
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let previewPending = false;
+	type OriginalContent = Promise<ArrayBuffer | null | undefined>;
+
+	// [Gradient] Resolves undefined when the modal moved on; the first try reuses the prefetch.
+	const loadOriginal = async (
+		id: string,
+		request: number,
+		first?: ReturnType<typeof getFileContentById>
+	): OriginalContent => {
+		const result = await loadWithPreviewRetry(
+			(attempt) => (attempt === 0 && first ? first : getFileContentById(id)),
+			{
+				isCurrent: () => show && request === contentRequest && id === item?.id,
+				isPending: (error) =>
+					isPreviewPending(error) ||
+					isPendingFileStatus(
+						previewFile?.meta?.status ?? previewFile?.data?.status ?? item?.status
+					),
+				onPending: () => {
+					previewPending = true;
+					loading = false;
+				}
+			}
+		);
+		if (result.status === 'cancelled') return undefined;
+		previewPending = false;
+		if (result.status === 'failed') throw result.error;
+		return result.value;
+	};
+	onDestroy(() => {
+		contentRequest++;
+	});
 
 	let panzoomRef: PanzoomContainer;
 	const resetImageView = () => {
@@ -143,10 +182,11 @@
 			'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
 		(item?.name && item.name.toLowerCase().endsWith('.pptx'));
 
-	const loadExcelContent = async (content?: ReturnType<typeof getFileContentById>) => {
+	const loadExcelContent = async (content: OriginalContent) => {
 		try {
 			excelError = '';
-			const arrayBuffer = await (content ?? getFileContentById(item.id));
+			const arrayBuffer = await content;
+			if (arrayBuffer === undefined) return; // [Gradient] superseded
 			if (!arrayBuffer) throw new Error('Empty file content');
 			excelWorkbook = await readWorkbook(arrayBuffer);
 			excelSheetNames = excelWorkbook.SheetNames;
@@ -172,23 +212,26 @@
 		renderExcelSheet();
 	}
 
-	const loadDocxContent = async (content?: ReturnType<typeof getFileContentById>) => {
+	const loadDocxContent = async (content: OriginalContent) => {
 		try {
 			docxError = '';
-			docxData = await (content ?? getFileContentById(item.id));
+			const data = await content;
+			if (data === undefined) return; // [Gradient] superseded
+			docxData = data;
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
 		}
 	};
 
-	const loadPptxContent = async (content?: ReturnType<typeof getFileContentById>) => {
+	const loadPptxContent = async (content: OriginalContent) => {
 		try {
 			pptxError = '';
 			const [arrayBuffer, { pptxToImages }] = await Promise.all([
-				content ?? getFileContentById(item.id),
+				content,
 				import('$lib/utils/pptxToHtml')
 			]);
+			if (arrayBuffer === undefined) return; // [Gradient] superseded
 			const result = await pptxToImages(arrayBuffer);
 			pptxSlides = result.images;
 			pptxCurrentSlide = 0;
@@ -206,6 +249,7 @@
 		selectedTab = isPDF || isAudio || isExcel || isDocx || isPptx ? 'preview' : '';
 		expandedContent = false;
 		docxData = null;
+		previewPending = false;
 		if (item?.type === 'collection') {
 			loading = true;
 
@@ -238,13 +282,13 @@
 
 			// Load Excel content if it's an Excel file
 			if (isExcel) {
-				await loadExcelContent(content);
+				await loadExcelContent(loadOriginal(id, request, content));
 			}
 			if (isDocx) {
-				await loadDocxContent(content);
+				await loadDocxContent(loadOriginal(id, request, content));
 			}
 			if (isPptx) {
-				await loadPptxContent(content);
+				await loadPptxContent(loadOriginal(id, request, content));
 			}
 
 			if (request === contentRequest && id === item?.id) loading = false;
@@ -501,6 +545,12 @@
 							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 							className="w-full h-[70vh] border-0 rounded-lg"
 						/>
+					{:else if (isExcel || isDocx || isPptx) && previewPending}
+						<!-- [Gradient] -->
+						<div class="flex flex-col items-center justify-center gap-2 py-6">
+							<Spinner className="size-5" />
+							<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+						</div>
 					{:else if isExcel}
 						{#if excelError}
 							<div class="text-red-500 text-sm p-4">

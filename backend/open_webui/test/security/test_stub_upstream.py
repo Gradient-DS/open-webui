@@ -4,9 +4,11 @@ import base64
 import importlib.util
 import json
 from concurrent.futures import ThreadPoolExecutor
+from http.client import HTTPConnection
 from pathlib import Path
 from threading import Thread
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
@@ -144,6 +146,27 @@ def test_capture_is_thread_safe_and_keeps_recent_requests(stub):
     assert len({record['body']['index'] for record in records}) == 200
     get_json(stub, '/webhook', payload={'index': 'last'})
     assert get_json(stub, '/_recorded')['requests'][-1]['body'] == {'index': 'last'}
+
+
+@pytest.mark.parametrize('method', ['POST', 'PUT'])
+def test_a_chunked_body_is_read_to_its_end_before_the_answer(stub, method):
+    # pipelines.py:upload_pipeline streams its multipart form from a generator, so
+    # aiohttp sends it chunked with no Content-Length. Answering after reading zero
+    # bytes and closing raced the upload into EPIPE, the handler's 404, and an
+    # unentered route on the coverage gate.
+    path = '/pipelines/upload' if method == 'POST' else '/process'
+    parts = [b'--boundary\r\n', b'Content-Disposition: form-data; name="file"\r\n\r\n', b'# pipeline\r\n']
+    get_json(stub, '/_recorded/reset')
+    connection = HTTPConnection(urlsplit(stub[1]).hostname, urlsplit(stub[1]).port, timeout=5)
+    try:
+        connection.request(method, path, body=iter(parts), encode_chunked=True)
+        response = connection.getresponse()
+        assert response.status == 200
+        response.read()
+    finally:
+        connection.close()
+    records = get_json(stub, '/_recorded')['requests']
+    assert base64.b64decode(records[-1]['raw_body_base64']) == b''.join(parts)
 
 
 @pytest.mark.parametrize('path', ['/webhook', '/unmodelled'])

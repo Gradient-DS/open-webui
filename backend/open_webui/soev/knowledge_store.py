@@ -139,31 +139,21 @@ class SoevKnowledgeTable:
             self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
         )
         hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
-        return [row for row in rows if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])]
+        return [
+            row
+            for row in rows
+            if row['key'] not in hidden
+            and not ingest.is_attachments_collection(row['key'])
+            and not ingest.is_assistant_collection(row['key'])
+            and not ingest.is_folder_collection(row['key'])
+        ]
 
-    async def _types(self, *, user_id=None, collection_key=None):
-        params = {'collection_key': collection_key} if collection_key is not None else None
-        schedules = await self._pages('/v1/schedules', user_id=user_id, params=params)
-        return self._projection.types_from_schedules(schedules)
+    def _knowledge(self, row):
+        return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
 
-    async def _fallback_types(self, rows, *, user_id=None):
-        return await self._types(user_id=user_id) if any(not row.get('subscriptions') for row in rows) else {}
-
-    def _knowledge(self, row, types=None):
-        return (
-            self._projection.knowledge_of(row, service_principal=self._service_principal, types=types) if row else None
-        )
-
-    async def _knowledge_with_type(self, row, *, user_id=None):
-        if row is None:
-            return None
-        if row.get('subscriptions'):
-            return self._knowledge(row)
-        return self._knowledge(row, await self._types(user_id=user_id, collection_key=row['key']))
-
-    def _user_knowledge(self, row, owners, types):
+    def _user_knowledge(self, row, owners):
         return self._projection.knowledge_user_of(
-            row, service_principal=self._service_principal, user=owners.get(self._knowledge(row).user_id), types=types
+            row, service_principal=self._service_principal, user=owners.get(self._knowledge(row).user_id)
         )
 
     async def _owners(self, rows):
@@ -185,7 +175,7 @@ class SoevKnowledgeTable:
         )
 
     async def get_knowledge_by_id(self, id, db=None):
-        return await self._knowledge_with_type(await self._collection(id))
+        return self._knowledge(await self._collection(id))
 
     async def describe_knowledge(self, ids, *, user_id=None):
         """The current name and description of each knowledge base the user can read, by id."""
@@ -217,22 +207,16 @@ class SoevKnowledgeTable:
             raise
 
     async def get_knowledge_by_id_unfiltered(self, id, db=None):
-        return await self._knowledge_with_type(await self._collection(id))
+        return self._knowledge(await self._collection(id))
 
     async def get_knowledge_bases(self, skip=0, limit=30, db=None):
         rows = sorted(await self._collections(), key=lambda row: self._collection_sort(row, 'updated_at'), reverse=True)
         owners = await self._owners(rows)
-        types = await self._fallback_types(rows)
-        return [self._user_knowledge(row, owners, types) for row in rows]
+        return [self._user_knowledge(row, owners) for row in rows]
 
     async def search_knowledge_bases(self, user_id, filter, skip=0, limit=30, db=None):
         rows = await self._collections(user_id=user_id)
-        owners, types = await asyncio.gather(
-            self._owners(rows), self._fallback_types(rows, user_id=user_id), return_exceptions=True
-        )
-        for result in (owners, types):
-            if isinstance(result, BaseException):
-                raise result
+        owners = await self._owners(rows)
         rows = [
             row
             for row in rows
@@ -241,7 +225,7 @@ class SoevKnowledgeTable:
                 user_id,
                 filter or {},
                 owners.get(self._knowledge(row).user_id, {}),
-                self._knowledge(row, types).type,
+                self._knowledge(row).type,
             )
         ]
         order = (filter or {}).get('order_by')
@@ -252,7 +236,7 @@ class SoevKnowledgeTable:
         rows.sort(key=lambda row: self._collection_sort(row, order), reverse=not ascending)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
-        return self._projection.knowledge_list_of([self._user_knowledge(row, owners, types) for row in rows], total)
+        return self._projection.knowledge_list_of([self._user_knowledge(row, owners) for row in rows], total)
 
     @staticmethod
     def _matches_collection(row, user_id, filters, owner, knowledge_type):
@@ -269,8 +253,7 @@ class SoevKnowledgeTable:
 
     async def get_knowledge_bases_by_type(self, type, db=None):
         rows = await self._collections()
-        types = await self._fallback_types(rows)
-        return [knowledge for row in rows if (knowledge := self._knowledge(row, types)).type == type]
+        return [knowledge for row in rows if (knowledge := self._knowledge(row)).type == type]
 
     async def get_knowledge_bases_by_user_id(self, user_id, permission='write', db=None):
         rows = [
@@ -279,17 +262,15 @@ class SoevKnowledgeTable:
             if permission == 'read' or (permission == 'write' and row.get('caller_may_write'))
         ]
         owners = await self._owners(rows)
-        types = await self._fallback_types(rows, user_id=user_id)
-        return [self._user_knowledge(row, owners, types) for row in rows]
+        return [self._user_knowledge(row, owners) for row in rows]
 
     async def get_knowledge_items_by_user_id(self, user_id, db=None):
         rows = await self._collections(user_id=user_id)
-        types = await self._fallback_types(rows, user_id=user_id)
-        return [self._knowledge(row, types) for row in rows if row.get('created_by') == f'owui:user:{user_id}']
+        return [self._knowledge(row) for row in rows if row.get('created_by') == f'owui:user:{user_id}']
 
     async def get_knowledge_by_id_and_user_id(self, id, user_id, db=None):
         row = await self._collection(id, user_id=user_id)
-        return await self._knowledge_with_type(row, user_id=user_id) if row and row.get('caller_may_write') else None
+        return self._knowledge(row) if row and row.get('caller_may_write') else None
 
     async def check_access_by_user_id(self, id, user_id, permission='write', db=None, user_group_ids=None):
         row = await self._collection(id, user_id=user_id)
@@ -325,11 +306,17 @@ class SoevKnowledgeTable:
         )
         owner = current.get('created_by')
         owners = {owner} if owner else set()
-        body = {**(fields or {}), 'writers': sorted(set(writers) | owners)}
-        access = {'visibility': visibility, 'principals': sorted(set(readers) | owners)}
-        result = await self._send('PATCH', self._path(id), body)
+        if current['source_kind'] != 'local':
+            readers = [ref for ref in readers if ref != self._service_principal]
+        access = {
+            'visibility': visibility,
+            'principals': sorted(set(readers) | owners),
+            'writers': sorted(set(writers) | owners),
+        }
         await self._send('PUT', self._path(id) + '/access', access)
-        return result
+        if fields:
+            return await self._send('PATCH', self._path(id), fields)
+        return await self._collection(id)
 
     async def update_knowledge_by_id(self, id, form_data, overwrite=False, db=None):
         body = {'name': form_data.name, 'description': form_data.description}
@@ -337,7 +324,7 @@ class SoevKnowledgeTable:
             result = await self.set_collection_access(id, form_data.access_grants, fields=body)
         else:
             result = await self._send('PATCH', self._path(id), body)
-        return await self._knowledge_with_type(result)
+        return self._knowledge(result)
 
     async def delete_knowledge_by_id(self, id, db=None):
         await self._send('DELETE', self._path(id), idempotency_key='kb-delete:' + id)
@@ -475,18 +462,26 @@ class SoevKnowledgeTable:
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
         return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
 
-    async def _references(self, ids, *, user_id=None):
+    async def _references(self, ids, *, user_id=None, as_service=False):
         result = []
         collections = {}
         for source_id in sorted(ids):
-            response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
+            params = {'source_id': source_id}
+            if as_service:
+                response = await self._client.get('/v1/documents', as_user=None, params=params)
+            else:
+                response = await self._get('/v1/documents', params=params, user_id=user_id)
             keys = list(
                 dict.fromkeys(
                     doc['collection_key'] for doc in response['data'] if doc['collection_key'] not in collections
                 )
             )
             rows = await asyncio.gather(
-                *(self._collection(key, user_id=user_id) for key in keys), return_exceptions=True
+                *(
+                    self._service_collection(key) if as_service else self._collection(key, user_id=user_id)
+                    for key in keys
+                ),
+                return_exceptions=True,
             )
             for key, row in zip(keys, rows):
                 if isinstance(row, BaseException):
@@ -500,8 +495,7 @@ class SoevKnowledgeTable:
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
         rows = await self._references({file_id})
-        types = await self._fallback_types([row for row, _ in rows])
-        return [self._knowledge(row, types) for row, _ in rows]
+        return [self._knowledge(row) for row, _ in rows]
 
     async def get_knowledge_by_file_id(self, file_id, db=None):
         rows = await self.get_knowledges_by_file_id(file_id)
@@ -514,9 +508,11 @@ class SoevKnowledgeTable:
         ]
 
     async def get_referenced_file_ids(self, file_ids, db=None):
+        """The file_ids any knowledge base still holds, read as the service: one the acting user cannot see still
+        counts, so deleting it as an orphan never reaches into someone else's knowledge base."""
         if not file_ids:
             return set()
-        return {document['source_id'] for _, document in await self._references(set(file_ids))}
+        return {document['source_id'] for _, document in await self._references(set(file_ids), as_service=True)}
 
     async def remove_file_from_knowledge_by_id(self, knowledge_id, file_id, db=None):
         from open_webui.models.files import Files
@@ -1018,7 +1014,7 @@ class SoevKnowledgeTable:
         namespace = self._projection.META_NAMESPACE
         patch = self._projection.meta_patch(current['meta'].get(namespace, {}), meta)
         result = await self._send('PATCH', self._path(id), {'meta': {namespace: patch}})
-        return await self._knowledge_with_type(result)
+        return self._knowledge(result)
 
     async def update_knowledge_data_by_id(self, id, data, db=None):
         return None

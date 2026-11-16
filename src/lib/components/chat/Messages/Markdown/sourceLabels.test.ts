@@ -12,16 +12,16 @@ const source = (ref: string, name: string, n: number, chunk = `${ref}#0`): RawSo
 describe('sourceLabels', () => {
 	it('gives two documents with the same name their own number', () => {
 		const sources = [
-			source('deck', 'Quickscan.pptx', 1),
-			source('mail-a', 'NDA - N2000-gebied Stein', 2),
-			source('mail-b', 'NDA - N2000-gebied Stein', 3),
+			source('deck', 'Projectplan.pptx', 1),
+			source('mail-a', 'NDA - Project Alfa', 2),
+			source('mail-b', 'NDA - Project Alfa', 3),
 			source('onedrive/1', 'Sjabloon.docx', 4)
 		];
 		const labels = sourceLabels(sources);
 		expect(labels).toEqual([
-			'Quickscan.pptx',
-			'NDA - N2000-gebied Stein',
-			'NDA - N2000-gebied Stein',
+			'Projectplan.pptx',
+			'NDA - Project Alfa',
+			'NDA - Project Alfa',
 			'Sjabloon.docx'
 		]);
 		expect(labels).toHaveLength(reduceSources(sources).length);
@@ -29,10 +29,10 @@ describe('sourceLabels', () => {
 
 	it('gives the chunks of one document one number', () => {
 		const sources = [
-			source('deck', 'Quickscan.pptx', 1, 'a'),
-			source('deck', 'Quickscan.pptx', 1, 'b')
+			source('deck', 'Projectplan.pptx', 1, 'a'),
+			source('deck', 'Projectplan.pptx', 1, 'b')
 		];
-		expect(sourceLabels(sources)).toEqual(['Quickscan.pptx']);
+		expect(sourceLabels(sources)).toEqual(['Projectplan.pptx']);
 	});
 
 	it('labels a web page by its title, else by its url', () => {
@@ -45,13 +45,19 @@ describe('sourceLabels', () => {
 		expect(sourceLabels([titled, bare])).toEqual(['Example', 'https://example.org/b']);
 	});
 
+	it('labels each marker by the stored number, not the arrival order', () => {
+		expect(
+			sourceLabels([source('deck', 'Projectplan.pptx', 2), source('note', 'Note', 1)])
+		).toEqual(['Note', 'Projectplan.pptx']);
+	});
+
 	it('labels every source N/A when citations are off', () => {
 		expect(sourceLabels([source('a', 'A', 1), source('b', 'B', 2)], true)).toEqual(['N/A', 'N/A']);
 	});
 });
 
 describe('chipLabel', () => {
-	const labels = ['Quickscan.pptx', 'NDA', 'Sjabloon.docx'];
+	const labels = ['Projectplan.pptx', 'NDA', 'Sjabloon.docx'];
 
 	it('names the first cited source and counts the rest', () => {
 		expect(chipLabel([2, 3], labels)).toEqual({ title: 'NDA', more: 1 });

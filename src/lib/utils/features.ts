@@ -118,6 +118,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'general',
 	'connections',
 	'models',
+	'system-prompt',
 	'evaluations',
 	'integrations',
 	'documents',
@@ -180,6 +181,11 @@ export function isAdminSettingsTabEnabled(tab: string): boolean {
 		return tabAllowed && isFeatureEnabled('voice');
 	}
 
+	// [Gradient] The global system prompt belongs to the models: a tenant that allows the models tab gets it too.
+	if (tab === 'system-prompt') {
+		return tabAllowed || allowedTabs.includes('models');
+	}
+
 	// External Agents tab requires AGENT_API_ENABLED on the backend.
 	if (tab === 'external-agents') {
 		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
@@ -221,4 +227,16 @@ export function isChatControlSectionEnabled(section: ChatControlSection): boolea
 
 	// If no sections specified, all sections are allowed
 	return allowedSections.length === 0 || allowedSections.includes(section);
+}
+
+/**
+ * Whether Continue Response is offered. The agent route sends one new input per
+ * turn and cannot extend an earlier answer, so it never is there.
+ */
+export function canContinueResponse(
+	$config: { features?: { feature_agent_api_enabled?: boolean } } | undefined,
+	$user: { role?: string; permissions?: { chat?: { continue_response?: boolean } } } | undefined
+): boolean {
+	if ($config?.features?.feature_agent_api_enabled) return false;
+	return $user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true);
 }

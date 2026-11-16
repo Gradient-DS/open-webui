@@ -6,6 +6,7 @@ import {
 	isAdminSettingsTabEnabled,
 	getFirstAvailableAdminSettingsTab,
 	isAgentRouted,
+	canContinueResponse,
 	type Feature
 } from './features';
 import { get } from 'svelte/store';
@@ -413,6 +414,21 @@ describe('admin settings features', () => {
 			expect(isAdminSettingsTabEnabled('pipelines')).toBe(false);
 		});
 
+		it('the system prompt tab comes with the models tab', () => {
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['models'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(true);
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['general'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(false);
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['system-prompt'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(true);
+		});
+
 		it('returns false for all tabs when admin settings is disabled', () => {
 			vi.mocked(get).mockReturnValue({
 				features: {
@@ -514,5 +530,20 @@ describe('isAgentRouted', () => {
 	])('follows the agent API flag (%s)', (api, routed) => {
 		vi.mocked(get).mockReturnValue({ features: { feature_agent_api_enabled: api } });
 		expect(isAgentRouted()).toBe(routed);
+	});
+});
+
+describe('canContinueResponse', () => {
+	it.each([
+		[{ role: 'user' }, true],
+		[{ role: 'admin', permissions: { chat: { continue_response: false } } }, true],
+		[{ role: 'user', permissions: { chat: { continue_response: false } } }, false]
+	])('follows the permission off the agent route (%o)', (user, allowed) => {
+		expect(canContinueResponse({ features: {} }, user)).toBe(allowed);
+	});
+
+	it('is never offered on the agent route', () => {
+		const agent = { features: { feature_agent_api_enabled: true } };
+		expect(canContinueResponse(agent, { role: 'admin' })).toBe(false);
 	});
 });

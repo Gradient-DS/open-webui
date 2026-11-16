@@ -73,6 +73,27 @@ def test_rag_file_prefix_is_env_authoritative(key):
     assert Config.persistent_enabled_for(key) is False
 
 
+@pytest.mark.parametrize(
+    'key',
+    ['audio.stt.engine', 'audio.stt.model', 'audio.stt.openai.api_base_url', 'audio.stt.openai.api_key'],
+)
+def test_speech_to_text_is_env_authoritative(key):
+    assert Config.persistent_enabled_for(key) is False
+
+
+def test_text_to_speech_still_persists():
+    assert Config.persistent_enabled_for('audio.tts.engine') is True
+
+
+@pytest.mark.asyncio
+async def test_stt_engine_resolves_from_env_even_with_a_stale_db_row(db_session):
+    async with db_session() as s:
+        s.add(Config(key='audio.stt.engine', value='', updated_at=int(time.time())))
+        await s.commit()
+    Config.DEFAULTS['audio.stt.engine'] = 'openai'
+    assert await Config.get('audio.stt.engine') == 'openai'
+
+
 def test_sync_daemon_carve_out_still_works():
     # Preserved unchanged by the refactor into _ENV_AUTHORITATIVE_KEY_PREFIXES.
     assert Config.persistent_enabled_for('sync_daemon.enabled') is False

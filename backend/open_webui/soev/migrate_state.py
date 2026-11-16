@@ -4,8 +4,10 @@ The state lives outside Alembic, in schema owui_v2_migration on PostgreSQL (pref
 tables on SQLite).
 """
 
+import asyncio
 import time
 from functools import cache
+from pathlib import Path
 from types import SimpleNamespace
 
 import sqlalchemy as sa
@@ -58,6 +60,39 @@ def tables(dialect: str) -> SimpleNamespace:
             sa.Column('created_at', number, nullable=False),
         ),
     )
+
+
+@cache
+def schema_heads() -> set[str]:
+    """Read the packaged Alembic heads without running migrations."""
+    from alembic.script import ScriptDirectory
+
+    return set(ScriptDirectory(str(Path(__file__).resolve().parents[1] / 'migrations')).get_heads())
+
+
+async def _pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+async def wait_for_schema(db: AsyncSession, *, timeout_seconds: float = 300) -> None:
+    """Wait for OWUI's init container to reach this image's Alembic head."""
+    from alembic.runtime.migration import MigrationContext
+
+    expected = schema_heads()
+    deadline = time.monotonic() + timeout_seconds
+    announced = False
+    while True:
+        connection = await db.connection()
+        current = await connection.run_sync(lambda sync: set(MigrationContext.configure(sync).get_current_heads()))
+        await db.rollback()
+        if current == expected:
+            return
+        if not announced:
+            print('Waiting for OWUI schema migrations to reach Alembic head', flush=True)
+            announced = True
+        if time.monotonic() >= deadline:
+            raise MigrationError('OWUI schema has not reached Alembic head; retry after OWUI finishes upgrading')
+        await _pause(1)
 
 
 async def state(db: AsyncSession) -> SimpleNamespace:

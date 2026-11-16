@@ -1,13 +1,13 @@
 """Verified-user routes for soev-api connections, schedule state and popup completion."""
 
 import json
+from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import HTMLResponse
-from open_webui import config
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from open_webui.config import CORS_ALLOW_ORIGIN
-from open_webui.soev import identity
+from open_webui.soev import capabilities, identity, silent_connect
 from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
@@ -18,7 +18,23 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 router = APIRouter(route_class=SoevRoute)
 
 
-async def cloud_sync(user=Depends(get_verified_user)):
+async def cloud_sync(request: Request, user=Depends(get_verified_user)):
+    from open_webui.soev.availability import ensure_configured
+
+    ensure_configured()
+    if 'knowledge_id' in request.path_params or request.url.path.endswith('/usage'):
+        await capabilities.require(capabilities.CLOUD_SYNC)
+    elif '/mailboxes' in request.url.path:
+        await capabilities.require(capabilities.LIVE_MAIL)
+    elif 'family' in request.path_params:
+        family = request.path_params['family']
+        await capabilities.require(capabilities.LIVE_MAIL if family == 'mail' else capabilities.LIVE_DOCUMENTS)
+    elif not await capabilities.refresh() & {
+        capabilities.CLOUD_SYNC,
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+    }:
+        await capabilities.require(capabilities.CLOUD_SYNC)
     try:
         client = identity.build_client()
         with request_cache():
@@ -39,7 +55,7 @@ class SyncPolicy(BaseModel):
 
 @router.get('/policy', response_model=SyncPolicy)
 async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
-    if not config.SOEV_API_URL:
+    if not await capabilities.has(capabilities.CLOUD_SYNC):
         return SyncPolicy(
             providers_enabled=[],
             scope_shapes_allowed={},
@@ -59,6 +75,16 @@ async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
 class ConnectionForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
     provider: Literal['onedrive', 'outlook_mail', 'google_drive', 'confluence']
+
+
+class MailboxForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    address: str
+
+
+class AuthorizationForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    silent: bool = False
 
 
 class ScheduleForm(BaseModel):
@@ -92,24 +118,47 @@ async def connection_usage(connection_id: str, sync=Depends(cloud_sync)):
 
 
 @router.delete('/connections/{connection_id}', status_code=204)
-async def revoke_connection(connection_id: str, sync=Depends(cloud_sync)):
+async def revoke_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    connection = await sync.connection(connection_id)
     await sync.revoke_connection(connection_id)
+    await silent_connect.decline(user.id, connection['source_kind'])
     return Response(status_code=204)
 
 
+# The app's first load after a Microsoft login: live search starts on for what auto-connect connected.
+@router.post('/live/auto')
+async def grant_live(sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    return {'families': await silent_connect.grant_live(user, sync)}
+
+
 @router.post('/connections/{connection_id}/authorize')
-async def authorize_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+async def authorize_connection(
+    connection_id: str,
+    body: AuthorizationForm | None = None,
+    sync=Depends(cloud_sync),
+    user=Depends(get_verified_user),
+):
     connection = await sync.connection(connection_id)
-    owner_email = user.email if connection['source_kind'] == 'google_drive' else None
-    return await sync.authorize(connection_id, owner_email=owner_email)
+    silent = body is not None and body.silent
+    owner_email = user.email if silent or connection['source_kind'] == 'google_drive' else None
+    return await sync.authorize(connection_id, owner_email=owner_email, silent=silent)
 
 
 @router.get('/connect/done', response_class=HTMLResponse)
 async def connect_done(
+    request: Request,
     connection: str,
-    result: Literal['pending', 'error', 'invalid'],
+    result: Literal['pending', 'error', 'invalid', 'interaction_required'],
     user=Depends(get_verified_user),
 ):
+    # A silent reconnect arrives here as a top-level page, not a popup: continue its chain.
+    if await silent_connect.returned(user, connection):
+        return RedirectResponse(
+            await silent_connect.continue_chain(request, user, connection, result),
+            status_code=302,
+            headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'},
+        )
+    # Not capability-gated: the page only relays the popup's result to its opener.
     data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
     # The opener may live on another configured origin than this page (a dev
     # stack serves the frontend and the API on different ports); a message to
@@ -119,7 +168,8 @@ async def connect_done(
         '<!DOCTYPE html><html><body><script>'
         f'if (window.opener) {{ for (const origin of new Set([window.location.origin, ...{origins}])) '
         f'window.opener.postMessage({data}, origin); }}'
-        'window.close();</script></body></html>',
+        # Keep the silent attempt's popup for the opener to continue interactive consent.
+        f'{"" if result == "interaction_required" else "window.close();"}</script></body></html>',
         headers={'Cache-Control': 'no-store'},
     )
 
@@ -138,8 +188,13 @@ async def delete_schedule(knowledge_id: str, schedule_id: str, sync=Depends(clou
 
 
 @router.get('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
-async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
-    return await sync.sync_status(knowledge_id)
+async def sync_status(knowledge_id: str, request: Request, user=Depends(get_verified_user)):
+    # A platform without cloud sync has no schedules on any knowledge base; an
+    # unknown capability set still refuses, so an outage is not shown as empty.
+    if not await capabilities.has(capabilities.CLOUD_SYNC) and capabilities.known():
+        return {'schedules': []}
+    async with asynccontextmanager(cloud_sync)(request, user) as sync:
+        return await sync.sync_status(knowledge_id)
 
 
 @router.post('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
@@ -152,6 +207,16 @@ async def sync_all(knowledge_id: str, sync=Depends(cloud_sync)):
 )
 async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.schedule_action(knowledge_id, schedule_id, 'run')
+
+
+# The same run, listing the whole folder so every file without a landed version is fetched again.
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed',
+    status_code=201,
+    dependencies=[Depends(require_soev)],
+)
+async def retry_failed_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.schedule_action(knowledge_id, schedule_id, 'retry_failed')
 
 
 @router.post(
@@ -191,3 +256,19 @@ async def live_grants(connection_id: str, family: Literal['live_documents', 'mai
 @router.post('/connections/{connection_id}/live/{family}')
 async def enable_live_family(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
     return await sync.enable_live_family(connection_id, family)
+
+
+@router.get('/connections/{connection_id}/mailboxes')
+async def list_mailboxes(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.mailboxes(connection_id)
+
+
+@router.post('/connections/{connection_id}/mailboxes')
+async def add_mailbox(connection_id: str, body: MailboxForm, sync=Depends(cloud_sync)):
+    return await sync.add_mailbox(connection_id, body.address)
+
+
+@router.delete('/connections/{connection_id}/mailboxes/{address:path}', status_code=204)
+async def remove_mailbox(connection_id: str, address: str, sync=Depends(cloud_sync)):
+    await sync.remove_mailbox(connection_id, address)
+    return Response(status_code=204)

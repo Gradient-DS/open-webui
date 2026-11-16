@@ -67,7 +67,7 @@ function detailsStart(src: string) {
 
 function lheadingTokenizer(this: any, src: string): any {
 	const cap = this.rules.block.lheading.exec(src);
-	const documentIndex = cap?.[0]?.search(DOCUMENT_OPEN) ?? -1;
+	const documentIndex = cap ? documentStart(cap[0]) : -1;
 	if (cap && documentIndex > 0) {
 		const raw = src.slice(0, documentIndex);
 		return {
@@ -114,11 +114,21 @@ function detailsExtension() {
 	};
 }
 
+// Where the first document starts, so a paragraph ends only there; a closed blank one stays in its paragraph.
+function documentStart(src: string): number {
+	const open = new RegExp(DOCUMENT_OPEN.source, 'g');
+	let match: RegExpExecArray | null;
+	while ((match = open.exec(src))) {
+		if (readDocument(src.slice(match.index))) return match.index;
+	}
+	return -1;
+}
+
 function documentExtension() {
 	return {
 		name: 'document',
 		level: 'block',
-		start: (src: string) => src.search(DOCUMENT_OPEN),
+		start: documentStart,
 		tokenizer(src: string) {
 			const result = readDocument(src);
 			if (result) return { type: 'document', ...result };

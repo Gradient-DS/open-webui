@@ -13,17 +13,17 @@ orjson==3.11.9
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.15.0 # security: CVE-2026-101917, CVE-2026-101918, CVE-2026-102265..102274 fixed by 2.15.0
-authlib==1.7.2
-joserfc==1.7.4
+authlib==1.9.1 # security: CVE-2026-114618 (RFC 7523 JWT bearer grant accepts any audience) fixed in 1.9.0
+joserfc==1.7.6 # security: CVE-2026-119283/119284 fixed in 1.7.5/1.7.6
 
 requests==2.34.2
-aiohttp==3.14.3 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
+aiohttp==3.14.4 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3; CVE-2026-111063/111064 + GHSA-2g87-pp6c-29x5 (cookie Secure, keepalive, resource exhaustion) fixed in 3.14.4
 async-timeout
 aiocache
 aiofiles
 starlette-compress==1.7.1
-Brotli==1.2.0
-brotlicffi==1.2.0.1
+Brotli==1.2.1 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
+brotlicffi==1.2.1.0 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
 httpx[socks,http2,zstd,cli,brotli]==0.28.1
 starsessions[redis]==2.2.1
 
@@ -42,7 +42,7 @@ RestrictedPython==8.4
 loguru==0.7.3
 asgiref==3.11.1
 
-mcp==1.28.1
+mcp==1.30.0
 openai
 
 langchain==1.3.9 # security: GHSA-gr75-jv2w-4656 (path traversal in file-search middleware, unused by us) fixed in 1.3.9
@@ -52,7 +52,7 @@ langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0
 
-black==26.5.1
+black==26.10.1 # security: CVE-2026-114134 fixed in 26.10.1
 pydub
 chardet==7.4.3
 beautifulsoup4

@@ -29,12 +29,12 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
+from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
-from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.mail_status import mail_search_status
@@ -117,10 +117,9 @@ def _summary(count: int, seconds: float, language: str | None) -> str:
 
 
 def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
-    """The declared template, or the first fallback, when every placeholder has a value; `fallback` is one template
-    or a list of them."""
+    """The declared template, or the first of its fallbacks (one or a list), whose every placeholder has a value."""
     fallback = declared.get('fallback')
-    for template in [declared.get('template'), *(fallback if isinstance(fallback, list) else [fallback])]:
+    for template in (declared.get('template'), *(fallback if isinstance(fallback, list) else [fallback])):
         if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
             return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
     return None
@@ -218,20 +217,59 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 @dataclass(frozen=True)
 class Skipped:
     """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note, chat or meeting;
-    `reason` gone (deleted), denied (exists, not for this user), failed, processing or unmigrated (a v1 upload never
-    ingested for v2). `in_chat` is False for an assistant's own knowledge base, which the chat cannot drop."""
+    `reason` gone (deleted), denied (exists, not for this user), failed, processing, unmigrated (a v1 upload never
+    ingested for v2) or limit (a folder note past the turn's ten texts). `in_chat` is False for an assistant's or a
+    folder's own item, which the chat cannot drop; `folder` marks an item of the chat's folder or an attached one."""
 
     kind: str
     reason: str
     id: str
     name: str | None = None
     in_chat: bool = True
+    folder: bool = False
 
 
-async def _knowledge(metadata: dict[str, Any]) -> tuple[list[dict[str, str]], list[Skipped]]:
+_FOLDER_ITEMS = ('collection', 'file', 'note')
+
+
+async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]], list[Skipped]]:
+    """[Claude] The knowledge bases, files and notes of the chat's folder (`folder_knowledge`, set by the middleware)
+    and of folders attached to the chat or to the assistant, once each, as far as each folder's owner can still
+    delegate them. A folder the user cannot read is left out; only the chat's own entry is dropped when it is gone."""
+    items = list(metadata.get('folder_knowledge') or [])
+    skipped = []
+    attached: dict[str, tuple[dict[str, Any], bool]] = {}
+    for source, in_chat in ((metadata.get('files'), True), (metadata.get('knowledge'), False)):
+        for entry in source if isinstance(source, list) else []:
+            if isinstance(entry, dict) and entry.get('type') == 'folder' and isinstance(entry.get('id'), str):
+                attached.setdefault(entry['id'], (entry, in_chat))
+    user = await Users.get_user_by_id(metadata['user_id']) if attached else None
+    for entry, in_chat in attached.values():
+        folder = await Folders.get_folder_by_id(entry['id'])
+        allowed = bool(
+            folder
+            and user
+            and (can_bypass_access_control(user) or await has_folder_access(user.id, folder, 'read', db=None))
+        )
+        if not allowed:
+            name = entry.get('name') or (folder.name if folder else None)
+            skipped.append(Skipped('folder', 'denied' if folder else 'gone', entry['id'], name, in_chat))
+            continue
+        items.extend({**item, 'folder_id': folder.id} for item in await get_owner_accessible_folder_files(folder))
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        if isinstance(item, dict) and item.get('type') in _FOLDER_ITEMS and isinstance(item.get('id'), str):
+            unique.setdefault((item['type'], item['id']), item)
+    return list(unique.values()), skipped
+
+
+async def _knowledge(
+    metadata: dict[str, Any], folder: list[dict[str, Any]] = ()
+) -> tuple[list[dict[str, str]], list[Skipped]]:
     """The selected knowledge bases with their current name and description, read at send time, and the ones the
-    API does not show the user: deleted for everyone, or hidden from them."""
-    keys = _knowledge_keys(metadata)
+    API does not show the user: deleted for everyone, or hidden from them. The folder's come after the chat's and the
+    assistant's, read as the user too."""
+    keys = _knowledge_keys(metadata, folder)
     if not keys:
         return [], []
     user_id = None if acting.acting_ref() else metadata['user_id']
@@ -244,8 +282,16 @@ async def _knowledge(metadata: dict[str, Any]) -> tuple[list[dict[str, str]], li
             for item in metadata.get('files') or []
             if item.get('type') == 'collection' and item.get('id')
         }
+        folder_only = set(_knowledge_keys(metadata, folder)) - set(_knowledge_keys(metadata))
         skipped = [
-            Skipped('knowledge', 'denied' if key in existing else 'gone', key, chosen.get(key), key in chosen)
+            Skipped(
+                'knowledge',
+                'denied' if key in existing else 'gone',
+                key,
+                chosen.get(key),
+                key in chosen,
+                folder=key in folder_only,
+            )
             for key in missing
         ]
     knowledge = [
@@ -268,8 +314,57 @@ async def _knowledge_document_reason(knowledge_id: str, file_id: str, user_id: s
     return 'gone'
 
 
-async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
-    """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
+async def _assistant_file_reason(key: str, file: FileModel | None, model_id: str, user_id: str | None) -> str:
+    """[Claude] Why an assistant's file is not in its collection for the user: deleted, failed there, denied while
+    the collection exists but not for the user, else still on its way; a file no sync has submitted asks for one."""
+    if file is None:
+        return 'gone'
+    meta = file.meta or {}
+    if meta.get('status') == 'failed' and meta.get('soev_collection_key') == key:
+        return 'failed'
+    if user_id is not None and await Knowledges.existing_knowledge([key]):
+        if not await Knowledges.describe_knowledge([key], user_id=user_id):
+            return 'denied'
+    if meta.get('soev_job') is None:
+        assistant_files.schedule(model_id)
+    return 'processing'
+
+
+async def _assistant_attachments(
+    metadata: dict[str, Any],
+    in_chat: set[str],
+    user_id: str | None,
+    attached: list[dict[str, str]],
+    unavailable: list[Skipped],
+) -> None:
+    """[Claude] The assistant's own files not also attached in the chat, read in its collection as the user."""
+    # An assistant/LLM split turn runs the picked LLM as `model_id`; the assistant is `assistant_id`.
+    model_id = metadata.get('assistant_id') or metadata.get('model_id')
+    if not model_id:
+        return
+    key = ingest.assistant_collection_key(model_id)
+    names = {
+        entry['id']: entry.get('name')
+        for entry in metadata.get('knowledge') or []
+        if isinstance(entry, dict) and entry.get('type') == 'file' and entry.get('id')
+    }
+    for file_id in assistant_files.file_ids({'knowledge': metadata.get('knowledge')}):
+        if file_id in in_chat:
+            continue
+        document = await Knowledges.knowledge_document(key, file_id, user_id=user_id)
+        if document is not None:
+            name = names[file_id] or document.get('filename') or file_id
+            attached.append({'collection_key': key, 'file_id': file_id, 'name': name})
+            continue
+        file = await Files.get_file_by_id(file_id)
+        name = names[file_id] or (file.filename if file is not None else None)
+        reason = await _assistant_file_reason(key, file, model_id, user_id)
+        unavailable.append(Skipped('file', reason, file_id, name, in_chat=False))
+
+
+async def _attachments(metadata: dict[str, Any], folder: list[dict[str, Any]] = ()) -> dict[str, Any]:
+    """[Claude] The files attached in the chat, the assistant's own files and the folder's files not among them, as
+    the turn's `attachments` field; none while nothing is attached.
 
     The collection is the one the file's own record names (a live document, or an upload the v2 migration ingested),
     else where chat uploads go; the agent checks access. A chat entry's `collection_name` is never read: a v1 entry
@@ -278,6 +373,8 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
     documents have no File row, and an uploaded one's row does not name the KB. A file the agent cannot read is
     left out under `skipped`; a processing one is also noted for the agent.
+    An assistant's file (a `file` entry of its knowledge) is read in the assistant's collection as the user, so a
+    shared assistant's files reach everyone it is shared with (`soev/assistant_files.py`).
     """
     attached: list[dict[str, str]] = []
     unavailable: list[Skipped] = []
@@ -285,42 +382,95 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     entries = {entry['id']: entry for entry in metadata.get('files') or [] if ingest.is_chat_attachment(entry)}
     user_id = None if acting.acting_ref() else metadata['user_id']
     for file_id, entry in entries.items():
-        if knowledge_id := entry.get('knowledge_id'):
-            document = await Knowledges.knowledge_document(knowledge_id, file_id, user_id=user_id)
-            name = entry.get('name') or (document or {}).get('filename') or file_id
-            if document is not None:
-                attached.append({'collection_key': knowledge_id, 'file_id': file_id, 'name': name})
-                continue
-            unavailable.append(
-                Skipped('file', await _knowledge_document_reason(knowledge_id, file_id, user_id), file_id, name)
-            )
-            continue
-        file = await Files.get_file_by_id(file_id)
-        name = entry.get('name') or (file.filename if file is not None else file_id)
-        status = 'gone' if file is None else (file.meta or {}).get('status')
-        if file is None or status in ('processing', 'failed'):
-            if entry.get('attached_by') or (file is not None and (file.meta or {}).get('attached_by')):
-                log.info('Skipping reference attachment %s (%s)', file_id, status)
-                if status == 'processing':
-                    notes.append(f'still processing: {name}')
-            else:
-                unavailable.append(Skipped('file', status or 'gone', file_id, name))
-            continue
-        key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
-        if key == f'file-{file.id}':
-            # [Claude] Still in the v1 per-file collection: `migrate --uploads` did not ingest it.
-            unavailable.append(Skipped('file', 'unmigrated', file_id, name))
-            continue
-        item = {'collection_key': key, 'file_id': file_id, 'name': name}
-        if (file.meta or {}).get('source'):
-            item['document_ref'] = file.meta['source']['ref']
-        attached.append(item)
+        await _chat_attachment(file_id, entry, user_id, attached, unavailable, notes)
+    await _assistant_attachments(metadata, set(entries), user_id, attached, unavailable)
+    seen = set(entries) | {item['file_id'] for item in attached} | {item.id for item in unavailable}
+    for entry in folder:
+        if entry['type'] == 'file' and entry['id'] not in seen and ingest.is_chat_attachment(entry):
+            seen.add(entry['id'])
+            await _folder_attachment(entry, user_id, attached, unavailable)
     notes.extend(f'still processing: {item.name}' for item in unavailable if item.reason == 'processing')
     return {
         **({'attachments': attached} if attached else {}),
         **({'attachment_notes': notes} if notes else {}),
         **({'skipped': unavailable} if unavailable else {}),
     }
+
+
+async def _chat_attachment(
+    file_id: str,
+    entry: dict[str, Any],
+    user_id: str | None,
+    attached: list[dict[str, str]],
+    unavailable: list[Skipped],
+    notes: list[str],
+) -> None:
+    """[Claude] One file attached in the chat, as `_attachments` reads it."""
+    if knowledge_id := entry.get('knowledge_id'):
+        document = await Knowledges.knowledge_document(knowledge_id, file_id, user_id=user_id)
+        name = entry.get('name') or (document or {}).get('filename') or file_id
+        if document is not None:
+            attached.append({'collection_key': knowledge_id, 'file_id': file_id, 'name': name})
+            return
+        unavailable.append(
+            Skipped('file', await _knowledge_document_reason(knowledge_id, file_id, user_id), file_id, name)
+        )
+        return
+    file = await Files.get_file_by_id(file_id)
+    name = entry.get('name') or (file.filename if file is not None else file_id)
+    status = 'gone' if file is None else (file.meta or {}).get('status')
+    if file is None or status in ('processing', 'failed'):
+        if entry.get('attached_by') or (file is not None and (file.meta or {}).get('attached_by')):
+            log.info('Skipping reference attachment %s (%s)', file_id, status)
+            if status == 'processing':
+                notes.append(f'still processing: {name}')
+        else:
+            unavailable.append(Skipped('file', status or 'gone', file_id, name))
+        return
+    key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
+    if key == f'file-{file.id}':
+        # [Claude] Still in the v1 per-file collection: `migrate --uploads` did not ingest it.
+        unavailable.append(Skipped('file', 'unmigrated', file_id, name))
+        return
+    item = {'collection_key': key, 'file_id': file_id, 'name': name}
+    if (file.meta or {}).get('source'):
+        item['document_ref'] = file.meta['source']['ref']
+    attached.append(item)
+
+
+async def _folder_attachment(
+    entry: dict[str, Any], user_id: str | None, attached: list[dict[str, str]], unavailable: list[Skipped]
+) -> None:
+    """[Claude] A folder's file, in the collection a chat file would be read from (its KB, else the one its record
+    names, else its uploader's attachments), checked there as the user first: a shared folder's file may sit in a
+    collection only its owner reads, which the agent would refuse the whole turn for."""
+    file_id = entry['id']
+    collection = entry.get('collection')
+    key = entry.get('knowledge_id') or (collection.get('id') if isinstance(collection, dict) else None)
+    file = await Files.get_file_by_id(file_id)
+    name = entry.get('name') or (file.filename if file is not None else None) or file_id
+    if not key and file is not None and entry.get('folder_id'):
+        # [Gradient] A shared folder's file is read in the folder's own collection (`soev/folder_files.py`).
+        shared = ingest.folder_collection_key(entry['folder_id'])
+        if await Knowledges.knowledge_document(shared, file_id, user_id=user_id) is not None:
+            key = shared
+    if not key and file is not None:
+        key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
+        if key == f'file-{file.id}':
+            unavailable.append(Skipped('file', 'unmigrated', file_id, name, in_chat=False, folder=True))
+            return
+    if not key:
+        unavailable.append(Skipped('file', 'gone', file_id, name, in_chat=False, folder=True))
+        return
+    document = await Knowledges.knowledge_document(key, file_id, user_id=user_id)
+    if document is None:
+        reason = await _knowledge_document_reason(key, file_id, user_id)
+        unavailable.append(Skipped('file', reason, file_id, name, in_chat=False, folder=True))
+        return
+    item = {'collection_key': key, 'file_id': file_id, 'name': name}
+    if file is not None and (file.meta or {}).get('source'):
+        item['document_ref'] = file.meta['source']['ref']
+    attached.append(item)
 
 
 def _attachment(document: dict[str, Any]) -> dict[str, Any]:
@@ -344,7 +494,6 @@ TEXT_CHARACTERS = 50_000
 # [Gradient] Match quoted attributes too: document titles and tool arguments may contain `>`.
 _ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
 _DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
-_DOCUMENT = re.compile(r'<document\b' + _ATTRIBUTES + r'>.*?</document>', re.DOTALL)
 _ATTRIBUTE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 # [Claude] GLM's tool-call token leaked into a document tag: `<tool_call>document title=...>` (also with `<`).
 _TOOL_CALL = '<tool_call>'
@@ -368,18 +517,75 @@ def _undecided(text: str) -> int:
     return len(text)
 
 
-def _document_label(match: re.Match[str]) -> str:
-    attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(match[1])}
-    return f'[document: {html.unescape(attributes.get("title", ""))}]'
+@dataclass(frozen=True)
+class _Document:
+    start: int
+    end: int
+    attributes: str
+
+    def label(self) -> str:
+        attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(self.attributes)}
+        return f'[document: {html.unescape(attributes.get("title", ""))}]'
+
+
+def _documents(text: str) -> list[_Document]:
+    """[Claude] Each closed `<document ...>...</document>` in `text`, found in one pass: a regular expression takes
+    quadratic time on many unclosed tags, which a model (or text it quotes) can write. An unclosed tag ends the
+    search, since no later tag can close before it does."""
+    found, position = [], 0
+    while (start := text.find('<document', position)) != -1:
+        after = start + len('<document')
+        if after < len(text) and (text[after].isalnum() or text[after] in '_-'):
+            position = after
+            continue
+        end, quote = after, ''
+        while end < len(text) and (quote or text[end] != '>'):
+            if quote and text[end] == quote:
+                quote = ''
+            elif not quote and text[end] in '"\'':
+                quote = text[end]
+            end += 1
+        close = text.find('</document>', end)
+        if end == len(text) or close == -1:
+            break
+        position = close + len('</document>')
+        found.append(_Document(start, position, text[after:end]))
+    return found
+
+
+def _labelled(text: str) -> str:
+    """[Claude] `text` with each document replaced by a line naming it."""
+    parts, position = [], 0
+    for document in _documents(text):
+        parts += [text[position : document.start], document.label()]
+        position = document.end
+    return ''.join(parts) + text[position:]
+
+
+# [Gradient] A citation marker the agent would read as a number of this turn: `[3]`, `[3, 4]`, `[#3]`, `[3#p2]`,
+# `【3】`, `【3†source】`; with the space OWUI puts before it. Code spans and blocks are left alone.
+_MARKER_NUMBER = r'#?\d+(?:#[^\]\s]*)?'
+_CITATION_MARKER = re.compile(
+    r'[ \t]*(?:\[\s*' + _MARKER_NUMBER + r'(?:\s*[,;]\s*' + _MARKER_NUMBER + r')*\s*\]'
+    r'|【\s*\d+(?:\s*[,;]\s*\d+)*(?:†[^】]*)?\s*】)'
+)
+_CODE = re.compile(r'(```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|`[^`\n]*`)', re.DOTALL)
+
+
+def _uncited(text: str) -> str:
+    """[Gradient] `text` without citation markers outside code: numbers from another turn or chat, which the
+    agent would resolve against this turn's sources. To cite such a document the model reads it again."""
+    parts = _CODE.split(text)
+    return ''.join(part if index % 2 else _CITATION_MARKER.sub('', part) for index, part in enumerate(parts))
 
 
 def _conversation(chat: Any, message_id: str | None) -> list[str]:
     """[Gradient] A chat's branch up to a message as `role: content` blocks, without tool, reasoning and document
-    bodies."""
+    bodies or citation markers."""
     blocks = []
     for message in get_message_list(chat.chat.get('history', {}).get('messages', {}), message_id):
         text = _DETAILS.sub('', get_content_from_message(message) or '')
-        text = _DOCUMENT.sub(_document_label, text).strip()
+        text = _uncited(_labelled(text)).strip()
         if text:
             blocks.append(f'{message.get("role", "user")}: {text}')
     return blocks
@@ -428,9 +634,11 @@ async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
         await Chats.update_chat_by_id(chat_id, {'files': kept}, touch=False)
 
 
-async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict[str, Any]], list[Skipped]]:
-    """[Gradient] Read attached notes and chats with the same grants as upstream retrieval; the ones deleted or not
-    readable by the user are left out."""
+async def _texts(
+    entries: list[dict[str, Any]], user_id: str, *, origin: str = 'chat'
+) -> tuple[list[dict[str, Any]], list[Skipped]]:
+    """[Gradient] Read attached notes and chats (`origin` chat), a folder's notes or an assistant's notes and chats with
+    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out."""
     if not entries:
         return [], []
     user = await Users.get_user_by_id(user_id)
@@ -465,10 +673,11 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict
                 or (can_bypass_access_control(user) if kind == 'note' else can_access_admin_chats(user))
             )
         )
-        if item and user and not allowed:
+        # A shared_chat grant covers the share snapshot only, never the live chat.
+        if item and user and not allowed and kind == 'note':
             allowed = await AccessGrants.has_access(
                 user_id=user.id,
-                resource_type='note' if kind == 'note' else 'shared_chat',
+                resource_type='note',
                 resource_id=item.id,
                 permission='read',
             )
@@ -477,7 +686,9 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict
             allowed = folder and await has_folder_access(user.id, folder, 'read', db=None)
         if not allowed:
             name = entry.get('name') or (item.title if item else None) or item_id or kind
-            unavailable.append(Skipped(kind, 'denied' if item else 'gone', item_id or '', name))
+            reason = 'denied' if item else 'gone'
+            in_chat, folder_item = origin == 'chat', origin == 'folder'
+            unavailable.append(Skipped(kind, reason, item_id or '', name, in_chat=in_chat, folder=folder_item))
             continue
         text = item.data.get('content', {}).get('md', '') if kind == 'note' else _chat_text(item)
         title = item.title or entry.get('name') or ('Notitie' if kind == 'note' else 'Chat')
@@ -491,6 +702,40 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict
             }
         )
     return texts, unavailable
+
+
+# [Gradient] The most notes and chats one turn sends; attached ones beyond it refuse the turn.
+TEXTS = 10
+
+
+async def _more_texts(
+    folder: list[dict[str, Any]], entries: list[dict[str, Any]], metadata: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[Skipped]]:
+    """[Claude] The folder's notes, then the assistant's notes and chats, not attached in the chat too, in the room
+    the chat's own texts leave; the rest are skipped, never refusing the turn."""
+    taken = {(entry['type'], entry.get('id')) for entry in entries}
+    room = max(TEXTS - len(entries), 0)
+    assistant = [
+        item
+        for item in metadata.get('knowledge') or []
+        if isinstance(item, dict) and item.get('type') in ('note', 'chat') and isinstance(item.get('id'), str)
+    ]
+    texts, skipped = [], []
+    for items, origin in (([item for item in folder if item['type'] == 'note'], 'folder'), (assistant, 'assistant')):
+        fresh = []
+        for item in items:
+            if (item['type'], item['id']) not in taken:
+                taken.add((item['type'], item['id']))
+                fresh.append(item)
+        read, more = await _texts(fresh[:room], metadata['user_id'], origin=origin)
+        texts += read
+        skipped += more
+        skipped += [
+            Skipped(item['type'], 'limit', item['id'], item.get('name'), in_chat=False, folder=origin == 'folder')
+            for item in fresh[room:]
+        ]
+        room = max(room - len(fresh), 0)
+    return texts, skipped
 
 
 def _urls(metadata: dict[str, Any]) -> dict[str, list[str]]:
@@ -555,6 +800,8 @@ async def _image_bytes(entry: dict, user: str) -> tuple[bytes, FileModel | None,
 
 
 async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
+    from open_webui.soev import capabilities
+
     entries = [
         entry
         for entry in (metadata.get('user_message') or {}).get('files') or []
@@ -562,6 +809,8 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
     ]
     if len(entries) > 4:
         raise ImagesUnavailable('limit')
+    if entries and not await capabilities.has(capabilities.IMAGES):
+        raise ImagesUnavailable('gone', entries[0].get('name') or 'image')
     images = []
     client = identity.build_client() if entries else None
     for entry in entries:
@@ -666,14 +915,24 @@ def _tools(
 
 async def _live_mail_allowed() -> bool:
     from open_webui.env import AGENT_API_ENABLED
+    from open_webui.soev import capabilities
 
-    return AGENT_API_ENABLED and bool(await Config.get('live_mail.enable'))
+    return (
+        AGENT_API_ENABLED
+        and bool(await Config.get('live_mail.enable'))
+        and await capabilities.has(capabilities.LIVE_MAIL)
+    )
 
 
 async def _live_documents_allowed() -> bool:
     from open_webui.env import AGENT_API_ENABLED
+    from open_webui.soev import capabilities
 
-    return AGENT_API_ENABLED and bool(await Config.get('live_documents.enable'))
+    return (
+        AGENT_API_ENABLED
+        and bool(await Config.get('live_documents.enable'))
+        and await capabilities.has(capabilities.LIVE_DOCUMENTS)
+    )
 
 
 async def _web_search_allowed(user_id: str) -> bool:
@@ -708,6 +967,7 @@ _SUBJECTS = {
         'note': ("Note '{name}'", 'A note'),
         'chat': ("Chat '{name}'", 'A chat'),
         'meeting': ("Meeting '{name}'", 'A meeting'),
+        'folder': ("Folder '{name}'", 'A folder'),
     },
     'nl': {
         'knowledge': ("Kennisbank '{name}'", 'Een kennisbank'),
@@ -715,56 +975,85 @@ _SUBJECTS = {
         'note': ("Notitie '{name}'", 'Een notitie'),
         'chat': ("Chat '{name}'", 'Een chat'),
         'meeting': ("Vergadering '{name}'", 'Een vergadering'),
+        'folder': ("Map '{name}'", 'Een map'),
     },
 }
 _WHY = {
     'en': {
         'gone': '{subject} no longer exists and was removed from this chat.',
+        'gone_assistant': '{subject} of this assistant no longer exists and was skipped.',
         'denied': '{subject} is not accessible and was skipped.',
         'failed': '{subject} could not be processed and was skipped.',
         'processing': '{subject} is still being processed and was skipped this time.',
         'unmigrated': '{subject} was uploaded before an update and cannot be read. Upload the file again.',
+        'gone_folder': '{subject} no longer exists and was skipped.',
+        'limit': '{subject} was skipped: a message reads at most 10 notes or chats.',
     },
     'nl': {
         'gone': '{subject} bestaat niet meer en is uit deze chat gehaald.',
+        'gone_assistant': '{subject} van deze assistent bestaat niet meer en is overgeslagen.',
         'denied': '{subject} is niet toegankelijk en is overgeslagen.',
         'failed': '{subject} kon niet worden verwerkt en is overgeslagen.',
         'processing': '{subject} wordt nog verwerkt en is deze keer overgeslagen.',
         'unmigrated': '{subject} is vóór een update geüpload en kan niet worden gelezen. Upload het bestand opnieuw.',
+        'gone_folder': '{subject} bestaat niet meer en is overgeslagen.',
+        'limit': '{subject} is overgeslagen: een bericht leest maximaal 10 notities of chats.',
     },
 }
+# [Claude] Where a folder's skipped item comes from, after its subject.
+_OF_FOLDER = {'en': ' of this folder', 'nl': ' van deze map'}
 # [Claude] Knowledge bases the user cannot see are only counted: their names may themselves be confidential. An
-# assistant's own deleted one cannot be dropped from the chat, so it is counted as skipped.
+# assistant's or folder's own deleted one cannot be dropped from the chat, so it is counted as skipped.
 _COUNTED = {
     'en': {
-        ('denied', True): (
+        ('denied', 'chat'): (
             '{n} knowledge base in this chat is not accessible and was skipped.',
             '{n} knowledge bases in this chat are not accessible and were skipped.',
         ),
-        ('denied', False): (
+        ('denied', 'assistant'): (
             '{n} knowledge base of this assistant is not accessible and was skipped.',
             '{n} knowledge bases of this assistant are not accessible and were skipped.',
         ),
-        ('gone', False): (
+        ('gone', 'assistant'): (
             '{n} knowledge base of this assistant no longer exists and was skipped.',
             '{n} knowledge bases of this assistant no longer exist and were skipped.',
         ),
+        ('denied', 'folder'): (
+            '{n} knowledge base of this folder is not accessible and was skipped.',
+            '{n} knowledge bases of this folder are not accessible and were skipped.',
+        ),
+        ('gone', 'folder'): (
+            '{n} knowledge base of this folder no longer exists and was skipped.',
+            '{n} knowledge bases of this folder no longer exist and were skipped.',
+        ),
     },
     'nl': {
-        ('denied', True): (
+        ('denied', 'chat'): (
             '{n} kennisbank in deze chat is niet toegankelijk en is overgeslagen.',
             '{n} kennisbanken in deze chat zijn niet toegankelijk en zijn overgeslagen.',
         ),
-        ('denied', False): (
+        ('denied', 'assistant'): (
             '{n} kennisbank van deze assistent is niet toegankelijk en is overgeslagen.',
             '{n} kennisbanken van deze assistent zijn niet toegankelijk en zijn overgeslagen.',
         ),
-        ('gone', False): (
+        ('gone', 'assistant'): (
             '{n} kennisbank van deze assistent bestaat niet meer en is overgeslagen.',
             '{n} kennisbanken van deze assistent bestaan niet meer en zijn overgeslagen.',
         ),
+        ('denied', 'folder'): (
+            '{n} kennisbank van deze map is niet toegankelijk en is overgeslagen.',
+            '{n} kennisbanken van deze map zijn niet toegankelijk en zijn overgeslagen.',
+        ),
+        ('gone', 'folder'): (
+            '{n} kennisbank van deze map bestaat niet meer en is overgeslagen.',
+            '{n} kennisbanken van deze map bestaan niet meer en zijn overgeslagen.',
+        ),
     },
 }
+
+
+def _origin(item: Skipped) -> str:
+    return 'folder' if item.folder else 'chat' if item.in_chat else 'assistant'
 
 
 def _notices(skipped: list[Skipped], language: str | None) -> list[str]:
@@ -772,16 +1061,17 @@ def _notices(skipped: list[Skipped], language: str | None) -> list[str]:
     from the chat's own entries; a knowledge base is named only when it was deleted from this chat."""
     lang = 'nl' if (language or '').lower().startswith('nl') else 'en'
     notices = []
-    for (reason, in_chat), templates in _COUNTED[lang].items():
-        count = sum(item.kind == 'knowledge' and (item.reason, item.in_chat) == (reason, in_chat) for item in skipped)
+    for (reason, origin), templates in _COUNTED[lang].items():
+        count = sum(item.kind == 'knowledge' and (item.reason, _origin(item)) == (reason, origin) for item in skipped)
         if count:
             notices.append(templates[count != 1].format(n=count))
     for item in skipped:
         if item.kind == 'knowledge' and (item.reason, item.in_chat) != ('gone', True):
             continue
         named, unnamed = _SUBJECTS[lang][item.kind]
-        subject = named.format(name=item.name) if item.name else unnamed
-        notices.append(_WHY[lang][item.reason].format(subject=subject))
+        subject = (named.format(name=item.name) if item.name else unnamed) + (_OF_FOLDER[lang] if item.folder else '')
+        reason = f'gone_{_origin(item)}' if item.reason == 'gone' and not item.in_chat else item.reason
+        notices.append(_WHY[lang][reason].format(subject=subject))
     return notices
 
 
@@ -797,8 +1087,9 @@ def _skipped_notes(skipped: list[Skipped]) -> list[str]:
     return notes
 
 
-def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
-    """The selected knowledge bases' keys; an OWUI knowledge id is the soev-api collection key.
+def _knowledge_keys(metadata: dict[str, Any], folder: list[dict[str, Any]] = ()) -> list[str]:
+    """The selected knowledge bases' keys (the chat's, the assistant's, then the folder's); an OWUI knowledge id is
+    the soev-api collection key.
 
     A model's knowledge also lists files and notes, and legacy entries without an id; none is a collection key.
     """
@@ -808,6 +1099,7 @@ def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
         for item in metadata.get('knowledge') or []
         if isinstance(item, str) or (item.get('type', 'collection') == 'collection' and 'id' in item)
     )
+    selected.extend(item for item in folder if item['type'] == 'collection')
     ids = [item if isinstance(item, str) else item['id'] for item in selected]
     if any(not isinstance(key, str) or not key for key in ids):
         raise ValueError('A collection requires an id')
@@ -816,6 +1108,16 @@ def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
 
 def _chunk(delta: dict[str, Any]) -> dict[str, Any]:
     return {'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
+
+
+_USAGE_KEYS = ('prompt_tokens', 'completion_tokens', 'total_tokens')
+
+
+def _summed_usage(total: dict[str, int] | None, usage: Any) -> dict[str, int] | None:
+    """[Claude] Add one model call's token counts to the turn's; a call without usage adds nothing."""
+    if not isinstance(usage, dict):
+        return total
+    return {key: (total or {}).get(key, 0) + int(usage.get(key) or 0) for key in _USAGE_KEYS}
 
 
 def _error(
@@ -974,21 +1276,28 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+_GRANULARITY = {'document-text': 'document', 'search-result': 'snippet', 'live-document': 'file-snippet'}
+
+
 async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
     """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
-    in the shape `Citations.add` takes. A whole document's text is a document-granularity source."""
+    in the shape `Citations.add` takes. A whole document's text is a document-granularity source, a web search
+    result's snippet a snippet-granularity one: the page itself was not read, and a live-document hit's search
+    snippet a file-snippet one: the file was not opened."""
     whole = whole or {}
     properties = {
         'title': whole.get('title') or whole.get('filename') or whole.get('name'),
         'source_id': whole.get('source_id'),
-        'source_url': whole.get('source_url'),
+        'source_url': whole.get('source_url') or whole.get('web_url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
-        'granularity': 'document' if element.get('type') == 'document-text' else None,
+        'granularity': _GRANULARITY.get(element.get('type')),
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:
         provider = 'outlook_mail'
+    elif element.get('type') == 'live-document':
+        provider = element.get('provider')
     elif isinstance(properties['source_id'], str) and properties['source_id']:
         file = await Files.get_file_by_id(properties['source_id'])
         if file is not None:
@@ -1128,6 +1437,9 @@ class AgentTurn:
         self.streamed: list[tuple[int, int]] = []
         self.streamed_citations = 0
         self.partial_reasoning = ''
+        # [Claude] The turn's document writer state, and every text its tools returned.
+        self.documents = 'off'
+        self.tool_texts: list[str] = []
         self.tool_calls = 0
         # [Claude] How many calls the last summary counted.
         self.summarized = 0
@@ -1162,6 +1474,8 @@ class AgentTurn:
         # [Claude] Whether soev-api accepted the turn, and the HTTP status of its failure, if it failed.
         self.accepted = False
         self.status: int | None = None
+        # [Claude] Token counts summed over every model call of the turn, sent once as the stream's usage chunk.
+        self.usage: dict[str, int] | None = None
 
     def fail(self, status: int, code: str, *, upstream: int | None = None, constraint: str | None = None) -> None:
         """[Claude] Keep the failure's HTTP status and log it once: ids and codes only, never content (GRA-219)."""
@@ -1501,6 +1815,11 @@ class AgentTurn:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         await self.attached(payload)
         await self.keep(payload)
+        self.tool_texts += [
+            text
+            for text in [payload.get('data'), *(element.get('text') for element in payload.get('elements') or [])]
+            if isinstance(text, str) and text
+        ]
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
@@ -1637,6 +1956,8 @@ class AgentTurn:
         if event.event == 'citation':
             marker = await self.cite(event.data)
             return [_chunk({'content': marker})] if marker else []
+        if event.event == 'model_output':
+            self.usage = _summed_usage(self.usage, payload.get('usage'))
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
         if event.event == 'tool_output' and event.data.get('stream') == 'root':
@@ -1721,16 +2042,27 @@ class AgentTurn:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'])
         text = _unleaked(held + _marked(content, markers, len(partial)))
-        if not self.pending_calls and not _DOCUMENT.search(_unleaked(content)):
-            # [Claude] A model that wrote its document in its reasoning: the answer, which promises it, shows it.
-            documents = [match[0] for match in _DOCUMENT.finditer(_unleaked(payload.get('reasoning') or ''))]
-            text += ''.join(f'\n\n{document}' for document in documents)
+        if (document := self.reasoning_document(content, payload.get('reasoning') or '')) is not None:
+            text += f'\n\n{document}'
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
         return chunks
+
+    def reasoning_document(self, content: str, reasoning: str) -> str | None:
+        """[Claude] The document a model wrote in its reasoning instead of its answer, for the answer to show: only
+        when the user turned the document writer on, the call ends the turn and its answer has none, and only the
+        last one, which a tool did not return as it is (text the model quoted from a mail or file is not its own)."""
+        if self.documents not in ('auto', 'required') or self.pending_calls or _documents(_unleaked(content)):
+            return None
+        reasoning = _unleaked(reasoning)
+        if not (found := _documents(reasoning)):
+            return None
+        last = found[-1]
+        body = reasoning[last.start + len('<document') + len(last.attributes) + 1 : last.end - len('</document>')]
+        return None if any(body.strip() in text for text in self.tool_texts) else reasoning[last.start : last.end]
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''
@@ -1772,6 +2104,10 @@ class AgentTurn:
         elif state not in {*_ENDED, 'waiting'}:
             self.fail(_http_status(state or 'service_unavailable'), state or 'service_unavailable')
             chunks.append(_error(state or 'service_unavailable', language=language))
+        if self.usage:
+            # [Claude] The OpenAI terminal usage chunk, which the middleware stores on the message as v1 does.
+            chunks.append({'object': 'chat.completion.chunk', 'choices': [], 'usage': self.usage})
+            self.usage = None
         return chunks
 
     async def summarize(self) -> None:
@@ -1785,6 +2121,7 @@ class AgentTurn:
 
     async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
         self.model = body.get('model')
+        self.documents = body.get('input', {}).get('documents', 'off')
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()
@@ -1795,10 +2132,11 @@ class AgentTurn:
             self.keep_attachments(body['input'].get('attachments') or [])
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
-            # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.
+            self.keep_texts(body['input'].get('texts') or [])
+            # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
+            # before any tool output numbers more; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
-            self.keep_texts(body['input'].get('texts') or [])
             if not self.thread_id:
                 body = {**body, 'agent': agent}
             events = self.events(body)
@@ -1835,14 +2173,21 @@ async def call_agent_v2(
         return JSONResponse(early, status_code=turn.status or 502)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}
+        usage: dict[str, int] | None = None
         async with aclosing(chunks):
             rest = [chunk async for chunk in chunks]
         for chunk in early + rest:
             if 'error' in chunk:
                 return JSONResponse(chunk, status_code=turn.status or 502)
-            for key, value in chunk['choices'][0]['delta'].items():
-                message[key] += value
-        return {'object': 'chat.completion', 'choices': [{'index': 0, 'message': message, 'finish_reason': 'stop'}]}
+            usage = chunk.get('usage') or usage
+            for choice in chunk['choices'][:1]:
+                for key, value in choice['delta'].items():
+                    message[key] += value
+        return {
+            'object': 'chat.completion',
+            'choices': [{'index': 0, 'message': message, 'finish_reason': 'stop'}],
+            **({'usage': usage} if usage else {}),
+        }
 
     async def stream_body() -> AsyncIterator[str]:
         async with aclosing(chunks):
@@ -1873,7 +2218,7 @@ async def _sent(
 ) -> AsyncIterator[dict[str, Any]]:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
     entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
-    if len(entries) > 10:
+    if len(entries) > TEXTS:
         message = (
             'Voeg maximaal 10 notities of chats toe.'
             if (metadata.get('user_language') or '').lower().startswith('nl')
@@ -1882,14 +2227,17 @@ async def _sent(
         turn.fail(422, 'attachments_unavailable')
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
-        knowledge, skipped = await _knowledge(metadata)
-        attachments = await _attachments(metadata)
+        folder, skipped_folders = await _folder_items(metadata)
+        knowledge, skipped = await _knowledge(metadata, folder)
+        attachments = await _attachments(metadata, folder)
         texts, skipped_texts = await _texts(entries, metadata['user_id'])
+        more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)
         images = await _images(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
-    skipped += attachments.pop('skipped', []) + skipped_texts
+    texts += more_texts
+    skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_more_texts
     if skipped:
         turn.left_out(skipped)
     tools = _tools(

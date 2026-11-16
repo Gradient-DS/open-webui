@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reduceSources, type RawSource, type DisplayCitation } from './reduceSources';
+import { citationAt, reduceSources, type RawSource, type DisplayCitation } from './reduceSources';
 
 const sourceA = (chunkText: string, page: number, fileId = 'doc-A'): RawSource => ({
 	source: { name: 'A.pdf', type: 'file', id: 'doc-A' },
@@ -120,8 +120,26 @@ describe('reduceSources', () => {
 		expect(out[0].n).toBe(7);
 	});
 
-	it('leaves `n` undefined for legacy/untagged sources', () => {
-		expect(reduceSources([sourceA('chunk1', 0)])[0].n).toBeUndefined();
+	it('numbers legacy sources without `n` by position', () => {
+		const b: RawSource = {
+			source: { id: 'doc-B' },
+			document: ['b'],
+			metadata: [{ source: 'B.pdf' }]
+		};
+		expect(reduceSources([sourceA('chunk1', 0), b]).map((entry) => entry.n)).toEqual([1, 2]);
+	});
+
+	it('resolves `[N]` by number, not position, when sources arrive out of order', () => {
+		const note: RawSource = {
+			source: { id: 'note:n1', name: 'Note' },
+			document: ['note body'],
+			metadata: [{ source: 'note:n1' }],
+			n: 1
+		};
+		const citations = reduceSources([{ ...sourceA('chunk1', 0), n: 2 }, note]);
+		expect(citationAt(citations, 1)?.id).toBe('note:n1');
+		expect(citationAt(citations, '2#p3')?.id).toBe('A.pdf');
+		expect(citationAt(citations, 3)).toBeUndefined();
 	});
 
 	it('stamps granularity=document onto each chunk of a document-level source', () => {

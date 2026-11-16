@@ -35,6 +35,7 @@
 	import ChevronUp from '../icons/ChevronUp.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import Spinner from './Spinner.svelte';
+	import { collapsesOnClick } from '$lib/utils/reasoningCollapse'; // [Gradient]
 
 	export let open = false;
 
@@ -176,9 +177,25 @@
 
 	{#if !grow}
 		{#if open && !hide}
-			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-				<slot name="content" />
-			</div>
+			{#if attributes?.type === 'reasoning'}
+				<!-- [Gradient] A click in opened reasoning collapses it; the header button stays the keyboard control. -->
+				<!-- svelte-ignore a11y-no-static-element-interactions -->
+				<!-- svelte-ignore a11y-click-events-have-key-events -->
+				<div
+					class="cursor-pointer"
+					title={$i18n.t('Click to collapse')}
+					transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+					on:click={(e) => {
+						if (collapsesOnClick(e.target, window.getSelection()?.toString() ?? '')) toggleOpen();
+					}}
+				>
+					<slot name="content" />
+				</div>
+			{:else}
+				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
+					<slot name="content" />
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>

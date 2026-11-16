@@ -23,7 +23,8 @@ describe('citation source list row', () => {
 						source: { name: 'Plan' },
 						document: granularities.map((_, i) => `Read text ${i}`),
 						metadata: granularities.map((granularity) => ({ granularity })),
-						distances: granularities.map(() => undefined)
+						distances: granularities.map(() => undefined),
+						n: 1
 					}
 				],
 				onSelect: () => {}

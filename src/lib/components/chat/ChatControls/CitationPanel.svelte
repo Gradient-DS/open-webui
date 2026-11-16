@@ -21,7 +21,13 @@
 		calculateShowRelevance,
 		shouldShowPercentage
 	} from '../Messages/Citations/relevanceDisplay';
-	import { sourceGroups, type SourceGroup, type CitationHistory } from './citationTab';
+	import {
+		findFileCitation,
+		sourceGroups,
+		type SourceGroup,
+		type CitationHistory
+	} from './citationTab';
+	import { getFileById } from '$lib/apis/files';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let overlay = false;
@@ -40,7 +46,11 @@
 	$: groups = sourceGroups(history);
 	$: panel = $citationPanel?.chatId === chatId ? $citationPanel : null;
 	$: activeGroup = groups.find((group) => group.messageId === panel?.messageId);
-	$: if ($citationPanel && ($citationPanel.chatId !== chatId || !activeGroup)) {
+	// [Gradient] A chat file opened from its chip has no answer group.
+	$: if (
+		$citationPanel &&
+		($citationPanel.chatId !== chatId || (!activeGroup && !$citationPanel.file))
+	) {
 		citationPanel.set(null);
 	}
 	$: relevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
@@ -126,12 +136,35 @@
 		if (panel) citationPanel.set({ ...panel, level: 'list' });
 	}
 
+	// [Gradient] A chip of a file an answer cites opens that citation, checked once per click.
+	let checkedFilePayload: typeof $citationPanel = null;
+	$: if (panel?.file && panel !== checkedFilePayload) {
+		checkedFilePayload = panel;
+		const match = findFileCitation(groups, panel.citation?.id ?? '');
+		if (match) selectSource(match.citation, match.group);
+	}
+
 	$: if (citation !== previousCitation) {
 		previousCitation = citation;
 		mergedDocuments = mergeCitationDocuments(citation);
 		activeSnippetIdx = 0;
 		expandedDocs = new Set();
 		selectedTab = 'preview';
+		if (panel?.file) void loadFileText(citation);
+	}
+
+	// [Gradient] The Content tab of a chat file shows its extracted text, fetched like the file modal did.
+	let textRequest = 0;
+	async function loadFileText(opened: DisplayCitation | null) {
+		const request = ++textRequest;
+		if (!opened || opened.document[0]) return;
+		const file = await getFileById(localStorage.token, opened.id).catch(() => null);
+		if (request !== textRequest || opened !== previousCitation) return;
+		const text = (file?.data?.content ?? '').trim();
+		mergedDocuments = mergedDocuments.map((document) => ({
+			...document,
+			document: text || $i18n.t('No content')
+		}));
 	}
 	$: ({ fileId, isPreviewable } = citationFileInfo(citation, mergedDocuments));
 	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
@@ -143,10 +176,11 @@
 	onDestroy(() => {
 		availability.cancel();
 		scrollVersion++;
+		textRequest++;
 	});
 </script>
 
-{#if groups.length > 0}
+{#if groups.length > 0 || panel?.file}
 	<section
 		class="relative flex flex-col h-full min-h-0 w-full text-gray-900 dark:text-gray-100"
 		bind:this={panelElement}

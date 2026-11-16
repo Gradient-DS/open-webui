@@ -2857,7 +2857,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if 'system_prompt' in folder.data:
                 form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
             if 'files' in folder.data:
-                if metadata.get('params', {}).get('function_calling') == 'legacy':
+                # [Gradient] A routed turn sends the folder's items to the agent itself (`utils/agent_v2.py`).
+                if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
                     form_data['files'] = [
                         {'type': 'folder', 'id': folder.id},
                         *form_data.get('files', []),
@@ -2865,7 +2866,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 else:
                     # Native FC: skip RAG injection, builtin tools
                     # will read folder knowledge from metadata.
-                    metadata['folder_knowledge'] = await get_owner_accessible_folder_files(folder)
+                    # [Gradient] Each item names its folder: a shared folder's files are read in its own collection.
+                    metadata['folder_knowledge'] = [
+                        {**item, 'folder_id': folder.id} for item in await get_owner_accessible_folder_files(folder)
+                    ]
 
     # [Gradient] Capture the merged conversation-level system prompt
     # (Chat Controls / per-chat + folder) for the agent service. At this

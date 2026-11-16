@@ -3710,9 +3710,6 @@
   "{{label}} sync started": "",
   "{{modelName}} profile image": "模型「{{modelName}}」的頭像",
   "{{model}} download has been canceled": "已取消模型 {{model}} 的下載",
-  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
-  "{{percentage}}% of the context window used.": "",
-  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
   "{{user}}'s Chats": "{{user}} 的對話",
   "{{webUIName}} Backend Required": "需要提供 {{webUIName}} 後端"
 }

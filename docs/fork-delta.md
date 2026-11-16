@@ -527,3 +527,12 @@ Chromium a nested `about:blank` frame is cross-origin to the page (verified), so
 Firefox and Safari it may be same-origin and reachable through `window[0]` before the guard's observer removes
 it, so WebRTC (STUN to an attacker host) may remain there for a running page. A page that never runs scripts can
 neither navigate nor reach the network.
+## Local secrets from 1Password
+
+Standalone local development (`open-webui dev`, the repo's docker compose) takes
+its secrets from `op://` references in the tracked `secrets.env`, resolved by
+`op run` through `scripts/op-run`; `.env` holds non-secret settings only. Rule:
+soev-docs `local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
+that passes those variables into the container. `.env.example` gains a header
+comment only. No runtime code changes: `env.py` already loads `.env` without
+override, so `op run`'s variables win.

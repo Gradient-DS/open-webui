@@ -153,7 +153,7 @@ async def test_empty_extension_passes_allowlist(monkeypatch):
     (Storage/DB unmocked); we only assert the allow-list 400 did not fire."""
     _patch_config(monkeypatch, engine='external', allowed=['pdf'])
     request = _request()
-    file = _upload_file('ASB - Microsoft Entra admin center', 'application/x-unknowntype')
+    file = _upload_file('Demo - Microsoft Entra admin center', 'application/x-unknowntype')
 
     with pytest.raises(HTTPException) as exc_info:
         await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())

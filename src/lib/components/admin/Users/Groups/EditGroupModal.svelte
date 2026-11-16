@@ -79,7 +79,7 @@
 				toast.success($i18n.t('Permissions reset to defaults'));
 			}
 		} catch (error) {
-			toast.error(`${error}`);
+			toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 		}
 	};
 

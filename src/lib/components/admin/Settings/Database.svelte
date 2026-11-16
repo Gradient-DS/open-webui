@@ -557,20 +557,22 @@
 									</div>
 								</div>
 								<div class="flex gap-1 ml-2">
-									<button
-										type="button"
-										class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"
-										on:click={() => handleViewArchive(archive.id)}
-									>
-										{$i18n.t('View')}
-									</button>
-									<button
-										type="button"
-										class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"
-										on:click={() => handleExportArchive(archive.id, archive.user_email)}
-									>
-										{$i18n.t('Export')}
-									</button>
+									{#if $config?.features?.enable_admin_chat_access || archive.user_id === $user?.id}
+										<button
+											type="button"
+											class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"
+											on:click={() => handleViewArchive(archive.id)}
+										>
+											{$i18n.t('View')}
+										</button>
+										<button
+											type="button"
+											class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"
+											on:click={() => handleExportArchive(archive.id, archive.user_email)}
+										>
+											{$i18n.t('Export')}
+										</button>
+									{/if}
 									<button
 										type="button"
 										class="px-1.5 py-0.5 border rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-700"

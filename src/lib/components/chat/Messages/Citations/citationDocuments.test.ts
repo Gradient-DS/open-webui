@@ -20,7 +20,8 @@ const citation: DisplayCitation = {
 		{ file_id: 'file', page: 8 },
 		{ file_id: 'file', page: 2 }
 	],
-	distances: [0.4, 0.9]
+	distances: [0.4, 0.9],
+	n: 1
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('shared citation documents', () => {
@@ -33,6 +34,14 @@ describe('shared citation documents', () => {
 		expect(citation.document).toEqual(['first', 'second']);
 		expect(minimumPage(documents)).toBe(3);
 		expect(citationFileInfo(citation, documents).isPreviewable).toBe(true);
+	});
+	it('previews a slide deck that has a file', () => {
+		const deck = { ...citation, source: { name: 'Q3 plan.PPTX' } };
+		const info = citationFileInfo(deck, mergeCitationDocuments(deck));
+		expect(info.isPptx).toBe(true);
+		expect(info.isPreviewable).toBe(true);
+		const hit = { ...deck, metadata: [{ granularity: 'file-snippet' }] };
+		expect(citationFileInfo(hit, mergeCitationDocuments(hit)).isPreviewable).toBe(false);
 	});
 	it('preserves input order when a whole-document citation has no score', () => {
 		expect(
@@ -76,6 +85,10 @@ describe('shared citation documents', () => {
 		);
 		expect(await probeFileAvailable('file')).toBe(false);
 		expect(await probeFileAvailable('file')).toBe(false);
+	});
+	it('keeps the preview for an original that is still being prepared', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409 }));
+		expect(await probeFileAvailable('file')).toBe(true);
 	});
 });
 describe('preview availability probe', () => {

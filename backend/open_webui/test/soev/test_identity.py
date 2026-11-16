@@ -128,7 +128,7 @@ async def test_ensure_link_is_idempotent(identity_config, identity_http):
     request = requests[0]
     assert request.method == 'POST'
     assert request.url.path == '/v1/identity/links'
-    assert request.headers['Idempotency-Key'] == 'link:owui:user:alice'
+    assert request.headers['Idempotency-Key'].startswith('link:')
     assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
     assert 'X-Soev-Subject' not in request.headers
     body = json.loads(request.content)
@@ -173,7 +173,7 @@ async def test_a_failed_link_can_be_retried(identity_config, identity_http):
     await identity.ensure_link('owui:user:alice', identity.build_client())
     assert len(requests) == 2
     assert json.loads(requests[0].content)['assertion'] != json.loads(requests[1].content)['assertion']
-    assert requests[0].headers['Idempotency-Key'] == requests[1].headers['Idempotency-Key']
+    assert requests[0].headers['Idempotency-Key'] != requests[1].headers['Idempotency-Key']
 
 
 @pytest.mark.asyncio

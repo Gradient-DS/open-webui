@@ -228,10 +228,11 @@ class UserArchiveTable:
                 archive.never_delete = form_data.never_delete
             if form_data.retention_days is not None:
                 archive.retention_days = form_data.retention_days
-                if form_data.retention_days and not archive.never_delete:
-                    archive.expires_at = archive.created_at + (form_data.retention_days * 24 * 60 * 60)
-                else:
-                    archive.expires_at = None
+            if not archive.never_delete and archive.retention_days is None:
+                from open_webui.models.config import Config
+
+                archive.retention_days = await Config.get('admin.default_archive_retention_days')
+            archive.expires_at = None if archive.never_delete else archive.created_at + archive.retention_days * 86400
 
             archive.updated_at = now
             await db.commit()

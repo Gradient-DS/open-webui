@@ -12,7 +12,7 @@ from open_webui.test.soev.test_jobs import env  # noqa: F401
 
 
 @pytest.fixture
-def picker(env, monkeypatch):  # noqa: F811
+def picker(env, monkeypatch, platform_capabilities):  # noqa: F811
     from open_webui.routers import live_documents as routes
 
     client = SimpleNamespace(
@@ -45,6 +45,19 @@ def picker(env, monkeypatch):  # noqa: F811
         'web_url': 'https://tenant.sharepoint.com/plan.pdf',
     }
     return SimpleNamespace(app=app, client=client, routes=routes, form=form)
+
+
+@pytest.mark.asyncio
+async def test_picker_requires_live_documents_capability(picker, platform_capabilities):
+    platform_capabilities.discard('live_documents')
+    async with AsyncClient(transport=httpx.ASGITransport(picker.app), base_url='http://test') as browser:
+        response = await browser.post(
+            '/api/v1/files/onedrive/attach', json=picker.form, headers={'Idempotency-Key': str(uuid4())}
+        )
+    assert response.status_code == 503
+    assert response.json()['detail']['code'] == 'feature_unavailable'
+    picker.client.send.assert_not_awaited()
+    picker.routes.ingest.ensure_attachments_collection.assert_not_awaited()
 
 
 @pytest.mark.asyncio

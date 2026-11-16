@@ -2,7 +2,7 @@
 	// [Gradient] Suggestions use effective LLMs; presentation uses assistant identity.
 	import { effectiveModels as _models, activeAssistant } from '$lib/stores/assistant';
 	import type { Model } from '$lib/stores';
-	import type { ToolState } from '$lib/utils/toolState';
+	import type { LiveToolState } from '$lib/utils/toolState';
 	import type {
 		ChatAttachment,
 		ChatInputCallbacks,
@@ -55,14 +55,12 @@
 	export let showCommands = false;
 
 	export let imageGenerationEnabled = false;
-	export let liveDocumentsState: ToolState = 'off';
-	export let liveMailState: ToolState = 'off';
+	export let liveDocumentsState: LiveToolState = 'off';
+	export let liveMailState: LiveToolState = 'off';
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
-	export let documentWriterRequired = false;
 	export let workspaceEnabled = false;
 	export let webSearchEnabled = false;
-	export let webSearchRequired = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
@@ -274,10 +272,8 @@
 						bind:liveMailState
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
-						bind:documentWriterRequired
 						bind:workspaceEnabled
 						bind:webSearchEnabled
-						bind:webSearchRequired
 						bind:atSelectedModel
 						bind:showCommands
 						bind:dragged

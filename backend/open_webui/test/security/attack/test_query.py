@@ -4,8 +4,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
-from . import plane, query
-from .test_shapes import offline as offline, reply
+from . import plane, query, seeds
+from .test_shapes import offline as offline
+from .test_shapes import reply
 
 
 def query_spec():
@@ -24,7 +25,28 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (49, 103)
+    assert (len(targets), sum(map(len, targets.values()))) == (49, 105)
+    assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
+
+
+def test_offboarding_query_contract_includes_resource_confirmation_array():
+    operation = seeds.SPEC['paths']['/api/v1/users/{user_id}']['delete']
+    parameters = {p['name']: p['schema'] for p in operation['parameters'] if p['in'] == 'query'}
+    assert set(parameters) == {
+        'mode',
+        'transfer_to',
+        'confirm_shared_deletion',
+        'never_delete',
+        'archive_before_delete',
+        'archive_reason',
+        'archive_retention_days',
+    }
+    assert parameters['mode']['enum'] == ['delete', 'transfer', 'archive']
+    assert parameters['mode']['default'] == 'delete'
+    assert parameters['transfer_to']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
+    assert parameters['confirm_shared_deletion']['type'] == 'array'
+    assert parameters['confirm_shared_deletion']['items'] == {'type': 'string'}
+    assert parameters['confirm_shared_deletion']['default'] == []
 
 
 @pytest.mark.parametrize('full', [False, True])

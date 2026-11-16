@@ -3,38 +3,28 @@
 	// item pinnable to the composer bar ($settings.pinnedInputItems). It absorbs upstream's
 	// separate integrations menu; tenant gates apply to every item.
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import type { Writable } from 'svelte/store';
+	import { get, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
 	import { fly } from 'svelte/transition';
-	import {
-		BINARY_TOOL_STATES,
-		DOCUMENT_WRITER_STATES,
-		documentWriterFlags,
-		TOOL_OFF_DESCRIPTION,
-		TOOL_STATE_LABELS,
-		WEB_SEARCH_STATE_DESCRIPTIONS,
-		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
-		documentWriterState,
-		WEB_SEARCH_STATES,
-		nextToolState,
-		webSearchFlags,
-		webSearchState,
-		type ToolState
-	} from '$lib/utils/toolState';
+	import { TOOL_OFF_DESCRIPTION, toolStateLabel, type LiveToolState } from '$lib/utils/toolState';
 	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		connectLiveSource,
+		liveGranted,
+		liveGrants,
+		LIVE_PROVIDERS,
 		prefetchLiveConnections,
-		relinkPrompt
+		relinkPrompt,
+		type LiveFamily
 	} from '$lib/utils/live-connections';
-	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
 	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
 
 	import { deleteOAuthSession } from '$lib/apis/auths';
+	import { listMailboxes, type MailboxList } from '$lib/apis/cloudSync';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
 
@@ -65,6 +55,8 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import Cog6 from '$lib/components/icons/Cog6.svelte';
+	import SharedMailboxesModal from './SharedMailboxesModal.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -132,46 +124,54 @@
 	export let toggleFilters: ToggleFilter[] = [];
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
-	export let liveDocumentsState: ToolState = 'off';
-	export let liveMailState: ToolState = 'off';
+	export let liveDocumentsState: LiveToolState = 'off';
+	export let liveMailState: LiveToolState = 'off';
 	let connectingDocuments = false;
 	let connectingMail = false;
-	async function cycleLive(family: 'live_documents' | 'mail') {
+	// [Gradient] A family is a switch only with a grant; without one it is a Connect action that
+	// runs the consent and turns the family on when it succeeds. Turning on is the consent.
+	$: documentsGranted = liveGranted($liveGrants, 'live_documents') === true;
+	$: mailGranted = liveGranted($liveGrants, 'mail') === true;
+	async function toggleLive(family: LiveFamily) {
 		const mail = family === 'mail';
 		if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents))
 			return;
 		if (mail ? connectingMail : connectingDocuments) return;
-		const state = mail ? liveMailState : liveDocumentsState;
-		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
+		if (liveGranted(get(liveGrants), family) === true) {
+			const next: LiveToolState =
+				(mail ? liveMailState : liveDocumentsState) === 'off' ? 'auto' : 'off';
+			if (mail) liveMailState = next;
+			else liveDocumentsState = next;
+			return;
+		}
 		if (mail) connectingMail = true;
 		else connectingDocuments = true;
 		const provider = mail ? 'Outlook' : 'OneDrive';
 		let consentToast: string | number | undefined;
 		try {
-			if (next !== 'off' && state === 'off')
-				await connectLiveSource(
-					localStorage.token,
-					mail ? 'outlook_mail' : 'onedrive',
-					family,
-					() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
-				);
+			await connectLiveSource(
+				localStorage.token,
+				LIVE_PROVIDERS[family],
+				family,
+				() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
+			);
 			if (consentToast !== undefined)
 				toast.success($i18n.t('{{provider}} connected', { provider }), { id: consentToast });
-			if (mail) liveMailState = next;
-			else liveDocumentsState = next;
+			if (mail) liveMailState = 'auto';
+			else liveDocumentsState = 'auto';
 		} catch (error) {
 			if (consentToast !== undefined) toast.dismiss(consentToast);
 			const prompt = relinkPrompt(error);
 			toast.error(prompt ? $i18n.t(prompt) : String(error));
 		} finally {
-			if (mail) connectingMail = false;
-			else connectingDocuments = false;
+			if (mail) {
+				connectingMail = false;
+				void prefetchMailSettings();
+			} else connectingDocuments = false;
 		}
 	}
-	export const cycleLiveDocuments = () => cycleLive('live_documents');
-	export const cycleLiveMail = () => cycleLive('mail');
-	// [Gradient] Altijd; webSearchEnabled alone is Auto.
-	export let webSearchRequired = false;
+	export const toggleLiveDocuments = () => toggleLive('live_documents');
+	export const toggleLiveMail = () => toggleLive('mail');
 	export let showImageGenerationButton = false;
 	export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
@@ -181,7 +181,6 @@
 	export let showWorkspaceButton = false;
 	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
-	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
@@ -198,8 +197,29 @@
 	) {
 		void prefetchLiveConnections(localStorage.token).catch(() => {});
 	}
+	// [Gradient] The platform's mailbox response gates the settings entry, independently of the switch.
+	let mailboxSettings: { connectionId: string; state: MailboxList } | null = null;
+	let showSharedMailboxes = false;
+	let mailboxLoad = 0;
+	async function prefetchMailSettings() {
+		const load = ++mailboxLoad;
+		const token = localStorage.token;
+		mailboxSettings = null;
+		try {
+			const rows = await prefetchLiveConnections(token, 'outlook_mail', 'mail');
+			const connection =
+				rows.find((row) => row.connection.lifecycle === 'enabled')?.connection ??
+				rows[0]?.connection;
+			if (!connection) return;
+			const state = await listMailboxes(token, connection.id);
+			if (load === mailboxLoad && token === localStorage.token && state.enabled)
+				mailboxSettings = { connectionId: connection.id, state };
+		} catch {
+			// Disabled deployments return policy_forbids; no settings entry until support is confirmed.
+		}
+	}
 	$: if (show && $config?.features?.enable_live_mail) {
-		void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
+		void prefetchMailSettings();
 	}
 	$: if (show && $config?.features?.enable_onedrive_business) {
 		void prepareBusinessDocumentPicker().catch(() => {});
@@ -537,58 +557,41 @@
 		}
 	};
 
-	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
-	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
-	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
-	$: workspaceState = (workspaceEnabled ? 'required' : 'off') as ToolState;
-	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+	const stateAriaLabel = (label: string, on: boolean, description: string) =>
+		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
+	const connectAriaLabel = (label: string) =>
+		`${label}: ${$i18n.t('Not connected')}. ${$i18n.t('Connect your account to use this')}`;
 
-	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
-		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
-
-	// [Gradient] Web search cycles Auto, Altijd, Uit. Exported for the pinned composer button.
-	export const cycleWebSearch = () => {
+	// [Gradient] Web search is on or off. Exported for the pinned composer button.
+	export const toggleWebSearch = () => {
 		// Strict data separation and #171 capability exclusion.
 		if (openInternetBlocked) return;
-		const wasOff = !webSearchEnabled;
-		const { enabled, required } = webSearchFlags(
-			nextToolState(webSearchToolState, WEB_SEARCH_STATES)
-		);
-		webSearchEnabled = enabled;
-		webSearchRequired = required;
+		webSearchEnabled = !webSearchEnabled;
 		if (webSearchEnabled && imageGenerationEnabled) {
 			toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 			imageGenerationEnabled = false;
 		}
-		// The confirmation flow cares about web search becoming possible, not about Altijd.
-		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
+		onWebSearchToggle(webSearchEnabled);
 	};
 
-	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
-	export const cycleTool = (
+	// [Gradient] Exported for the pinned composer buttons.
+	export const toggleFeature = (
 		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
 	) => {
 		if (tool === 'image_generation') {
-			imageGenerationEnabled =
-				nextToolState(imageGenerationState, BINARY_TOOL_STATES) === 'required';
-			// #171: image generation takes over from web search, which must then be Uit.
+			imageGenerationEnabled = !imageGenerationEnabled;
+			// #171: image generation takes over from web search, which must then be off.
 			if (imageGenerationEnabled && webSearchEnabled) {
 				toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 				webSearchEnabled = false;
-				webSearchRequired = false;
 				onWebSearchToggle(false);
 			}
 		} else if (tool === 'code_interpreter') {
-			codeInterpreterEnabled =
-				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
+			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else if (tool === 'workspace') {
-			workspaceEnabled = nextToolState(workspaceState, BINARY_TOOL_STATES) === 'required';
+			workspaceEnabled = !workspaceEnabled;
 		} else {
-			const { enabled, required } = documentWriterFlags(
-				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
-			);
-			documentWriterEnabled = enabled;
-			documentWriterRequired = required;
+			documentWriterEnabled = !documentWriterEnabled;
 		}
 	};
 
@@ -854,27 +857,54 @@
 						<MenuItem
 							label={$i18n.t('Mail search')}
 							pinId="live_mail"
-							ariaLabel={stateAriaLabel(
-								$i18n.t('Mail search'),
-								liveMailState,
-								liveMailState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search your mail')
-							)}
-							tooltip={!$config?.features?.enable_live_mail
-								? $i18n.t('Unavailable')
-								: stateAriaLabel(
+							ariaLabel={mailGranted
+								? stateAriaLabel(
 										$i18n.t('Mail search'),
-										liveMailState,
+										liveMailState !== 'off',
 										liveMailState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search your mail')
-									)}
-							toolState={liveMailState}
+									)
+								: connectAriaLabel($i18n.t('Mail search'))}
+							tooltip={!$config?.features?.enable_live_mail
+								? $i18n.t('Unavailable')
+								: mailGranted
+									? stateAriaLabel(
+											$i18n.t('Mail search'),
+											liveMailState !== 'off',
+											liveMailState === 'off'
+												? $i18n.t(TOOL_OFF_DESCRIPTION)
+												: $i18n.t('The model decides whether to search your mail')
+										)
+									: connectAriaLabel($i18n.t('Mail search'))}
+							toggle={mailGranted ? liveMailState !== 'off' : null}
 							disabled={connectingMail || !$config?.features?.enable_live_mail}
-							onClick={cycleLiveMail}
+							onClick={toggleLiveMail}
 						>
 							<MailSearch slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if mailboxSettings && $config?.features?.enable_live_mail}
+									<Tooltip content={$i18n.t('Shared mailboxes')}>
+										<button
+											type="button"
+											class="p-0.5 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+											disabled={connectingMail}
+											aria-label={$i18n.t('Shared mailboxes')}
+											on:click|stopPropagation|preventDefault={() => {
+												showSharedMailboxes = true;
+												closeMenu();
+											}}><Cog6 className="size-3.5" /></button
+										>
+									</Tooltip>
+								{/if}
+								{#if connectingMail}
+									<Spinner className="size-3.5 shrink-0" />
+								{:else if !mailGranted}
+									<span class="shrink-0 text-xs font-medium text-sky-600 dark:text-sky-400"
+										>{$i18n.t('Connect')}</span
+									>
+								{/if}
+							</svelte:fragment>
 						</MenuItem>
 					{/if}
 
@@ -882,27 +912,40 @@
 						<MenuItem
 							label={$i18n.t('OneDrive search')}
 							pinId="live_documents"
-							ariaLabel={stateAriaLabel(
-								$i18n.t('OneDrive search'),
-								liveDocumentsState,
-								liveDocumentsState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search OneDrive')
-							)}
-							tooltip={!$config?.features?.enable_live_documents
-								? $i18n.t('Unavailable')
-								: stateAriaLabel(
+							ariaLabel={documentsGranted
+								? stateAriaLabel(
 										$i18n.t('OneDrive search'),
-										liveDocumentsState,
+										liveDocumentsState !== 'off',
 										liveDocumentsState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search OneDrive')
-									)}
-							toolState={liveDocumentsState}
+									)
+								: connectAriaLabel($i18n.t('OneDrive search'))}
+							tooltip={!$config?.features?.enable_live_documents
+								? $i18n.t('Unavailable')
+								: documentsGranted
+									? stateAriaLabel(
+											$i18n.t('OneDrive search'),
+											liveDocumentsState !== 'off',
+											liveDocumentsState === 'off'
+												? $i18n.t(TOOL_OFF_DESCRIPTION)
+												: $i18n.t('The model decides whether to search OneDrive')
+										)
+									: connectAriaLabel($i18n.t('OneDrive search'))}
+							toggle={documentsGranted ? liveDocumentsState !== 'off' : null}
 							disabled={connectingDocuments || !$config?.features?.enable_live_documents}
-							onClick={cycleLiveDocuments}
+							onClick={toggleLiveDocuments}
 						>
 							<OneDriveSearch slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if connectingDocuments}
+									<Spinner className="size-3.5 shrink-0" />
+								{:else if !documentsGranted}
+									<span class="shrink-0 text-xs font-medium text-sky-600 dark:text-sky-400"
+										>{$i18n.t('Connect')}</span
+									>
+								{/if}
+							</svelte:fragment>
 						</MenuItem>
 					{/if}
 
@@ -910,7 +953,7 @@
 						<MenuItem
 							label={$i18n.t('Search the web')}
 							pinId="web_search"
-							toolState={webSearchToolState}
+							toggle={webSearchEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showWebSearchButton
 								? $i18n.t('Unavailable')
@@ -918,14 +961,22 @@
 									? dataSeparationMessage
 									: imageGenerationEnabled
 										? $i18n.t('Web search and image generation cannot run in the same turn')
-										: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
+										: $i18n.t(
+												webSearchEnabled
+													? 'The model decides whether to search the web'
+													: TOOL_OFF_DESCRIPTION
+											)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Search the web'),
-								webSearchToolState,
-								$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+								webSearchEnabled,
+								$i18n.t(
+									webSearchEnabled
+										? 'The model decides whether to search the web'
+										: TOOL_OFF_DESCRIPTION
+								)
 							)}
 							disabled={!showWebSearchButton || openInternetBlocked}
-							onClick={() => showWebSearchButton && cycleWebSearch()}
+							onClick={() => showWebSearchButton && toggleWebSearch()}
 						>
 							<GlobeAlt slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -936,7 +987,7 @@
 						<MenuItem
 							label={$i18n.t('Image')}
 							pinId="image_generation"
-							toolState={imageGenerationState}
+							toggle={imageGenerationEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showImageGenerationButton
 								? $i18n.t('Unavailable')
@@ -947,13 +998,13 @@
 										: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Image'),
-								imageGenerationState,
+								imageGenerationEnabled,
 								imageGenerationEnabled
 									? $i18n.t('Generate an image')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showImageGenerationButton}
-							onClick={() => showImageGenerationButton && cycleTool('image_generation')}
+							onClick={() => showImageGenerationButton && toggleFeature('image_generation')}
 						>
 							<Photo slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -963,7 +1014,7 @@
 						<MenuItem
 							label={$i18n.t('Code Interpreter')}
 							pinId="code_interpreter"
-							toolState={codeInterpreterState}
+							toggle={codeInterpreterEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showCodeInterpreterButton
 								? $i18n.t('Unavailable')
@@ -972,13 +1023,13 @@
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Code Interpreter'),
-								codeInterpreterState,
+								codeInterpreterEnabled,
 								codeInterpreterEnabled
 									? $i18n.t('Execute code for analysis')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showCodeInterpreterButton}
-							onClick={() => showCodeInterpreterButton && cycleTool('code_interpreter')}
+							onClick={() => showCodeInterpreterButton && toggleFeature('code_interpreter')}
 						>
 							<Terminal slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -988,18 +1039,26 @@
 						<MenuItem
 							label={$i18n.t('Document writer')}
 							pinId="document_writer"
-							toolState={documentWriterToolState}
+							toggle={documentWriterEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showDocumentWriterButton
 								? $i18n.t('Unavailable')
-								: $i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])}
+								: $i18n.t(
+										documentWriterEnabled
+											? 'The model decides whether to write a document'
+											: TOOL_OFF_DESCRIPTION
+									)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Document writer'),
-								documentWriterToolState,
-								$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+								documentWriterEnabled,
+								$i18n.t(
+									documentWriterEnabled
+										? 'The model decides whether to write a document'
+										: TOOL_OFF_DESCRIPTION
+								)
 							)}
 							disabled={!showDocumentWriterButton}
-							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}
+							onClick={() => showDocumentWriterButton && toggleFeature('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -1009,7 +1068,7 @@
 						<MenuItem
 							label={$i18n.t('Workspace')}
 							pinId="workspace"
-							toolState={workspaceState}
+							toggle={workspaceEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showWorkspaceButton
 								? $i18n.t('Unavailable')
@@ -1018,13 +1077,13 @@
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Workspace'),
-								workspaceState,
+								workspaceEnabled,
 								workspaceEnabled
 									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showWorkspaceButton}
-							onClick={() => showWorkspaceButton && cycleTool('workspace')}
+							onClick={() => showWorkspaceButton && toggleFeature('workspace')}
 						>
 							<CommandLine slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -1385,3 +1444,11 @@
 		</DropdownMenu>
 	</div>
 </Dropdown>
+
+{#if showSharedMailboxes && mailboxSettings}
+	<SharedMailboxesModal
+		bind:show={showSharedMailboxes}
+		connectionId={mailboxSettings.connectionId}
+		initial={mailboxSettings.state}
+	/>
+{/if}

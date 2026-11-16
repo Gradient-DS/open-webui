@@ -9,6 +9,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import aiohttp
@@ -56,6 +57,7 @@ from open_webui.config import (
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
+    ENABLE_AGENT_TRACE_DOWNLOAD,
     USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
@@ -84,6 +86,7 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
+    WHATS_NEW_MODELS,
     FEATURE_SKILL_FILES,
     FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -121,8 +124,10 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
-from open_webui.soev import model_catalog
+from open_webui.soev import capabilities, model_catalog, system_prompt
 from open_webui.soev.availability import SoevNotConfigured
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.errors import problem_message
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -194,6 +199,7 @@ from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
+    agent_threads,
     analytics,
     archives,
     audio,
@@ -576,7 +582,15 @@ async def lifespan(app: FastAPI):
     # The poller stays idle when SOEV_API_URL is unset.
     from open_webui.soev.jobs import start_job_poller
 
+    await capabilities.refresh()
     start_job_poller(app)
+    from open_webui.soev.group_sync import start_reconciler
+
+    start_reconciler(app)
+    # [Gradient] Keep each assistant's files collection in step with the assistant.
+    from open_webui.soev import assistant_files
+
+    assistant_files.install()
 
     # [Gradient] Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
@@ -673,6 +687,9 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup.cancel()
     app.state.periodic_session_pool_cleanup.cancel()
+    from open_webui.soev.group_sync import stop_reconciler
+
+    await stop_reconciler(app)
     app.state.soev_job_poller.cancel()
     await app.state.soev_job_poller
 
@@ -708,6 +725,20 @@ app.state.startup_complete = False
 @app.exception_handler(SoevNotConfigured)
 async def soev_not_configured_handler(request, exc: SoevNotConfigured):
     return JSONResponse(status_code=503, content={'detail': {'code': exc.code, 'detail': exc.detail}})
+
+
+@app.exception_handler(SoevApiError)
+async def soev_api_error_handler(request: Request, exc: SoevApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status,
+        content=build_http_error_body(
+            {
+                'code': exc.code,
+                'constraint': exc.constraint,
+                'detail': problem_message(exc, request.headers.get('accept-language', 'en')),
+            }
+        ),
+    )
 
 
 # [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
@@ -1110,6 +1141,9 @@ app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['fee
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
 app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
 
+# [Gradient] Download a v2 agent thread's trace file from soev-api, as the caller.
+app.include_router(agent_threads.router, prefix='/api/v1/agent-threads', tags=['agent-threads'])
+
 
 ##################################
 #
@@ -1423,6 +1457,12 @@ async def chat_completion(
             default_model_params,
             model_info.params.model_dump() if model_info and model_info.params else {},
         )
+        # [Gradient] An empty prompt box (system: null) no longer blanks the default: a base model without
+        # its own prompt gets the global system prompt.
+        resolved_system_prompt = await system_prompt.for_model(model_info, default_model_params.get('system'))
+        model_info_params.pop('system', None)
+        if resolved_system_prompt:
+            model_info_params['system'] = resolved_system_prompt
         request_params = {key: value for key, value in (form_data.get('params') or {}).items() if value is not None}
         if model_info_params or request_params:
             form_data['params'] = merge_model_params(model_info_params, request_params)
@@ -1534,6 +1574,7 @@ async def chat_completion(
             'tool_ids': form_data.get('tool_ids', None),
             'tool_servers': tool_servers,
             'rag_filter': form_data.pop('rag_filter', None),  # [Gradient] RAG filter passthrough
+            'assistant_id': split_assistant_id,  # [Gradient] the assistant of an assistant/LLM split turn
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
             'variables': form_data.get('variables', {}),
@@ -2818,7 +2859,7 @@ async def get_app_config(request: Request):
                     'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
                     'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
                     'feature_changelog': FEATURE_CHANGELOG,
-                    'feature_meetings': FEATURE_MEETINGS,
+                    'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,
@@ -2845,26 +2886,34 @@ async def get_app_config(request: Request):
                     'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
+                    'enable_agent_trace_download': ENABLE_AGENT_TRACE_DOWNLOAD,  # [Gradient]
                     'enable_google_drive_integration': config.get('google_drive.enable'),
-                    'enable_onedrive_integration': config.get('onedrive.enable'),
+                    'enable_onedrive_integration': config.get('onedrive.enable')
+                    and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'enable_memories': config.get('memories.enable'),
                     **(
                         {
                             'enable_onedrive_personal': config.get('onedrive.enable_personal'),
-                            'enable_onedrive_business': config.get('onedrive.enable_business'),
+                            'enable_onedrive_business': config.get('onedrive.enable_business')
+                            and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                         }
                         if config.get('onedrive.enable')
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
-                    'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
-                    'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
+                    'enable_live_mail': AGENT_API_ENABLED
+                    and config.get('live_mail.enable')
+                    and await capabilities.has(capabilities.LIVE_MAIL),
+                    'enable_live_documents': AGENT_API_ENABLED
+                    and config.get('live_documents.enable')
+                    and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
                     'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
+                    'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }
                 if user is not None
                 else {}
@@ -3544,25 +3593,24 @@ async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
 ):
-    """Serve cached files (e.g. tool outputs) with path-traversal protection.
+    """Serve the caller's own data export (exports/<user id>/<file>).
 
-    Only ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;
-    everything else gets a ``Content-Disposition: attachment`` header to prevent
-    XSS from user-generated HTML stored in the cache directory.
+    The rest of the cache (speech, pipelines, tool and function dirs) is shared
+    or admin data and is never served here. Only ``image/*``, ``audio/*`` and
+    ``video/*`` MIME types are served inline; everything else is an attachment.
     """
-    file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
-    # trailing os.sep is required: without it, a path resolving to a sibling
-    # whose name starts with the cache-dir basename (e.g. cache_backup) passes
-    cache_root = os.path.abspath(CACHE_DIR) + os.sep
-    if not file_path.startswith(cache_root):
+    # Authorize on the resolved path: a check on the raw path is bypassed by
+    # dot segments (exports/<me>/../<other>/...) that resolve elsewhere.
+    cache_root = Path(CACHE_DIR).resolve()
+    try:
+        file_path = (cache_root / path).resolve()
+        parts = file_path.relative_to(cache_root).parts
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail='File not found')
 
-    # [Gradient] Ownership check for user exports: only the owning user or an admin
-    parts = path.split('/')
-    if len(parts) >= 2 and parts[0] == 'exports':
-        export_owner_id = parts[1]
-        if user.role != 'admin' and user.id != export_owner_id:
-            raise HTTPException(status_code=404, detail='File not found')
+    # [Gradient] Only data exports are served, each to its owner only, admins included.
+    if len(parts) != 3 or parts[0] != 'exports' or parts[1] != user.id:
+        raise HTTPException(status_code=404, detail='File not found')
 
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')

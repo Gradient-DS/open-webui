@@ -14,14 +14,14 @@ from open_webui.soev.client import SoevApiError
 
 CLOUD_TYPES = {'onedrive', 'google_drive', 'confluence'}
 INGESTED, SUBMITTED, RUNNING, FAILED, PLANNED = 'ingested', 'submitted', 'running', 'failed', 'to check'
-# The fixed reasons soev.jobs stores; anything else it stores is `<code>: <detail>` or a job status.
+# The fixed reasons soev.jobs stores; anything else it stores is `<code>`, `<code>: <reason>` or a job status.
 _POLLER_REASONS = {'job disappeared': 'job_not_found', 'upload could not be completed': 'upload_incomplete'}
 
 
 def stored_code(file) -> str:
     """The stable code of a file's stored ingest error; never its detail, which can name the file."""
     error = str((file.meta or {}).get('error') or (file.data or {}).get('error') or '')
-    if match := re.match(r'([a-z][a-z0-9_]*):', error):
+    if match := re.match(r'([a-z][a-z0-9_]*)(?::|$)', error):
         return match.group(1)
     if error in _POLLER_REASONS:
         return _POLLER_REASONS[error]

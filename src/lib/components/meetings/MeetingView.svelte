@@ -52,6 +52,7 @@
 		OUTPUT_KINDS,
 		fileStem,
 		formatTimestamp,
+		meetingLanguage,
 		groupTurns,
 		liveParts,
 		meetingTimes,
@@ -124,6 +125,22 @@
 	);
 	const interrupted = $derived(
 		meeting?.status === 'recording' && !recording && !threadBusy && !finishedHere && !recovering
+	);
+	// While a finish runs: its stage, and how long since the recording was stopped.
+	let stoppedAt = $state<number | null>(null);
+	let now = $state(Date.now());
+	$effect(() => {
+		if (!transcribing) return;
+		const ticker = setInterval(() => (now = Date.now()), 1000);
+		return () => clearInterval(ticker);
+	});
+	const finishingSince = $derived(
+		meeting?.ended_at ? Date.parse(meeting.ended_at) : (stoppedAt ?? null)
+	);
+	const finishingLabel = $derived(
+		meeting?.finishing === 'cleaning'
+			? $i18n.t('Cleaning up the transcript and recognising speakers…')
+			: $i18n.t('Transcribing…')
 	);
 	const recoveryActions = $derived(
 		interruptedActions({ localParts, liveParts: liveParts(meeting).length })
@@ -329,11 +346,11 @@
 		titleTimer = setTimeout(saveTitle, 800);
 	};
 
-	const start = async (source: AudioSource) => {
+	const start = async (source: AudioSource, micId: string | null) => {
 		let captured: Capture;
 		try {
 			// First call in the click: the share picker needs the user gesture.
-			captured = await captureAudio(source);
+			captured = await captureAudio(source, micId);
 		} catch (error) {
 			console.error(error);
 			toast.error(
@@ -348,6 +365,7 @@
 			const res = await startMeeting(localStorage.token, {
 				type: 'start',
 				...(chosen ? { title: chosen } : {}),
+				language: meetingLanguage($i18n.language),
 				consent: { text_version: CONSENT_TEXT_VERSION, at: new Date().toISOString() }
 			});
 			titleSent = chosen;
@@ -367,6 +385,7 @@
 
 	const recorded = async () => {
 		finishedHere = true;
+		stoppedAt = Date.now();
 		capture = null;
 		await load();
 		schedule();
@@ -445,10 +464,10 @@
 	};
 
 	/** Continue an interrupted meeting as a new part; its consent stands. */
-	const resume = async (source: AudioSource) => {
+	const resume = async (source: AudioSource, micId: string | null) => {
 		let captured: Capture;
 		try {
-			captured = await captureAudio(source);
+			captured = await captureAudio(source, micId);
 		} catch (error) {
 			console.error(error);
 			toast.error(
@@ -477,6 +496,7 @@
 				parts.map(({ blob }) => blob)
 			);
 			finishedHere = true;
+			stoppedAt = Date.now();
 		} catch (error) {
 			toast.error(`${(error as Error)?.message ?? error}`);
 		} finally {
@@ -827,12 +847,12 @@
 					{:else if !meeting || transcribing}
 						<div class="flex items-center gap-2 text-xs text-gray-500">
 							<Spinner className="size-3.5" />
-							<span class="text-gray-700 dark:text-gray-300">{$i18n.t('Transcribing…')}</span>
-							<span
-								>{$i18n.t(
-									'The transcript is being cleaned up and speakers recognised. This can take a few minutes.'
-								)}</span
-							>
+							<span class="text-gray-700 dark:text-gray-300">{finishingLabel}</span>
+							{#if finishingSince !== null}
+								<span class="tabular-nums">
+									{formatTimestamp(Math.max(0, (now - finishingSince) / 1000))}
+								</span>
+							{/if}
 						</div>
 						{@render liveTranscript()}
 					{:else if meeting.status === 'ready'}

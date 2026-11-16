@@ -3710,9 +3710,6 @@
   "{{label}} sync started": "",
   "{{modelName}} profile image": "รูปโปรไฟล์ของ {{modelName}}",
   "{{model}} download has been canceled": "การดาวน์โหลด {{model}} ถูกยกเลิกแล้ว",
-  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
-  "{{percentage}}% of the context window used.": "",
-  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
   "{{user}}'s Chats": "การแชทของ {{user}}",
   "{{webUIName}} Backend Required": "ต้องใช้ Backend ของ {{webUIName}}"
 }

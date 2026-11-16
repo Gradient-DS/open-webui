@@ -133,7 +133,9 @@ async def meeting_document(user, meeting_id: str, client: SoevClient | None = No
     """Read the meeting as `user`; soev-api only returns the caller's own threads."""
     if user is None or not meeting_id:
         raise MeetingUnavailable('No user or meeting')
-    if not is_feature_enabled('meetings'):
+    from open_webui.soev import capabilities
+
+    if not is_feature_enabled('meetings') or not await capabilities.has(capabilities.MEETINGS):
         raise MeetingUnavailable('Meetings are not available')
     path = thread_path(meeting_id)
     client = client or identity.build_client()

@@ -92,6 +92,14 @@ describe('vendor adapters', () => {
 		expect(openOneDriveItemPicker).toHaveBeenCalledExactlyOnceWith();
 		await expect(picked).resolves.toEqual([]);
 	});
+	it('opens the OneDrive picker without a sign-in window when asked to stay silent', async () => {
+		vi.mocked(openOneDriveItemPicker).mockResolvedValue([]);
+		await expect(providers.onedrive.pickSilently!()).resolves.toEqual([]);
+		expect(openOneDriveItemPicker).toHaveBeenLastCalledWith({ allowPopup: false });
+	});
+	it('has no silent Google picker: its sign-in always needs a click', () => {
+		expect(providers.google_drive.pickSilently).toBeUndefined();
+	});
 	it('invokes the Google picker without an import delay', async () => {
 		vi.mocked(createKnowledgePicker).mockResolvedValue(null);
 		const picked = providers.google_drive.pick();

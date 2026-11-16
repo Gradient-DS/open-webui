@@ -1,9 +1,8 @@
-"""Ingest the loose chat uploads that stored chats still attach into their owners' attachments collections.
+"""Ingest chat uploads into their owners' attachments collections and assistant files into their assistants'.
 
-A v1 upload was read from its own vector collection; v2 reads it from the owner's attachments collection in
-soev-api. Each file goes through ingest.submit as its owner, the path a fresh chat upload takes, and its
-`collection_name` then names that collection. Knowledge base files are their KB's documents and images reach the
-model as pixels, so neither is ingested here. A rerun skips files already ingested, in flight or terminally failed.
+An assistant's files go to its own collection (`soev/assistant_files.py`), submitted as the model owner, so
+everyone the assistant is shared with reads them. Reruns inspect current documents and durable ingest jobs before
+submitting.
 """
 
 import asyncio
@@ -68,14 +67,22 @@ def attached_file_ids(chat: dict) -> set[str]:
     }
 
 
+def folder_file_ids(data: dict) -> set[str]:
+    """The uploads a folder's knowledge lists, read by the agent like a chat's; not files picked from a KB."""
+    return attached_file_ids({'files': _list((data or {}).get('files'))})
+
+
 async def _referenced(db) -> set[str]:
     import sqlalchemy as sa
 
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.chats import Chat
+    from open_webui.models.folders import Folder
 
     ids, after = set(), ''
     async with get_async_db_context(db) as session:
+        for (data,) in (await session.execute(sa.select(Folder.data).where(Folder.data.is_not(None)))).all():
+            ids |= folder_file_ids(data if isinstance(data, dict) else {})
         while True:
             query = (
                 sa.select(Chat.id, Chat.chat)
@@ -91,7 +98,30 @@ async def _referenced(db) -> set[str]:
             after = page[-1][0]
 
 
-async def _rows(ids: set[str], db) -> tuple[list, set[str], set[str]]:
+def assistant_file_ids(meta: dict) -> set[str]:
+    """Return only explicit file entries in a model's knowledge metadata."""
+    from open_webui.soev.assistant_files import file_ids
+
+    return set(file_ids(meta))
+
+
+async def _assistant_refs(db) -> dict[str, set[tuple[str, str]]]:
+    """Each assistant file's assistants, as (model id, owner)."""
+    import sqlalchemy as sa
+
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.models import Model
+
+    refs: dict[str, set[tuple[str, str]]] = {}
+    async with get_async_db_context(db) as session:
+        rows = (await session.execute(sa.select(Model.id, Model.user_id, Model.meta))).all()
+    for model_id, owner, meta in rows:
+        for file_id in assistant_file_ids(meta if isinstance(meta, dict) else {}):
+            refs.setdefault(file_id, set()).add((model_id, owner))
+    return refs
+
+
+async def _rows(ids: set[str], db, *, assistant_owners: set[str]) -> tuple[list, set[str], set[str]]:
     """The File rows, the ids among them linked to a KB, and the user ids that exist."""
     import sqlalchemy as sa
 
@@ -109,7 +139,7 @@ async def _rows(ids: set[str], db) -> tuple[list, set[str], set[str]]:
             files.extend(FileModel.model_validate(row) for row in result.scalars().all())
             result = await session.execute(sa.select(KnowledgeFile.file_id).where(KnowledgeFile.file_id.in_(batch)))
             linked.update(result.scalars().all())
-        owners = sorted({file.user_id for file in files})
+        owners = sorted({file.user_id for file in files} | assistant_owners)
         users = set((await session.execute(sa.select(User.id).where(User.id.in_(owners)))).scalars().all())
     return sorted(files, key=lambda file: file.id), linked, users
 
@@ -164,36 +194,69 @@ async def _submit(file, key: str, client, state: UploadState, gate: asyncio.Sema
             state.counts[FAILED] += 1
             state.fail(f'{file.user_id}/{file.id}', type(error).__name__)
         else:
-            await _point(file, key)
+            if not ingest.is_assistant_collection(key):
+                await _point(file, key)
             state.counts[SUBMITTED] += 1
         progress.step()
 
 
-def _by_owner(files: list, linked: set[str], users: set[str], state: UploadState) -> dict[str, list]:
-    owned: dict[str, list] = {}
-    for file in files:
-        if file.id in linked:
-            state.counts[KNOWLEDGE] += 1
-        elif (file.meta or {}).get('source'):
-            # A v2 live-document attachment: soev-api reads it from its provider.
-            state.counts[REFERENCE] += 1
-        elif file.user_id not in users:
-            state.counts[NO_OWNER] += 1
-            state.fail(f'{file.user_id}/{file.id}', 'owner_missing')
-        else:
-            owned.setdefault(file.user_id, []).append(file)
-    return owned
-
-
-async def _check(owner: str, owned: list, client, state: UploadState, *, dry_run: bool) -> list:
-    """Count the owner's files that need nothing; return the ones to submit."""
+def _by_collection(
+    files: list,
+    linked: set[str],
+    users: set[str],
+    state: UploadState,
+    chat_ids: set[str],
+    assistant_refs: dict[str, set[tuple[str, str]]],
+) -> dict[tuple[str, str | None, str], list]:
+    """The files to land, by (owner, assistant model id or None for chat uploads, collection key); each file is a
+    copy owned by whoever submits it there."""
     from open_webui.soev import ingest
+
+    targets: dict[tuple[str, str | None, str], list] = {}
+    for file in files:
+        # An assistant holds only its owner's files (`soev/assistant_files.py`).
+        places = {
+            (owner, model_id, ingest.assistant_collection_key(model_id))
+            for model_id, owner in assistant_refs.get(file.id, set())
+            if owner == file.user_id
+        }
+        if file.id in chat_ids and file.id not in linked:
+            places.add((file.user_id, None, ingest.attachments_collection_key(file.user_id)))
+        if not places:
+            state.counts[KNOWLEDGE] += 1
+            continue
+        if (file.meta or {}).get('source'):
+            state.counts[REFERENCE] += 1
+            continue
+        for owner, model_id, key in sorted(places, key=lambda place: (place[0], place[2])):
+            if owner not in users:
+                state.counts[NO_OWNER] += 1
+                state.fail(f'{owner}/{file.id}', 'owner_missing')
+                continue
+            targets.setdefault((owner, model_id, key), []).append(file.model_copy(update={'user_id': owner}))
+    return targets
+
+
+async def _ensure(owner: str, model_id: str | None, client) -> None:
+    from open_webui.models.models import Models
+    from open_webui.soev import assistant_files, ingest
+
+    if model_id is None:
+        await ingest.ensure_attachments_collection(owner, client)
+        return
+    await assistant_files.ensure_collection(await Models.get_model_by_id(model_id), client)
+
+
+async def _check(
+    target: tuple[str, str | None, str], owned: list, client, state: UploadState, *, dry_run: bool
+) -> list[tuple]:
+    """Count the target's files that need nothing; return the ones to submit, with their collection key."""
     from open_webui.soev.migrate_ingest import stored_code
 
-    key = ingest.attachments_collection_key(owner)
+    owner, model_id, key = target
     documents = set()
     if not dry_run:
-        await ingest.ensure_attachments_collection(owner, client)
+        await _ensure(owner, model_id, client)
         path = f'/v1/collections/{quote(key, safe="")}/documents'
         documents = {document['source_id'] async for document in client.pages(path)}
     pending = []
@@ -203,38 +266,42 @@ async def _check(owner: str, owned: list, client, state: UploadState, *, dry_run
             state.counts[PLANNED] += 1
             state.bytes_planned += int((file.meta or {}).get('size') or 0)
         elif status is None:
-            pending.append(file)
+            pending.append((file, key))
         elif status == FAILED:
             state.counts[status] += 1
             state.fail(f'{owner}/{file.id}', stored_code(file))
         else:
             state.counts[status] += 1
-            if not dry_run:
+            if not dry_run and model_id is None:
                 await _point(file, key)
     return pending
 
 
-async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, prefix: str = '5 chat uploads'):
-    """Put every upload a stored chat attaches into its owner's attachments collection; a rerun submits nothing
-    twice. A dry run makes no HTTP request and writes nothing."""
-    from open_webui.soev import identity, ingest
+async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, prefix: str = '5 uploads'):
+    """Put every upload a chat or folder references into its owner's attachments collection and every assistant file
+    into its assistant's collection; a rerun submits nothing twice. A dry run makes no HTTP request and writes nothing."""
+    from open_webui.soev import identity
 
     state = UploadState()
-    referenced = await _referenced(db)
-    files, linked, users = await _rows(referenced, db)
+    chat_ids = await _referenced(db)
+    assistant_refs = await _assistant_refs(db)
+    referenced = chat_ids | assistant_refs.keys()
+    model_owners = {owner for refs in assistant_refs.values() for _, owner in refs}
+    files, linked, users = await _rows(referenced, db, assistant_owners=model_owners)
     state.counts[GONE] = len(referenced) - len(files)
-    print(f'{prefix}: {len(referenced)} files attached in chats, {len(files)} with a file row', flush=True)
+    print(
+        f'{prefix}: {len(referenced)} files attached in chats, folders or assistants, {len(files)} with a file row',
+        flush=True,
+    )
     client = None if dry_run else identity.build_client()
     pending = []
-    for owner, owned in sorted(_by_owner(files, linked, users, state).items()):
-        pending += await _check(owner, owned, client, state, dry_run=dry_run)
+    targets = _by_collection(files, linked, users, state, chat_ids, assistant_refs)
+    for target, owned in sorted(targets.items(), key=lambda item: (item[0][0], item[0][2])):
+        pending += await _check(target, owned, client, state, dry_run=dry_run)
+    # One File row holds one job pointer: a file in several collections goes to the next one on the next run.
+    pending = list({file.id: (file, key) for file, key in reversed(pending)}.values())[::-1]
     if pending:
         gate = asyncio.Semaphore(concurrency)
         progress = _Progress(len(pending), prefix)
-        await asyncio.gather(
-            *(
-                _submit(file, ingest.attachments_collection_key(file.user_id), client, state, gate, progress)
-                for file in pending
-            )
-        )
+        await asyncio.gather(*(_submit(file, key, client, state, gate, progress) for file, key in pending))
     return state

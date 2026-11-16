@@ -204,29 +204,43 @@ async def test_grant_reads_are_identity_free_projections(env):
 
 
 @pytest.mark.asyncio
-async def test_setting_grants_patches_writers_and_commissions_the_access_job(env):
-    """Writers change immediately while readers change only when the commissioned access job succeeds."""
+async def test_setting_grants_commissions_one_atomic_access_job(env):
     acting = importlib.import_module('open_webui.soev.acting')
     token = acting._acting_ref.set('owui:user:owner')
     grants = [
         {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
+        {'principal_type': 'user', 'principal_id': '*', 'permission': 'write'},
         {'principal_type': 'group', 'principal_id': 'editors', 'permission': 'write'},
+        {'principal_type': 'user', 'principal_id': 'editor', 'permission': 'write'},
     ]
     try:
-        result = await env.table.set_access_grants('knowledge', 'kb', grants)
+        await env.table.set_access_grants('knowledge', 'kb', grants)
         await env.table.set_access_grants('knowledge', 'kb', grants)
     finally:
         acting._acting_ref.reset(token)
     writes = [request for request in env.api.requests if request.method in ('PATCH', 'PUT')]
-    assert [request.method for request in writes] == ['PATCH', 'PUT', 'PATCH', 'PUT']
-    assert json.loads(writes[0].content) == {'writers': ['owui:group:editors', 'owui:user:owner']}
-    assert json.loads(writes[1].content) == {'visibility': 'public', 'principals': [SERVICE, 'owui:user:owner']}
+    assert [request.method for request in writes] == ['PUT', 'PUT']
+    assert all(request.url.path == '/v1/collections/kb/access' for request in writes)
+    assert json.loads(writes[0].content) == {
+        'visibility': 'restricted',
+        'principals': sorted(
+            [SERVICE, 'owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
+        ),
+        'writers': sorted(['owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
+    }
     assert all(subject(request) == 'owui:user:owner' for request in writes)
-    assert any(row.principal_id == 'editors' and row.permission == 'write' for row in result)
-    assert env.api.collections['kb']['visibility'] == 'restricted'
+    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
     assert len(env.api.jobs) == 1
     env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
-    assert env.api.collections['kb']['visibility'] == 'public'
+    projected = await env.table.get_grants_by_resource('knowledge', 'kb')
+    assert {(g.principal_id, g.permission) for g in projected} == {
+        ('*', 'read'),
+        ('*', 'write'),
+        ('editors', 'read'),
+        ('editors', 'write'),
+        ('editor', 'read'),
+        ('editor', 'write'),
+    }
 
 
 @pytest.mark.asyncio
@@ -234,9 +248,13 @@ async def test_revoke_all_access_returns_to_owner_only(env):
     """Revocation keeps the owner as writer and restores restricted readers through the access job."""
     removed = await env.table.revoke_all_access('knowledge', 'kb')
     assert removed == 3
-    assert env.api.collections['kb']['writers'] == ['owui:user:owner']
+    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
     job_id = next(iter(env.api.jobs))
-    assert env.api.job_effects[job_id] == {'visibility': 'restricted', 'principals': [SERVICE, 'owui:user:owner']}
+    assert env.api.job_effects[job_id] == {
+        'visibility': 'restricted',
+        'principals': [SERVICE, 'owui:user:owner'],
+        'writers': ['owui:user:owner'],
+    }
     env.api.advance(job_id, 'SUCCEEDED')
     assert await env.table.get_grants_by_resource('knowledge', 'kb') == []
     assert not await env.table.has_access('reader', 'knowledge', 'kb')

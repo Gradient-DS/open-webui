@@ -50,7 +50,7 @@ CONNECTION_MODEL = {'id': 'zai-org/GLM-5.3', 'name': 'zai-org/GLM-5.3', 'owned_b
 
 
 @pytest.fixture
-def v2(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoevApi:
+def v2(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch, platform_capabilities) -> FakeSoevApi:
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
     monkeypatch.setitem(model_catalog.CATALOG_CACHE, 'expires_at', 0.0)
     chat_http.models = [GLM, GEMMA]
@@ -114,7 +114,8 @@ async def test_v2_base_models_are_the_catalog_mapping(v2: FakeSoevApi, connectio
     connections.assert_not_awaited()
     assert [model['id'] for model in models] == ['glm-5-3', 'gemma-4-31b']
     glm, gemma = models
-    assert glm['name'] == 'GLM 5.3' and glm['owned_by'] == 'soev'
+    # The catalog's label is not used: every model goes by its provider/model id.
+    assert glm['name'] == 'glm-5-3' and glm['owned_by'] == 'soev'
     meta = glm['info']['meta']
     assert meta['description'] == 'Strong general model'
     assert meta['capabilities'] == {'vision': False}
@@ -139,6 +140,17 @@ async def test_unknown_vision_counts_as_off(v2: FakeSoevApi) -> None:
     v2.models = [{**GEMMA, 'capabilities': {**GEMMA['capabilities'], 'vision': 'unknown'}}]
     [model] = await model_catalog.base_models()
     assert model['info']['meta']['capabilities'] == {'vision': False}
+
+
+@pytest.mark.asyncio
+async def test_vision_needs_platform_image_admission(v2, platform_capabilities):
+    platform_capabilities.discard('images')
+    models = await model_catalog.base_models()
+    assert all(model['info']['meta']['capabilities']['vision'] is False for model in models)
+    assert models[1]['info']['meta']['soev']['capabilities']['vision'] == 'supported'
+    platform_capabilities.add('images')
+    models = await model_catalog.base_models()
+    assert models[1]['info']['meta']['capabilities']['vision'] is True
 
 
 @pytest.mark.asyncio
@@ -172,6 +184,9 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
     models = await run()
     assert set(models) == {'glm-5-3', 'gemma-4-31b', 'helper'}
     meta = models['glm-5-3']['info']['meta']
+    # The row's name ('Admin glm-5-3', or a migrated v1 name) never replaces the id.
+    assert models['glm-5-3']['name'] == 'glm-5-3'
+    assert models['helper']['name'] == 'Admin helper'
     assert meta['description'] == 'Admin text'
     assert meta['capabilities'] == {'vision': False, 'citations': False}
     assert meta['soev']['vendor'] == 'Zhipu AI'

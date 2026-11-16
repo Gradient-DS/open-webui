@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from open_webui.soev.client import ChatEvent, SoevApiError
 
+pytestmark = pytest.mark.usefixtures('platform_capabilities')
+
 STATE = {'status': 'ready', 'title': 'Weekoverleg'}
 
 
@@ -79,6 +81,14 @@ def test_meetings_need_soev_api(monkeypatch):
     response = client.get('/api/v1/meetings/agents')
     assert response.status_code == 503
     assert response.json()['detail']['code'] == 'soev_not_configured'
+
+
+def test_meetings_need_advertised_capability(monkeypatch, platform_capabilities):
+    platform_capabilities.discard('meetings')
+    client = _client(monkeypatch)
+    response = client.get('/api/v1/meetings/agents')
+    assert response.status_code == 503
+    assert response.json()['detail']['code'] == 'feature_unavailable'
 
 
 def test_agents_and_list_forward_as_the_caller(monkeypatch):

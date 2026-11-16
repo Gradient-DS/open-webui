@@ -12,8 +12,15 @@
 	import Spinner from './Spinner.svelte';
 	import Tooltip from './Tooltip.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import {
+		CHAT_FILE_PANEL,
+		opensInPanel,
+		type OpenFileInPanel
+	} from '$lib/components/chat/Messages/Citations/fileCitation'; // [Gradient]
 
 	const i18n = getContext<Readable<I18n>>('i18n');
+	// [Gradient] Inside a chat, files open in the sources panel instead of the modal.
+	const openInPanel = getContext<OpenFileInPanel | undefined>(CHAT_FILE_PANEL);
 	$: originalUrl =
 		typeof item?.web_url === 'string' && item.web_url.startsWith('https://') ? item.web_url : null;
 	const dispatch = createEventDispatcher();
@@ -72,6 +79,10 @@
 
 			if (filesystemPath) {
 				showFileNavPath.set(filesystemPath);
+			} else if (openInPanel && opensInPanel(item) && openInPanel(item)) {
+				// [Gradient] Opened in the chat's sources panel.
+			} else if (openInPanel && item?.type === 'file' && !item.id) {
+				// [Gradient] Not stored yet: nothing to show; the panel opens it once it has an id.
 			} else if (
 				(typeof item?.file === 'object' && item.file?.data?.content) ||
 				item?.type === 'file' ||

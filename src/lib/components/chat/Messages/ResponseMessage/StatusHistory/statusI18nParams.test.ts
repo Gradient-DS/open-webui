@@ -50,20 +50,20 @@ it('localizes mail order and address labels without changing addresses', () => {
 	const params = statusI18nParams(
 		{
 			action: 'search_mail',
-			keywords: 'KNB',
+			keywords: 'Acme',
 			matches: '143',
 			options: 'English fallback',
 			mail_options: [
 				{ label: 'newest first', value: '' },
-				{ label: 'From', value: '@knb.nl' },
-				{ label: 'To', value: 'lex@example.test' },
+				{ label: 'From', value: '@acme.example' },
+				{ label: 'To', value: 'jan@example.test' },
 				{ label: 'Cc', value: 'copy@example.test' }
 			]
 		},
 		(key) => labels[key]
 	);
 	expect(params.options).toBe(
-		'nieuwste eerst; Van: @knb.nl; Aan: lex@example.test; Cc: copy@example.test'
+		'nieuwste eerst; Van: @acme.example; Aan: jan@example.test; Cc: copy@example.test'
 	);
 	expect(params.mail_options).toBeUndefined();
 });

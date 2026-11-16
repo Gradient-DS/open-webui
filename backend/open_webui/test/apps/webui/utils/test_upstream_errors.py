@@ -27,7 +27,7 @@ VLLM_ECHOING_400 = json.dumps(
         'input': {
             'model': 'gpt-oss-120b',
             'messages': [
-                {'role': 'system', 'content': 'You are a helpful assistant for Haute Equipe.'},
+                {'role': 'system', 'content': 'You are a helpful assistant for Acme.'},
                 {'role': 'user', 'content': SECRET},
             ],
         },

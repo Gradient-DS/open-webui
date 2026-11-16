@@ -67,6 +67,8 @@ export type MeetingState = {
 	audio_retained?: boolean;
 	usage?: { audio_seconds?: number; stt_output_tokens?: number };
 	pending_action?: OutputKind | null;
+	/** While a finish runs: transcribing the recording, then cleaning it up and naming speakers. */
+	finishing?: 'transcribing' | 'cleaning' | null;
 	started_at?: string | null;
 	ended_at?: string | null;
 	duration_s?: number | null;
@@ -283,6 +285,34 @@ export const matchesQuery = (title: string | null | undefined, query: string): b
 	const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 	const needle = fold(query.trim());
 	return !needle || fold(title ?? '').includes(needle);
+};
+
+export type MeetingSort = 'created_at' | 'title';
+
+/** The meetings matching `query` and, unless null, `status`; sorted by `sort`, descending unless `ascending`. */
+export const listMeetings = (
+	meetings: MeetingSummary[],
+	{
+		query,
+		status,
+		sort,
+		ascending
+	}: { query: string; status: MeetingStatus | null; sort: MeetingSort; ascending: boolean }
+): MeetingSummary[] => {
+	const key = (meeting: MeetingSummary) =>
+		sort === 'title' ? (meeting.title ?? '').toLocaleLowerCase() : (meeting.created_at ?? '');
+	return meetings
+		.filter(
+			(meeting) =>
+				(status === null || meeting.status === status) && matchesQuery(meeting.title, query)
+		)
+		.sort((a, b) => (ascending ? 1 : -1) * key(a).localeCompare(key(b)));
+};
+
+/** The meeting language for the transcriber: the UI language's code (nl-NL → nl), else auto-detect. */
+export const meetingLanguage = (uiLanguage: string | undefined): string => {
+	const code = (uiLanguage ?? '').slice(0, 2).toLowerCase();
+	return /^[a-z]{2}$/.test(code) ? code : 'auto';
 };
 
 /** Groups items (already newest first) under the label `rangeOf` gives each, keeping order. */

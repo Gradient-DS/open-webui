@@ -2,10 +2,11 @@ import logging
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
-from pydantic import BaseModel, ConfigDict
+from open_webui.models.files import strip_file_paths
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 from sqlalchemy import JSON, BigInteger, Boolean, Column, Text, delete, func, select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,10 @@ class Folder(Base):
     updated_at = Column(BigInteger)
 
 
+# Folder data can embed File records; their storage paths never reach the client.
+FolderData = Annotated[Optional[dict], BeforeValidator(strip_file_paths)]
+
+
 class FolderModel(BaseModel):
     id: str
     parent_id: Optional[str] = None
@@ -40,7 +45,7 @@ class FolderModel(BaseModel):
     name: str
     items: Optional[dict] = None
     meta: Optional[dict] = None
-    data: Optional[dict] = None
+    data: FolderData = None
     is_expanded: bool = False
     created_at: int
     updated_at: int
@@ -84,7 +89,7 @@ class SharedFolderResponse(BaseModel):
 
 class FolderForm(BaseModel):
     name: str
-    data: Optional[dict] = None
+    data: FolderData = None
     meta: Optional[dict] = None
     parent_id: Optional[str] = None
     model_config = ConfigDict(extra='forbid')
@@ -92,7 +97,7 @@ class FolderForm(BaseModel):
 
 class FolderUpdateForm(BaseModel):
     name: Optional[str] = None
-    data: Optional[dict] = None
+    data: FolderData = None
     meta: Optional[dict] = None
     model_config = ConfigDict(extra='forbid')
 

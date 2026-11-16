@@ -7,7 +7,9 @@ import {
 	groupTurns,
 	hasMeetingAgent,
 	groupByRange,
+	listMeetings,
 	liveParts,
+	meetingLanguage,
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
@@ -17,6 +19,7 @@ import {
 	revealTotalMs,
 	wordCount,
 	type MeetingMeta,
+	type MeetingSummary,
 	outputMarkdown,
 	transcriptMarkdown,
 	type ExportLabels,
@@ -35,7 +38,7 @@ import {
 	type CutState,
 	type RecorderLike
 } from './recorder';
-import { displayMediaOptions } from './audio';
+import { displayMediaOptions, micConstraints } from './audio';
 
 const labels: ExportLabels = {
 	transcript: 'Transcript',
@@ -56,14 +59,14 @@ const meta: MeetingMeta = {
 	date: '7 oktober 2026',
 	time: '10:00–10:47',
 	duration: '47:12',
-	speakers: ['Xander', 'Spreker 2']
+	speakers: ['Pieter', 'Spreker 2']
 };
 
 const state: MeetingState = {
 	status: 'ready',
 	transcript: {
 		speakers: [
-			{ label: 'Spreker 1', name: 'Xander', inferred: true },
+			{ label: 'Spreker 1', name: 'Pieter', inferred: true },
 			{ label: 'Spreker 2', name: null }
 		],
 		segments: [
@@ -75,7 +78,7 @@ const state: MeetingState = {
 				clean: 'Goedemorgen allemaal.'
 			},
 			{ start: 2.4, end: 5, speaker: 'Spreker 1', raw: 'eh we beginnen', clean: 'We beginnen.' },
-			{ start: 65, end: 70, speaker: 'Spreker 2', raw: 'dank je xander', clean: 'Dank je, Xander.' }
+			{ start: 65, end: 70, speaker: 'Spreker 2', raw: 'dank je pieter', clean: 'Dank je, Pieter.' }
 		]
 	},
 	outputs: {
@@ -83,7 +86,7 @@ const state: MeetingState = {
 		minutes: null,
 		actions: {
 			items: [
-				{ task: 'Offerte sturen', owner: 'Xander', due: 'vrijdag' },
+				{ task: 'Offerte sturen', owner: 'Pieter', due: 'vrijdag' },
 				{ task: 'Agenda', owner: null, due: null }
 			]
 		}
@@ -149,7 +152,7 @@ describe('meeting helpers', () => {
 		expect(block).toContain('**Datum:** 7 oktober 2026');
 		expect(block).toContain('**Tijd:** 10:00–10:47');
 		expect(block).toContain('**Duur:** 47:12');
-		expect(block).toContain('**Sprekers:** Xander, Spreker 2');
+		expect(block).toContain('**Sprekers:** Pieter, Spreker 2');
 		expect(metadataMarkdown({ ...meta, duration: null, speakers: [] }, labels)).not.toContain(
 			'Duur'
 		);
@@ -168,7 +171,7 @@ describe('meeting helpers', () => {
 	it('exports the transcript with names, labels and timestamps', () => {
 		const md = transcriptMarkdown(meta, state, labels);
 		expect(md).toContain('# Weekoverleg');
-		expect(md).toContain('**Xander** (00:00)\n\nGoedemorgen allemaal. We beginnen.');
+		expect(md).toContain('**Pieter** (00:00)\n\nGoedemorgen allemaal. We beginnen.');
 		expect(md).toContain('**Spreker 2** (01:05)');
 		expect(transcriptMarkdown(meta, state, labels, true)).toContain(
 			'Heedemorgen allemaal eh we beginnen'
@@ -180,7 +183,7 @@ describe('meeting helpers', () => {
 			'Kort **overleg** over één punt.'
 		);
 		expect(outputMarkdown(meta, state, 'actions', labels)).toContain(
-			'- Offerte sturen (Eigenaar: Xander, Deadline: vrijdag)\n- Agenda'
+			'- Offerte sturen (Eigenaar: Pieter, Deadline: vrijdag)\n- Agenda'
 		);
 		expect(outputMarkdown(meta, state, 'minutes', labels)).toBeNull();
 	});
@@ -188,6 +191,35 @@ describe('meeting helpers', () => {
 	it('keeps accented letters in file names and drops path characters', () => {
 		expect(fileStem('Overleg café / 7-10')).toBe('Overleg-café-7-10');
 		expect(fileStem('///')).toBe('vergadering');
+	});
+});
+
+describe('meeting list', () => {
+	const meeting = (thread_id: string, title: string | null, created_at: string, status = 'ready') =>
+		({ thread_id, agent: 'meeting', title, created_at, status }) as MeetingSummary;
+	const all = [
+		meeting('a', 'Budget', '2026-10-01T10:00:00Z'),
+		meeting('b', 'agenda', '2026-10-03T10:00:00Z', 'failed'),
+		meeting('c', null, '2026-10-02T10:00:00Z', 'recording')
+	];
+	const ids = (list: MeetingSummary[]) => list.map((item) => item.thread_id);
+
+	it('sorts newest first by default and oldest first ascending', () => {
+		const options = { query: '', status: null, sort: 'created_at', ascending: false } as const;
+		expect(ids(listMeetings(all, options))).toEqual(['b', 'c', 'a']);
+		expect(ids(listMeetings(all, { ...options, ascending: true }))).toEqual(['a', 'c', 'b']);
+	});
+
+	it('sorts by title regardless of case', () => {
+		expect(
+			ids(listMeetings(all, { query: '', status: null, sort: 'title', ascending: true }))
+		).toEqual(['c', 'b', 'a']);
+	});
+
+	it('filters by status and query together', () => {
+		const options = { query: '', status: 'failed', sort: 'created_at', ascending: false } as const;
+		expect(ids(listMeetings(all, options))).toEqual(['b']);
+		expect(ids(listMeetings(all, { ...options, query: 'budget' }))).toEqual([]);
 	});
 });
 
@@ -344,6 +376,31 @@ describe('display capture hints', () => {
 	});
 });
 
+describe('microphone choice', () => {
+	it('asks for the chosen device exactly, and the system default without one', () => {
+		expect(micConstraints('mic-2')).toMatchObject({
+			deviceId: { exact: 'mic-2' },
+			echoCancellation: true
+		});
+		expect(micConstraints(null)).not.toHaveProperty('deviceId');
+	});
+
+	it('keeps the room unfiltered except for the level, and filters next to a call', () => {
+		expect(micConstraints(null, true)).toEqual({
+			echoCancellation: false,
+			noiseSuppression: false,
+			autoGainControl: true
+		});
+		expect(micConstraints(null)).toMatchObject({ echoCancellation: true, noiseSuppression: true });
+	});
+
+	it('records in the UI language, else lets the transcriber detect it', () => {
+		expect(meetingLanguage('nl-NL')).toBe('nl');
+		expect(meetingLanguage('en')).toBe('en');
+		expect(meetingLanguage(undefined)).toBe('auto');
+	});
+});
+
 describe('chunk delivery', () => {
 	it('retries while the thread is busy and rethrows other errors', async () => {
 		let calls = 0;
@@ -381,6 +438,33 @@ describe('chunk delivery', () => {
 		await queue.drain();
 		expect(order).toEqual(['a', 'c']);
 		expect(errors).toHaveLength(1);
+		expect(queue.pending).toBe(0);
+	});
+
+	it('on cancel skips waiting jobs and stops a running one at its next busy answer', async () => {
+		const sent: string[] = [];
+		const errors: unknown[] = [];
+		const queue = new SerialQueue(undefined, (error) => errors.push(error));
+		let busy = 0;
+		let reopen: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (reopen = resolve));
+		queue.push(() =>
+			sendWhenIdle(
+				async () => {
+					busy++;
+					throw { status: 409 };
+				},
+				{ wait: () => gate, cancelled: () => queue.cancelled }
+			).then(() => void sent.push('a'))
+		);
+		queue.push(async () => void sent.push('b'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const cancelled = queue.cancel();
+		reopen();
+		await cancelled;
+		expect(sent).toEqual([]);
+		expect(busy).toBe(2);
+		expect(errors).toEqual([]);
 		expect(queue.pending).toBe(0);
 	});
 });

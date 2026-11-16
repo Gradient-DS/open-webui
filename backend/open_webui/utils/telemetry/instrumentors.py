@@ -87,7 +87,8 @@ def redis_request_hook(span: Span, instance: Union[Redis | RedisCluster], args, 
                 SpanAttributes.DB_TYPE: SPAN_REDIS_TYPE,
                 SpanAttributes.DB_PORT: port,
                 SpanAttributes.DB_IP: host,
-                SpanAttributes.DB_STATEMENT: ' '.join([str(i) for i in args]),
+                # [Gradient] Command and key only: values are chat content and overflowed 16 MB OTLP batches.
+                SpanAttributes.DB_STATEMENT: ' '.join(str(i) for i in args[:2]),
                 SpanAttributes.DB_OPERATION: str(args[0]),
             }
         )

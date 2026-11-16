@@ -10,6 +10,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 os.environ.setdefault('STATIC_DIR', tempfile.mkdtemp(prefix='owui-test-static-'))
+# The image sets these; without them unstructured (>=0.26) pings its telemetry
+# endpoint on import, which the SSRF tests' HTTP boundary records.
+os.environ.setdefault('DO_NOT_TRACK', 'true')
+os.environ.setdefault('SCARF_NO_ANALYTICS', 'true')
 
 # Runtime security drives the configured container. The backend suite instead
 # builds the real migration schema in a fresh database for each pytest worker.
@@ -32,6 +36,28 @@ if not os.environ.get('ATTACK_BASE_URL'):
     # responses at the call site; an unpatched operation on this client fails.
     with patch.object(WeaviateClient, '__init__', return_value=None):
         import open_webui.retrieval.vector.factory  # noqa: F401
+
+
+@pytest.fixture
+def platform_capabilities(monkeypatch):
+    from open_webui import config
+    from open_webui.soev import capabilities
+
+    enabled = {
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+        capabilities.CLOUD_SYNC,
+        capabilities.MEETINGS,
+        capabilities.GROUPS_PUSH,
+        capabilities.IMAGES,
+    }
+
+    async def refresh():
+        return frozenset(enabled) if config.SOEV_API_URL else frozenset()
+
+    monkeypatch.setattr(capabilities, 'refresh', refresh)
+    monkeypatch.setattr(capabilities, 'known', lambda: True)
+    return enabled
 
 
 @pytest.fixture

@@ -1,14 +1,12 @@
 <script lang="ts">
 	// [Gradient] One row of the unified "+" menu: icon, label, optional submenu chevron,
-	// switch or tool state, and the pin in the right-hand column.
+	// switch, and the pin in the right-hand column.
 	import type { Placement } from 'tippy.js';
-	import type { ToolState } from '$lib/utils/toolState';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import PinButton from './PinButton.svelte';
-	import ToolStateLabel from './ToolStateLabel.svelte';
 
 	export let label: string;
 	export let onClick: (e: MouseEvent) => void;
@@ -21,8 +19,6 @@
 	export let count: number | null = null;
 	/** Shows a switch reflecting this state when not null. */
 	export let toggle: boolean | null = null;
-	/** Shows the tool's state as text when not null; the row's click cycles it. */
-	export let toolState: ToolState | null = null;
 	export let ariaLabel: string | undefined = undefined;
 </script>
 
@@ -59,10 +55,6 @@
 			<div class="shrink-0" inert>
 				<Switch state={toggle} />
 			</div>
-		{/if}
-
-		{#if toolState !== null}
-			<ToolStateLabel state={toolState} />
 		{/if}
 
 		{#if pinId}

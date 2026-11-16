@@ -42,6 +42,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
+from open_webui.soev import system_prompt
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -1146,15 +1147,18 @@ async def generate_chat_completion(
             payload['model'] = base_model_id
 
         params = model_info.params.model_dump()
+        params.pop('system', None)
         if params:
-            system = params.pop('system', None)
             payload = apply_model_params_to_body_ollama(params, payload)
-            if not bypass_system_prompt:
-                payload = await apply_system_prompt_to_body(system, payload, metadata, user)
 
         await check_model_access(user, model_info, bypass_filter)
     else:
         await check_model_access(user, None, bypass_filter)
+
+    # [Gradient] The model's own prompt, else (base models) the global system prompt.
+    if not bypass_system_prompt:
+        system = await system_prompt.for_model(model_info)
+        payload = await apply_system_prompt_to_body(system, payload, metadata, user)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_configs = await Config.get('ollama.api_configs', {})

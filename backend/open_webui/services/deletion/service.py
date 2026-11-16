@@ -7,6 +7,7 @@ from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.storage.provider import Storage
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,8 @@ class DeletionService:
         knowledge_id: str,
         directory_id: str,
         move_files_to_parent: bool = True,
+        *,
+        user,
     ) -> DeletionReport:
         """
         Delete a KB directory with full fork-cascade parity (P2-8 ledger #4).
@@ -214,7 +217,9 @@ class DeletionService:
           vectors by file_id + hash in this KB's collection, then the orphan
           batch (file-{id} collections, storage objects, DB rows). Files still
           referenced by another KB or chat survive with only this KB's link
-          and vectors removed.
+          and vectors removed. Only files `user` owns (or any, for an admin
+          who bypasses access control) are deleted; the others are only
+          unlinked from this KB.
 
         The directory must belong to knowledge_id — the KB-scope guard for the
         /sync/cleanup dir branch lives here so every caller gets it.
@@ -230,12 +235,14 @@ class DeletionService:
             return report
 
         subtree_file_ids: list[str] = []
+        owned_file_ids: list[str] = []
         if not move_files_to_parent:
             subtree_file_ids = await Knowledges.get_file_ids_in_directory_subtree(knowledge_id, directory_id)
             # Vectors first (deletion order: Vectors -> Storage -> DB). Remove
             # this KB's vectors by file_id and hash — the same double delete
             # the single-file path does.
             files = await Files.get_files_by_ids(subtree_file_ids) if subtree_file_ids else []
+            owned_file_ids = [file.id for file in files if file.user_id == user.id or can_bypass_access_control(user)]
             for file in files:
                 try:
                     await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge_id, filter={'file_id': file.id})
@@ -253,8 +260,8 @@ class DeletionService:
             return report
         report.add_db('knowledge_directory')
 
-        if subtree_file_ids:
-            batch_report = await DeletionService.delete_orphaned_files_batch(subtree_file_ids)
+        if owned_file_ids:
+            batch_report = await DeletionService.delete_orphaned_files_batch(owned_file_ids)
             for table, count in batch_report.db_records.items():
                 report.add_db(table, count)
             report.storage_files += batch_report.storage_files
@@ -454,189 +461,10 @@ class DeletionService:
 
     @staticmethod
     async def delete_user(user_id: str) -> DeletionReport:
-        """
-        Delete a user and ALL associated data.
+        """Offboard a user without swallowing revocation or group failures."""
+        from open_webui.services.deletion.offboarding import OffboardingOptions, offboard_user
 
-        Fast path (synchronous):
-        1. Delete memories (single vector collection + DB)
-        2. Soft-delete all user's knowledge bases (instant)
-        3. Soft-delete all user's chats (instant)
-        4. Delete simple DB tables (tags, folders, prompts, etc.)
-        5. Delete auth and user records
-
-        The cleanup worker handles the expensive parts:
-        - KB vector collections, model reference updates, file cleanup
-        - Chat file cleanup (vectors, storage, DB)
-        """
-        from open_webui.models.auths import Auths
-        from open_webui.models.users import Users
-        from open_webui.models.chats import Chats
-        from open_webui.models.groups import Groups
-        from open_webui.soev.agent_threads import delete_threads, user_thread_ids
-        from open_webui.models.tags import Tags
-        from open_webui.models.folders import Folders
-        from open_webui.models.prompts import Prompts
-        from open_webui.models.tools import Tools
-        from open_webui.models.functions import Functions
-        from open_webui.models.models import Models
-        from open_webui.models.feedbacks import Feedbacks
-        from open_webui.models.notes import Notes
-        from open_webui.models.channels import Channels
-        from open_webui.models.messages import Messages
-        from open_webui.models.oauth_sessions import OAuthSessions
-
+        count = await offboard_user(user_id, actor_id='system:deletion', options=OffboardingOptions())
         report = DeletionReport()
-
-        # Verify user exists
-        user = await Users.get_user_by_id(user_id)
-        if not user:
-            report.add_error(f'User {user_id} not found')
-            return report
-
-        # 1. Delete memories (vectors + DB) — fast, single collection
-        memory_report = await DeletionService.delete_memories(user_id)
-        report.vector_collections += memory_report.vector_collections
-        for table, count in memory_report.db_records.items():
-            report.add_db(table, count)
-        report.errors.extend(memory_report.errors)
-
-        # 2. Soft-delete all knowledge bases (instant — cleanup worker handles the rest)
-        try:
-            kb_count = await Knowledges.soft_delete_by_user_id(user_id) if configured() else 0
-            report.add_db('knowledge_soft_deleted', kb_count)
-        except SoevNotConfigured:
-            raise
-        except Exception as e:
-            report.add_error(f'Failed to soft-delete knowledge bases: {e}')
-
-        # 3. Soft-delete all chats (instant — cleanup worker handles the rest)
-        try:
-            chat_count = await Chats.soft_delete_by_user_id(user_id)
-            report.add_db('chat_soft_deleted', chat_count)
-        except Exception as e:
-            report.add_error(f'Failed to soft-delete chats: {e}')
-
-        # 4. Delete remaining tables with user_id
-        # Order matters: delete dependents before parents
-
-        # Messages and reactions (channel content)
-        try:
-            await Messages.delete_messages_by_user_id(user_id)
-            report.add_db('message')
-        except Exception as e:
-            report.add_error(f'Failed to delete messages: {e}')
-
-        # Channel memberships
-        try:
-            await Channels.delete_member_by_user_id(user_id)
-            report.add_db('channel_member')
-        except Exception as e:
-            report.add_error(f'Failed to delete channel memberships: {e}')
-
-        # Channels owned by user
-        try:
-            await Channels.delete_channels_by_user_id(user_id)
-            report.add_db('channel')
-        except Exception as e:
-            report.add_error(f'Failed to delete channels: {e}')
-
-        # Tags
-        try:
-            await Tags.delete_tags_by_user_id(user_id)
-            report.add_db('tag')
-        except Exception as e:
-            report.add_error(f'Failed to delete tags: {e}')
-
-        # Folders
-        try:
-            await Folders.delete_folders_by_user_id(user_id)
-            report.add_db('folder')
-        except Exception as e:
-            report.add_error(f'Failed to delete folders: {e}')
-
-        # Prompts
-        try:
-            await Prompts.delete_prompts_by_user_id(user_id)
-            report.add_db('prompt')
-        except Exception as e:
-            report.add_error(f'Failed to delete prompts: {e}')
-
-        # Tools
-        try:
-            await Tools.delete_tools_by_user_id(user_id)
-            report.add_db('tool')
-        except Exception as e:
-            report.add_error(f'Failed to delete tools: {e}')
-
-        # Functions
-        try:
-            await Functions.delete_functions_by_user_id(user_id)
-            report.add_db('function')
-        except Exception as e:
-            report.add_error(f'Failed to delete functions: {e}')
-
-        # Models (user's custom models)
-        try:
-            await Models.delete_models_by_user_id(user_id)
-            report.add_db('model')
-        except Exception as e:
-            report.add_error(f'Failed to delete models: {e}')
-
-        # Feedbacks
-        try:
-            await Feedbacks.delete_feedbacks_by_user_id(user_id)
-            report.add_db('feedback')
-        except Exception as e:
-            report.add_error(f'Failed to delete feedbacks: {e}')
-
-        # Notes
-        try:
-            await Notes.delete_notes_by_user_id(user_id)
-            report.add_db('note')
-        except Exception as e:
-            report.add_error(f'Failed to delete notes: {e}')
-
-        # OAuth sessions
-        try:
-            await OAuthSessions.delete_sessions_by_user_id(user_id)
-            report.add_db('oauth_session')
-        except Exception as e:
-            report.add_error(f'Failed to delete OAuth sessions: {e}')
-
-        # Groups - remove from all groups
-        try:
-            await Groups.remove_user_from_all_groups(user_id)
-            report.add_db('group_member')
-        except Exception as e:
-            report.add_error(f'Failed to remove from groups: {e}')
-
-        # Groups owned by user
-        try:
-            await Groups.delete_groups_by_user_id(user_id)
-            report.add_db('group')
-        except Exception as e:
-            report.add_error(f'Failed to delete owned groups: {e}')
-
-        # API keys
-        try:
-            await Users.delete_user_api_key_by_id(user_id)
-            report.add_db('api_key')
-        except Exception as e:
-            report.add_error(f'Failed to delete API keys: {e}')
-
-        # [Gradient] The user's agent threads in soev-api, before their chats go with the user record
-        try:
-            if kept := await delete_threads(user_id, await user_thread_ids(user_id)):
-                report.add_error(f'Agent threads not deleted: {len(kept)}')
-        except Exception as e:
-            report.add_error(f'Failed to delete agent threads: {e}')
-
-        # 5. Finally delete auth and user records
-        try:
-            await Auths.delete_auth_by_id(user_id)
-            report.add_db('auth')
-            report.add_db('user')
-        except Exception as e:
-            report.add_error(f'Failed to delete auth/user record: {e}')
-
+        report.add_db('user', count)
         return report

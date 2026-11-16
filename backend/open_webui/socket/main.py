@@ -3,6 +3,7 @@ import logging
 import random
 import sys
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pycrdt as Y
@@ -32,6 +33,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
+from open_webui.models.groups import Groups
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import Users, UserNameResponse
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
@@ -548,26 +550,103 @@ async def join_note(sid, data):
     if not user:
         return
 
+    # Only sessions in the session pool can be found again when access is revoked.
+    session_user = await get_socket_session_user(sid)
+    if not session_user or session_user.get('id') != user.id:
+        return
+
     note = await Notes.get_note_by_id(data['note_id'])
     if not note:
         log.error(f'Note {data["note_id"]} not found for user {user.id}')
         return
 
-    if (
-        not can_bypass_access_control(user)
-        and user.id != note.user_id
-        and not await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='note',
-            resource_id=note.id,
-            permission='read',
-        )
-    ):
+    if not await has_note_access(user, note, 'read'):
         log.error(f'User {user.id} does not have access to note {data["note_id"]}')
         return
 
     log.debug('Joining note %s for user %s', note.id, user.id)
     await sio.enter_room(sid, f'note:{note.id}')
+
+
+async def has_note_access(user, note, permission: str) -> bool:
+    """Whether `user` (a model or a session dict) holds `permission` on `note` now."""
+    user_id = user.get('id') if isinstance(user, dict) else user.id
+    return (
+        can_bypass_access_control(user)
+        or user_id == note.user_id
+        or await AccessGrants.has_access(
+            user_id=user_id,
+            resource_type='note',
+            resource_id=note.id,
+            permission=permission,
+        )
+    )
+
+
+def _read_principals(grants) -> set[tuple[str, str]]:
+    return {(grant.principal_type, grant.principal_id) for grant in grants if grant.permission == 'read'}
+
+
+async def _principal_user_ids(principals: set[tuple[str, str]]) -> set[str] | None:
+    """The user ids `principals` cover; None when they include every user."""
+    if ('user', '*') in principals:
+        return None
+    user_ids = set()
+    for principal_type, principal_id in principals:
+        if principal_type == 'user':
+            user_ids.add(principal_id)
+        elif principal_type == 'group':
+            user_ids.update(await Groups.get_group_user_ids_by_id(principal_id))
+    return user_ids
+
+
+async def _leave_note_rooms(note_id: str, session_ids: list[str]) -> None:
+    """Take sessions out of the note's rooms on whichever worker holds them."""
+    for sid in session_ids:
+        await sio.leave_room(sid, f'note:{note_id}')
+        await sio.leave_room(sid, f'doc_note:{note_id}')
+        await YDOC_MANAGER.remove_user(document_id=f'note:{note_id}', user_id=sid)
+
+
+@asynccontextmanager
+async def note_access_change(note_id: str, db=None):
+    """Around a change to a note's grants: afterwards the sessions of users who lost read access leave its rooms."""
+    before = _read_principals(await AccessGrants.get_grants_by_resource('note', note_id, db=db))
+    try:
+        yield
+    finally:
+        after = _read_principals(await AccessGrants.get_grants_by_resource('note', note_id, db=db))
+        if before - after:
+            await _evict_note_readers(note_id, before - after, after)
+
+
+async def _evict_note_readers(note_id: str, removed: set, kept: set) -> None:
+    lost = await _principal_user_ids(removed)
+    readers = await _principal_user_ids(kept)
+    if readers is None:
+        return
+    note = await Notes.get_note_by_id(note_id)
+    owner_id = note.user_id if note else None
+    session_ids = [
+        sid
+        for batch in get_session_pool_batches()
+        for sid, entry in batch
+        if entry
+        and entry.get('id') != owner_id
+        and entry.get('id') not in readers
+        and (lost is None or entry.get('id') in lost)
+        and not can_bypass_access_control(entry)
+    ]
+    if session_ids:
+        log.info('Removing %d session(s) that lost access from note %s', len(session_ids), note_id)
+        await _leave_note_rooms(note_id, session_ids)
+
+
+async def close_note_rooms(note_id: str) -> None:
+    """Empty a deleted note's rooms on every worker and drop its collaborative document."""
+    await sio.close_room(f'note:{note_id}')
+    await sio.close_room(f'doc_note:{note_id}')
+    await YDOC_MANAGER.clear_document(f'note:{note_id}')
 
 
 @sio.on('events:channel')
@@ -670,6 +749,18 @@ def normalize_document_id(document_id: str) -> str:
     return document_id
 
 
+async def get_document_note(document_id: str, user, permission: str):
+    """The note behind a `note:<id>` document when `user` holds `permission` on it now; None for any other id."""
+    if not document_id.startswith('note:'):
+        log.warning(f'Rejecting non-note document {document_id}')
+        return None
+    note = await Notes.get_note_by_id(document_id.split(':', 1)[1])
+    if not note or not await has_note_access(user, note, permission):
+        log.warning(f'User {user.get("id")} has no {permission} access to document {document_id}')
+        return None
+    return note
+
+
 @sio.on('ydoc:document:join')
 async def ydoc_document_join(sid, data):
     """Handle user joining a document"""
@@ -679,26 +770,8 @@ async def ydoc_document_join(sid, data):
 
     try:
         document_id = normalize_document_id(data['document_id'])
-
-        if document_id.startswith('note:'):
-            note_id = document_id.split(':')[1]
-            note = await Notes.get_note_by_id(note_id)
-            if not note:
-                log.error(f'Note {note_id} not found')
-                return
-
-            if (
-                not can_bypass_access_control(user)
-                and user.get('id') != note.user_id
-                and not await AccessGrants.has_access(
-                    user_id=user.get('id'),
-                    resource_type='note',
-                    resource_id=note.id,
-                    permission='read',
-                )
-            ):
-                log.error(f'User {user.get("id")} does not have access to note {note_id}')
-                return
+        if not await get_document_note(document_id, user, 'read'):
+            return
 
         user_id = data.get('user_id', sid)
         user_name = data.get('user_name', 'Anonymous')
@@ -751,34 +824,17 @@ async def ydoc_document_join(sid, data):
 
 
 async def document_save_handler(document_id, data, user):
-    document_id = normalize_document_id(document_id)
-
-    if document_id.startswith('note:'):
-        note_id = document_id.split(':')[1]
-        note = await Notes.get_note_by_id(note_id)
-        if not note:
-            log.error(f'Note {note_id} not found')
-            return
-
-        if (
-            not can_bypass_access_control(user)
-            and user.get('id') != note.user_id
-            and not await AccessGrants.has_access(
-                user_id=user.get('id'),
-                resource_type='note',
-                resource_id=note.id,
-                permission='write',
-            )
-        ):
-            log.error(f'User {user.get("id")} does not have write access to note {note_id}')
-            return
-
-        await Notes.update_note_by_id(note_id, NoteUpdateForm(data=data))
+    note = await get_document_note(normalize_document_id(document_id), user, 'write')
+    if note:
+        await Notes.update_note_by_id(note.id, NoteUpdateForm(data=data))
 
 
 @sio.on('ydoc:document:state')
 async def yjs_document_state(sid, data):
     """Send the current state of the Yjs document to the user"""
+    user = await get_socket_session_user(sid)
+    if not user:
+        return
     try:
         document_id = data['document_id']
 
@@ -789,6 +845,11 @@ async def yjs_document_state(sid, data):
 
         if sid not in active_session_ids:
             log.warning(f'Session {sid} not in room {room}. Cannot send state.')
+            return
+
+        # Room membership was granted at join; access may have been revoked since.
+        if not await get_document_note(document_id, user, 'read'):
+            await _leave_note_rooms(document_id.split(':', 1)[1], [sid])
             return
 
         if not await YDOC_MANAGER.document_exists(document_id):
@@ -837,25 +898,8 @@ async def yjs_document_update(sid, data):
         if not user:
             return
 
-        if document_id.startswith('note:'):
-            note_id = document_id.split(':')[1]
-            note = await Notes.get_note_by_id(note_id)
-            if not note:
-                log.error(f'Note {note_id} not found')
-                return
-
-            if (
-                not can_bypass_access_control(user)
-                and user.get('id') != note.user_id
-                and not await AccessGrants.has_access(
-                    user_id=user.get('id'),
-                    resource_type='note',
-                    resource_id=note.id,
-                    permission='write',
-                )
-            ):
-                log.warning(f'User {user.get("id")} does not have write access to note {note_id}. Rejecting update.')
-                return
+        if not await get_document_note(document_id, user, 'write'):
+            return
 
         user_id = data.get('user_id', sid)
 
@@ -908,6 +952,8 @@ async def yjs_document_leave(sid, data):
         return
     try:
         document_id = normalize_document_id(data['document_id'])
+        if not document_id.startswith('note:'):
+            return
 
         log.info('User %s leaving document %s', user['id'], document_id)
 
@@ -942,6 +988,9 @@ async def yjs_awareness_update(sid, data):
         document_id = normalize_document_id(data['document_id'])
         room = f'doc_{document_id}'
         if room not in sio.rooms(sid):  # must have joined the document first
+            return
+        if not await get_document_note(document_id, user, 'read'):
+            await _leave_note_rooms(document_id.split(':', 1)[1], [sid])
             return
         update = data['update']
 

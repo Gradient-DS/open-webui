@@ -1,5 +1,6 @@
 """Carry the authenticated OWUI user's external ref through a request's dependency context."""
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 
@@ -12,6 +13,17 @@ _acting_ref: ContextVar[str | None] = ContextVar('soev_acting_ref', default=None
 
 def acting_ref() -> str | None:
     return _acting_ref.get()
+
+
+@contextmanager
+def acting_as(ref: str):
+    """[Gradient] Assert `ref` instead of the requesting user inside the block: an owner's own change that OWUI
+    makes for them, such as the grants a folder share adds to their knowledge bases."""
+    token = _acting_ref.set(ref)
+    try:
+        yield
+    finally:
+        _acting_ref.reset(token)
 
 
 def install(app: FastAPI) -> None:

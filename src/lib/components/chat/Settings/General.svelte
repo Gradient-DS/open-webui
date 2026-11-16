@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount, getContext } from 'svelte';
-	import { getLanguages, changeLanguage } from '$lib/i18n';
+	import { getLanguages } from '$lib/i18n';
 	const dispatch = createEventDispatcher();
 
 	import { config, models, settings, theme, user } from '$lib/stores';
@@ -68,7 +68,7 @@
 	};
 
 	const saveHandler = async () => {
-		saveSettings({
+		await saveSettings({
 			system: system !== '' ? system : undefined,
 			params: {
 				stream_response: params.stream_response !== null ? params.stream_response : undefined,
@@ -109,6 +109,12 @@
 			}
 		});
 		dispatch('save');
+
+		// Strings rendered outside a reactive $i18n read keep the old language until reload.
+		if (lang !== $i18n.language) {
+			localStorage.locale = lang;
+			location.reload();
+		}
 	};
 
 	onMount(async () => {
@@ -230,9 +236,6 @@
 					bind:value={lang}
 					ariaLabel={$i18n.t('Language')}
 					placeholder={$i18n.t('Select a language')}
-					on:change={(e) => {
-						changeLanguage(lang);
-					}}
 				>
 					{#each languages as language}
 						<option value={language['code']}>{language['title']}</option>

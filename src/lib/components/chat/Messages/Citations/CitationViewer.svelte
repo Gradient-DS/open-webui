@@ -11,10 +11,12 @@
 	import type { WorkBook } from 'xlsx';
 	import type { DisplayCitation } from './reduceSources';
 	import PDFViewer from '$lib/components/common/PDFViewer.svelte';
+	import PptxPreview from '$lib/components/common/PptxPreview.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { config } from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { loadWithPreviewRetry } from '$lib/utils/previewRetry';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
 	import {
 		citationFileInfo,
@@ -38,6 +40,8 @@
 	let docxContainer: HTMLDivElement;
 	let officeLoading = false;
 	let officeError = false;
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let officePending = false;
 
 	// XLSX workbook state.
 	let xlsxWorkbook: WorkBook | null = null;
@@ -45,7 +49,11 @@
 	let selectedSheet = '';
 	let xlsxHtml = '';
 
-	$: ({ fileName, fileId, isPDF, isDocx, isXlsx, isImage, isAudio } = citationFileInfo(
+	// [Gradient] PPTX slides, rendered in the browser as images.
+	let pptxSlides: string[] = [];
+	let pptxCurrentSlide = 0;
+
+	$: ({ fileName, fileId, isPDF, isDocx, isXlsx, isPptx, isImage, isAudio } = citationFileInfo(
 		citation,
 		mergedDocuments
 	));
@@ -60,24 +68,35 @@
 	let loadedOfficeFileId: string | null = null;
 	$: if (fileId !== loadedOfficeFileId) {
 		loadedOfficeFileId = null;
-		if (previewAvailable && fileId && (isDocx || isXlsx)) {
+		if (previewAvailable && fileId && (isDocx || isXlsx || isPptx)) {
 			loadedOfficeFileId = fileId;
-			loadOfficeContent(fileId, isDocx);
+			loadOfficeContent(fileId, isDocx ? 'docx' : isPptx ? 'pptx' : 'xlsx');
 		}
 	}
 	onDestroy(() => {
 		loadedOfficeFileId = null;
 	});
-	const loadOfficeContent = async (id: string, asDocx: boolean) => {
+	const loadOfficeContent = async (id: string, kind: 'docx' | 'xlsx' | 'pptx') => {
 		officeLoading = true;
 		officeError = false;
+		officePending = false;
 		docxHtml = '';
 		xlsxWorkbook = null;
 		xlsxSheetNames = [];
 		selectedSheet = '';
 		xlsxHtml = '';
+		pptxSlides = [];
+		pptxCurrentSlide = 0;
 		try {
-			const buffer = await getFileContentById(id);
+			// [Gradient] Wait for an original that is still being prepared, then load it.
+			const result = await loadWithPreviewRetry(() => getFileContentById(id), {
+				isCurrent: () => id === loadedOfficeFileId,
+				onPending: () => (officePending = true)
+			});
+			if (result.status === 'cancelled') return;
+			officePending = false;
+			if (result.status === 'failed') throw result.error;
+			const buffer = result.value;
 			// Stale-load guard: the `citation` prop may switch files mid-flight.
 			// `loadedOfficeFileId` always holds the latest requested id, so if it no
 			// longer equals `id` a newer load has started — discard this one's results
@@ -88,7 +107,14 @@
 				officeError = true;
 				return;
 			}
-			if (asDocx) {
+			if (kind === 'pptx') {
+				const { pptxToImages } = await import('$lib/utils/pptxToHtml');
+				const { images } = await pptxToImages(buffer);
+				if (id !== loadedOfficeFileId) return;
+				pptxSlides = images;
+				return;
+			}
+			if (kind === 'docx') {
 				const html = await renderDocxHtml(buffer);
 				if (id !== loadedOfficeFileId) return;
 				docxHtml = html;
@@ -174,8 +200,12 @@
 		/>
 	{:else if isDocx}
 		{#if officeLoading}
-			<div class="flex items-center justify-center h-full">
+			<div class="flex flex-col items-center justify-center gap-2 h-full">
 				<Spinner className="size-5" />
+				<!-- [Gradient] -->
+				{#if officePending}
+					<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+				{/if}
 			</div>
 		{:else if officeError}
 			<div class="flex items-center justify-center h-full text-sm text-gray-400">
@@ -193,8 +223,12 @@
 	{:else if isXlsx}
 		<!-- XLSX: view-only sheet grid with sheet tabs -->
 		{#if officeLoading}
-			<div class="flex items-center justify-center h-full">
+			<div class="flex flex-col items-center justify-center gap-2 h-full">
 				<Spinner className="size-5" />
+				<!-- [Gradient] -->
+				{#if officePending}
+					<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+				{/if}
 			</div>
 		{:else if officeError}
 			<div class="flex items-center justify-center h-full text-sm text-gray-400">
@@ -224,6 +258,29 @@
 					</div>
 				{/if}
 			</div>
+		{/if}
+	{:else if isPptx}
+		<!-- [Gradient] PPTX: the slides as images, opened at the cited slide. -->
+		{#if officeLoading}
+			<div class="flex flex-col items-center justify-center gap-2 h-full">
+				<Spinner className="size-5" />
+				{#if officePending}
+					<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+				{/if}
+			</div>
+		{:else if officeError || pptxSlides.length === 0}
+			<div class="flex items-center justify-center h-full text-sm text-gray-400">
+				{$i18n.t('Could not read file.')}
+			</div>
+		{:else}
+			<PptxPreview
+				slides={pptxSlides}
+				bind:currentSlide={pptxCurrentSlide}
+				targetPage={activePage === undefined ? null : activePage + 1}
+				itemLabel={$i18n.t('Slide')}
+				listLabel={$i18n.t('Slides')}
+				className="h-full"
+			/>
 		{/if}
 	{:else if isImage}
 		<img

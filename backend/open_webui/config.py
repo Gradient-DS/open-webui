@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import redis
 import requests
 from authlib.integrations.starlette_client import OAuth
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
 
@@ -1735,6 +1735,10 @@ except Exception as e:
 
 DEFAULT_MODEL_PARAMS = default_model_params
 
+# [Gradient] The global system prompt every base model uses unless its own row sets one
+# (Admin > Settings > System prompt). Persistent: the env value only seeds a fresh install.
+DEFAULT_SYSTEM_PROMPT = os.getenv('DEFAULT_SYSTEM_PROMPT', '')
+
 
 # [Gradient] Default: iframeSandboxAllowForms=False (upstream: enabled when unset).
 # Opt-in via Helm; deployment documentation: soev-gitops/docs/.
@@ -2126,13 +2130,7 @@ ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
 ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
 
-BYPASS_ADMIN_ACCESS_CONTROL = (
-    os.getenv(
-        'BYPASS_ADMIN_ACCESS_CONTROL',
-        os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True'),
-    ).lower()
-    == 'true'
-)
+BYPASS_ADMIN_ACCESS_CONTROL = os.getenv('BYPASS_ADMIN_ACCESS_CONTROL', 'False').lower() == 'true'
 
 ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
@@ -3012,6 +3010,10 @@ FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lowe
 
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
 
+# [Gradient] New models the "what's new" tour announces, per release: {"1.3": ["zai-org/glm-5.3"]}.
+# A release left out falls back to the frontend's list for it; an empty list announces none.
+WHATS_NEW_MODELS = TypeAdapter(dict[str, list[str]]).validate_json(os.environ.get('WHATS_NEW_MODELS') or '{}')
+
 FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'true'
 
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
@@ -3029,6 +3031,9 @@ FEATURE_STRICT_DATA_SEPARATION = os.environ.get('FEATURE_STRICT_DATA_SEPARATION'
 USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
 
 ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'true'
+
+# [Gradient] Admins' "Agent trace (.json)" download; off unless a tenant turns it on.
+ENABLE_AGENT_TRACE_DOWNLOAD = os.environ.get('ENABLE_AGENT_TRACE_DOWNLOAD', 'False').lower() == 'true'
 
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
 
@@ -3102,9 +3107,14 @@ SOEV_API_KEY = os.environ.get('SOEV_API_KEY', '')
 SOEV_API_SIGNING_KEY = os.environ.get('SOEV_API_SIGNING_KEY', '')
 SOEV_API_AUDIENCE = os.environ.get('SOEV_API_AUDIENCE', '')
 SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
+SOEV_GROUP_RECONCILE_MINUTES = int(os.environ.get('SOEV_GROUP_RECONCILE_MINUTES', '15'))
+if SOEV_GROUP_RECONCILE_MINUTES <= 0:
+    raise ValueError('SOEV_GROUP_RECONCILE_MINUTES must be positive')
 SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5'))
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
+# A Microsoft login connects OneDrive and Outlook mail silently and turns their live search on.
+SOEV_AUTO_CONNECT = os.environ.get('SOEV_AUTO_CONNECT', 'true').lower() == 'true'
 
 
 _default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
@@ -3382,6 +3392,7 @@ DEFAULT_CONFIG = {
     'ui.model_order_list': MODEL_ORDER_LIST,
     'models.default_metadata': DEFAULT_MODEL_METADATA,
     'models.default_params': DEFAULT_MODEL_PARAMS,
+    'models.system_prompt': DEFAULT_SYSTEM_PROMPT,
     'ui.default_user_role': DEFAULT_USER_ROLE,
     'ui.default_group_id': DEFAULT_GROUP_ID,
     'ui.pending_user_overlay_title': PENDING_USER_OVERLAY_TITLE,

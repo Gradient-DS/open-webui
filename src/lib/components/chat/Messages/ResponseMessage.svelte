@@ -19,6 +19,7 @@
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
 	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
+	import { downloadAgentTrace } from '$lib/apis/agentThreads'; // [Gradient]
 
 	import {
 		audioQueue,
@@ -42,7 +43,7 @@
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { canContinueResponse, isFeatureEnabled } from '$lib/utils/features';
 	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
@@ -103,7 +104,8 @@
 		id: string;
 		model: string;
 		assistant_id?: string; // [Gradient]
-		meta?: { answered_model?: string }; // [Gradient] Set when a fallback answered a v2 turn.
+		// [Gradient] answered_model: set when a fallback answered a v2 turn. agent_v2: the turn's soev-api thread.
+		meta?: { answered_model?: string; agent_v2?: { thread_id?: string } };
 		notices?: string[]; // [Claude] Chat items a v2 turn ran without, shown above its answer.
 		content: string;
 		output?: OutputItem[];
@@ -633,6 +635,21 @@
 		} catch (e) {
 			console.error('Message DOCX export failed:', e);
 			toast.error($i18n.t('Failed to export Word document'));
+		}
+	};
+
+	// [Gradient] The v2 thread behind this answer, for admins: the trace file opens in soev-agents-inspect.
+	$: traceThreadId =
+		$user?.role === 'admin' && $config?.features?.enable_agent_trace_download
+			? (message?.meta?.agent_v2?.thread_id ?? null)
+			: null;
+
+	const downloadMessageTrace = async (threadId: string) => {
+		try {
+			saveAs(await downloadAgentTrace(localStorage.token, threadId), `${threadId}.trace.json`);
+		} catch (e) {
+			console.error('Message trace download failed:', e);
+			toast.error($i18n.t('Failed to download trace'));
 		}
 	};
 
@@ -1703,6 +1720,23 @@
 													</div>
 												</button>
 											{/if}
+											{#if traceThreadId}
+												<button
+													class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+													on:click={() => {
+														downloadMessageTrace(traceThreadId);
+														showDownloadMenu = false;
+													}}
+												>
+													<div class="flex items-center line-clamp-1">
+														{$i18n.t('Agent trace (.json)')}
+														<span
+															class="ml-1.5 rounded-lg bg-orange-500/15 px-1.5 text-xs font-medium text-orange-700 dark:text-orange-300"
+															>{$i18n.t('dev')}</span
+														>
+													</div>
+												</button>
+											{/if}
 										</div>
 									</div>
 								</Dropdown>
@@ -1934,7 +1968,7 @@
 										</Tooltip>
 									{/if}
 
-									{#if isLastMessage && ($user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true))}
+									{#if isLastMessage && canContinueResponse($config, $user)}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 											<button
 												aria-label={$i18n.t('Continue Response')}

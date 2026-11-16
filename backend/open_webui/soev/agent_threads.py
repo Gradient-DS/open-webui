@@ -2,7 +2,9 @@
 
 soev-api keeps a v2 agent's conversation in threads owned by the user; OWUI knows them only by the
 `meta.agent_v2` bookmark on each assistant message. A regenerate or an edit forks a thread of its own, and a
-clone of a chat shares the original's threads, so a thread goes only once no message of the user bookmarks it.
+clone of a chat shares the original's threads, so a thread goes only once no message of the user bookmarks it. A clone
+of another user's chat bookmarks none: soev-api keeps the original's threads from the new owner, so the clone's first
+turn starts a thread seeded with the conversation so far, as a chat from before the agent cutover does.
 
 A temporary chat has no messages to hold bookmarks: they are kept beside the socket session pool for as long as
 the chat's socket is connected, and its threads go when the socket does, as the chat itself does in the browser.
@@ -10,6 +12,7 @@ the chat's socket is connected, and its threads go when the socket does, as the 
 
 import logging
 from collections.abc import Collection, Iterable
+from typing import Any
 from urllib.parse import quote
 
 from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
@@ -20,6 +23,23 @@ from open_webui.utils.chat_id import get_temporary_chat_session_id
 
 log = logging.getLogger(__name__)
 _PAGE = 500
+
+
+def without_bookmarks(chat: dict) -> dict:
+    """The chat's content with no message bookmarking a thread, for a copy that another user will own."""
+    history = chat.get('history') if isinstance(chat.get('history'), dict) else None
+    unmarked = dict(chat)
+    if history and isinstance(history.get('messages'), dict):
+        unmarked['history'] = {**history, 'messages': {k: _unmarked(m) for k, m in history['messages'].items()}}
+    if isinstance(chat.get('messages'), list):
+        unmarked['messages'] = [_unmarked(message) for message in chat['messages']]
+    return unmarked
+
+
+def _unmarked(message: Any) -> Any:
+    if not isinstance(message, dict) or not isinstance(message.get('meta'), dict) or 'agent_v2' not in message['meta']:
+        return message
+    return {**message, 'meta': {key: value for key, value in message['meta'].items() if key != 'agent_v2'}}
 
 
 def _bookmarked(messages: Iterable[ChatMessageModel]) -> set[str]:

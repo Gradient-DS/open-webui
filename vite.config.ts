@@ -49,7 +49,8 @@ export default defineConfig({
 	],
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
-		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
+		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build'),
+		APP_SOEV_VERSION: JSON.stringify(process.env.SOEV_VERSION || '') // [Gradient]
 	},
 	server: {
 		// Proxy target is env-driven so soev's multi-stack dev workflow

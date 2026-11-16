@@ -1444,15 +1444,8 @@ async def get_sources_from_items(
         elif item.get('type') == 'chat':
             # Chat Attached
             chat = await Chats.get_chat_by_id(item.get('id'))
+            # A shared_chat grant covers the share snapshot only, never the live chat.
             has_read_access = bool(chat and (can_access_admin_chats(user) or chat.user_id == user.id))
-
-            if chat and not has_read_access:
-                has_read_access = await AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='shared_chat',
-                    resource_id=chat.id,
-                    permission='read',
-                )
 
             if chat and not has_read_access and chat.folder_id:
                 folder = await Folders.get_folder_by_id(chat.folder_id)

@@ -24,6 +24,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
 	import DocumentCard from './DocumentCard.svelte';
+	import { settleDocument } from '$lib/utils/agentDocument';
 
 	import HtmlToken from './HTMLToken.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
@@ -531,14 +532,20 @@
 			</div>
 		</ConsecutiveDetailsGroup>
 	{:else if token.type === 'document'}
-		<DocumentCard
-			id={`${id}-${tokenIdx}-doc`}
-			title={token.document.title}
-			content={token.document.content}
-			format={token.document.format}
-			page={token.document.page}
-			done={token.document.done}
-		/>
+		{@const settled = settleDocument(token.document, done)}
+		{#if settled}
+			<DocumentCard
+				id={`${id}-${tokenIdx}-doc`}
+				title={settled.title}
+				content={settled.content}
+				format={settled.format}
+				page={settled.page}
+				done={settled.done}
+				messageDone={done}
+			/>
+		{:else}
+			<p dir="auto">{token.raw}</p>
+		{/if}
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 

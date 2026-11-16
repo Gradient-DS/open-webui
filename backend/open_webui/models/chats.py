@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -17,9 +18,10 @@ from typing import Optional
 # local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.ordering import request_order
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.access_grants import AccessGrant
 from open_webui.models.automations import AutomationRun
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
+from open_webui.models.files import strip_file_paths
 from open_webui.models.folders import Folders
 from open_webui.models.tags import Tag, TagModel, Tags
 from open_webui.utils.misc import get_output_text, sanitize_data_for_db, sanitize_text_for_db
@@ -408,9 +410,9 @@ class ChatStatsExport(BaseModel):
 
 # [Gradient] User-facing queries exclude soft-deleted rows until retention cleanup.
 class ChatTable:
-    def _clean_null_bytes(self, obj):
-        """Recursively remove null bytes from strings in dict/list structures."""
-        return sanitize_data_for_db(obj)
+    def _sanitize_for_db(self, obj):
+        """Remove null bytes from strings and storage paths from embedded File records."""
+        return strip_file_paths(sanitize_data_for_db(obj))
 
     def get_current_message_id(self, chat: dict | None) -> str | None:
         chat = chat or {}
@@ -439,14 +441,14 @@ class ChatTable:
 
         # Clean title
         if chat_item.title:
-            cleaned = self._clean_null_bytes(chat_item.title)
+            cleaned = self._sanitize_for_db(chat_item.title)
             if cleaned != chat_item.title:
                 chat_item.title = cleaned
                 changed = True
 
         # Clean JSON
         if chat_item.chat:
-            cleaned = self._clean_null_bytes(chat_item.chat)
+            cleaned = self._sanitize_for_db(chat_item.chat)
             if cleaned != chat_item.chat:
                 chat_item.chat = cleaned
                 changed = True
@@ -563,10 +565,10 @@ class ChatTable:
                 **{
                     'id': id,
                     'user_id': user_id,
-                    'title': self._clean_null_bytes(
+                    'title': self._sanitize_for_db(
                         form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'
                     ),
-                    'chat': self._clean_null_bytes(form_data.chat),
+                    'chat': self._sanitize_for_db(form_data.chat),
                     'folder_id': form_data.folder_id,
                     'meta': {**(form_data.meta or {}), **(internal_meta or {})},
                     'timer_at': timer_at,
@@ -658,8 +660,8 @@ class ChatTable:
             **{
                 'id': id,
                 'user_id': user_id,
-                'title': self._clean_null_bytes(form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'),
-                'chat': self._clean_null_bytes(form_data.chat),
+                'title': self._sanitize_for_db(form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'),
+                'chat': self._sanitize_for_db(form_data.chat),
                 'meta': form_data.meta,
                 'variables': form_data.variables or {},
                 'pinned': form_data.pinned,
@@ -757,7 +759,7 @@ class ChatTable:
                     # The caller built its history from an earlier read; merge so messages saved since then survive.
                     updated['history'] = self.merge_history(stored.get('history'), chat['history'])
 
-                updated = self._clean_null_bytes(updated)
+                updated = self._sanitize_for_db(updated)
                 chat_item.chat = updated
                 chat_item.title = updated.get('title', 'New Chat')
                 if any(key in chat for key in ('history', 'messages', 'currentId', 'branchPointMessageId')):
@@ -878,7 +880,7 @@ class ChatTable:
                 )
                 if chat_item is None:
                     return None
-                clean_title = self._clean_null_bytes(title)
+                clean_title = self._sanitize_for_db(title)
                 chat_item.title = clean_title
                 chat_item.chat = {**(chat_item.chat or {}), 'title': clean_title}
                 await session.commit()
@@ -1176,8 +1178,8 @@ class ChatTable:
             if output_text:
                 message['content'] = output_text
 
-        message = self._clean_null_bytes(message)
-        message_id = self._clean_null_bytes(message_id)
+        message = self._sanitize_for_db(message)
+        message_id = self._sanitize_for_db(message_id)
 
         try:
             async with get_async_db_context() as session:
@@ -1272,7 +1274,7 @@ class ChatTable:
         self, id: str, message_id: str, status: dict
     ) -> ChatModel | None:
         try:
-            status = self._clean_null_bytes(status)
+            status = self._sanitize_for_db(status)
             async with get_async_db_context() as session:
                 chat_item = await session.get(
                     Chat,
@@ -1345,7 +1347,7 @@ class ChatTable:
             # Written here rather than through update_chat_by_id: with session sharing off that opens a second
             # connection, which then blocks on the lock this one holds.
             chat['history'] = history
-            chat_item.chat = self._clean_null_bytes(chat)
+            chat_item.chat = self._sanitize_for_db(chat)
             # History was mutated in place, so the new blob compares equal to the loaded one.
             flag_modified(chat_item, 'chat')
             chat_item.updated_at = int(time.time())
@@ -1819,15 +1821,7 @@ class ChatTable:
         if can_access_admin_chats(user):
             return chat
 
-        if await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='shared_chat',
-            resource_id=id,
-            permission='read',
-            db=db,
-        ):
-            return chat
-
+        # A shared_chat grant covers the share snapshot only, never the live chat.
         if chat.folder_id:
             from open_webui.utils.access_control.folders import has_folder_access
 
@@ -2592,8 +2586,9 @@ class ChatTable:
     async def soft_delete_by_user_id_and_folder_id(
         self, user_id: str, folder_id: str, db: Optional[AsyncSession] = None
     ) -> int:
-        """Soft-delete all chats in a folder for a user. Returns count of affected rows."""
+        """Soft-delete all chats in a folder for a user and revoke their shares. Returns count of affected rows."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id))
             result = await db.execute(
                 update(Chat)
                 .filter_by(user_id=user_id, folder_id=folder_id)
@@ -2744,16 +2739,27 @@ class ChatTable:
         except Exception:
             return False
 
-    async def get_shared_chat_ids_by_file_id(self, file_id: str, db: AsyncSession | None = None) -> list[str]:
-        """Return IDs of chats that contain this file and have an active share link."""
+    async def get_shared_chat_ids_by_file_id(
+        self, file_id: str, *, user_id: str, db: AsyncSession | None = None
+    ) -> list[str]:
+        """Return IDs of the user's live chats whose share snapshot holds this file in the message it was attached to.
+
+        A file attached after the snapshot was taken is not part of the share."""
+        from open_webui.models.shared_chats import SharedChat as SharedChatTable
+
         async with get_async_db_context(db) as session:
             result = await session.execute(
-                select(Chat.id)
-                .join(ChatFile, Chat.id == ChatFile.chat_id)
-                .filter(ChatFile.file_id == file_id, Chat.share_id.isnot(None))
-                .filter(Chat.deleted_at.is_(None))
+                select(SharedChatTable.chat_id, SharedChatTable.chat, ChatFile.message_id)
+                .join(ChatFile, ChatFile.chat_id == SharedChatTable.chat_id)
+                .join(Chat, Chat.id == SharedChatTable.chat_id)
+                .filter(ChatFile.file_id == file_id, Chat.user_id == user_id, Chat.deleted_at.is_(None))
             )
-            return [row[0] for row in result.all()]
+            chat_ids = []
+            for chat_id, snapshot, message_id in result.all():
+                message = ((snapshot or {}).get('history') or {}).get('messages', {}).get(message_id) or {}
+                if file_id in json.dumps(message.get('files') or []) and chat_id not in chat_ids:
+                    chat_ids.append(chat_id)
+            return chat_ids
 
     async def update_chat_tasks_by_id(self, id: str, tasks: list[dict]) -> ChatModel | None:
         """Update the tasks list on a chat."""
@@ -2807,9 +2813,23 @@ class ChatTable:
             result = await db.execute(stmt)
             return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
 
+    @staticmethod
+    async def _unshare(db: AsyncSession, chat_ids) -> None:
+        """Drop the share snapshots and shared_chat grants of `chat_ids` (a list or select) in `db`."""
+        from open_webui.models.shared_chats import SharedChat as SharedChatTable
+
+        await db.execute(
+            delete(AccessGrant).filter(
+                AccessGrant.resource_type == 'shared_chat', AccessGrant.resource_id.in_(chat_ids)
+            )
+        )
+        await db.execute(delete(SharedChatTable).filter(SharedChatTable.chat_id.in_(chat_ids)))
+        await db.execute(update(Chat).filter(Chat.id.in_(chat_ids)).values(share_id=None))
+
     async def soft_delete_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        """Mark a chat as deleted (soft-delete)."""
+        """Mark a chat as deleted (soft-delete) and revoke its shares."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, [id])
             result = await db.execute(
                 update(Chat).filter_by(id=id).filter(Chat.deleted_at.is_(None)).values(deleted_at=int(time.time()))
             )
@@ -2817,8 +2837,9 @@ class ChatTable:
             return result.rowcount > 0
 
     async def soft_delete_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
-        """Soft-delete all chats for a user. Returns count of affected rows."""
+        """Soft-delete all chats for a user and revoke their shares. Returns count of affected rows."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, select(Chat.id).filter_by(user_id=user_id))
             result = await db.execute(
                 update(Chat)
                 .filter_by(user_id=user_id)

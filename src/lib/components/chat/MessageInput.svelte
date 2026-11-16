@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
@@ -37,10 +38,13 @@
 		attachPickedDocument,
 		attachErrorMessage,
 		liveConnections,
+		liveGranted,
+		liveGrants,
 		matchingPickerConnection,
 		prefetchLiveConnections,
 		relinkPrompt
 	} from '$lib/utils/live-connections';
+	import { isPending } from '$lib/utils/messageQueue';
 	import { enableLiveFamily } from '$lib/apis/cloudSync';
 	import {
 		beginBusinessDocumentPicker,
@@ -87,15 +91,7 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import {
-		TOOL_OFF_DESCRIPTION,
-		TOOL_STATE_LABELS,
-		WEB_SEARCH_STATE_DESCRIPTIONS,
-		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
-		documentWriterState,
-		webSearchState,
-		type ToolState
-	} from '$lib/utils/toolState';
+	import { TOOL_OFF_DESCRIPTION, toolStateLabel, type LiveToolState } from '$lib/utils/toolState';
 	import { uploadFile } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
@@ -145,7 +141,13 @@
 	import CommandLine from '../icons/CommandLine.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
-	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
+	import {
+		barItemIds,
+		inputItemOrder,
+		itemState,
+		normalizePins,
+		usedItemIds
+	} from './MessageInput/inputItems';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
@@ -187,6 +189,8 @@
 	export let statusHandler: () => void = () => {};
 	export let forkHandler: () => void = () => {};
 	export let chatId = '';
+	// [Gradient] Changes whenever Chat loads a chat's composer state (new chat or another chat).
+	export let composerSession = 0;
 	export let contextUsage = null;
 	export let contextCompactionEnabled = false;
 	export let embedded = false;
@@ -246,14 +250,11 @@
 	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
-	export let liveDocumentsState: ToolState = 'off';
-	export let liveMailState: ToolState = 'off';
+	export let liveDocumentsState: LiveToolState = 'off';
+	export let liveMailState: LiveToolState = 'off';
 	export let webSearchEnabled = false;
-	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
-	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
-	export let documentWriterRequired = false;
 	export let workspaceEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
@@ -310,13 +311,11 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		webSearchRequired,
 		liveDocumentsState,
 		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		workspaceEnabled,
-		documentWriterRequired,
 		toolApprovalMode
 	};
 
@@ -969,20 +968,25 @@
 	);
 
 	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
-	// every item that is on or on Auto, in menu order (inputItems.ts). The "Attach Files"
+	// every item that is on, in menu order (inputItems.ts). The "Attach Files"
 	// submenu shares the upload_files restriction key with the menu.
 	$: inputBarAllowed = (id: string) =>
 		(inputMenuRestrictTo === null ||
 			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
 			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
 		!dataSeparationBlockedItems.has(id);
+	// [Gradient] A live family is on only with a grant; without one its pinned button connects.
+	$: liveMailGranted = liveGranted($liveGrants, 'mail') === true;
+	$: liveDocumentsGranted = liveGranted($liveGrants, 'live_documents') === true;
+	$: liveMailOn = liveMailGranted && liveMailState !== 'off';
+	$: liveDocumentsOn = liveDocumentsGranted && liveDocumentsState !== 'off';
 	$: inputItemStates = {
-		live_mail: itemState(liveMailState),
-		live_documents: itemState(liveDocumentsState),
-		web_search: itemState(webSearchToolState),
+		live_mail: itemState(liveMailOn),
+		live_documents: itemState(liveDocumentsOn),
+		web_search: itemState(webSearchEnabled),
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
-		document_writer: itemState(documentWriterToolState),
+		document_writer: itemState(documentWriterEnabled),
 		workspace: itemState(workspaceEnabled),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
@@ -990,10 +994,22 @@
 			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
 		)
 	};
+	// Items used in this chat keep their button until the next chat, which shows only the
+	// ones still on (they carry over through composerTools).
+	let usedInputItems: readonly string[] = [];
+	let usedInputItemsSession = composerSession;
+	$: {
+		if (usedInputItemsSession !== composerSession) {
+			usedInputItemsSession = composerSession;
+			usedInputItems = [];
+		}
+		usedInputItems = usedItemIds(usedInputItems, inputItemStates);
+	}
 	$: inputBarItems = barItemIds({
 		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
 		pinned: normalizePins($settings?.pinnedInputItems),
 		states: inputItemStates,
+		used: usedInputItems,
 		allowed: inputBarAllowed
 	});
 	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(
@@ -1008,46 +1024,43 @@
 		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
 	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
 
-	// [Gradient] Altijd needs web search to be possible: every rule that turns web search
-	// off (data separation, model capability, image generation, Escape) lands on Uit.
-	$: if (!webSearchEnabled && webSearchRequired) {
-		webSearchRequired = false;
-	}
-	$: if (!documentWriterEnabled) documentWriterRequired = false;
-	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
 	$: documentWriterTooltip = pinnedStateTooltip(
 		$i18n.t('Document writer'),
-		documentWriterToolState,
-		$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+		documentWriterEnabled,
+		$i18n.t(
+			documentWriterEnabled ? 'The model decides whether to write a document' : TOOL_OFF_DESCRIPTION
+		)
 	);
-	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+	$: webSearchTooltip = pinnedStateTooltip(
+		$i18n.t('Web Search'),
+		webSearchEnabled,
+		$i18n.t(webSearchEnabled ? 'The model decides whether to search the web' : TOOL_OFF_DESCRIPTION)
+	);
 
 	let inputMenuRef:
 		| {
 				openTab: (tab: string) => void;
 				openWebpageModal: () => void;
-				cycleWebSearch: () => void;
-				cycleLiveDocuments: () => Promise<void>;
-				cycleLiveMail: () => Promise<void>;
-				cycleTool: (
-					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
-				) => void;
+				toggleWebSearch: () => void;
+				toggleLiveDocuments: () => Promise<void>;
+				toggleLiveMail: () => Promise<void>;
+				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace') => void;
 		  }
 		| undefined;
-	const liveMailTooltipId = `mail-search-${uuidv4()}`;
-	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
-	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
-		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+	const pinnedStateTooltip = (label: string, on: boolean, description: string) =>
+		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
+	const pinnedLiveTooltip = (label: string, granted: boolean, on: boolean, description: string) =>
+		granted
+			? pinnedStateTooltip(label, on, on ? description : $i18n.t(TOOL_OFF_DESCRIPTION))
+			: `${label}: ${$i18n.t('Not connected')}. ${$i18n.t('Connect your account to use this')}`;
 	const pinnedButtonClass =
 		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
-	// Altijd (or an active toggle) gets the accent, Auto a subtle outline, Uit none.
-	const pinnedToggleClass = (active: boolean | ToolState) =>
+	// An item that is on gets the accent, one that is off none.
+	const pinnedToggleClass = (on: boolean) =>
 		`p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden shrink-0 ${
-			active === true || active === 'required'
+			on
 				? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-				: active === 'auto'
-					? 'border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-					: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+				: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
 		}`;
 
 	const googleDriveHandler = async () => {
@@ -2315,7 +2328,7 @@
 												name={file.name ?? ''}
 												type={file.type}
 												size={file?.size ?? 0}
-												loading={file.status === 'uploading'}
+												loading={isPending(file)}
 												dismissible={true}
 												edit={!agentRouted}
 												small={true}
@@ -2555,11 +2568,9 @@
 											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
-											bind:webSearchRequired
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
-											bind:documentWriterRequired
 											bind:workspaceEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
@@ -2614,7 +2625,10 @@
 										{/if}
 
 										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
-										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
+										<div
+											class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none"
+											use:overflowFade
+										>
 											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
 											{#each inputBarItems as itemId (itemId)}
 												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
@@ -2741,22 +2755,15 @@
 															? $i18n.t(
 																	'Web search and image generation cannot run in the same turn'
 																)
-															: pinnedStateTooltip(
-																	$i18n.t('Web Search'),
-																	webSearchToolState,
-																	$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
-																)}
+															: webSearchTooltip}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={pinnedStateTooltip(
-																$i18n.t('Web Search'),
-																webSearchToolState,
-																$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
-															)}
-															on:click|preventDefault={() => inputMenuRef?.cycleWebSearch()}
-															class={pinnedToggleClass(webSearchToolState)}
+															aria-label={webSearchTooltip}
+															aria-pressed={webSearchEnabled}
+															on:click|preventDefault={() => inputMenuRef?.toggleWebSearch()}
+															class={pinnedToggleClass(webSearchEnabled)}
 														>
 															<GlobeAlt className="size-4" strokeWidth="1.75" />
 														</button>
@@ -2769,7 +2776,7 @@
 																)
 															: pinnedStateTooltip(
 																	$i18n.t('Image'),
-																	imageGenerationEnabled ? 'required' : 'off',
+																	imageGenerationEnabled,
 																	imageGenerationEnabled
 																		? $i18n.t('Generate an image')
 																		: $i18n.t(TOOL_OFF_DESCRIPTION)
@@ -2781,7 +2788,7 @@
 															aria-label={$i18n.t('Image')}
 															aria-pressed={imageGenerationEnabled}
 															on:click|preventDefault={() =>
-																inputMenuRef?.cycleTool('image_generation')}
+																inputMenuRef?.toggleFeature('image_generation')}
 															class={pinnedToggleClass(imageGenerationEnabled)}
 														>
 															<Photo className="size-4" strokeWidth="1.75" />
@@ -2789,81 +2796,59 @@
 													</Tooltip>
 												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
 													<Tooltip
-														elementId={liveMailTooltipId}
-														content={pinnedStateTooltip(
+														content={pinnedLiveTooltip(
 															$i18n.t('Mail search'),
-															liveMailState,
-															liveMailState !== 'off'
-																? $i18n.t('The model decides whether to search your mail')
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
+															liveMailGranted,
+															liveMailOn,
+															$i18n.t('The model decides whether to search your mail')
 														)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={`${$i18n.t('Mail search')}: ${$i18n.t(TOOL_STATE_LABELS[liveMailState])}`}
-															aria-pressed={liveMailState !== 'off'}
-															on:click|preventDefault={() => inputMenuRef?.cycleLiveMail()}
-															class={pinnedToggleClass(liveMailState)}
+															aria-label={liveMailGranted
+																? `${$i18n.t('Mail search')}: ${$i18n.t(toolStateLabel(liveMailOn))}`
+																: pinnedLiveTooltip($i18n.t('Mail search'), false, false, '')}
+															aria-pressed={liveMailGranted ? liveMailOn : undefined}
+															on:click|preventDefault={() => inputMenuRef?.toggleLiveMail()}
+															class={pinnedToggleClass(liveMailOn)}
 														>
 															<MailSearch className="size-4" />
+															{#if !liveMailGranted}
+																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
+															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveMailTooltipId} class="flex items-center gap-2">
-																<MailSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedStateTooltip(
-																		$i18n.t('Mail search'),
-																		liveMailState,
-																		liveMailState !== 'off'
-																			? $i18n.t('The model decides whether to search your mail')
-																			: $i18n.t(TOOL_OFF_DESCRIPTION)
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
 													<Tooltip
-														elementId={liveDocumentsTooltipId}
-														content={pinnedStateTooltip(
+														content={pinnedLiveTooltip(
 															$i18n.t('OneDrive search'),
-															liveDocumentsState,
-															liveDocumentsState !== 'off'
-																? $i18n.t('The model decides whether to search OneDrive')
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
+															liveDocumentsGranted,
+															liveDocumentsOn,
+															$i18n.t('The model decides whether to search OneDrive')
 														)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(TOOL_STATE_LABELS[liveDocumentsState])}`}
-															aria-pressed={liveDocumentsState !== 'off'}
-															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
-															class={pinnedToggleClass(liveDocumentsState)}
+															aria-label={liveDocumentsGranted
+																? `${$i18n.t('OneDrive search')}: ${$i18n.t(toolStateLabel(liveDocumentsOn))}`
+																: pinnedLiveTooltip($i18n.t('OneDrive search'), false, false, '')}
+															aria-pressed={liveDocumentsGranted ? liveDocumentsOn : undefined}
+															on:click|preventDefault={() => inputMenuRef?.toggleLiveDocuments()}
+															class={pinnedToggleClass(liveDocumentsOn)}
 														>
 															<OneDriveSearch className="size-4" />
+															{#if !liveDocumentsGranted}
+																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
+															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
-																<OneDriveSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedStateTooltip(
-																		$i18n.t('OneDrive search'),
-																		liveDocumentsState,
-																		liveDocumentsState !== 'off'
-																			? $i18n.t('The model decides whether to search OneDrive')
-																			: $i18n.t(TOOL_OFF_DESCRIPTION)
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
 													<Tooltip
 														content={pinnedStateTooltip(
 															$i18n.t('Code Interpreter'),
-															codeInterpreterEnabled ? 'required' : 'off',
+															codeInterpreterEnabled,
 															codeInterpreterEnabled
 																? $i18n.t('Execute code for analysis')
 																: $i18n.t(TOOL_OFF_DESCRIPTION)
@@ -2877,7 +2862,7 @@
 																: $i18n.t('Enable Code Interpreter')}
 															aria-pressed={codeInterpreterEnabled}
 															on:click|preventDefault={() =>
-																inputMenuRef?.cycleTool('code_interpreter')}
+																inputMenuRef?.toggleFeature('code_interpreter')}
 															class={pinnedToggleClass(codeInterpreterEnabled)}
 														>
 															<Terminal className="size-4" strokeWidth="1.75" />
@@ -2890,8 +2875,8 @@
 															aria-label={documentWriterTooltip}
 															aria-pressed={documentWriterEnabled}
 															on:click|preventDefault={() =>
-																inputMenuRef?.cycleTool('document_writer')}
-															class={pinnedToggleClass(documentWriterToolState)}
+																inputMenuRef?.toggleFeature('document_writer')}
+															class={pinnedToggleClass(documentWriterEnabled)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
 														</button>
@@ -2900,7 +2885,7 @@
 													<Tooltip
 														content={pinnedStateTooltip(
 															$i18n.t('Workspace'),
-															workspaceEnabled ? 'required' : 'off',
+															workspaceEnabled,
 															workspaceEnabled
 																? $i18n.t(
 																		'Make files, analyse data and draw charts in a secure workspace'
@@ -2913,7 +2898,7 @@
 															type="button"
 															aria-label={$i18n.t('Workspace')}
 															aria-pressed={workspaceEnabled}
-															on:click|preventDefault={() => inputMenuRef?.cycleTool('workspace')}
+															on:click|preventDefault={() => inputMenuRef?.toggleFeature('workspace')}
 															class={pinnedToggleClass(workspaceEnabled)}
 														>
 															<CommandLine className="size-4" strokeWidth="1.75" />

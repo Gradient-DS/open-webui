@@ -310,7 +310,10 @@ class GroupTable:
                 .filter(GroupMember.user_id == user_id)
                 .order_by(Group.updated_at.desc())
             )
-            return [GroupModel.model_validate(group) for group in result.scalars().all()]
+            groups = [GroupModel.model_validate(group) for group in result.scalars().all()]
+            from open_webui.soev.group_sync import archive_groups_for_users
+
+            return groups + (await archive_groups_for_users([user_id], db=db)).get(user_id, [])
 
     async def get_groups_by_member_ids(
         self, user_ids: list[str], db: Optional[AsyncSession] = None
@@ -331,6 +334,10 @@ class GroupTable:
             for user_id, group in rows:
                 user_groups[user_id].append(GroupModel.model_validate(group))
 
+            from open_webui.soev.group_sync import archive_groups_for_users
+
+            for user_id, groups in (await archive_groups_for_users(user_ids, db=db)).items():
+                user_groups[user_id].extend(groups)
             return user_groups
 
     async def get_group_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[GroupModel]:

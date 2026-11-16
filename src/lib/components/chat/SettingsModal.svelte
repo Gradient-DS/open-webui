@@ -48,6 +48,7 @@
 	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
 	import AdminConnections from '$lib/components/admin/Settings/Connections.svelte';
 	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
+	import AdminSystemPrompt from '$lib/components/admin/Settings/SystemPrompt.svelte';
 	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
 	import AdminAnalytics from '$lib/components/admin/Analytics.svelte';
 	import AdminIntegrations from '$lib/components/admin/Settings/Integrations.svelte';
@@ -179,6 +180,7 @@
 		'admin:email': 'System',
 		'admin:connections': 'AI',
 		'admin:models': 'AI',
+		'admin:system-prompt': 'AI',
 		'admin:external-agents': 'AI',
 		'admin:interface': 'Experience',
 		'admin:audio': 'Experience',
@@ -761,6 +763,11 @@
 				'import',
 				'export'
 			]
+		},
+		{
+			id: 'admin:system-prompt',
+			title: 'System Prompt',
+			keywords: ['system prompt', 'prompt', 'instructions', 'models', 'base models']
 		},
 		{
 			id: 'admin:external-agents',
@@ -1365,6 +1372,12 @@
 				/>
 			{:else if selectedTab === 'admin:models'}
 				<AdminModels bind:tabState />
+			{:else if selectedTab === 'admin:system-prompt'}
+				<AdminSystemPrompt
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
 			{:else if selectedTab === 'admin:evaluations'}
 				<AdminEvaluations />
 			{:else if selectedTab === 'admin:analytics'}

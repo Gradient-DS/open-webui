@@ -15,6 +15,8 @@ interface Citation {
 	id: string;
 	name: string;
 	url?: string;
+	// [Gradient] The `[N]` it answers to: the agent's `n`, else (legacy sources) its position.
+	n: number;
 }
 
 /**
@@ -22,7 +24,7 @@ interface Citation {
  * using the same logic as Citations.svelte.
  */
 function reduceSources(sources: any[]): Citation[] {
-	const citations: Citation[] = [];
+	const citations: (Omit<Citation, 'n'> & { n?: number })[] = [];
 
 	for (const source of sources) {
 		if (!source || Object.keys(source).length === 0) continue;
@@ -47,13 +49,16 @@ function reduceSources(sources: any[]): Citation[] {
 				url = sourceUrl;
 			}
 
-			if (!citations.find((c) => c.id === id)) {
-				citations.push({ id, name: cleanSourceName(name), url });
+			const known = citations.find((c) => c.id === id);
+			if (!known) {
+				citations.push({ id, name: cleanSourceName(name), url, n: source.n });
+			} else if (source.n !== undefined) {
+				known.n = source.n;
 			}
 		});
 	}
 
-	return citations;
+	return citations.map((citation, index) => ({ ...citation, n: citation.n ?? index + 1 }));
 }
 
 // Strip trailing UUID (v4-style) from source names, e.g.
@@ -98,6 +103,7 @@ export function normalizeCitations(
 	if (citations.length === 0) {
 		return { content, sourceList: [] };
 	}
+	const numbered = new Map(citations.map((citation) => [citation.n, citation]));
 
 	// 1. Collect all referenced original indices (1-based) in order of first appearance
 	const seen = new Set<number>();
@@ -110,7 +116,7 @@ export function normalizeCitations(
 		const group = m[1] ?? m[2];
 		if (!group) continue;
 		for (const num of parseCitationGroup(group)) {
-			if (!seen.has(num) && num >= 1 && num <= citations.length) {
+			if (!seen.has(num) && numbered.has(num)) {
 				seen.add(num);
 				appearanceOrder.push(num);
 			}
@@ -140,7 +146,7 @@ export function normalizeCitations(
 
 	// 4. Build source list in appearance order
 	const sourceList: SourceInfo[] = appearanceOrder.map((orig, i) => {
-		const citation = citations[orig - 1]; // citations array is 0-based
+		const citation = numbered.get(orig);
 		return {
 			index: i + 1,
 			name: citation?.name ?? `Source ${orig}`,

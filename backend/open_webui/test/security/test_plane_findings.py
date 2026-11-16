@@ -1,7 +1,6 @@
 """Regression tests for application findings the attack plane recorded.
 
-Each test names its entry in security/plane-findings.md and drives the handler
-through FastAPI, as the plane did, so an unhandled exception reads as a 500.
+Each test drives the handler through FastAPI, as the plane did, so an unhandled exception reads as a 500.
 """
 
 from types import SimpleNamespace

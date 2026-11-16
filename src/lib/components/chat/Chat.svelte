@@ -5,18 +5,33 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
-	import { type ToolState, seedsLiveDefault } from '$lib/utils/toolState';
+	import type { LiveToolState } from '$lib/utils/toolState';
+	import {
+		grantedLiveState,
+		liveConnected,
+		liveDefaultState,
+		liveGranted,
+		liveGrants,
+		prefetchLiveFamilies,
+		type LiveFamily
+	} from '$lib/utils/live-connections';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
-	import { applyFileStatus, applyUploadResult, isAwaitingUpload } from '$lib/utils/messageQueue';
+	import {
+		applyFileStatus,
+		applyUploadResult,
+		isAwaitingUpload,
+		isPending
+	} from '$lib/utils/messageQueue';
+	import { expectSettled, markSettled, turnAnswered } from '$lib/utils/turnSettled';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { deliveredFileName, isDeliveredFile } from '$lib/utils/deliveredFile';
 
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -143,6 +158,8 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
+	import { CHAT_FILE_PANEL, type OpenFileInPanel } from './Messages/Citations/fileCitation'; // [Gradient]
+	import { openFileInPanel } from '$lib/stores/citations'; // [Gradient]
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -159,7 +176,6 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
-	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import EmbeddedChatHistoryDropdown from './EmbeddedChatHistoryDropdown.svelte';
@@ -180,6 +196,13 @@
 	export let onDeleteEmbeddedChat: ((chatId: string) => void | Promise<void>) | null = null;
 	export let onEmbeddedChatTitle: ((chatId: string, title: string) => void | Promise<void>) | null =
 		null;
+
+	// [Gradient] File chips in this chat open in the sources panel; embedded chats have none.
+	setContext(CHAT_FILE_PANEL, ((item) => {
+		if (embedded) return false;
+		openFileInPanel($chatId, item);
+		return true;
+	}) satisfies OpenFileInPanel);
 
 	let loading = true;
 	$: chatContainerId = embedded ? 'note-chat-container' : 'chat-container';
@@ -260,13 +283,20 @@
 		const modelSearchParam =
 			$page.url.searchParams.get('models') || $page.url.searchParams.get('model');
 
+		// [Gradient] A model removed from the tenant must never leave a chat without one:
+		// drop unknown ids (saved chats, settings, a refreshed model list) and fall back to
+		// the user's or tenant's default when nothing is left.
 		if (
-			chatIdProp === '' &&
-			$models.length > 0 &&
-			!selectedModels?.some((modelId) => modelId) &&
-			!modelSearchParam
+			$rawModels.length > 0 &&
+			(chatIdProp === '' ? !modelSearchParam : !loading) &&
+			Array.isArray(selectedModels)
 		) {
-			const fallbackModels = normalizeSelectedModels(selectedModels);
+			const knownModels = selectedModels.filter(
+				(modelId) => !modelId || $rawModels.some((m) => m.id === modelId)
+			);
+			const fallbackModels = knownModels.some((modelId) => modelId)
+				? knownModels
+				: normalizeSelectedModels(knownModels);
 			if (!equal(fallbackModels, selectedModels)) {
 				selectedModels = fallbackModels;
 			}
@@ -368,14 +398,48 @@
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
-	let liveDocumentsState: ToolState = 'off';
-	let liveMailState: ToolState = 'off';
+	let liveDocumentsState: LiveToolState = 'off';
+	let liveMailState: LiveToolState = 'off';
+	// [Gradient] A live family is on only with a grant. Prefetch the grant snapshots when a chat
+	// loads, so a new chat's default and the composer reflect them.
+	const prefetchLiveGrants = () => {
+		const families: LiveFamily[] = [];
+		if ($config?.features?.enable_live_documents) families.push('live_documents');
+		if ($config?.features?.enable_live_mail) families.push('mail');
+		if (families.length) prefetchLiveFamilies(localStorage.token, families);
+	};
+	const setLiveState = (family: LiveFamily, state: LiveToolState) => {
+		if (family === 'mail') liveMailState = state;
+		else liveDocumentsState = state;
+	};
+	// A new chat's families whose grant was still loading when the default was set: once it
+	// arrives with a grant, the family turns on unless the user changed it in the meantime.
+	let liveDefaultWait: { session: number; families: LiveFamily[] } | null = null;
+	$: if (liveDefaultWait) applyLateLiveDefaults($liveGrants);
+	const applyLateLiveDefaults = (grants: Record<string, boolean>) => {
+		if (!liveDefaultWait) return;
+		if (liveDefaultWait.session !== composerSession) {
+			liveDefaultWait = null;
+			return;
+		}
+		const waiting = liveDefaultWait.families.filter((family) => {
+			const granted = liveGranted(grants, family);
+			if (granted === undefined) return true;
+			const state = family === 'mail' ? liveMailState : liveDocumentsState;
+			if (granted && state === 'off') setLiveState(family, 'auto');
+			return false;
+		});
+		liveDefaultWait = waiting.length ? { ...liveDefaultWait, families: waiting } : null;
+	};
+	// The chat's connect card connected a family: the user asked for it, so it is on.
+	let liveConnectedSeen = get(liveConnected)?.seq ?? 0;
+	$: if ($liveConnected && $liveConnected.seq > liveConnectedSeen) {
+		liveConnectedSeen = $liveConnected.seq;
+		setLiveState($liveConnected.family, 'auto');
+	}
 	let webSearchEnabled = false;
-	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
-	let webSearchRequired = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = true;
-	let documentWriterRequired = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
@@ -389,27 +453,25 @@
 	};
 	const currentComposerPreferences = (): ComposerPreferences => ({
 		webSearchEnabled,
-		webSearchRequired,
 		liveDocumentsState,
 		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
-		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
 	});
+	let composerSession = 0;
 	const restoreComposerPreferences = (value: ComposerPreferences) => {
+		composerSession += 1;
 		({
 			webSearchEnabled,
-			webSearchRequired,
 			liveDocumentsState,
 			liveMailState,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled,
-			documentWriterRequired,
 			selectedToolIds,
 			selectedSkillIds,
 			selectedFilterIds
@@ -508,11 +570,6 @@
 	};
 
 	let taskIds = null;
-
-	// [Gradient] Post-turn context-budget estimate from the agent service.
-	// Emitted once per turn over Socket.IO (see backend/utils/agent.py).
-	// Drives the banner above the chat input. Reset on chat switch / new chat.
-	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null = null;
 
 	// Chat Input
 	let prompt = '';
@@ -908,6 +965,7 @@
 
 	const navigateHandler = async () => {
 		noteChatDebug('navigateHandler start');
+		prefetchLiveGrants();
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
 		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
@@ -927,7 +985,6 @@
 		composerInitialized = false;
 		workspaceEnabled = false;
 		acceptedDataWarnings = new Set();
-		contextUsage = null;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -1036,13 +1093,11 @@
 	let lastSavedFeatures = '';
 	$: composerSnapshot = composerPreferences({
 		webSearchEnabled,
-		webSearchRequired,
 		liveDocumentsState,
 		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
-		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -1125,6 +1180,7 @@
 			return;
 		}
 		settingDefaults = true;
+		let liveWaiting: LiveFamily[] = [];
 
 		try {
 			if (!$tools) {
@@ -1136,9 +1192,11 @@
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));
 			}
-			// [Gradient] A new chat starts web search on Auto, or Altijd when the user asks for
-			// it always. Strict data separation starts on Uit: Auto may reach the open internet,
-			// which would lock a fresh chat away from internal documents before anything is sent.
+			// [Gradient] Until the user has chosen (composerTools), the tools the model decides on
+			// start on: web search, the document writer, OneDrive search and mail search. Strict
+			// data separation starts web search off, unless the user turned it on in Settings: it may
+			// reach the open internet, which would lock a fresh chat away from internal documents
+			// before anything is sent. OneDrive and mail search ask for consent on their first use.
 			if (!history?.currentId) {
 				const webSearchAllowed =
 					$config?.features?.enable_web_search &&
@@ -1146,13 +1204,17 @@
 				const always = ($settings?.webSearch ?? null) === 'always';
 				const strict = $config?.features?.feature_strict_data_separation ?? false;
 				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
-				webSearchRequired = Boolean(webSearchAllowed && always);
-			}
-
-			// [Gradient] Document writer reads no external data, including under strict separation.
-			if (!history?.currentId) {
 				documentWriterEnabled = true;
-				documentWriterRequired = false;
+				// OneDrive and mail search start on only with a grant; without one the composer
+				// offers to connect instead. A grant still loading is applied when it arrives.
+				const documentsOffered = Boolean($config?.features?.enable_live_documents);
+				const mailOffered = Boolean($config?.features?.enable_live_mail);
+				const documentsGranted = liveGranted($liveGrants, 'live_documents');
+				const mailGranted = liveGranted($liveGrants, 'mail');
+				liveDocumentsState = liveDefaultState(documentsOffered, documentsGranted);
+				liveMailState = liveDefaultState(mailOffered, mailGranted);
+				if (documentsOffered && documentsGranted === undefined) liveWaiting.push('live_documents');
+				if (mailOffered && mailGranted === undefined) liveWaiting.push('mail');
 			}
 
 			if (selectedModels.length !== 1 && !atSelectedModel) {
@@ -1230,11 +1292,10 @@
 						$config?.features?.enable_web_search &&
 						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 					) {
-						// [Gradient] A default-on web search starts on Altijd; otherwise the chat
-						// keeps the starting state set above.
+						// [Gradient] A default-on web search starts on, also under strict separation;
+						// otherwise the chat keeps the starting state set above.
 						if (model.info.meta.defaultFeatureIds.includes('web_search')) {
 							webSearchEnabled = true;
-							webSearchRequired = true;
 						}
 					}
 
@@ -1246,30 +1307,7 @@
 						codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 					}
 
-					if (
-						model.info?.meta?.capabilities?.['document_writer'] &&
-						$config?.features?.enable_document_writer &&
-						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
-					) {
-						if (model.info.meta.defaultFeatureIds.includes('document_writer')) {
-							documentWriterEnabled = true;
-							documentWriterRequired = true;
-						}
-					}
-
-					// [Gradient] Live tools start on Auto; consent waits for the user's own click.
-					if (
-						seedsLiveDefault(
-							model.info.meta,
-							'live_documents',
-							$config?.features?.enable_live_documents
-						)
-					) {
-						liveDocumentsState = 'auto';
-					}
-					if (seedsLiveDefault(model.info.meta, 'live_mail', $config?.features?.enable_live_mail)) {
-						liveMailState = 'auto';
-					}
+					// [Gradient] The workspace switch follows the model default; it is not a saved composer choice.
 					if (
 						model.info?.meta?.capabilities?.['workspace'] &&
 						isFeatureEnabled('workspace') &&
@@ -1294,6 +1332,9 @@
 					composerPreferences($settings.composerTools, currentComposerPreferences())
 				);
 			}
+			liveDefaultWait = liveWaiting.length
+				? { session: composerSession, families: liveWaiting }
+				: null;
 			settingDefaults = false;
 		}
 	};
@@ -1485,6 +1526,7 @@
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
 				} else if (type === 'chat:tasks:cancel') {
+					markSettled(event.message_id);
 					dismissContextCompactionToast();
 					if (event.message_id === history.currentId) {
 						taskIds = null;
@@ -1598,25 +1640,6 @@
 						} else {
 							message.uiBlocks = [block];
 						}
-					}
-				} else if (type === 'context_usage') {
-					// [Gradient] Post-turn context-budget estimate from the agent
-					// service. Drives the banner above the chat input. Also
-					// stamped onto the message so a frontend-driven history save
-					// preserves it (the backend persists it on `done`; this keeps
-					// the in-memory blob in sync). Mirrors the subagents handler.
-					if (
-						typeof data?.tokens_used === 'number' &&
-						typeof data?.tokens_budget === 'number' &&
-						typeof data?.fraction === 'number'
-					) {
-						const usage = {
-							tokens_used: data.tokens_used,
-							tokens_budget: data.tokens_budget,
-							fraction: data.fraction
-						};
-						contextUsage = usage;
-						message.contextUsage = usage;
 					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
@@ -2319,10 +2342,11 @@
 				// v0.10.2 — fall back to the output items, which getOutputText()
 				// serializes into the same <details type="document"> blocks.
 				// Content-baked documents (pre-refactor chats) still win.
-				const found = extractDocumentsFromMessage(message?.content ?? '');
+				const messageDone = message?.done !== false;
+				const found = extractDocumentsFromMessage(message?.content ?? '', messageDone);
 				const documents = found.length
 					? found
-					: extractDocumentsFromMessage(getOutputText(message?.output));
+					: extractDocumentsFromMessage(getOutputText(message?.output), messageDone);
 				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
 					docs = [
@@ -2366,11 +2390,11 @@
 	};
 
 	const initNewChat = async () => {
+		prefetchLiveGrants();
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
 		acceptedDataWarnings = new Set();
-		contextUsage = null;
 		resetWebSearchConfirmation();
 
 		// Mark the outgoing chat as read before resetting; in-place created chats
@@ -2531,7 +2555,6 @@
 
 		if ($page.url.searchParams.get('web-search') === 'true') {
 			webSearchEnabled = true;
-			webSearchRequired = true;
 		}
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
@@ -2545,7 +2568,6 @@
 		const writerParam = $page.url.searchParams.get('document-writer');
 		if (writerParam !== null) {
 			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
-			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('workspace') === 'true') workspaceEnabled = true;
@@ -2751,19 +2773,6 @@
 					}
 				}
 
-				// [Gradient] Rehydrate the context-usage banner from the
-				// persisted message field (set by the agent backend on `done`).
-				// Reflects the active branch's most recent turn; stays null when
-				// no agent turn recorded one (navigateHandler reset it first).
-				contextUsage = null;
-				const usageBranch = createMessagesList(history, history.currentId);
-				for (let i = usageBranch.length - 1; i >= 0; i--) {
-					if (usageBranch[i]?.contextUsage) {
-						contextUsage = usageBranch[i].contextUsage;
-						break;
-					}
-				}
-
 				// Reconcile active tasks with message state:
 				// If the response is already done, remaining tasks are just background
 				// work (follow-ups, title gen) that shouldn't block the input.
@@ -2904,10 +2913,13 @@
 		followRAF = requestAnimationFrame(step);
 	};
 
+	const INTERRUPT_SETTLE_MS = 10_000;
 	let processingQueueChats = new Set<string>();
+	// [Gradient] Set while a new input interrupts the answer: the stop must not also send the rest of the queue.
+	let interrupting = false;
 
 	const processNextInQueue = async (targetChatId: string) => {
-		if (processingQueueChats.has(targetChatId)) return;
+		if (interrupting || processingQueueChats.has(targetChatId)) return;
 
 		const queue = $chatRequestQueues[targetChatId];
 		if (!queue || queue.length === 0) return;
@@ -2946,7 +2958,7 @@
 	const sendQueuedMessageNow = async (id) => {
 		const queue = $chatRequestQueues[$chatId] ?? [];
 		const item = queue.find((m) => m.id === id);
-		if (!item || (item.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))) {
+		if (!item || (item.files ?? []).some((file) => isPending(file) || file.status === 'error')) {
 			return;
 		}
 
@@ -2954,9 +2966,32 @@
 			...q,
 			[$chatId]: queue.filter((m) => m.id !== id)
 		}));
-		await stopResponse(false);
-		await tick();
+		await interruptResponse();
 		await submitPrompt(item.prompt, item.files);
+	};
+
+	// [Gradient] Stop the answer for a new input. On the agent route the next turn forks from the stopped
+	// message's thread bookmark, which is stored with the cancel, so wait for that before sending.
+	const interruptResponse = async () => {
+		const answer = (history.currentId ? history.messages[history.currentId] : null) as {
+			id: string;
+			role: string;
+			done?: boolean;
+		} | null;
+		const settled =
+			isAgentRouted() && answer?.role === 'assistant' && answer.done !== true
+				? expectSettled(answer.id, INTERRUPT_SETTLE_MS)
+				: null;
+		interrupting = true;
+		try {
+			await stopResponse(false);
+			if (settled && !(await settled)) {
+				console.warn('Stopped answer did not settle before the next input', answer?.id);
+			}
+			await tick();
+		} finally {
+			interrupting = false;
+		}
 	};
 
 	const editQueuedMessage = (id) => {
@@ -3296,6 +3331,12 @@
 			);
 
 			history.messages[message.id] = message;
+
+			// [Gradient] The chat task outlives the answer while it runs post-turn work (follow-ups, title, tags,
+			// memory); that work must not hold the stop button, so the answer's own done releases it.
+			if (turnAnswered(history)) {
+				taskIds = null;
+			}
 
 			await tick();
 			if (shouldAutoScrollResponse()) {
@@ -3664,8 +3705,7 @@
 				return;
 			} else {
 				// Interrupt: stop current generation and proceed
-				await stopResponse();
-				await tick();
+				await interruptResponse();
 			}
 		}
 
@@ -3986,18 +4026,14 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.workspace)
 						? workspaceEnabled
 						: false,
-				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
-				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
-
-				document_writer_required: Boolean(
-					$config?.features?.enable_document_writer &&
-					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
-					documentWriterEnabled &&
-					documentWriterRequired
-				),
-				web_search: webSearchActive,
-				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
-				web_search_required: webSearchActive && webSearchRequired
+				// [Gradient] A family known to have no grant is never sent on.
+				live_documents: $config?.features?.enable_live_documents
+					? grantedLiveState(liveDocumentsState, liveGranted($liveGrants, 'live_documents'))
+					: 'off',
+				live_mail: $config?.features?.enable_live_mail
+					? grantedLiveState(liveMailState, liveGranted($liveGrants, 'mail'))
+					: 'off',
+				web_search: webSearchActive
 			};
 
 		if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
@@ -4280,7 +4316,10 @@
 				await handleOpenAIError(res.error, responseMessage);
 			} else {
 				// Backend returns task_ids (multi-model) or task_id (single model)
-				onToolCallResolved(res);
+				// [Gradient] Unless the answer's done already arrived: the task then only runs post-turn work.
+				if (!turnAnswered(history)) {
+					onToolCallResolved(res);
+				}
 
 				// Backend returns chat_id for new chats — set store + URL.
 				// Only update if the user hasn't navigated to a different chat
@@ -5116,8 +5155,6 @@
 								).length}
 							/>
 
-							<ContextUsageBanner usage={contextUsage} />
-
 							{#if readOnly}
 								<div class="pb-6 z-10">
 									<div class="text-xs text-gray-400 dark:text-gray-500 text-center">
@@ -5131,6 +5168,7 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										agentRouted={isAgentRouted()}
 										{history}
 										{taskIds}
@@ -5144,14 +5182,12 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
-										bind:documentWriterRequired
 										bind:workspaceEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
 										bind:webSearchEnabled
-										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5230,6 +5266,7 @@
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										{history}
 										{taskIds}
 										bind:selectedModels
@@ -5244,12 +5281,10 @@
 										bind:workspaceEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
-										bind:documentWriterRequired
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
 										bind:webSearchEnabled
-										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5310,10 +5345,8 @@
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
 									bind:liveMailState
-									bind:documentWriterRequired
 									bind:workspaceEnabled
 									bind:webSearchEnabled
-									bind:webSearchRequired
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged

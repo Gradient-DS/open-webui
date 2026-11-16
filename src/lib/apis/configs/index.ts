@@ -1443,3 +1443,26 @@ export const getCloudSyncStatus = async (token: string) => {
 
 	return res;
 };
+
+// [Gradient] The global system prompt of every base model without its own.
+export const getSystemPrompt = async (token: string): Promise<{ SYSTEM_PROMPT: string }> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/system_prompt`, {
+		method: 'GET',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw (await res.json()).detail;
+	return res.json();
+};
+
+export const setSystemPrompt = async (
+	token: string,
+	prompt: string
+): Promise<{ SYSTEM_PROMPT: string }> => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/system_prompt`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+		body: JSON.stringify({ SYSTEM_PROMPT: prompt })
+	});
+	if (!res.ok) throw (await res.json()).detail;
+	return res.json();
+};

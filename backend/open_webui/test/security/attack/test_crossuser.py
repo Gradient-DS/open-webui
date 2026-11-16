@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 202
+    assert len(admin_gated_operations()) == 206
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -28,6 +28,17 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
+
+
+def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():
+    route = 'GET /api/v1/users/{user_id}/shared-data'
+    routes, admins = crossuser.targets()
+    assert route in routes and route in admins
+    assert route in seeds.ordinary_targets()
+    assert route not in crossuser._shared()
+    assert route not in seeds.SOEV_BACKED
+    assert route not in seeds.DESTRUCTIVE
+    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
 
 
 @pytest.mark.parametrize('status', [200, 400, 401, 403, 404, 500])
@@ -96,6 +107,20 @@ def test_schedule_control_keeps_the_declared_provider_scope():
     assert request['json']['scope'] == scope
     assert request['json']['connection_id'] == 'owned'
     assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
+
+
+def test_mailbox_control_uses_the_saved_address_and_the_matching_owner(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    ctx = seeds.SeedContext(None, None, seeds.SURFACE, values={'cloud_mailbox_address': 'gedeeld@example.test'})
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(ctx, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    assert request['json'] == {'address': 'gedeeld@example.test'}
+    paths = [route.split(' ', 1)[1], route.split(' ', 1)[1] + '/{address}']
+    assert all(crossuser._owner_key(path, seeds.SURFACE) == 'admin' for path in paths)
+    assert crossuser._owner_key('/api/v1/cloud-sync/connections/{connection_id}/authorize', seeds.SURFACE) == 'user'
+    assert not set(crossuser.expected_refusals()) & {'GET ' + paths[0], route, 'DELETE ' + paths[1]}
 
 
 def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):

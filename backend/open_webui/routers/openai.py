@@ -40,6 +40,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
+from open_webui.soev import system_prompt
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
 from open_webui.utils.anthropic import ANTHROPIC_VERSION, get_anthropic_models, is_anthropic_url
@@ -1506,17 +1507,19 @@ async def generate_chat_completion(
             model_id = base_model_id
 
         params = model_info.params.model_dump()
+        params.pop('system', None)
 
         if params:
-            system = params.pop('system', None)
-
             payload = apply_model_params_to_body_openai(params, payload)
-            if not bypass_system_prompt:
-                payload = await apply_system_prompt_to_body(system, payload, metadata, user)
 
         await check_model_access(user, model_info, bypass_filter)
     else:
         await check_model_access(user, None, bypass_filter)
+
+    # [Gradient] The model's own prompt, else (base models) the global system prompt.
+    if not bypass_system_prompt:
+        system = await system_prompt.for_model(model_info)
+        payload = await apply_system_prompt_to_body(system, payload, metadata, user)
 
     # Check if model is already in app state cache to avoid expensive get_all_models() call
     models = request.app.state.OPENAI_MODELS

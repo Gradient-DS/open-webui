@@ -2,13 +2,11 @@ import { liveDocumentState } from './toolState';
 
 const featureKeys = {
 	webSearchEnabled: 'web_search',
-	webSearchRequired: 'web_search_required',
 	liveDocumentsState: 'live_documents',
 	liveMailState: 'live_mail',
 	imageGenerationEnabled: 'image_generation',
 	codeInterpreterEnabled: 'code_interpreter',
 	documentWriterEnabled: 'document_writer',
-	documentWriterRequired: 'document_writer_required',
 	selectedToolIds: 'tool_ids',
 	selectedSkillIds: 'skill_ids',
 	selectedFilterIds: 'filter_ids'
@@ -16,13 +14,11 @@ const featureKeys = {
 
 export type ComposerPreferences = {
 	webSearchEnabled: boolean;
-	webSearchRequired: boolean;
 	liveDocumentsState: ReturnType<typeof liveDocumentState>;
 	liveMailState: ReturnType<typeof liveDocumentState>;
 	imageGenerationEnabled: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
-	documentWriterRequired: boolean;
 	selectedToolIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
@@ -35,13 +31,11 @@ export function composerPreferences(
 	const values = { ...defaults, ...saved };
 	return {
 		webSearchEnabled: values.webSearchEnabled ?? false,
-		webSearchRequired: values.webSearchRequired ?? false,
 		liveDocumentsState: liveDocumentState(values.liveDocumentsState),
 		liveMailState: liveDocumentState(values.liveMailState),
 		imageGenerationEnabled: values.imageGenerationEnabled ?? false,
 		codeInterpreterEnabled: values.codeInterpreterEnabled ?? false,
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
-		documentWriterRequired: values.documentWriterRequired ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
 		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
 		selectedFilterIds: [...(values.selectedFilterIds ?? [])]

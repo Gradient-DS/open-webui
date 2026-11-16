@@ -17,7 +17,7 @@ from open_webui.utils.auth import get_verified_user
 
 
 @pytest.fixture
-def platform(monkeypatch):
+def platform(monkeypatch, platform_capabilities):
     sent, replies = [], []
 
     def handle(request):

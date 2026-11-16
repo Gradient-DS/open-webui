@@ -36,6 +36,8 @@ V1_CONFIG = {
     'user.permissions': {'chat': {'edit': True}, 'features': {'web_search': False, 'memories': True}},
     'web.search.enable': False,
 }
+DEFAULT = 'mistral-small-4'
+CATALOG = [{'id': 'glm-5-3'}, {'id': 'gemma-4-31b'}, {'id': 'qwen-3-32b'}, {'id': DEFAULT, 'default': True}]
 
 
 class FakeVectors:
@@ -100,6 +102,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
             'models',
             'memories',
             'automations',
+            'folders',
         )
     }
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/owui.db')
@@ -118,11 +121,18 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         modules['models'].Model,
         modules['memories'].Memory,
         modules['automations'].Automation,
+        modules['folders'].Folder,
     ]
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(sync, tables=[table.__table__ for table in tables])
         )
+    from open_webui.soev.migrate_state import schema_heads
+
+    async with engine.begin() as connection:
+        await connection.execute(sa.text('CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY)'))
+        for head in schema_heads():
+            await connection.execute(sa.text('INSERT INTO alembic_version VALUES (:head)'), {'head': head})
     monkeypatch.setattr(database, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     original = httpx.AsyncClient
@@ -133,6 +143,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
     monkeypatch.setenv('SOEV_V2_MIGRATION_ID', MIGRATION)
     monkeypatch.setenv('SOEV_V2_CONFIG', json.dumps(V2_CONFIG))
     monkeypatch.setenv('SOEV_V2_MODEL_MAP', '{}')
+    fake_api.models = CATALOG
     async with engine.begin() as connection:
         for key, value in V1_CONFIG.items():
             # Hand-written text, so a byte-for-byte restore cannot pass by re-serializing.
@@ -181,6 +192,11 @@ async def config_rows(env):
 
 def options(env, **overrides):
     return env.module.options_from_env()
+
+
+def catalog_reads(env) -> bool:
+    """soev-api saw only the model catalog reads of step 3."""
+    return {(request.method, request.url.path) for request in env.api.requests} == {('GET', '/v1/models')}
 
 
 @pytest.mark.asyncio
@@ -285,15 +301,13 @@ async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alem
 
 @pytest.mark.asyncio
 async def test_apply_leaves_the_alembic_version_and_adds_only_prefixed_tables(env):
-    async with env.engine.begin() as connection:
-        await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
-        await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{ALEMBIC_VERSION}')"))
+    before_versions = await rows(env, 'SELECT version_num FROM alembic_version ORDER BY version_num')
     names = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
     before = {name for (name,) in await rows(env, names)}
     await env.module.apply(options(env))
     added = {name for (name,) in await rows(env, names)} - before
     assert added == {f'owui_v2_migration_{t}' for t in ('config_backup', 'migration_marker', 'model_id_backup')}
-    assert await rows(env, 'SELECT version_num FROM alembic_version') == [(ALEMBIC_VERSION,)]
+    assert await rows(env, 'SELECT version_num FROM alembic_version ORDER BY version_num') == before_versions
 
 
 async def config_value(env, key):
@@ -422,6 +436,7 @@ TABLE_DUMPS = {
     'access_grant': 'SELECT id, resource_id FROM access_grant ORDER BY id',
     'user': 'SELECT id, settings FROM user ORDER BY id',
     'automation': 'SELECT id, data FROM automation ORDER BY id',
+    'folder': 'SELECT id, data FROM folder ORDER BY id',
 }
 
 
@@ -466,6 +481,11 @@ async def seed_models(env, monkeypatch):
             " VALUES ('a1', 'alice', 'Daily', :data, 1, 1, 1)",
             {'data': json.dumps({'prompt': 'p', 'model_id': 'zai-org/GLM-5.3', 'rrule': 'FREQ=DAILY'})},
         ),
+        (
+            'INSERT INTO folder (id, user_id, name, data, is_expanded, created_at, updated_at)'
+            " VALUES ('f1', 'alice', 'Project', :data, 0, 1, 1), ('f2', 'alice', 'Empty', NULL, 0, 1, 1)",
+            {'data': json.dumps({'system_prompt': 'Kort.', 'model_ids': ['zai-org/GLM-5.3', 'helper']})},
+        ),
     ]
     async with env.engine.begin() as connection:
         for statement, params in statements:
@@ -483,7 +503,7 @@ async def dumps(env):
 
 
 @pytest.mark.asyncio
-async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env, monkeypatch, capsys):
+async def test_mapped_ids_are_rewritten_and_unmapped_ids_defaulted_everywhere(env, monkeypatch, capsys):
     await seed_models(env, monkeypatch)
     await env.module.apply(options(env))
     data = await dumps(env)
@@ -492,16 +512,21 @@ async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env,
     assert chat['history']['messages']['m.1']['models'] == ['glm-5-3']
     assert chat['history']['messages']['m.2']['model'] == 'glm-5-3'
     assert chat['history']['messages']['m.2']['content'] == 'model: zai-org/GLM-5.3'
-    assert chat['messages'] == [{'model': 'unknown/model'}]
-    assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', 'unknown/model')]
-    assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', 'unknown/model')]
+    assert chat['messages'] == [{'model': DEFAULT}]
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', DEFAULT)]
+    assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', DEFAULT)]
     assert data['access_grant'] == [('g1', 'glm-5-3'), ('g2', 'zai-org/GLM-5.3')]
-    assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', 'unknown/model']}})]
+    assert data['user'] == [('alice', {'ui': {'pinnedModels': ['helper', DEFAULT]}})]
     assert data['automation'][0][1]['model_id'] == 'glm-5-3'
-    assert await config_value(env, 'ui.default_pinned_models') == 'glm-5-3,unknown/model'
+    assert data['folder'] == [('f1', {'system_prompt': 'Kort.', 'model_ids': ['glm-5-3', 'helper']}), ('f2', None)]
+    assert await config_value(env, 'ui.default_pinned_models') == f'glm-5-3,{DEFAULT}'
     output = capsys.readouterr().out
-    assert '3 model ids: unmapped unknown/model' in output
-    assert 'unmapped helper' not in output
+    assert f'3 model ids: default model {DEFAULT}' in output
+    for site in ('chat.chat', 'chat_message.model_id', 'model.base_model_id', 'ui.default_pinned_models'):
+        assert f'3 model ids: defaulted {site} 1\n' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (5 references)' in output
+    assert 'defaulted helper' not in output
+    assert '3 model ids: cleared the default model selection of 1 users' in output
 
 
 @pytest.mark.asyncio
@@ -537,7 +562,247 @@ async def test_restore_gives_back_the_original_model_ids_and_keeps_later_message
     dict_chat = dict(restored['chat'])['c1']
     assert dict_chat['history']['messages'].pop('m.4') == {'role': 'assistant', 'model': 'glm-5-3'}
     assert json.loads(json.dumps(restored)) == expected
+    assert dict(restored['user'])['alice']['ui']['models'] == ['zai-org/GLM-5.3']
     assert await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup') == []
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_a_default_model_the_user_chose_after_the_apply(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    chosen = {'ui': {'models': ['qwen-3-32b'], 'pinnedModels': ['helper', DEFAULT]}}
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text("UPDATE user SET settings = :settings WHERE id = 'alice'"), {'settings': json.dumps(chosen)}
+        )
+    await env.module.restore(MIGRATION)
+    settings = dict((await dumps(env))['user'])['alice']
+    assert settings == {'ui': {'models': ['qwen-3-32b'], 'pinnedModels': ['helper', 'unknown/model']}}
+    assert 'skipped user.settings.cleared alice: changed since' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_an_unmapped_override_row_merges_into_the_default_and_catalog_ids_stay(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('vendor/retired-1', 'alice', NULL, 'Retired', '{}', '{}', 1, 1, 1),"
+                " ('qwen-3-32b', 'alice', NULL, 'Qwen', '{}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
+                " created_at) VALUES ('g6', 'model', 'vendor/retired-1', 'group', 'eng', 'read', 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO chat_message (id, chat_id, role, model_id, created_at, updated_at)'
+                " VALUES ('m.4', 'c1', 'assistant', 'qwen-3-32b', 1, 1)"
+            )
+        )
+    active_sql = 'SELECT id, is_active FROM model WHERE base_model_id IS NULL ORDER BY id'
+    original = (await dumps(env), await rows(env, active_sql))
+    await env.module.apply(options(env))
+    data = await dumps(env)
+    assert await rows(env, active_sql) == [('glm-5-3', 1), ('qwen-3-32b', 1), ('vendor/retired-1', 0)]
+    assert ('g6', DEFAULT) in data['access_grant']
+    assert ('m.4', 'qwen-3-32b') in data['chat_message']
+    output = capsys.readouterr().out
+    merged = f'merged model vendor/retired-1: unmapped, merged into the default {DEFAULT}; 1 grants moved to it'
+    assert f'3 model ids: {merged}, vendor/retired-1 deactivated' in output
+    assert '3 model ids: defaulted access_grant.resource_id 1\n' in output
+    assert '3 model ids: defaulted model.is_active 1\n' in output
+    assert 'qwen-3-32b' not in output
+    await env.module.restore(MIGRATION)
+    assert (await dumps(env), await rows(env, active_sql)) == original
+
+
+PROMPT_ROWS_SQL = 'SELECT id, user_id, base_model_id, name, params, is_active FROM model ORDER BY id'
+
+
+async def seed_prompts(env, monkeypatch, *, same: bool = False):
+    """v1 base-model rows with and without a system prompt, and an assistant with its own. same: the prompted
+    base models share one prompt (whitespace aside), as most tenants do."""
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps({'v1/gemma': 'gemma-4-31b'}))
+    env.api.models = [{**entry, 'label': 'GLM-5.3'} if entry['id'] == 'glm-5-3' else entry for entry in CATALOG]
+    oldest, gemma = ('Kwink.', ' Kwink.\n') if same else ('Oud.', 'Eigen.')
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('v1/oldest', 'admin', NULL, 'Oldest', :oldest, '{}', 1, 1, 50),"
+                " ('v1/gemma', 'admin', NULL, 'Gemma', :gemma, '{}', 1, 2, 2),"
+                " ('v1/empty', 'admin', NULL, 'Empty', '{\"system\": \" \"}', '{}', 1, 9, 9),"
+                " ('qwen-3-32b', 'admin', NULL, 'Qwen', '{\"temperature\": 0.2}', '{}', 1, 1, 1),"
+                " ('helper', 'alice', 'v1/gemma', 'Helper', '{\"system\": \"Assistent.\"}', '{}', 1, 10, 10)"
+            ),
+            {'oldest': json.dumps({'system': oldest}), 'gemma': json.dumps({'system': gemma, 'top_k': 3})},
+        )
+        if not same:
+            await connection.execute(
+                sa.text(
+                    'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at,'
+                    " updated_at) VALUES ('v1/latest', 'admin', NULL, 'Latest', '{\"system\": \"Nieuwste.\"}',"
+                    " '{}', 1, 5, 5)"
+                )
+            )
+
+
+async def prompt_rows(env):
+    return {row[0]: (*row[1:4], json.loads(row[4]), row[5]) for row in await rows(env, PROMPT_ROWS_SQL)}
+
+
+@pytest.mark.asyncio
+async def test_one_distinct_prompt_becomes_the_global_one_and_every_own_prompt_is_cleared(env, monkeypatch, capsys):
+    """Prompts equal but for whitespace are one candidate; the renamed row is cleared too, assistants keep theirs."""
+    await seed_prompts(env, monkeypatch, same=True)
+    original = (await rows(env, PROMPT_ROWS_SQL), await config_rows(env))
+    await env.module.plan(options(env))
+    output = capsys.readouterr().out
+    assert '3 system prompt: 1 distinct base-model system prompts\n' in output
+    assert '3 system prompt: [1] 6 chars, on v1/oldest (Oldest, updated 1970-01-01 00:00 UTC); v1/gemma' in output
+    assert '----- [1] begin -----\nKwink.\n----- [1] end -----\n' in output
+    assert '3 system prompt: kept as the global prompt: the only one\n' in output
+    assert '3 model ids: own system prompt cleared on gemma-4-31b, v1/oldest\n' in output
+    assert (await rows(env, PROMPT_ROWS_SQL), await config_rows(env)) == original
+    await env.module.apply(options(env))
+    assert '3 model ids: global system prompt: 6 chars\n' in capsys.readouterr().out
+    assert await config_value(env, 'models.system_prompt') == 'Kwink.'
+    after = await prompt_rows(env)
+    assert after['gemma-4-31b'][3] == {'top_k': 3}
+    assert after['v1/oldest'][3] == {}
+    assert after['v1/empty'][3] == {'system': ' '}
+    assert after['helper'][3] == {'system': 'Assistent.'}
+    # No catalog model gets a row of its own for the prompt.
+    assert 'glm-5-3' not in after and DEFAULT not in after
+    assert await env.module.restore(MIGRATION) == 0
+    assert (await rows(env, PROMPT_ROWS_SQL), await config_rows(env)) == original
+
+
+@pytest.mark.asyncio
+async def test_several_prompts_without_a_choice_stop_the_apply_before_any_write(env, monkeypatch, capsys):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_prompts(env, monkeypatch)
+    before = (await config_rows(env), await dumps(env))
+    await env.module.plan(options(env))
+    output = capsys.readouterr().out
+    # Most recently updated first.
+    assert output.index('[1] 4 chars, on v1/oldest') < output.index('[2] 9 chars, on v1/latest')
+    assert output.index('[2] 9 chars, on v1/latest') < output.index('[3] 6 chars, on v1/gemma')
+    assert '----- [2] begin -----\nNieuwste.\n----- [2] end -----\n' in output
+    assert '3 system prompt: an apply would stop: 3 different base-model system prompts' in output
+    assert 'global system prompt' not in output
+    with pytest.raises(MigrationError, match='set SOEV_V2_SYSTEM_PROMPT'):
+        await env.module.apply(options(env))
+    assert (await config_rows(env), await dumps(env)) == before
+    assert await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'") == []
+
+
+@pytest.mark.parametrize(('choice', 'kept'), [('v1/latest', 'Nieuwste.'), ('v1/gemma', 'Eigen.'), ('none', None)])
+@pytest.mark.asyncio
+async def test_the_chosen_base_models_prompt_is_kept_and_none_keeps_none(env, monkeypatch, capsys, choice, kept):
+    await seed_prompts(env, monkeypatch)
+    monkeypatch.setenv('SOEV_V2_SYSTEM_PROMPT', choice)
+    await env.module.plan(options(env))
+    assert f'3 system prompt: kept as the global prompt: {choice}\n' in capsys.readouterr().out
+    await env.module.apply(options(env))
+    assert await config_value(env, 'models.system_prompt') == kept
+    after = await prompt_rows(env)
+    assert [model_id for model_id, row in after.items() if 'system' in row[3]] == ['helper', 'v1/empty']
+
+
+@pytest.mark.asyncio
+async def test_a_choice_without_a_prompt_names_the_ones_with_one(env, monkeypatch):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_prompts(env, monkeypatch)
+    monkeypatch.setenv('SOEV_V2_SYSTEM_PROMPT', 'v1/empty')
+    with pytest.raises(MigrationError, match='names v1/empty, which has no system prompt; base models with one: v1/'):
+        await env.module.apply(options(env))
+
+
+@pytest.mark.asyncio
+async def test_without_any_base_model_prompt_there_is_no_global_one(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    output = capsys.readouterr().out
+    assert '3 model ids: global system prompt: none\n' in output
+    assert 'own system prompt cleared' not in output
+    assert await config_value(env, 'models.system_prompt') is None
+    assert [row[0] for row in await rows(env, PROMPT_ROWS_SQL)] == ['glm-5-3', 'helper', 'legacy']
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_what_an_admin_changed_since(env, monkeypatch, capsys):
+    await seed_prompts(env, monkeypatch, same=True)
+    await env.module.apply(options(env))
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text('UPDATE model SET params = \'{"system": "Eigen."}\' WHERE id = \'v1/oldest\''))
+        await connection.execute(sa.text("UPDATE config SET value = '\"Nieuw.\"' WHERE key = 'models.system_prompt'"))
+    await env.module.restore(MIGRATION)
+    after = await prompt_rows(env)
+    assert after['v1/oldest'][3] == {'system': 'Eigen.'}
+    assert after['v1/gemma'][3] == {'system': ' Kwink.\n', 'top_k': 3}
+    assert await config_value(env, 'models.system_prompt') == 'Nieuw.'
+    output = capsys.readouterr().out
+    assert 'model ids restored: skipped config.models.system_prompt: changed since' in output
+    assert 'model ids restored: skipped model.params.system.cleared v1/oldest: changed since' in output
+
+
+@pytest.mark.asyncio
+async def test_restore_still_undoes_the_earlier_per_model_copy(env, monkeypatch):
+    """A migration run with the per-model copy (#482) recorded model.created and model.params.system."""
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('qwen-3-32b', 'admin', NULL, 'Qwen', '{\"system\": \"Kwink.\"}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text('UPDATE model SET params = \'{"system": "Kwink.", "top_k": 3}\' WHERE id = \'glm-5-3\'')
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO owui_v2_migration_model_id_backup'
+                ' (migration_id, site, row_id, path, old_value, new_value, created_at) VALUES'
+                " (:id, 'model.created', 'qwen-3-32b', '[\"params\", \"system\"]', 'null', '\"Kwink.\"', 1),"
+                " (:id, 'model.params.system', 'glm-5-3', '[\"params\", \"system\"]', 'null', '\"Kwink.\"', 1)"
+            ),
+            {'id': MIGRATION},
+        )
+    await env.module.restore(MIGRATION)
+    after = await prompt_rows(env)
+    assert 'qwen-3-32b' not in after
+    assert after['zai-org/GLM-5.3'][3] == {'top_k': 3}
+
+
+@pytest.mark.parametrize(
+    ('catalog', 'message'),
+    [
+        ([entry for entry in CATALOG if not entry.get('default')], 'marks no default model'),
+        ([{'id': 'zai-org/GLM-5.3', 'default': True}], 'rewrites the default model zai-org/GLM-5.3'),
+    ],
+)
+@pytest.mark.asyncio
+async def test_without_a_usable_default_model_the_run_fails_before_any_write(env, monkeypatch, catalog, message):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_models(env, monkeypatch)
+    env.api.models = catalog
+    before = (await config_rows(env), await dumps(env))
+    for run in (env.module.plan, env.module.apply):
+        with pytest.raises(MigrationError, match=message):
+            await run(options(env))
+    assert (await config_rows(env), await dumps(env)) == before
+    assert await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'") == []
 
 
 @pytest.mark.parametrize(
@@ -842,7 +1107,7 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     assert await env.module.plan(options(env)) == 0
     after = (await config_rows(env), await dumps(env), await rows(env, 'SELECT * FROM file ORDER BY id'))
     assert after == before
-    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert catalog_reads(env) and env.redis.sets == [] and env.embedded == []
     tables = await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'")
     assert tables == []
     output = capsys.readouterr().out
@@ -850,7 +1115,7 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     assert '2 config switch: openai.enable = false' in output
     assert '3 model ids: map zai-org/GLM-5.3 -> glm-5-3' in output
     assert '3 model ids: chat.chat 3' in output
-    assert '3 model ids: unmapped unknown/model' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (4 references)' in output
     assert f'5 re-ingest: {local.id}: failed 1, to check 6' in output
     assert '8 sign-out: every user' in output
 
@@ -919,12 +1184,12 @@ async def test_models_mode_rewrites_only_model_ids_and_restore_undoes_it(env, mo
     data = await dumps(env)
     chat = dict(data['chat'])['c1']
     assert chat['models'] == ['zai-org/glm-5.3', 'helper']
-    assert data['chat_message'] == [('m.1', None), ('m.2', 'zai-org/glm-5.3'), ('m.3', 'unknown/model')]
-    assert data['model'] == [('helper', 'zai-org/glm-5.3'), ('legacy', 'unknown/model'), ('zai-org/glm-5.3', None)]
-    assert await config_value(env, 'ui.default_pinned_models') == 'zai-org/glm-5.3,unknown/model'
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'zai-org/glm-5.3'), ('m.3', DEFAULT)]
+    assert data['model'] == [('helper', 'zai-org/glm-5.3'), ('legacy', DEFAULT), ('zai-org/glm-5.3', None)]
+    assert await config_value(env, 'ui.default_pinned_models') == f'zai-org/glm-5.3,{DEFAULT}'
     unchanged = [row for row in await config_rows(env) if row[0] != 'ui.default_pinned_models']
     assert unchanged == [row for row in config if row[0] != 'ui.default_pinned_models']
-    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert catalog_reads(env) and env.redis.sets == [] and env.embedded == []
     assert await rows(env, 'SELECT step FROM owui_v2_migration_migration_marker ORDER BY step') == [
         ('model_ids',),
         ('snapshot',),
@@ -935,6 +1200,18 @@ async def test_models_mode_rewrites_only_model_ids_and_restore_undoes_it(env, mo
     assert await env.module.restore(HANDLES) == 0
     assert await dumps(env) == original
     assert await config_rows(env) == config
+
+
+@pytest.mark.asyncio
+async def test_models_mode_maps_the_users_default_model_instead_of_clearing_it(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    original = await dumps(env)
+    assert await env.module.apply_models(handles_options(env, monkeypatch)) == 0
+    settings = dict((await dumps(env))['user'])['alice']
+    assert settings == {'ui': {'models': ['zai-org/glm-5.3'], 'pinnedModels': ['helper', DEFAULT]}}
+    assert 'cleared the default model selection' not in capsys.readouterr().out
+    assert await env.module.restore(HANDLES) == 0
+    assert await dumps(env) == original
 
 
 @pytest.mark.asyncio
@@ -1025,6 +1302,8 @@ async def test_models_dry_run_previews_and_writes_nothing(env, monkeypatch, caps
     output = capsys.readouterr().out
     assert '3 model ids: map zai-org/GLM-5.3 -> zai-org/glm-5.3' in output
     assert '3 model ids: chat_message.model_id 1' in output
+    assert '3 model ids: defaulted chat_message.model_id 1' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (5 references)' in output
 
 
 ALICE, BOB = 'owui-attachments-alice', 'owui-attachments-bob'
@@ -1115,11 +1394,44 @@ async def test_uploads_mode_ingests_each_attached_upload_as_its_owner_and_skips_
     assert (await file_meta(env, 'gone'))['collection_name'] == 'file-gone'
     assert (await file_meta(env, 'in-kb'))['collection_name'] == 'file-in-kb'
     output = capsys.readouterr().out
-    assert '5 chat uploads: 6 files attached in chats, 5 with a file row' in output
-    assert '5 chat uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
-    assert '5 chat uploads: original missing, skipped alice/gone\n' in output
+    assert '5 uploads: 6 files attached in chats, folders or assistants, 5 with a file row' in output
+    assert '5 uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
+    assert '5 uploads: original missing, skipped alice/gone\n' in output
     assert '.pdf' not in output
-    assert 'chat uploads running 3 | chat uploads failed 0 | chat upload originals missing 1' in output
+    assert 'uploads running 3 | uploads failed 0 | upload originals missing 1' in output
+
+
+@pytest.mark.asyncio
+async def test_an_upload_only_a_folder_lists_is_ingested_and_pointed_at_its_owners_collection(env, monkeypatch):
+    kb = await seed_uploads(env, monkeypatch)
+    files = importlib.import_module('open_webui.models.files')
+    path = env.tmp_path / 'folder-only.pdf'
+    path.write_bytes(b'original folder-only')
+    meta = {'name': 'folder-only.pdf', 'content_type': 'application/pdf', 'size': 1, 'status': 'completed'}
+    await files.Files.insert_new_file(
+        'alice', files.FileForm(id='folder-only', filename='folder-only.pdf', path=str(path), meta=meta)
+    )
+    data = {'files': [upload('folder-only'), upload('picked', knowledge_id=kb.id), {'type': 'collection', 'id': kb.id}]}
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO folder (id, user_id, name, data, is_expanded, created_at, updated_at)'
+                " VALUES ('f1', 'alice', 'Project', :data, 0, 1, 1)"
+            ),
+            {'data': json.dumps(data)},
+        )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert submitted_uploads(env) == [(ALICE, 'chat-level'), (ALICE, 'folder-only'), (ALICE, 'loose'), (BOB, 'bobs')]
+    assert (await file_meta(env, 'folder-only'))['collection_name'] == ALICE
+
+
+def test_folder_uploads_skip_kb_picks_and_odd_shapes():
+    from open_webui.soev.migrate_uploads import folder_file_ids
+
+    data = {'files': [upload('up'), upload('kb-file', knowledge_id='kb'), {'type': 'note', 'id': 'n'}, 'odd']}
+    assert folder_file_ids(data) == {'up'}
+    assert folder_file_ids({'files': None}) == set()
+    assert folder_file_ids({}) == set()
 
 
 @pytest.mark.asyncio
@@ -1135,7 +1447,7 @@ async def test_an_uploads_rerun_submits_nothing_twice_and_ends_once_jobs_finish(
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
     assert job_posts(env) == []
     output = capsys.readouterr().out
-    assert 'ingested 3' in output and 'chat uploads running 0' in output
+    assert 'ingested 3' in output and 'uploads running 0' in output
 
 
 @pytest.mark.asyncio
@@ -1168,8 +1480,8 @@ async def test_an_upload_soev_api_refuses_is_reported_and_the_run_goes_on(env, m
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
     assert submitted_uploads(env) == [(ALICE, 'chat-level'), (BOB, 'bobs')]
     output = capsys.readouterr().out
-    assert '5 chat uploads: failed alice/loose: unsupported_media_type\n' in output
-    assert '5 chat uploads: failed 1 (unsupported_media_type 1)' in output
+    assert '5 uploads: failed alice/loose: unsupported_media_type\n' in output
+    assert '5 uploads: failed 1 (unsupported_media_type 1)' in output
     assert '.pdf' not in output
 
 
@@ -1181,8 +1493,8 @@ async def test_the_uploads_dry_run_reads_only_the_database(env, monkeypatch, cap
     assert await rows(env, 'SELECT * FROM file ORDER BY id') == before
     assert env.api.requests == []
     output = capsys.readouterr().out
-    assert '5 chat uploads: knowledge base file 1, no file row 1, to check 4' in output
-    assert '5 chat uploads: to check 1.0 MB' in output
+    assert '5 uploads: knowledge base file 1, no file row 1, to check 4' in output
+    assert '5 uploads: to check 1.0 MB' in output
 
 
 @pytest.mark.asyncio
@@ -1192,7 +1504,7 @@ async def test_the_full_apply_ingests_chat_uploads_too(env, monkeypatch, capsys)
     assert {(ALICE, 'loose'), (BOB, 'bobs')} <= set(submitted_uploads(env))
     await finish_jobs(env, monkeypatch)
     assert await env.module.apply(options(env)) == 0
-    assert 'chat uploads failed 0 | chat upload originals missing 1' in capsys.readouterr().out
+    assert 'uploads failed 0 | upload originals missing 1' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1255,3 +1567,104 @@ def test_a_stored_ingest_error_is_reported_by_its_code_alone(error, code):
     from open_webui.soev.migrate_ingest import stored_code
 
     assert stored_code(SimpleNamespace(meta={'error': error}, data=None)) == code
+
+
+@pytest.mark.asyncio
+async def test_assistant_files_are_migrated_into_the_assistants_collection_and_rerunnable(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+            ),
+            {
+                'id': 'field-guide',
+                'owner': 'alice',
+                'name': 'Field guide',
+                'params': '{}',
+                'meta': json.dumps(
+                    {
+                        'knowledge': [
+                            upload('quiet'),
+                            upload('quiet'),
+                            {'type': 'collection', 'id': 'not-a-file'},
+                            {'type': 'note', 'id': 'not-a-file'},
+                        ]
+                    }
+                ),
+            },
+        )
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert ('owui-assistant-field-guide', 'quiet') in submitted_uploads(env)
+    assert (ALICE, 'quiet') not in submitted_uploads(env)
+    # The chat attachments pointer stays where chat uploads look.
+    assert (await file_meta(env, 'quiet'))['collection_name'] == 'file-quiet'
+    submitted = len(job_posts(env))
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert len(job_posts(env)) == submitted
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
+    assert len(job_posts(env)) == submitted
+
+
+@pytest.mark.asyncio
+async def test_assistant_file_is_submitted_as_the_model_owner_and_shared_with_the_assistants_users(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+            ),
+            {
+                'id': 'field-guide',
+                'owner': 'alice',
+                'name': 'Field guide',
+                'params': '{}',
+                'meta': json.dumps({'knowledge': [upload('quiet')]}),
+            },
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, '
+                "created_at) VALUES ('g1', 'model', 'field-guide', 'group', 'readers', 'read', 1)"
+            )
+        )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert submitted_uploads(env).count(('owui-assistant-field-guide', 'quiet')) == 1
+    assert {key for key, file_id in submitted_uploads(env) if file_id == 'quiet'} == {'owui-assistant-field-guide'}
+    collection = env.api.collections['owui-assistant-field-guide']
+    assert collection['created_by'] == 'owui:user:alice'
+    assert 'owui:group:readers' in collection['principals']
+    assert collection['writers'] == ['owui:user:alice']
+
+
+@pytest.mark.asyncio
+async def test_a_file_in_two_assistants_lands_only_in_its_owners_without_losing_jobs(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        for owner in ('alice', 'bob'):
+            await connection.execute(
+                sa.text(
+                    'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                    'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+                ),
+                {
+                    'id': 'guide-' + owner,
+                    'owner': owner,
+                    'name': 'Field guide',
+                    'params': '{}',
+                    'meta': json.dumps({'knowledge': [upload('quiet')]}),
+                },
+            )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert len([item for item in submitted_uploads(env) if item[1] == 'quiet']) == 1
+    await finish_jobs(env, monkeypatch)
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
+    # Bob's assistant holds Alice's file: it never lands there (`soev/assistant_files.py`).
+    assert [(key, file_id) for key, file_id in submitted_uploads(env) if file_id == 'quiet'] == [
+        ('owui-assistant-guide-alice', 'quiet'),
+    ]

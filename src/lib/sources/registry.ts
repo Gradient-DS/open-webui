@@ -15,6 +15,9 @@ export interface SourceProvider {
 	icon: ComponentType;
 	startParam: string;
 	pick(): Promise<PickedScope[] | null>;
+	// The same picker without opening a window, for when no click started it
+	// (a new knowledge base opening its picker). Rejects when it would need one.
+	pickSilently?(): Promise<PickedScope[] | null>;
 	warmUp?(): Promise<void>;
 	needsReconnectOn: string[];
 }
@@ -26,7 +29,8 @@ export const DEFAULT_RECONNECT_CODES = [
 	'suspended:reauth',
 	'pending',
 	'revoked',
-	'access_revoked',
+	'reauth_required',
+	'refresh_rejected',
 	'credential_unusable',
 	'owner_mismatch'
 ];
@@ -40,6 +44,10 @@ export const providers: Record<string, SourceProvider> = {
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
 			const items = await openOneDriveItemPicker();
+			return items?.map(oneDriveScope) ?? null;
+		},
+		async pickSilently() {
+			const items = await openOneDriveItemPicker({ allowPopup: false });
 			return items?.map(oneDriveScope) ?? null;
 		}
 	},

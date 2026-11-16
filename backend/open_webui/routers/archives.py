@@ -10,6 +10,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.config import Config
 from open_webui.models.user_archives import (
     UserArchives,
@@ -19,6 +20,7 @@ from open_webui.models.user_archives import (
     UpdateArchiveForm,
 )
 from open_webui.services.archival import ArchiveService
+from open_webui.utils.access_control import can_access_admin_chats
 from open_webui.utils.auth import get_admin_user
 
 from pydantic import BaseModel
@@ -26,6 +28,12 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def require_content_access(user, owner_id: str) -> None:
+    """Another user's archived chats are readable only with admin chat access."""
+    if owner_id != user.id and not can_access_admin_chats(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 
 ####################
@@ -180,6 +188,7 @@ async def get_archive(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='Archive not found',
         )
+    require_content_access(user, archive.user_id)
 
     return archive
 
@@ -205,12 +214,14 @@ async def export_archive_chats(
             detail='User archival is not enabled',
         )
 
-    chats = await ArchiveService.get_exportable_chats(archive_id)
-    if chats is None:
+    archive = await UserArchives.get_archive_by_id(archive_id)
+    if archive is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='Archive not found',
         )
+    require_content_access(user, archive.user_id)
+    chats = archive.data.get('chats', [])
 
     # Return the raw chats array - same format as GET /api/v1/chats/all
     return JSONResponse(content=chats)
@@ -235,6 +246,8 @@ async def create_user_archive(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
         )
+    # A snapshot of a living user's chats is a read of them; offboarding archives via DELETE /users/{id}.
+    require_content_access(user, user_id)
 
     # Use default retention if not specified
     retention_days = form_data.retention_days
@@ -281,6 +294,22 @@ async def update_archive(
             detail='User archival is not enabled',
         )
 
+    from open_webui.services.archival.resources import set_expiry
+
+    current = await UserArchives.get_archive_by_id(archive_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail='Archive not found')
+    updated = current.model_copy(deep=True)
+    if form_data.never_delete is not None:
+        updated.never_delete = form_data.never_delete
+    if form_data.retention_days is not None:
+        updated.retention_days = form_data.retention_days
+    if not updated.never_delete and updated.retention_days is None:
+        updated.retention_days = await Config.get('admin.default_archive_retention_days')
+        form_data = form_data.model_copy(update={'retention_days': updated.retention_days})
+    updated.expires_at = None if updated.never_delete else updated.created_at + updated.retention_days * 86400
+    if not updated.restored:
+        await set_expiry(updated)
     archive = await UserArchives.update_archive(archive_id, form_data)
     if not archive:
         raise HTTPException(
@@ -309,7 +338,9 @@ async def delete_archive(
             detail='User archival is not enabled',
         )
 
-    success = await UserArchives.delete_archive(archive_id)
+    from open_webui.services.archival.resources import delete_archive as delete_archived_data
+
+    success = await delete_archived_data(archive_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

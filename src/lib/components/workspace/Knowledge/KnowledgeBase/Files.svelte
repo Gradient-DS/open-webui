@@ -16,6 +16,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -77,6 +78,9 @@
 	// bring in, listed greyed out under the synced ones with the reason.
 	export let skippedItems: SkippedItem[] = [];
 	export let skippedProvider = '';
+	// The source's content schedule, so a writer can retry the failed files from here.
+	export let skippedSource: Schedule | null = null;
+	let showSkipped = false;
 	// [Gradient] Set inside a cloud source whose run is live: files show up
 	// as they land, so the listing says more is coming.
 	export let syncing: FolderProgress | true | null = null;
@@ -126,19 +130,19 @@
 		const pair = dirPair(dir);
 		return pair ? sourcePairItem(pair) : directoryItem(dir.id, dir.name, dir.child_count ?? 0);
 	};
-	// Sources are removable where their menu offers Remove (admins); other
-	// folders only where the structure is editable. Files inside a synced
-	// folder stay read-only.
+	// Sources are removable where their menu offers Remove (KB writers, who
+	// alone get a selection); other folders only where the structure is
+	// editable. Files inside a synced folder stay read-only.
 	const isDirSelectable = (dir: DirectoryItem) =>
-		!dir.placeholder && (dir.schedule_id ? isAdmin && !!dirPair(dir) : structureEditable);
-	const isSourceSelectable = () => !!selection && isAdmin;
+		!dir.placeholder && (dir.schedule_id ? !!dirPair(dir) : structureEditable);
+	const isSourceSelectable = () => !!selection;
 
 	// Selection order mirrors render order (folders, single-file sources,
 	// files) so Shift-range and drag-paint spans behave predictably.
 	let orderedItems: SelectableItem[] = [];
 	$: {
 		// Rebuild when any selectability gate changes, not just the rows.
-		void [structureEditable, isAdmin, sourcePairs, selection];
+		void [structureEditable, sourcePairs, selection];
 		orderedItems = searchMode
 			? shownFiles.filter(isSelectable).map(buildItem)
 			: [
@@ -246,7 +250,7 @@
 				busy={syncBusy}
 				{isAdmin}
 				selectionActive={!!selection}
-				selectable={!!selection && isAdmin}
+				selectable={!!selection}
 				selected={(selection && $selectedStore?.has(sourcePairItem(pair).key)) ?? false}
 				checkboxVisible={!!$selectionModeStore}
 				onToggleSelect={() => selection?.toggle(sourcePairItem(pair))}
@@ -404,17 +408,28 @@
 	{/if}
 
 	<!-- Skipped files: in the source, not in the knowledge base -->
+	<!-- [Gradient] Collapsed by default, so a folder with skipped files does not read as failed. -->
 	{#if !searchMode && skippedItems.length > 0}
 		<div
-			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			class="mx-2 mt-3 mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
 			role="status"
 		>
-			<ExclamationTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-			<span
-				>{$i18n.t('{{count}} files in this folder could not be synced', {
-					count: skippedItems.length
-				})}</span
+			<button
+				type="button"
+				class="flex min-w-0 items-center gap-1.5 hover:text-gray-700 dark:hover:text-gray-200"
+				aria-expanded={showSkipped}
+				on:click={() => (showSkipped = !showSkipped)}
 			>
+				<ExclamationTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+				<span class="text-left"
+					>{$i18n.t('{{count}} files in this folder could not be synced', {
+						count: skippedItems.length
+					})}</span
+				>
+				<ChevronDown
+					className="size-3 shrink-0 transition-transform {showSkipped ? 'rotate-180' : ''}"
+				/>
+			</button>
 			<Tooltip
 				content={$i18n.t(
 					'These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.',
@@ -423,32 +438,44 @@
 			>
 				<span class="cursor-help underline decoration-dotted">{$i18n.t('Why?')}</span>
 			</Tooltip>
+			{#if syncAccess && skippedSource}
+				<button
+					type="button"
+					class="rounded-lg border px-2 py-0.5 disabled:opacity-50 dark:border-gray-700"
+					disabled={syncBusy}
+					on:click={() => onSourceAction([skippedSource], 'retry_failed')}
+					>{$i18n.t('Retry failed files')}</button
+				>
+			{/if}
 		</div>
-		{#each skippedItems as item (item.source_id)}
-			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
-				{#if selection}<SelectCheckbox selectable={false} />{/if}
-				<div class="flex items-center p-1">
-					<SourceItemIcon
-						kind="file"
-						provider={enclosingProvider}
-						className="size-3.5 text-gray-400"
-					/>
-				</div>
-				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
-					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">
-						{item.name || item.source_id}
+		{#if showSkipped}{#each skippedItems as item (item.source_id)}
+				<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
+					{#if selection}<SelectCheckbox selectable={false} />{/if}
+					<div class="flex items-center p-1">
+						<SourceItemIcon
+							kind="file"
+							provider={enclosingProvider}
+							className="size-3.5 text-gray-400"
+						/>
 					</div>
-					<Tooltip
-						content={$i18n.t(skippedExplainer(item.code), { provider: skippedProvider })}
-						className="shrink-0"
-					>
-						<span
-							class="cursor-help rounded-lg bg-amber-500/15 px-1.5 text-xs text-amber-700 dark:text-amber-300"
-							>{$i18n.t(skippedReason(item.code))}</span
+					<!-- On a narrow screen the reason wraps under the name. -->
+					<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 p-2 text-left">
+						<div class="min-w-0 max-w-full truncate text-sm text-gray-500 dark:text-gray-400">
+							{item.name || item.source_id}
+						</div>
+						<Tooltip
+							content={$i18n.t(skippedExplainer(item.code, item.reason), {
+								provider: skippedProvider
+							})}
+							className="shrink-0"
 						>
-					</Tooltip>
+							<span
+								class="cursor-help rounded-lg bg-amber-500/15 px-1.5 text-xs text-amber-700 dark:text-amber-300"
+								>{$i18n.t(skippedReason(item.code, item.reason))}</span
+							>
+						</Tooltip>
+					</div>
 				</div>
-			</div>
-		{/each}
+			{/each}{/if}
 	{/if}
 </div>

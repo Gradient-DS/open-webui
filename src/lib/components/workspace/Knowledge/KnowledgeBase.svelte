@@ -2,6 +2,7 @@
 	import { takeKnowledgeDetail, takeKnowledgeItems } from './utils/prefetch';
 	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
+	import { providerBadge } from '$lib/sources/badges';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -21,6 +22,7 @@
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
+		deleteKnowledgeById,
 		removeFileFromKnowledgeById,
 		resetKnowledgeById,
 		updateKnowledgeById,
@@ -46,7 +48,7 @@
 	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import { removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
+	import { autoPickProvider, removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
 	import type { SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
@@ -68,7 +70,8 @@
 		finishedRuns,
 		runIsLive,
 		syncableSources,
-		syncAllNotice
+		syncAllNotice,
+		syncStatusApplies
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 	import { runProgress, skippedRunKey } from './utils/sourceState';
@@ -106,8 +109,16 @@
 	let destroyed = false;
 	let closeAuthorization: (() => void) | undefined;
 	let syncStatusError = false;
+	let syncStatusLoaded = false;
+	let showDeleteDisconnected = false;
 	let syncStatusRequest = 0;
-	$: activeProvider = requestedProvider ?? (knowledge?.type ? providers[knowledge.type] : null);
+	$: activeProvider = providerFor(knowledge?.type);
+	$: cloudBadge = providerBadge(knowledge?.type);
+	$: cloudNotConnected =
+		syncStatusLoaded &&
+		!syncStatusError &&
+		!!cloudBadge &&
+		!schedules.some((schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked');
 	$: activeProviderEnabled =
 		!!activeProvider && $enabledProviders.some((item) => item.kind === activeProvider.kind);
 	$: isSyncBusy =
@@ -965,6 +976,7 @@
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
+		syncStatusLoaded = true;
 		queuedRuns = settleQueuedRuns(queuedRuns, schedules);
 		syncStatusError = false;
 		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
@@ -1123,7 +1135,9 @@
 						expectedId = authorization.connection_id;
 					if (!expectedId) return finish(null);
 					connecting = { id: expectedId, source_kind: provider.kind, lifecycle: 'pending' };
-					popup.location.href = authorization.authorize_url;
+					// [Gradient] An existing healthy connection comes back without consent to give.
+					if (authorization.authorize_url) popup.location.href = authorization.authorize_url;
+					else void checkConnection();
 				} catch (error) {
 					reportCloudError(error);
 					finish(null);
@@ -1186,7 +1200,10 @@
 		}
 	};
 
-	const cloudSyncHandler = async (provider: SourceProvider) => {
+	// [Gradient] silent: started without a click (a new KB opening its picker), so it
+	// never opens a window: no consent, no interactive sign-in. A picker that cannot
+	// open silently leaves the empty state's sync card to wait for a click.
+	const cloudSyncHandler = async (provider: SourceProvider, silent = false) => {
 		if (
 			!knowledge ||
 			cloudActionBusy ||
@@ -1210,10 +1227,17 @@
 				connection = accounts.find((item) => item.lifecycle === 'enabled') ?? accounts[0] ?? null;
 			}
 			if (connection?.lifecycle !== 'enabled') {
+				if (silent) return;
 				connection = await authorizeBackgroundSync(provider, connection?.id);
 			}
 			if (!connection || destroyed) return;
-			const scopes = await provider.pick();
+			let scopes: Awaited<ReturnType<SourceProvider['pick']>>;
+			try {
+				scopes = silent ? await provider.pickSilently!() : await provider.pick();
+			} catch (error) {
+				if (silent) return;
+				throw error;
+			}
 			if (!scopes?.length) return;
 			let started = 0;
 			for (const source of scopes) {
@@ -1264,6 +1288,22 @@
 		}
 	};
 
+	// [Gradient] The create page asks for the picker in the URL: open it once, never
+	// again on a reload.
+	const autoPick = async (requested: SourceProvider) => {
+		const url = new URL(window.location.href);
+		url.searchParams.delete(requested.startParam);
+		history.replaceState({}, '', url.toString());
+		const provider = autoPickProvider({
+			requested,
+			writeAccess: !!knowledge?.write_access && knowledge?.type === requested.kind,
+			providerEnabled: $enabledProviders.some((item) => item.kind === requested.kind),
+			hasContentSource: schedules.some((schedule) => schedule.kind === 'content'),
+			statusKnown: syncStatusLoaded && !syncStatusError
+		});
+		if (provider) await cloudSyncHandler(provider, true);
+	};
+
 	// [Gradient] Confirm unsubscribe against the selected source's shared usage.
 	let showRemoveSource = false;
 	let removeSourceTargets: Schedule[] = [];
@@ -1288,6 +1328,7 @@
 		try {
 			const actions = {
 				run: cloudSync.runSchedule,
+				retry_failed: cloudSync.retryFailedSchedule,
 				cancel: cloudSync.cancelSchedule,
 				suspend: cloudSync.suspendSchedule,
 				resume: cloudSync.resumeSchedule,
@@ -1295,21 +1336,24 @@
 			};
 			for (const schedule of targets) {
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
-				if (action === 'run') queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
+				if (action === 'run' || action === 'retry_failed')
+					queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
 			}
 			done = true;
 			await refreshCloudSync();
 			repollCloudSyncSoon();
 		} catch (error) {
+			// An older platform refuses retry_failed as unknown: the generic error below.
+			const runs = action === 'run' || action === 'retry_failed';
 			if (
-				action === 'run' &&
+				runs &&
 				error instanceof cloudSync.CloudSyncError &&
 				error.status === 429 &&
 				error.code === 'run_too_soon'
 			)
 				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
 			else if (
-				action === 'run' &&
+				runs &&
 				error instanceof cloudSync.CloudSyncError &&
 				error.status === 409 &&
 				error.code === 'run_active'
@@ -1863,17 +1907,23 @@
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
-		void loadSourcePolicy(localStorage.token).then(() => {
+		const policy = loadSourcePolicy(localStorage.token);
+		void policy.then(() => {
 			if (destroyed) return;
 			for (const provider of $enabledProviders) void provider.warmUp?.();
 		});
 		id = $page.params.id;
 		knowledgeId = id;
-		// [Gradient] Start all three independent reads together; the first items page covers this poll.
+		// [Gradient] Load the KB and its first items page together; the first items page covers
+		// this poll. Sync status is polled only where it can apply, so a local KB on a tenant
+		// without cloud providers makes no status call and shows no false error.
 		const [res] = await Promise.all([
-			loadKnowledge(id, true),
-			getItemsPage(true),
-			pollCloudSyncStatus(false)
+			Promise.all([loadKnowledge(id, true), policy]).then(async ([res, { providers_enabled }]) => {
+				if (res && !destroyed && syncStatusApplies(res.type, providers_enabled))
+					await pollCloudSyncStatus(false);
+				return res;
+			}),
+			getItemsPage(true)
 		]);
 
 		if (destroyed) return;
@@ -1889,6 +1939,7 @@
 
 		if (destroyed) return;
 		loaded = true;
+		if (requestedProvider) void autoPick(requestedProvider);
 
 		const dropZone = document.querySelector('body');
 		dropZone?.addEventListener('dragover', onDragOver);
@@ -1926,6 +1977,21 @@
 		singleUploads.clear();
 	});
 </script>
+
+<ConfirmDialog
+	bind:show={showDeleteDisconnected}
+	title={$i18n.t('Delete')}
+	on:confirm={async () => {
+		if (!knowledge || knowledge.user_id !== $user?.id) return;
+		try {
+			await deleteKnowledgeById(localStorage.token, knowledge.id);
+			toast.success($i18n.t('Knowledge deleted successfully.'));
+			await goto('/workspace/knowledge');
+		} catch (error) {
+			toast.error(`${error}`);
+		}
+	}}
+/>
 
 <svelte:window
 	on:keydown={(e) => {
@@ -2023,6 +2089,7 @@
 			<AccessControlModal
 				bind:show={showAccessControlModal}
 				bind:accessGrants={knowledge.access_grants}
+				readOnly={knowledge.user_id !== $user?.id}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
@@ -2036,7 +2103,7 @@
 						);
 						toast.success($i18n.t('Saved'));
 					} catch (error) {
-						toast.error(`${error}`);
+						toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 					}
 				}}
 				accessRoles={['read', 'write']}
@@ -2083,8 +2150,8 @@
 										{$i18n.t('Back to assistant')}
 									</button>
 								{/if}
-								{#if activeProvider}
-									<Badge type="info" content={$i18n.t(activeProvider.label)} />
+								{#if cloudBadge}
+									<Badge type="info" content={$i18n.t(cloudBadge.label)} />
 								{:else if $config?.integration_providers?.[knowledge?.type]}
 									<Badge
 										type={$config.integration_providers[knowledge.type].badge_type}
@@ -2095,7 +2162,7 @@
 								{/if}
 								{#if fileItemsTotal || kbFileTotal}
 									<!-- [Gradient] Synced cloud sources have no per-KB file cap: show the count only. -->
-									{#if knowledge?.type !== 'local' && knowledge?.type && !activeProvider}
+									{#if knowledge?.type !== 'local' && knowledge?.type && !cloudBadge}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
 											$config?.features?.knowledge_max_file_count ||
@@ -2121,7 +2188,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
+						{#if knowledge?.type === 'local' || !knowledge?.type}
 							<div class="self-center shrink-0">
 								<AccessButton
 									on:click={() => {
@@ -2176,6 +2243,29 @@
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			<!-- [Gradient] Cloud-sync notices; the sources themselves sit in the listing. -->
+			<!-- Without a source, the empty state offers the provider's picker; only a
+				provider this tenant cannot sync from leaves nothing to do but delete. -->
+			{#if cloudNotConnected && !activeProviderEnabled}
+				<div
+					class="mx-4 mb-2 flex items-center justify-between gap-3 text-xs text-gray-500"
+					role="status"
+				>
+					<span
+						>{$i18n.t('{{provider}} sync is not available here.', {
+							provider: cloudBadge?.label
+						})}</span
+					>
+					{#if knowledge.user_id === $user?.id}
+						<button
+							class="font-medium underline"
+							disabled={isSyncBusy}
+							on:click={() => {
+								showDeleteDisconnected = true;
+							}}>{$i18n.t('Delete knowledge base')}</button
+						>
+					{/if}
+				</div>
+			{/if}
 			{#if finishingConnectionId}
 				<p role="status" class="mx-4 mb-1 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('Finishing the connection…')}
@@ -2286,28 +2376,32 @@
 				</div>
 			{:else}
 				<div class="px-3 flex shrink-0 items-center w-full space-x-1.5">
-					<div class="flex flex-1 items-center">
-						<div class=" self-center ml-1 mr-2">
-							<Search className="size-3.5" />
+					<!-- [Gradient] On a narrow screen the buttons wrap below the search field. -->
+					<div class="flex flex-1 flex-wrap items-center gap-y-1">
+						<div class="flex min-w-[10rem] flex-1 items-center">
+							<div class=" self-center ml-1 mr-2">
+								<Search className="size-3.5" />
+							</div>
+							<input
+								class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+								bind:value={query}
+								aria-label={$i18n.t('Search Collection')}
+								placeholder={$i18n.t('Search Collection')}
+								on:input={() => {
+									queryDebounceActive = true;
+								}}
+								on:focus={() => {
+									selectedFileId = null;
+								}}
+							/>
 						</div>
-						<input
-							class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-							bind:value={query}
-							aria-label={$i18n.t('Search Collection')}
-							placeholder={$i18n.t('Search Collection')}
-							on:input={() => {
-								queryDebounceActive = true;
-							}}
-							on:focus={() => {
-								selectedFileId = null;
-							}}
-						/>
 
 						{#if knowledge?.write_access && hasSyncableSources}
 							<!-- [Gradient] Keep the standard gap before "Add source". -->
 							<Tooltip
 								content={$i18n.t('Check every source of this knowledge base for changes now')}
 								className="flex mr-1.5"
+								touch={false}
 							>
 								<button
 									type="button"
@@ -2321,6 +2415,7 @@
 								{#if activeProviderEnabled}
 									<Tooltip
 										content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
+										touch={false}
 									>
 										<button
 											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2344,7 +2439,7 @@
 											<span>{$i18n.t('Add source')}</span>
 										</button>
 									</Tooltip>
-								{:else if activeProvider || $config?.integration_providers?.[knowledge?.type]}
+								{:else if cloudBadge || $config?.integration_providers?.[knowledge?.type]}
 									<!-- Disabled sync providers and API-managed providers have no add button. -->
 								{:else}
 									<AddContentMenu
@@ -2447,7 +2542,7 @@
 
 				{#if fileItems !== null && fileItemsTotal !== null}
 					<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
-						<div class="flex-1 flex">
+						<div class="flex-1 flex min-w-0">
 							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 								<div class="w-full h-full flex flex-col min-h-0">
 									<!-- Mirrors the row-list condition below so a level holding only
@@ -2479,6 +2574,7 @@
 												{sourcePairs}
 												looseSources={currentDirectoryId === null ? listedSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
+												skippedSource={currentSourcePair?.content ?? null}
 												syncing={enclosingSyncing}
 												{enclosingProvider}
 												{uploadProgress}
@@ -2531,7 +2627,7 @@
 												{$i18n.t('Starting sync...')}
 											</div>
 										</div>
-									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null}
+									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled)}
 										<EmptyStateCards
 											knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
 											integrationProviders={$config?.integration_providers}

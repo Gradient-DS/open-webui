@@ -87,7 +87,7 @@ from open_webui.models.invites import Invites
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
-from open_webui.soev import identity
+from open_webui.soev import identity, silent_connect
 from open_webui.utils.auth import (
     create_token,
     get_password_hash,
@@ -2292,6 +2292,7 @@ class OAuthManager:
             redirect_url = f'{redirect_url}?error={urllib.parse.quote_plus(error_message)}'
             return RedirectResponse(url=redirect_url, headers=response.headers)
 
+        redirect_url = await silent_connect.after_login(user, provider, redirect_url)
         response = RedirectResponse(url=redirect_url, headers=response.headers)
 
         # Compute cookie expiry from JWT lifetime

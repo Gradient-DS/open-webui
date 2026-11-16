@@ -24,23 +24,12 @@ from open_webui.models.knowledge import (
 META_NAMESPACE = 'owui'
 
 
-def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
-    types = {}
-    # If providers conflict for a collection, the first eligible schedule by id wins.
-    for schedule in sorted(schedules, key=lambda row: row['id']):
-        if schedule['kind'] == 'content' and schedule['lifecycle'] != 'revoked':
-            for collection_key in schedule['subscribers']:
-                types.setdefault(collection_key, schedule['source_kind'])
-    return types
-
-
-def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, str] | None = None) -> KnowledgeModel:
+def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
-    subscriptions = collection.get('subscriptions') or []
     return KnowledgeModel(
         id=collection['key'],
         user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
-        type=subscriptions[0] if subscriptions else (types or {}).get(collection['key'], 'local'),
+        type=collection['source_kind'],
         name=collection['name'],
         description=collection['description'] or '',
         meta=collection['meta'].get(META_NAMESPACE, {}),
@@ -67,35 +56,34 @@ def meta_patch(current: dict, desired: dict) -> dict:
 
 
 def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> dict:
+    source_kind = 'local' if form.type is None else form.type
     visibility, readers, writers = access_of(form.access_grants or [], service_principal=service_principal)
     return {
         'name': form.name,
         'description': form.description,
+        'source_kind': source_kind,
         'visibility': visibility,
-        'principals': readers,
+        'principals': readers if source_kind == 'local' else [ref for ref in readers if ref != service_principal],
         'writers': writers,
     }
 
 
 def access_of(grants: list[dict], *, service_principal: str) -> tuple[str, list[str], list[str]]:
-    visibility = 'restricted'
     readers, writers = {service_principal}, set()
     for grant in grants:
         principal_type = grant.get('principal_type')
         principal_id = grant.get('principal_id')
         permission = grant.get('permission')
-        if principal_id == '*':
-            if permission == 'read':
-                visibility = 'public'
-            continue
         if principal_type not in ('user', 'group') or not principal_id:
             continue
-        ref = f'owui:{principal_type}:{principal_id}'
-        if permission == 'read':
+        if principal_id == '*' and principal_type != 'user':
+            continue
+        ref = 'platform:pseudo:owui' if principal_id == '*' else f'owui:{principal_type}:{principal_id}'
+        if permission in ('read', 'write'):
             readers.add(ref)
-        elif permission == 'write':
+        if permission == 'write':
             writers.add(ref)
-    return visibility, sorted(readers), sorted(writers)
+    return 'restricted', sorted(readers), sorted(writers)
 
 
 def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantModel]:
@@ -104,6 +92,9 @@ def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantMo
     for field, permission in (('principals', 'read'), ('writers', 'write')):
         for ref in collection[field]:
             if ref in excluded:
+                continue
+            if ref == 'platform:pseudo:owui':
+                identities.add(('user', '*', permission))
                 continue
             source, _, rest = ref.partition(':')
             principal_type, _, principal_id = rest.partition(':')
@@ -174,11 +165,9 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
     )
 
 
-def knowledge_user_of(
-    collection: dict, *, service_principal: str, user: dict | None = None, types: dict[str, str] | None = None
-) -> KnowledgeUserModel:
+def knowledge_user_of(collection: dict, *, service_principal: str, user: dict | None = None) -> KnowledgeUserModel:
     return KnowledgeUserModel(
-        **knowledge_of(collection, service_principal=service_principal, types=types).model_dump(),
+        **knowledge_of(collection, service_principal=service_principal).model_dump(),
         user=user,
         file_count=collection['document_count'],
     )

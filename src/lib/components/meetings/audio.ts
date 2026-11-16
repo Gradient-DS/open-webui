@@ -32,7 +32,41 @@ export const displayMediaOptions = () => ({
 	surfaceSwitching: 'include'
 });
 
-const MIC_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+// With the call's audio from the speakers, echo cancellation keeps it out of the microphone.
+const CALL_MIC = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+// In the room, call filters treat everyone but the nearest voice as noise and cut it away:
+// only the level is evened out.
+const ROOM_MIC = { echoCancellation: false, noiseSuppression: false, autoGainControl: true };
+
+/**
+ * The microphone constraints: room filters for a meeting in the room, call filters next to a
+ * shared tab; `micId` picks a device, null keeps the system default.
+ */
+export const micConstraints = (micId: string | null, room = false): MediaTrackConstraints => {
+	const filters = room ? ROOM_MIC : CALL_MIC;
+	return micId ? { ...filters, deviceId: { exact: micId } } : filters;
+};
+
+export type Microphone = { id: string; label: string };
+
+/**
+ * The audio inputs, the system default first. Their labels stay empty until the page may use
+ * the microphone, so an unlabelled list means: ask permission first (`unlockMicrophones`).
+ */
+export const listMicrophones = async (): Promise<Microphone[]> => {
+	const devices = (await navigator.mediaDevices?.enumerateDevices?.()) ?? [];
+	return devices
+		.filter((device) => device.kind === 'audioinput' && device.deviceId !== 'communications')
+		.map((device) => ({ id: device.deviceId, label: device.label }))
+		.sort((a, b) => Number(b.id === 'default') - Number(a.id === 'default'));
+};
+
+/** Asks microphone permission once, so the device list carries names. */
+export const unlockMicrophones = async (): Promise<Microphone[]> => {
+	const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+	stopAll(stream.getTracks());
+	return listMicrophones();
+};
 
 const stopAll = (tracks: MediaStreamTrack[]) => {
 	for (const track of tracks) track.stop();
@@ -62,9 +96,14 @@ const once = (fn: () => void) => {
 };
 
 /** Must be called from the click that starts the meeting: the share picker needs that gesture. */
-export const captureAudio = async (source: AudioSource): Promise<Capture> => {
+export const captureAudio = async (
+	source: AudioSource,
+	micId: string | null = null
+): Promise<Capture> => {
 	if (source === 'microphone') {
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+		const stream = await navigator.mediaDevices.getUserMedia({
+			audio: micConstraints(micId, true)
+		});
 		const tracks = stream.getTracks();
 		return { stream, tracks, release: once(() => stopAll(tracks)) };
 	}
@@ -80,7 +119,7 @@ export const captureAudio = async (source: AudioSource): Promise<Capture> => {
 	let mic: MediaStream | null = null;
 	try {
 		tab = await shareDisplay();
-		mic = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+		mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(micId) });
 		const mix = context.createMediaStreamDestination();
 		context.createMediaStreamSource(tab).connect(mix);
 		context.createMediaStreamSource(mic).connect(mix);

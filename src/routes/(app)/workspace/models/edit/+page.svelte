@@ -86,23 +86,27 @@
 	});
 
 	const onSubmit = async (modelInfo, { skipNavigate = false } = {}) => {
-		const res = await updateModelById(localStorage.token, modelInfo.id, modelInfo);
+		const res = await updateModelById(localStorage.token, modelInfo.id, modelInfo).catch((e) => {
+			toast.error(`${e?.detail ?? e}`);
+			return null;
+		});
+		if (!res) {
+			return false;
+		}
 
-		if (res) {
-			await models.set(
-				await getModels(
-					localStorage.token,
-					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-				)
-			);
-			toast.success(
-				useSimpleBuilder
-					? $i18n.t('Assistant updated successfully')
-					: $i18n.t('Model updated successfully')
-			);
-			if (!skipNavigate) {
-				await goto('/workspace/models');
-			}
+		await models.set(
+			await getModels(
+				localStorage.token,
+				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
+			)
+		);
+		toast.success(
+			useSimpleBuilder
+				? $i18n.t('Assistant updated successfully')
+				: $i18n.t('Model updated successfully')
+		);
+		if (!skipNavigate) {
+			await goto('/workspace/models');
 		}
 	};
 </script>

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { classifyFileItem, getLiveSide, getHistorySide, getActiveSide } from './dataSeparation';
-import { webSearchFlags } from './toolState';
 
 describe('classifyFileItem', () => {
 	it('classifies web search and webpage URLs as open_internet', () => {
@@ -69,18 +68,12 @@ describe('getActiveSide', () => {
 	it('is null when nothing is committed or selected', () => {
 		expect(getActiveSide({ messages: [], files: [], webSearchEnabled: false })).toBeNull();
 	});
-	it('counts web search Auto as the open internet', () => {
-		// Auto and Altijd both travel as webSearchEnabled: the model may search either way.
-		const auto = webSearchFlags('auto');
-		expect(getActiveSide({ messages: [], files: [], webSearchEnabled: auto.enabled })).toBe(
-			'open_internet'
-		);
-		expect(getLiveSide([{ type: 'file' }], auto.enabled)).toBe('open_internet');
+	it('counts web search on as the open internet: the model may search', () => {
+		expect(getLiveSide([{ type: 'file' }], true)).toBe('open_internet');
 	});
-	it('leaves internal documents available when web search is Uit', () => {
-		const off = webSearchFlags('off');
+	it('leaves internal documents available when web search is off', () => {
 		expect(
-			getActiveSide({ messages: [], files: [{ type: 'file' }], webSearchEnabled: off.enabled })
+			getActiveSide({ messages: [], files: [{ type: 'file' }], webSearchEnabled: false })
 		).toBe('internal');
 	});
 });

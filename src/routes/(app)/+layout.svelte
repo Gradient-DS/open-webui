@@ -57,6 +57,8 @@
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
 	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
+	import WhatsNew from '$lib/components/layout/Overlay/WhatsNew.svelte';
+	import { shouldShowWhatsNew } from '$lib/utils/whatsNew';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import FeedbackModal from '$lib/components/feedback/FeedbackModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -73,6 +75,7 @@
 
 	let version;
 	let showAcceptanceModal = false;
+	let showWhatsNew = false;
 
 	const checkAcceptanceModal = async () => {
 		if (!$config?.ui?.enable_acceptance_modal) return;
@@ -482,6 +485,7 @@
 		});
 
 		await checkAcceptanceModal();
+		showWhatsNew = shouldShowWhatsNew($settings?.whatsNewSeen, $user);
 
 		// Persist selectedTerminalId across page loads
 		selectedTerminalId.subscribe((value) => {
@@ -602,6 +606,10 @@
 				{/if}
 
 				<TwoFactorRequired bind:show={show2FAOverlay} gracePeriodExpiresAt={grace2FAExpiresAt} />
+
+				{#if loaded && !show2FAOverlay}
+					<WhatsNew bind:show={showWhatsNew} />
+				{/if}
 
 				<Sidebar />
 

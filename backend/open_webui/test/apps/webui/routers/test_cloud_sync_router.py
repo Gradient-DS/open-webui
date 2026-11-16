@@ -13,7 +13,7 @@ from open_webui.soev.client import SoevClient, close_client
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch, platform_capabilities):
     """Exercise the real client against queued HTTP responses without network access."""
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     requests, responses = [], []
@@ -74,6 +74,41 @@ def test_create_connection_returns_the_authorize_url(api, provider):
     ]
     assert api.refs == ['owui:user:alice', 'owui:user:alice']
     assert_assertions(api.requests)
+
+
+def test_create_connection_reuses_an_existing_healthy_connection_without_consent(api):
+    """soev-api answers with the user's enabled connection: no authorize call, no authorize URL."""
+    api.responses.append(response({'id': 'conn-live', 'source_kind': 'onedrive', 'lifecycle': 'enabled'}))
+    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
+    assert result.status_code == 200
+    assert result.json() == {'connection_id': 'conn-live', 'authorize_url': None}
+    assert [(request.method, request.url.path) for request in api.requests] == [('POST', '/v1/connections')]
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize(
+    'connection',
+    [
+        {'lifecycle': 'pending'},
+        {'lifecycle': 'suspended:reauth'},
+        {'lifecycle': 'enabled', 'last_error': 'reauth_required'},
+    ],
+)
+def test_create_connection_authorizes_an_existing_connection_that_needs_consent(api, connection):
+    """A returned pending, suspended or failing connection gets consent instead of a duplicate."""
+    api.responses.extend(
+        [
+            response({'id': 'conn-old', 'source_kind': 'onedrive', **connection}),
+            response({'authorize_url': 'https://provider.invalid/consent'}),
+        ]
+    )
+    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
+    assert result.status_code == 200
+    assert result.json() == {'connection_id': 'conn-old', 'authorize_url': 'https://provider.invalid/consent'}
+    assert [(request.method, request.url.path) for request in api.requests] == [
+        ('POST', '/v1/connections'),
+        ('POST', '/v1/connections/conn-old/authorize'),
+    ]
 
 
 @pytest.mark.parametrize('result', ['pending', 'error', 'invalid'])
@@ -177,6 +212,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'authorize',
         'delete',
         'run',
+        'retry_failed',
         'cancel',
         'suspend',
         'resume',
@@ -184,7 +220,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'unauthenticated',
     ],
 )
-def test_every_call_carries_the_users_assertion(api, operation):
+def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
     """All calls carry fresh user assertions and mutations cannot cross a KB boundary."""
     prefix = '/api/v1/cloud-sync'
     if operation == 'unauthenticated':
@@ -211,9 +247,14 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.get(prefix + '/connections/c')
         assert result.json()['lifecycle'] == 'pending'
     elif operation == 'revoke':
+        decline = AsyncMock()
+        monkeypatch.setattr(cloud_sync.silent_connect, 'decline', decline)
+        api.responses.append(response({'id': 'c', 'source_kind': 'outlook_mail'}))
         api.responses.append(httpx.Response(204))
         result = api.browser.delete(prefix + '/connections/c')
         assert result.status_code == 204
+        # A disconnected provider is not connected again by the next Microsoft login.
+        decline.assert_awaited_once_with('alice', 'outlook_mail')
     elif operation == 'authorize':
         api.responses.append(response({'id': 'c', 'source_kind': 'onedrive'}))
         api.responses.append(response({'authorize_url': 'https://provider.invalid/fresh'}))
@@ -239,10 +280,11 @@ def test_every_call_carries_the_users_assertion(api, operation):
             result = api.browser.delete(path)
             assert result.status_code == 204
         else:
-            api.responses.append(response({'job_id': 'job-1'}, 201) if operation == 'run' else httpx.Response(204))
+            runs = operation in ('run', 'retry_failed')
+            api.responses.append(response({'job_id': 'job-1'}, 201) if runs else httpx.Response(204))
             result = api.browser.post(path + '/' + operation)
-            assert result.status_code == (201 if operation == 'run' else 204)
-            assert result.content == (b'{"job_id":"job-1"}' if operation == 'run' else b'')
+            assert result.status_code == (201 if runs else 204)
+            assert result.content == (b'{"job_id":"job-1"}' if runs else b'')
             assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
     assert result.status_code < 300 or operation == 'foreign'
     api.link.assert_awaited_once()
@@ -313,7 +355,7 @@ def test_delete_forwards_the_kb_as_collection_key(api, key):
     assert_assertions(api.requests)
 
 
-@pytest.mark.parametrize('action', ['delete', 'run', 'cancel', 'suspend', 'resume'])
+@pytest.mark.parametrize('action', ['delete', 'run', 'retry_failed', 'cancel', 'suspend', 'resume'])
 @pytest.mark.parametrize('subscribed', [False, True])
 def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
     """Every mutation checks subscribers even when the schedule destination equals the KB."""
@@ -326,11 +368,12 @@ def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
             }
         )
     )
+    runs = action in ('run', 'retry_failed')
     if subscribed:
-        api.responses.append(response({'job_id': 'j'}, 201) if action == 'run' else httpx.Response(204))
+        api.responses.append(response({'job_id': 'j'}, 201) if runs else httpx.Response(204))
     path = '/api/v1/cloud-sync/knowledge/kb/schedules/s'
     result = api.browser.delete(path) if action == 'delete' else api.browser.post(path + '/' + action)
-    assert result.status_code == ((201 if action == 'run' else 204) if subscribed else 404)
+    assert result.status_code == ((201 if runs else 204) if subscribed else 404)
     assert len(api.requests) == (2 if subscribed else 1)
     if not subscribed:
         assert result.json()['detail']['code'] == 'connection_not_found'
@@ -463,6 +506,15 @@ def test_skipped_items_list_failed_job_items(api):
                             'title': 'Current.pdf',
                             'status': 'failed',
                             'code': 'processing_failed',
+                            'reason': 'bundle_missing',
+                        },
+                        {
+                            'source_id': 'odd',
+                            'title': 'Odd.pdf',
+                            'status': 'failed',
+                            'code': 'internal_error',
+                            'detail': 'Traceback: something broke',
+                            'reason': 'Graph said no',
                         },
                         {
                             'source_id': 'slow',
@@ -489,12 +541,14 @@ def test_skipped_items_list_failed_job_items(api):
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
     assert result.status_code == 200
     assert result.json() == [
-        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large'},
-        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type'},
-        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
-        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
-        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
-        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out'},
+        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large', 'reason': None},
+        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type', 'reason': None},
+        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending', 'reason': None},
+        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content', 'reason': None},
+        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed', 'reason': 'bundle_missing'},
+        # Free text never reaches the browser: neither a detail nor a reason.
+        {'source_id': 'odd', 'name': 'Odd.pdf', 'code': 'internal_error', 'reason': None},
+        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out', 'reason': None},
     ]
     assert api.requests[2].url.path == '/v1/jobs/job-1'
     assert dict(api.requests[2].url.params) == {'include_items': 'true'}
@@ -547,7 +601,7 @@ def test_skipped_items_require_readable_knowledge(api):
 
 
 def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     policy = {
         'providers_enabled': ['onedrive', 'confluence'],
         'scope_shapes_allowed': {'onedrive': ['folder', 'file']},
@@ -568,7 +622,7 @@ def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypat
 
 
 def test_policy_is_empty_without_soev_api(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', '')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', '')
     result = api.browser.get('/api/v1/cloud-sync/policy')
     assert result.status_code == 200
     assert result.json() == {
@@ -579,11 +633,80 @@ def test_policy_is_empty_without_soev_api(api, monkeypatch) -> None:
     }
     cloud_sync.identity.build_client.assert_not_called()
     api.link.assert_not_awaited()
-    assert api.requests == []
+
+
+def test_policy_is_empty_without_cloud_sync_capability(api, platform_capabilities):
+    platform_capabilities.discard('cloud_sync')
+    result = api.browser.get('/api/v1/cloud-sync/policy')
+    assert result.status_code == 200
+    assert result.json()['providers_enabled'] == []
+    assert not api.requests
+
+
+@pytest.mark.parametrize('feature', ['cloud_sync', 'live_documents', 'live_mail'])
+def test_connections_remain_available_for_each_connection_family(api, platform_capabilities, feature):
+    platform_capabilities.intersection_update({feature})
+    api.responses.append(response({'data': [], 'next_cursor': None}))
+    assert api.browser.get('/api/v1/cloud-sync/connections').status_code == 200
+    assert api.requests[0].url.path == '/v1/connections'
+
+
+@pytest.mark.parametrize(
+    'path,capability',
+    [
+        ('knowledge/kb/schedules/s/skipped', 'cloud_sync'),
+        ('connections/c/live/live_documents', 'live_documents'),
+        ('connections/c/live/mail', 'live_mail'),
+        ('connections/c/usage', 'cloud_sync'),
+    ],
+)
+def test_missing_capability_refuses_before_platform_calls(api, platform_capabilities, path, capability):
+    platform_capabilities.discard(capability)
+    result = api.browser.get(f'/api/v1/cloud-sync/{path}')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_sync_status_without_cloud_sync_is_empty(api, platform_capabilities):
+    """A tenant without cloud sync answers status with no schedules and no platform call."""
+    platform_capabilities.discard('cloud_sync')
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-local/sync')
+    assert result.status_code == 200
+    assert result.json() == {'schedules': []}
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_sync_status_with_unknown_capabilities_still_refuses(api, platform_capabilities, monkeypatch):
+    """An unread capability set is not taken as no cloud sync."""
+    platform_capabilities.clear()
+    monkeypatch.setattr(cloud_sync.capabilities, 'known', lambda: False)
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-cloud/sync')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
+
+
+def test_sync_status_maps_a_platform_failure(api):
+    """A platform error on a status read still reaches the browser as an error."""
+    api.responses.extend([response({'code': 'internal_error', 'detail': 'boom'}, 500)] * 2)
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-cloud/sync')
+    assert result.status_code == 500
+    assert result.json()['detail']['code'] == 'upstream_error'
+
+
+def test_no_connection_capabilities_refuses_connection_routes(api, platform_capabilities):
+    platform_capabilities.clear()
+    result = api.browser.get('/api/v1/cloud-sync/connections')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
 
 
 def test_policy_preserves_upstream_forbidden_code(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     api.responses.append(
         httpx.Response(
             403,
@@ -658,3 +781,98 @@ def test_sync_all_runs_the_kbs_schedules_in_one_call(api, key):
     assert api.requests[0].url.raw_path.decode() == f'/v1/collections/{quote(key, safe="")}/sync'
     assert api.requests[0].headers['Idempotency-Key']
     assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('operation', ['list', 'add', 'duplicate', 'remove'])
+def test_shared_mailbox_proxies_use_the_users_identity(api, operation):
+    mailbox = {'address': 'gedeeld@example.test', 'added_at': '2026-10-31T12:00:00Z'}
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    upstream = '/v1/connections/c/mailboxes'
+    if operation == 'list':
+        body = {'enabled': True, 'consented': False, 'mailboxes': [mailbox]}
+        api.responses.append(response(body))
+        result = api.browser.get(path)
+        assert result.json() == body
+    elif operation == 'remove':
+        api.responses.append(httpx.Response(204))
+        result = api.browser.delete(path + '/gedeeld%40example.test')
+        assert result.status_code == 204
+        assert not result.content
+        upstream += '/gedeeld@example.test'
+    else:
+        api.responses.append(response(mailbox, 201 if operation == 'add' else 200))
+        result = api.browser.post(path, json={'address': mailbox['address']})
+        assert result.json() == mailbox
+        assert json.loads(api.requests[0].content) == {'address': mailbox['address']}
+    assert result.is_success
+    assert api.requests[0].url.path == upstream
+    assert api.refs == ['owui:user:alice']
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST', 'DELETE'])
+@pytest.mark.parametrize(
+    'status,code,constraint',
+    [
+        (403, 'policy_forbids', None),
+        (403, 'mailbox_access_denied', None),
+        (409, 'reconsent_required', None),
+        (409, 'mailbox_limit', None),
+        (409, 'connection_required', None),
+        (422, 'invalid_field', 'address:email'),
+        (422, 'invalid_field', 'address:own_mailbox'),
+    ],
+)
+def test_shared_mailbox_refusals_keep_their_code(api, method, status, code, constraint):
+    problem = {'code': code, 'detail': 'Refused', **({'constraint': constraint} if constraint else {})}
+    api.responses.append(httpx.Response(status, json=problem, headers={'Content-Type': 'application/problem+json'}))
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    if method == 'DELETE':
+        path += '/gedeeld%40example.test'
+    result = api.browser.request(
+        method, path, **({'json': {'address': 'gedeeld@example.test'}} if method == 'POST' else {})
+    )
+    assert result.status_code == status
+    assert result.json()['detail'] == problem
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST', 'DELETE'])
+def test_shared_mailboxes_require_live_mail_and_a_verified_user(api, platform_capabilities, method):
+    path = '/api/v1/cloud-sync/connections/c/mailboxes'
+    if method == 'DELETE':
+        path += '/gedeeld%40example.test'
+    kwargs = {'json': {'address': 'gedeeld@example.test'}} if method == 'POST' else {}
+    platform_capabilities.discard('live_mail')
+    assert api.browser.request(method, path, **kwargs).status_code == 503
+
+    def reject():
+        raise HTTPException(401)
+
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = reject
+    assert api.browser.request(method, path, **kwargs).status_code == 401
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_outlook_silent_reauthorization_uses_the_signed_in_email(api):
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = lambda: SimpleNamespace(
+        id='alice', role='user', email='gebruiker@example.test'
+    )
+    api.responses.extend(
+        [
+            response({'id': 'c', 'source_kind': 'outlook_mail', 'lifecycle': 'enabled'}),
+            response({'authorize_url': 'https://provider.invalid/silent'}),
+        ]
+    )
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/authorize', json={'silent': True})
+    assert result.status_code == 200
+    assert json.loads(api.requests[1].content) == {'silent': True, 'owner_email': 'gebruiker@example.test'}
+    assert_assertions(api.requests)
+
+
+def test_silent_interaction_keeps_the_popup_for_interactive_consent(api):
+    page = api.browser.get('/api/v1/cloud-sync/connect/done?connection=c&result=interaction_required')
+    assert page.status_code == 200
+    assert 'window.close();' not in page.text
+    assert '"result": "interaction_required"' in page.text

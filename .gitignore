@@ -337,6 +337,8 @@ cypress/screenshots
 
 # Claude Code scratch + personal tooling — never committed (see soev-docs/claude-code.md)
 thoughts/
+# The superpowers plugin writes its plans here by default; they belong in thoughts/.
+docs/superpowers/
 .reviews/
 CLAUDE.local.md
 .claude/commands/*

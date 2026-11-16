@@ -9,9 +9,7 @@ platform credentials and URLs are specified in docs/agent-api-deployment.md.
 - chart defaults: open-webui/helm/open-webui-tenant/values.yaml
 - env mapping: open-webui/helm/open-webui-tenant/templates/open-webui/configmap.yaml
 
-Every production tenant (demo, gradient, haagsebeek, datafryslan, staging, kwink,
-haute-equipe, afk, kompanen, gemeente-zuidplas, bzk-ministerie) sets
-agentApiEnabled=true; this release moves them all to v2.
+Every production tenant sets agentApiEnabled=true.
 
 ## Flags that decide which request paths exist
 
@@ -33,7 +31,7 @@ agentApiEnabled=true; this release moves them all to v2.
 | openaiApiBaseUrl | OPENAI_API_BASE_URL | https://router.huggingface.co/v1 | http://litellm-proxy.shared-services.svc:4000/v1 | chart default is a REAL external host |
 | storageProvider | STORAGE_PROVIDER | — | "s3" | parity: CI selects the same S3 storage provider for uploads and downloads |
 | s3EndpointUrl | S3_ENDPOINT_URL | "" | https://object.previder.nl | CI replaces the production endpoint with the in-network S3 gateway |
-| s3BucketName | S3_BUCKET_NAME | "" | previder-prod-gradient-uploads | CI uses a disposable bucket |
+| s3BucketName | S3_BUCKET_NAME | "" | <tenant>-uploads | CI uses a disposable bucket |
 | enableOnedriveIntegration | — | — | "true" | Graph egress |
 | enableGoogleDriveIntegration/Sync | — | — | "true" | Google egress |
 | enableImageGeneration | ENABLE_IMAGE_GENERATION | — | "true" | via litellm-proxy |
@@ -61,7 +59,7 @@ CI runs no soev server.
 | OPENAI_API_BASE_URL, RAG_OPENAI_API_BASE_URL | http://stub:8000/v1 | Replace the production LiteLLM hostname with the sealed stub. |
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
 | S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
-| S3_BUCKET_NAME | ci-uploads | Disposable bucket replaces previder-prod-gradient-uploads; the gateway creates it before it listens and its health check verifies it before the app starts. |
+| S3_BUCKET_NAME | ci-uploads | Disposable bucket replaces the tenant bucket; the gateway creates it before it listens and its health check verifies it before the app starts. |
 | ENABLE_OTEL | empty | No Alloy OTLP collector exists in the sealed stack. Disable telemetry exports; they do not decide application request coverage. |
 | Upstream API keys, database password, signing key, S3 credentials | disposable CI values | Production secrets are neither available nor needed by the sealed stack. |
 | OAuth / OneDrive / Google Drive / Graph mail credentials and stored tokens | empty | Provider authentication uses public Microsoft/Google endpoints, including hard-coded URLs. No real provider credentials or tokens are available. Integration, Google sync, email invite and OAuth signup flags remain enabled, but successful cloud authentication, sync and mail delivery are not covered. |
@@ -91,6 +89,18 @@ Caller contracts verified in this checkout:
 - External reranking posts to `/v1/rerank` and reads indexed relevance scores.
 - `AGENT_API_AGENTS` matches the deployed list; agent routing is disabled and
   no private-service URL is configured.
+- `GET /api/v1/users/{user_id}/shared-data` is an admin-only, read-only
+  offboarding inventory of another user's shared KB and assistant IDs and kinds;
+  it returns no content and grants no ordinary-user sharing access. It uses the
+  disposable user seed and has no route-coverage waiver. With soev-api absent,
+  only local shared assistants can appear; the remote KB inventory is not
+  exercised by the sealed stack.
+- `DELETE /api/v1/users/{user_id}` remains admin-only and destructive. Its
+  `mode=delete|transfer|archive` query selects resource disposition, `transfer_to`
+  selects a transfer target, and in delete mode repeated `confirm_shared_deletion`
+  values must exactly match the shared-resource IDs. The scalar query pass
+  derives `mode` and `transfer_to` alongside `archive_reason`; confirmation is
+  an array of strings and is outside that derivation.
 - Legacy sync-daemon, loader-worker, document-job and `PIPELINE_API_*` settings
   have no callers in this checkout and are removed. Pipelines management uses
   the configured OpenAI connections (`routers/pipelines.py`).

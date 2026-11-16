@@ -1,10 +1,14 @@
 """Subject-scoped connection and schedule calls through the existing soev-api client."""
 
 import asyncio
+import re
 from urllib.parse import quote
 from uuid import uuid4
 
 from open_webui.soev.client import SoevApiError, SoevClient
+
+# A skip code or reason as soev-sync stores it (snake_case), never free text.
+_FIXED_CODE = re.compile(r'[a-z][a-z0-9_]{0,63}')
 
 
 class CloudSync:
@@ -45,6 +49,19 @@ class CloudSync:
             idempotency_key=f'live:{family}:{connection_id}',
         )
 
+    async def mailboxes(self, connection_id: str) -> dict:
+        return await self._get(f'/v1/connections/{quote(connection_id, safe="")}/mailboxes')
+
+    async def add_mailbox(self, connection_id: str, address: str) -> dict:
+        return await self._send(
+            'POST', f'/v1/connections/{quote(connection_id, safe="")}/mailboxes', {'address': address}
+        )
+
+    async def remove_mailbox(self, connection_id: str, address: str) -> None:
+        await self._send(
+            'DELETE', f'/v1/connections/{quote(connection_id, safe="")}/mailboxes/{quote(address, safe="")}'
+        )
+
     async def connection_usage(self, connection_id: str) -> dict:
         await self.connection(connection_id)
         knowledge_ids: set[str] = set()
@@ -54,14 +71,26 @@ class CloudSync:
             knowledge_ids.update(schedule['subscribers'])
         return {'knowledge_ids': sorted(knowledge_ids)}
 
-    async def authorize(self, connection_id: str, owner_email: str | None = None) -> dict:
+    async def authorize(self, connection_id: str, owner_email: str | None = None, *, silent: bool = False) -> dict:
         body = {'owner_email': owner_email} if owner_email is not None else None
+        if silent:
+            body = {**(body or {}), 'silent': True}
         return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
 
+    async def open_connection(self, provider: str) -> dict:
+        """The user's connection for this provider: soev-api creates one only when none is held."""
+        return await self._send('POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'})
+
     async def create_connection(self, provider: str, owner_email: str | None = None) -> dict:
-        connection = await self._send(
-            'POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'}
-        )
+        """Start consent for a new connection, or reuse the one the user already holds.
+
+        soev-api keeps one connection per owner and provider and answers a create with the
+        existing row. A healthy enabled one needs no consent (no authorize URL): the caller
+        enables its live family on it. Any other row gets consent as usual.
+        """
+        connection = await self.open_connection(provider)
+        if connection.get('lifecycle') == 'enabled' and not connection.get('last_error'):
+            return {'connection_id': connection['id'], 'authorize_url': None}
         authorization = await self.authorize(connection['id'], owner_email if provider == 'google_drive' else None)
         return {'connection_id': connection['id'], 'authorize_url': authorization['authorize_url']}
 
@@ -107,10 +136,15 @@ class CloudSync:
             # and keeps the specific reason (item_too_large, timed_out, ...) in
             # the detail, which is the one worth showing.
             code = item.get('code')
+            code = (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status']
+            # Only fixed codes reach the browser, which maps them to a sentence;
+            # anything else (free text from a detail) reads as the generic error.
+            reason = item.get('reason')
             skipped[item['source_id']] = {
                 'source_id': item['source_id'],
                 'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
-                'code': (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status'],
+                'code': code if _FIXED_CODE.fullmatch(code) else 'internal_error',
+                'reason': reason if isinstance(reason, str) and _FIXED_CODE.fullmatch(reason) else None,
             }
         return list(skipped.values())
 
@@ -138,3 +172,14 @@ class CloudSync:
         return {
             'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
         }
+
+
+async def revoke_cloud(user_id: str, *, client: SoevClient) -> None:
+    """Unsubscribe each owned schedule and revoke connections using the person's assertion."""
+    cloud = CloudSync(client, f'owui:user:{user_id}')
+    schedules = [row async for row in client.pages('/v1/schedules', as_user=cloud.user_ref)]
+    for schedule in schedules:
+        for key in schedule['subscribers']:
+            await cloud.schedule_action(key, schedule['id'], 'delete')
+    for connection in await cloud.connections():
+        await cloud.revoke_connection(connection['id'])

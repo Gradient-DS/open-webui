@@ -201,6 +201,184 @@ def test_file_cannot_be_laundered_through_foreign_owned_knowledge(seeded, permis
     seeded.run(check)
 
 
+OUTSIDER_READ = [{'principal_type': 'user', 'principal_id': 'outsider', 'permission': 'read'}]
+
+
+async def _revoke_file_kb_grants(db):
+    from open_webui.models.access_grants import AccessGrants
+
+    await AccessGrants.set_access_grants('knowledge', 'file-kb', [], db=db)
+
+
+def test_model_knowledge_refuses_files_its_owner_does_not_own(seeded):
+    from open_webui.models.files import File
+    from open_webui.models.models import Model
+
+    async def prepare():
+        await seed_resource(seeded, 'file')
+        async with seeded.sessions() as db:
+            for model_id, owner in (('own-model', 'owner'), ('reader-model', 'reader')):
+                db.add(
+                    Model(
+                        id=model_id,
+                        user_id=owner,
+                        base_model_id='llm',
+                        name=model_id,
+                        params={},
+                        meta={},
+                        created_at=1,
+                        updated_at=1,
+                    )
+                )
+            db.add(
+                File(
+                    id='writer-file',
+                    user_id='writer',
+                    filename='w.txt',
+                    path='',
+                    meta={},
+                    data={},
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
+            from open_webui.models.access_grants import AccessGrants
+
+            await AccessGrants.set_access_grants('model', 'own-model', GRANTS, db=db)
+
+    seeded.run(prepare)
+
+    def update(principal, model_id, file_id):
+        body = {
+            'id': model_id,
+            'name': model_id,
+            'params': {},
+            'meta': {'knowledge': [{'type': 'file', 'id': file_id}]},
+        }
+        return seeded.client.post('/api/v1/models/model/update', json=body, headers=seeded.headers(principal))
+
+    # The reader can read the owner's file through the knowledge base, yet may not pin it to their own model.
+    response = update('reader', 'reader-model', 'target')
+    assert response.status_code == 403, response.text
+    # A co-writer may attach only files of the model's owner, not their own.
+    assert update('writer', 'own-model', 'writer-file').status_code == 403
+    assert update('writer', 'own-model', 'target').status_code == 200
+    assert update('owner', 'own-model', 'missing').status_code == 403
+
+
+def test_model_reference_does_not_outlive_revoked_file_access(seeded):
+    async def check():
+        from open_webui.models.access_grants import AccessGrants
+        from open_webui.models.models import Model
+        from open_webui.models.users import Users
+        from open_webui.utils.access_control.files import has_access_to_file
+
+        await seed_resource(seeded, 'file')
+        async with seeded.sessions() as db:
+            # A model the reader saved while they could read the owner's file (stored before ownership was enforced).
+            db.add(
+                Model(
+                    id='reader-model',
+                    user_id='reader',
+                    base_model_id='llm',
+                    name='reader-model',
+                    params={},
+                    meta={'knowledge': [{'type': 'file', 'id': 'target'}]},
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
+            await AccessGrants.set_access_grants('model', 'reader-model', OUTSIDER_READ, db=db)
+            reader = await Users.get_user_by_id('reader', db=db)
+            outsider = await Users.get_user_by_id('outsider', db=db)
+            assert await has_access_to_file('target', 'read', reader, db=db)
+            assert not await has_access_to_file('target', 'read', outsider, db=db)
+
+            await _revoke_file_kb_grants(db)
+            assert not await has_access_to_file('target', 'read', reader, db=db)
+            assert not await has_access_to_file('target', 'read', outsider, db=db)
+
+    seeded.run(check)
+
+
+def test_shared_chat_reference_does_not_outlive_revoked_file_access(seeded):
+    async def check():
+        from open_webui.models.access_grants import AccessGrants
+        from open_webui.models.chats import Chat, Chats
+        from open_webui.models.shared_chats import SharedChats
+        from open_webui.models.users import Users
+        from open_webui.utils.access_control.files import has_access_to_file
+
+        await seed_resource(seeded, 'file')
+        # The share snapshot holds the file in the message it is linked to (a share covers only its snapshot).
+        message = {'id': 'message', 'role': 'user', 'content': 'x', 'files': [{'type': 'file', 'id': 'target'}]}
+        chat = {'title': 't', 'history': {'messages': {'message': message}, 'currentId': 'message'}}
+        async with seeded.sessions() as db:
+            for chat_id, owner in (('reader-chat', 'reader'), ('owner-chat', 'owner')):
+                db.add(Chat(id=chat_id, user_id=owner, title='t', chat=chat, meta={}, created_at=1, updated_at=1))
+            await db.commit()
+            for chat_id, owner in (('reader-chat', 'reader'), ('owner-chat', 'owner')):
+                assert await Chats.insert_chat_files(chat_id, 'message', ['target'], owner, db=db)
+                assert await SharedChats.create(chat_id, owner, db=db)
+            await AccessGrants.set_access_grants('shared_chat', 'reader-chat', OUTSIDER_READ, db=db)
+            outsider = await Users.get_user_by_id('outsider', db=db)
+            reader = await Users.get_user_by_id('reader', db=db)
+            # The reader's chat links a file the reader does not own: sharing it shares no file access.
+            assert not await has_access_to_file('target', 'read', outsider, db=db)
+
+            await _revoke_file_kb_grants(db)
+            assert not await has_access_to_file('target', 'read', reader, db=db)
+            assert not await has_access_to_file('target', 'read', outsider, db=db)
+
+            # The file owner's own shared chat still shares its file.
+            await AccessGrants.set_access_grants('shared_chat', 'owner-chat', OUTSIDER_READ, db=db)
+            assert await has_access_to_file('target', 'read', outsider, db=db)
+
+    seeded.run(check)
+
+
+def test_deleting_a_file_detaches_it_from_the_models_holding_it(seeded, monkeypatch):
+    from open_webui.soev import assistant_files
+
+    synced = []
+    monkeypatch.setattr(assistant_files, 'schedule', synced.append)
+
+    async def prepare():
+        from open_webui.models.models import Model
+
+        await seed_resource(seeded, 'file')
+        async with seeded.sessions() as db:
+            knowledge = [{'type': 'file', 'id': 'target'}, {'type': 'collection', 'id': 'file-kb'}]
+            db.add(
+                Model(
+                    id='own-model',
+                    user_id='owner',
+                    base_model_id='llm',
+                    name='own-model',
+                    params={},
+                    meta={'knowledge': knowledge},
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
+
+    seeded.run(prepare)
+    response = seeded.client.delete('/api/v1/files/target', headers=seeded.headers('owner'))
+    assert response.status_code == 200, response.text
+
+    async def check():
+        from open_webui.models.models import Models
+
+        model = await Models.get_model_by_id('own-model')
+        assert model.meta.knowledge == [{'type': 'collection', 'id': 'file-kb'}]
+
+    seeded.run(check)
+    assert synced == ['own-model']
+
+
 def test_folder_file_entries_require_valid_readable_targets(seeded):
     async def check():
         from open_webui.models.users import Users

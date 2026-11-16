@@ -71,11 +71,12 @@ export interface DisplayCitation {
 	// Parallel to `document`; `undefined` holes keep positions aligned for
 	// chunks whose source carried no distances (e.g. whole-document reads).
 	distances: (number | undefined)[];
-	n?: number;
+	// [Gradient] The `[N]` this entry answers to: the agent's `n`, else (legacy sources) its position.
+	n: number;
 }
 
 export function reduceSources(sources: RawSource[]): DisplayCitation[] {
-	const acc: DisplayCitation[] = [];
+	const acc: (Omit<DisplayCitation, 'n'> & { n?: number })[] = [];
 	const seenChunks = new Map<string, Set<string>>();
 
 	for (const source of sources) {
@@ -142,7 +143,16 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 		});
 	}
 
-	return acc;
+	return acc.map((entry, index) => ({ ...entry, n: entry.n ?? index + 1 }));
+}
+
+/** [Gradient] The entry a `[N]` marker (`3` or `'3#suffix'`) opens, by its number, not its position. */
+export function citationAt(
+	citations: DisplayCitation[],
+	marker: string | number
+): DisplayCitation | undefined {
+	const number = typeof marker === 'string' ? parseInt(marker.split('#')[0]) : marker;
+	return citations.find((citation) => citation.n === number);
 }
 
 // [Gradient] The document a chunk belongs to: one citation entry, and one `[N]`, per key.

@@ -28,7 +28,10 @@
 	// options.skipNavigate lets callers persist without the parent route
 	// navigating away — used by the "+ Add knowledge" flow, which saves
 	// the assistant then navigates to the KB-create flow itself.
-	export let onSubmit: (info: any, options?: { skipNavigate?: boolean }) => Promise<void> | void;
+	export let onSubmit: (
+		info: any,
+		options?: { skipNavigate?: boolean }
+	) => Promise<boolean | void> | boolean | void;
 	export let onAdvanced: () => void;
 
 	let loaded = false;
@@ -197,7 +200,10 @@
 		info.meta = applyToggles(info.meta, toggles);
 		info.access_grants = accessGrants;
 
-		await onSubmit(info, options);
+		if ((await onSubmit(info, options)) === false) {
+			loading = false;
+			return false;
+		}
 		// Reset the dirty baseline to the values we just persisted, so
 		// the Save button disappears until the user makes a new edit.
 		savedSnapshot = _snapshot();
@@ -239,11 +245,11 @@
 	/>
 
 	<div class="flex flex-col gap-5 max-w-3xl mx-auto w-full p-1">
-		<div class="flex items-center justify-between">
-			<div class="text-lg font-medium">
+		<div class="flex flex-wrap items-center justify-between gap-2">
+			<div class="text-lg font-medium whitespace-nowrap">
 				{edit ? $i18n.t('Edit assistant') : $i18n.t('New assistant')}
 			</div>
-			<div class="flex gap-1.5">
+			<div class="flex flex-wrap gap-1.5">
 				{#if (edit || hasBeenSaved) && id}
 					<button
 						class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"

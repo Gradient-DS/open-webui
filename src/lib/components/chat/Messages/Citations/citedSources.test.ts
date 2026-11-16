@@ -47,6 +47,14 @@ describe('citedCitations', () => {
 		expect(ids('Index `a[1]` and\n```\nb[2]\n```\nbut cites [3].')).toEqual(['doc-3']);
 	});
 
+	it('resolves markers by the stored number when sources arrived out of order', () => {
+		const citations = reduceSources([
+			{ source: { id: 'doc' }, document: ['Passage'], n: 2 },
+			{ source: { id: 'note' }, document: ['Note'], n: 1 }
+		]);
+		expect(citedCitations(citations, 'From the note [1].').map((c) => c.id)).toEqual(['note']);
+	});
+
 	it('follows the text as it streams', () => {
 		expect(ids('Partial [1')).toEqual([]);
 		expect(ids('Partial [1]')).toEqual(['doc-1']);
