@@ -1,14 +1,18 @@
 """The schema step names where it failed without printing driver messages."""
 
+from types import FunctionType
+
 import pytest
 
 from open_webui.soev import migrate
 
 
 def _raised(module: str, error: Exception) -> Exception:
-    scope = {'__name__': module, 'error': error}
+    def raise_error(error):
+        raise error
+
     try:
-        exec('raise error', scope)
+        FunctionType(raise_error.__code__, {'__name__': module})(error)
     except Exception as caught:
         return caught
     raise AssertionError('unreachable')
