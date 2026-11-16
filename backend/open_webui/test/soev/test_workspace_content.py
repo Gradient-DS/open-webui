@@ -157,6 +157,16 @@ async def test_download_is_404_while_the_workspace_is_off(workspace, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_an_admin_owner_without_the_workspace_permission_gets_404(workspace):
+    workspace.user.role = 'admin'
+    workspace.gate['permission'] = False
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == 404
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('part', ['workspace', 'page-0', 'page--1', 'page-1.5', 'page-01', 'page:1'])
 async def test_only_file_and_positive_page_parts_are_allowed(workspace, part):
     async with workspace.client as client:

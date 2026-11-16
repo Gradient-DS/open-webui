@@ -290,12 +290,32 @@ async def test_workspace_requires_the_capability(workspace):
 
     with (
         patch('open_webui.models.config.Config.get', AsyncMock(return_value=True)),
+        patch('open_webui.utils.access_control.has_permission', AsyncMock(return_value=True)),
         patch.dict(FEATURE_FLAGS, {'workspace': True}),
     ):
         result = await gate_workspace_features(
-            {'workspace': True, 'web_search': True}, {'workspace': workspace}, SimpleNamespace(role='admin')
+            {'workspace': True, 'web_search': True}, {'workspace': workspace}, SimpleNamespace(role='user', id='alice')
         )
     assert result == {'workspace': workspace, 'web_search': True}
+
+
+@pytest.mark.asyncio
+async def test_an_admin_without_the_workspace_permission_is_refused():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from open_webui.utils.features import gate_workspace_features
+
+    permission = AsyncMock(side_effect=lambda uid, key, defaults: key != 'features.workspace')
+    with (
+        patch('open_webui.models.config.Config.get', AsyncMock(return_value=True)),
+        patch('open_webui.utils.access_control.has_permission', permission),
+        patch.dict(FEATURE_FLAGS, {'workspace': True}),
+    ):
+        result = await gate_workspace_features(
+            {'workspace': True}, {'workspace': True}, SimpleNamespace(role='admin', id='root')
+        )
+    assert result['workspace'] is False
+    permission.assert_awaited()
 
 
 @pytest.mark.asyncio

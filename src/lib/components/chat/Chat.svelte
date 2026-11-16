@@ -1312,7 +1312,7 @@
 						model.info?.meta?.capabilities?.['workspace'] &&
 						isFeatureEnabled('workspace') &&
 						$config?.features?.enable_workspace &&
-						($user?.role === 'admin' || $user?.permissions?.features?.workspace)
+						$user?.permissions?.features?.workspace
 					) {
 						workspaceEnabled = model.info.meta.defaultFeatureIds.includes('workspace');
 					}
@@ -4023,7 +4023,7 @@
 				workspace:
 					isFeatureEnabled('workspace') &&
 					$config?.features?.enable_workspace &&
-					($user?.role === 'admin' || $user?.permissions?.features?.workspace)
+					$user?.permissions?.features?.workspace
 						? workspaceEnabled
 						: false,
 				// [Gradient] A family known to have no grant is never sent on.

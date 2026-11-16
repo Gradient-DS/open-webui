@@ -505,8 +505,9 @@ to off: the workspace agent runs model-written code, so a tenant opts in. The do
 `/api/v1/chats/{id}/workspace/{element}/{part}` is owner-only, admins included (404 otherwise): it asserts the
 owner to the agent, so `ENABLE_ADMIN_CHAT_ACCESS` or a chat share must not reach the owner's files. It is also 404
 while the feature flag, the admin switch or the user's permission is off (`utils/features.workspace_allowed`, the
-same gate a turn's `workspace` feature passes). The route is in `security/openapi.json` and waived as
-soev-solutions-backed in `security/route-coverage.toml`; its `element_id` is unseedable on the sealed stack. Delivered file
+same gate a turn's `workspace` feature passes; admins need the permission like users, and the frontend shows the
+switch on the same three). The route is in `security/openapi.json` and waived in `security/route-coverage.toml` as
+never attempted: its `element_id` is unseedable on the sealed stack. Delivered file
 names lose control, format (bidi override, zero-width) and line-separator characters and path separators, in the
 backend attachment (`agent_v2._shown_name`) and in the UI and download name (`deliveredFile.deliveredFileName`).
 

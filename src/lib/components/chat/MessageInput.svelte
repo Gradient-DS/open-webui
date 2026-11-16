@@ -918,7 +918,7 @@
 		selectedModelIds.length === workspaceCapableModels.length &&
 		isFeatureEnabled('workspace') &&
 		$config?.features?.enable_workspace &&
-		($_user?.role === 'admin' || $_user?.permissions?.features?.workspace);
+		$_user?.permissions?.features?.workspace;
 	$: if (!showWorkspaceButton) workspaceEnabled = false;
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
