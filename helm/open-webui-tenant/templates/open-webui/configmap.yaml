@@ -519,7 +519,7 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Migrations run in each pod's init container, serialized on PostgreSQL.
+  # Only the migration init container may upgrade the schema.
   ENABLE_DB_MIGRATIONS: "false"
 
   # Telemetry

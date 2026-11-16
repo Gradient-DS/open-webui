@@ -193,7 +193,7 @@ jobs:
       - name: Start test PostgreSQL
         if: steps.gate.outputs.run == 'true'
         run: |
-          docker run --detach --name backend-tests-postgres -e POSTGRES_PASSWORD=backend-test -e POSTGRES_DB=backend_tests -p 127.0.0.1:5432:5432 postgres:16-alpine
+          docker run --detach --name backend-tests-postgres -e POSTGRES_PASSWORD=backend-test -e POSTGRES_DB=backend_tests -p 127.0.0.1:5432:5432 pgvector/pgvector:0.8.6-pg16
           for _ in {1..30}; do if docker exec backend-tests-postgres pg_isready -U postgres; then exit 0; fi; sleep 1; done
           docker logs backend-tests-postgres
           exit 1
@@ -234,10 +234,11 @@ jobs:
         run: helm template test-release helm/open-webui-tenant > /dev/null
 
       - name: Template Helm chart with external Postgres values
-        # All six DB consumers must point at postgres.host, none at the bundled Service.
+        # Six host occurrences: OWUI and loader ConfigMaps, OWUI migrate/app URLs,
+        # loader wait-for-postgres, and loader bootstrap Job. No bundled Service.
         run: |
           helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/external-postgres-values.yaml > /tmp/external-postgres.yaml
-          test "$(grep -c 'pg-external.database-staging' /tmp/external-postgres.yaml)" -eq 6
+          test "$(grep -Fc 'pg-external.database-staging.svc.cluster.local' /tmp/external-postgres.yaml)" -eq 6
           ! grep -q 'open-webui-tenant-postgres' /tmp/external-postgres.yaml
 
       - name: Template Helm chart with strict egress values

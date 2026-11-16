@@ -101,6 +101,20 @@ async def test_dry_run_rolls_back_all_rows_and_reports_counts(cutover_store):
 
 
 @pytest.mark.asyncio
+async def test_platform_archive_group_entry_is_not_an_owui_group(cutover_store):
+    sessions, _ = cutover_store
+    archive = {cutover.ARCHIVE_SOURCE_ID: 'platform:group:0b6f2f0e-6f0f-4c6f-9a44-2b7c1f6f3a11'}
+    async with sessions() as db:
+        report = await cutover.run_cutover(db, PERSON_MAP, {**GROUP_MAP, **archive}, ['demo'])
+    assert report['counts'] == COUNTS
+    async with sessions() as db:
+        with pytest.raises(cutover.CutoverRefused):
+            await cutover.run_cutover(
+                db, PERSON_MAP, {**GROUP_MAP, 'legacy-unknown': archive['admins-archive']}, ['demo']
+            )
+
+
+@pytest.mark.asyncio
 async def test_apply_and_same_map_retry_preserve_rows_and_report_no_changes(cutover_store):
     sessions, _ = cutover_store
     before = await snapshot(sessions)

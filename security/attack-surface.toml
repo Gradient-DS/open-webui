@@ -804,6 +804,11 @@ description = "The handler requires an email query parameter."
 params = { email = "attack-{token}@example.com" }
 
 [[field]]
+route = "POST /api/v1/models/model/access/update"
+description = "routers/models.py:update_model_access_by_id refuses a model without a stored row; the user-owned assistant has one, so the owner control is positive."
+json = { id = "{assistant}", access_grants = [] }
+
+[[field]]
 route = "POST /api/v1/models/model/toggle"
 description = "Toggle resolves the actual registered model from the required id query."
 params = { id = "{assistant}" }

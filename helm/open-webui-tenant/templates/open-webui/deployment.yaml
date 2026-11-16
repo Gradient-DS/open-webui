@@ -57,29 +57,12 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # Import-time trigger: run_migrations() fires when open_webui.config
-          # is imported, gated on ENABLE_DB_MIGRATIONS. This explicit override
-          # forces it on regardless of the configmap value (which is false on
-          # the main Deployment so its pods don't also try to migrate).
-          command: ["python", "-c", "import open_webui.config"]
+          command: ["python", "-m", "open_webui.soev.migrate"]
           envFrom:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
-            - name: ENABLE_DB_MIGRATIONS
-              value: "true"
-            - name: WEBUI_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: webui-secret-key
-            - name: DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: postgres-password
-            - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
+            {{- include "open-webui-tenant.openWebui.env" (merge (dict "migration" true) .) | nindent 12 }}
           resources:
             {{- toYaml .Values.openWebui.resources | nindent 12 }}
           volumeMounts:
@@ -101,19 +84,6 @@ spec:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
-            # [Gradient] Per-pod OTel identity. Without a unique
-            # service.instance.id each HA replica exports metrics under an
-            # identical series — Mimir commingles them and increase()/rate()
-            # inflate by orders of magnitude. Set here (not the ConfigMap)
-            # because the pod name is only available via the downward API.
-            {{- if .Values.openWebui.config.telemetry.otel.enabled }}
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: OTEL_RESOURCE_ATTRIBUTES
-              value: "service.instance.id=$(POD_NAME){{ with .Values.openWebui.config.telemetry.otel.resourceAttributes }},{{ . }}{{ end }}"
-            {{- end }}
             {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}
           volumeMounts:
             - name: data

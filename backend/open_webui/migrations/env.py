@@ -6,15 +6,16 @@ import logging.config
 import logging
 import alembic.context
 from open_webui.env import DATABASE_PASSWORD, DATABASE_URL, LOG_FORMAT
-from open_webui.internal.db import enable_iam_token_auth, extract_ssl_params_from_url, reattach_ssl_params_to_url
+from open_webui.internal.db import Base, enable_iam_token_auth, extract_ssl_params_from_url, reattach_ssl_params_to_url
 from open_webui.internal.migration_lock import migration_lock
-from open_webui.models.auths import Auth
-from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee  # noqa: F401
-from open_webui.models.chat_messages import ChatMessage  # noqa: F401
-from open_webui.models.chats import Chat  # noqa: F401
 from sqlalchemy import create_engine, engine_from_config, pool
 
 alembic_config = alembic.context.config
+if not alembic_config.attributes.get('skip_model_imports'):
+    from open_webui.models.auths import Auth  # noqa: F401
+    from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee  # noqa: F401
+    from open_webui.models.chat_messages import ChatMessage  # noqa: F401
+    from open_webui.models.chats import Chat  # noqa: F401
 if alembic_config.config_file_name:
     logging.config.fileConfig(alembic_config.config_file_name, disable_existing_loggers=False)
 if LOG_FORMAT == 'json':
@@ -22,7 +23,7 @@ if LOG_FORMAT == 'json':
 
     for log_handler in logging.root.handlers:
         log_handler.setFormatter(JSONFormatter())
-migration_metadata = Auth.metadata
+migration_metadata = Base.metadata
 target_db_url = DATABASE_URL
 base_url, ssl_query_params = extract_ssl_params_from_url(target_db_url)
 if ssl_query_params:
@@ -76,6 +77,7 @@ def run_migrations_online() -> None:
         alembic.context.configure(
             connection=live_connection,
             target_metadata=migration_metadata,
+            on_version_apply=alembic_config.attributes.get('on_version_apply'),
         )
         with alembic.context.begin_transaction():
             alembic.context.run_migrations()

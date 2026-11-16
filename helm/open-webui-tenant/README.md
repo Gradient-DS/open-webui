@@ -28,9 +28,14 @@ ExternalSecret fetches `soevApiKey` from the configured 1Password item and
 injects `SOEV_API_KEY` through `secretKeyRef`. Inline deployments use
 `secrets.soevApiKey`. User authority comes from each person's login token.
 
-`extraEnv` is appended to the main Open WebUI container's environment. Each
-entry supports either `{name, value}` or `{name, valueFrom}`; quote scalar
-values as strings. It does not modify the migration init container.
+`extraEnv` is shared by the app and migration init container. Each entry supports
+`{name, value}` or `{name, valueFrom}`; quote scalar values as strings. Both use
+the same ConfigMap and secret references. The app keeps its per-pod OTel identity
+(`POD_NAME` and `OTEL_RESOURCE_ATTRIBUTES`) unchanged; these variables are excluded
+from init so it cannot claim the app's instance id. In separate-login mode, init
+replaces the database connection fields (including `PGVECTOR_DB_URL` and
+`PGOPTIONS`). `extraEnv` cannot override those fields or either container's
+`ENABLE_DB_MIGRATIONS`, regardless of login mode.
 
 ## PostgreSQL vectors
 
@@ -102,12 +107,36 @@ all public 443, so the policy only observes; with `fqdn.enforce` (requires
 
 ## Database migrations
 
-Every Open WebUI pod runs `python -c 'import open_webui.config'` in a `migrate`
-init container on both first install and upgrades. It uses the application
-image, resources, security context, ConfigMap, database secret references, and
-data volume. The init container sets `ENABLE_DB_MIGRATIONS=true`; the main
-container inherits `false` from the ConfigMap. Kubernetes waits for the
-ExternalSecret's generated Secret before starting the init container.
+Every pod runs schema upgrades in a `migrate` init container. The app always has
+`ENABLE_DB_MIGRATIONS=false`. Set `postgres.migration.user`,
+`postgres.migration.passwordSecretRef.name` and
+`postgres.migration.passwordSecretRef.key` to give init a separate login. Optional `postgres.migration.role` sets
+`PGOPTIONS=-c role=<owner role>` on that container, so all its libpq connections
+assume the owner role. The login must be allowed to SET that role.
+
+With a separate login, init explicitly overrides all `DATABASE_*` connection
+parts as well as `DATABASE_URL` and `PGVECTOR_DB_URL`: `env.py` prefers the parts over a
+URL. The app receives only runtime credentials and `ENABLE_DB_MIGRATIONS=false`,
+even if `extraEnv` attempts to enable it. Grant its login schema USAGE, table
+SELECT/INSERT/UPDATE/DELETE and sequence USAGE; grant no schema CREATE. Provision
+the `vector` extension before migration when `pgvector.createExtension=false`.
+
+Without `postgres.migration.user`, init uses the runtime login for schema
+upgrades. The app still never runs migrations. Existing tenants can keep that
+single-login mode until their database roles are separated.
+The init container uses the application image, resources, security
+context, ConfigMap and data volume. Kubernetes waits for its referenced Secrets.
+It runs `python -m open_webui.soev.migrate`: Alembic upgrade followed by pgvector
+extensions/table/index initialization when `VECTOR_DB=pgvector`, then exits 0.
+The command enables migrations explicitly, prints only JSON counts, and never
+imports the full application config or connects to other vector backends.
+The app verifies pgvector extensions, table columns, dimensions and indexes
+read-only; a missing object names itself and instructs the operator to run the
+migration step. Each PostgreSQL schema phase uses the migration advisory lock.
+See [ci/migration-values.yaml](ci/migration-values.yaml) for a separate-login
+rendering example. Set owner-role default privileges (or grant after the schema
+step) so newly created tables and sequences remain accessible to the runtime
+login on future upgrades.
 
 Use an application image containing the PostgreSQL migration advisory lock
 when running multiple replicas. The lock covers the entire online Alembic run
@@ -133,7 +162,11 @@ for values in helm/open-webui-tenant/ci/*.yaml; do
 done
 ```
 
-The focused backend test is
+Run `pytest -q helm/open-webui-tenant/tests/test_render.py` for environment and
+login isolation checks. The focused backend tests are
+`backend/open_webui/test/migrations/test_runtime_schema.py` and
 `backend/open_webui/test/migrations/test_migration_lock.py`. Set
-`MIGRATION_LOCK_TEST_DATABASE_URL` to an isolated PostgreSQL database to also
-exercise real concurrent sessions, commit boundaries, and failure cleanup.
+`BACKEND_TEST_DATABASE_URL` to an isolated pgvector-enabled PostgreSQL server
+login with CREATEDB/CREATEROLE; these tests create disposable databases and
+fictional roles to check migration locking, restricted startup, missing objects,
+and the standalone migration command.

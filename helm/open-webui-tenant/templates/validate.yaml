@@ -9,3 +9,16 @@
 {{- fail "when openWebui.config.vectorDb is pgvector, set openWebui.config.databaseName to match postgres.database" -}}
 {{- end -}}
 {{- end -}}
+
+{{- with .Values.postgres.migration -}}
+{{- if .user -}}
+{{- if or (empty .passwordSecretRef.name) (empty .passwordSecretRef.key) -}}
+{{- fail "postgres.migration.user requires postgres.migration.passwordSecretRef.name and key" -}}
+{{- end -}}
+{{- if and .role (not (regexMatch "^[A-Za-z_][A-Za-z0-9_$-]*$" .role)) -}}
+{{- fail "postgres.migration.role must be a single PostgreSQL role name without whitespace or option syntax" -}}
+{{- end -}}
+{{- else if or .role .passwordSecretRef.name .passwordSecretRef.key -}}
+{{- fail "postgres.migration.role and passwordSecretRef require postgres.migration.user" -}}
+{{- end -}}
+{{- end -}}
