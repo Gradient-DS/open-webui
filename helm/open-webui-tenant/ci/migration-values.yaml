@@ -1,0 +1,22 @@
+# Separate owner/migration/runtime roles on an externally managed tenant database.
+openWebui:
+  config:
+    vectorDb: pgvector
+    databaseUser: raven_owui
+    databaseName: raven
+postgres:
+  enabled: false
+  host: raven-postgres.soev-raven.svc.cluster.local
+  user: raven_owui
+  database: raven
+  migration:
+    user: raven_migrator
+    passwordSecretRef:
+      name: raven-migration
+      key: password
+    role: raven_admin
+weaviate:
+  enabled: false
+extraEnv:
+  - name: PGVECTOR_INDEX_METHOD
+    value: hnsw

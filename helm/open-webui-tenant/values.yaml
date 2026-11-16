@@ -702,7 +702,8 @@ postgres:
   user: openwebui
   # password is set via secrets
 
-  # Opt into a separate migration init container; these credentials never reach
+  # Opt into python -m open_webui.soev.migrate in an init container (Alembic +
+  # pgvector schema, counts-only output); these credentials never reach
   # the app. Grant the login membership in the owner role; role uses libpq
   # PGOPTIONS (-c role=...) for every migration connection, including pgvector.
   # The runtime login needs table DML + sequence USAGE and no schema CREATE.

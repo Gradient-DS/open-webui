@@ -123,6 +123,17 @@ single application login runs migrations at startup (`ENABLE_DB_MIGRATIONS=true`
 Existing tenants can keep that mode until their database roles are separated.
 The separate init container uses the application image, resources, security
 context, ConfigMap and data volume. Kubernetes waits for its referenced Secrets.
+It runs `python -m open_webui.soev.migrate`: Alembic upgrade followed by pgvector
+extensions/table/index initialization when `VECTOR_DB=pgvector`, then exits 0.
+The command enables migrations explicitly, prints only JSON counts, and never
+imports the full application config or connects to other vector backends.
+The app verifies pgvector extensions, table columns, dimensions and indexes
+read-only; a missing object names itself and instructs the operator to run the
+migration step. Each PostgreSQL schema phase uses the migration advisory lock.
+See [ci/migration-values.yaml](ci/migration-values.yaml) for a separate-login
+rendering example. Set owner-role default privileges (or grant after the schema
+step) so newly created tables and sequences remain accessible to the runtime
+login on future upgrades.
 
 Use an application image containing the PostgreSQL migration advisory lock
 when running multiple replicas. The lock covers the entire online Alembic run
@@ -148,7 +159,11 @@ for values in helm/open-webui-tenant/ci/*.yaml; do
 done
 ```
 
-The focused backend test is
+Run `pytest -q helm/open-webui-tenant/tests/test_render.py` for environment and
+login isolation checks. The focused backend tests are
+`backend/open_webui/test/migrations/test_runtime_schema.py` and
 `backend/open_webui/test/migrations/test_migration_lock.py`. Set
-`MIGRATION_LOCK_TEST_DATABASE_URL` to an isolated PostgreSQL database to also
-exercise real concurrent sessions, commit boundaries, and failure cleanup.
+`BACKEND_TEST_DATABASE_URL` to an isolated pgvector-enabled PostgreSQL server
+login with CREATEDB/CREATEROLE; these tests create disposable databases and
+fictional roles to check migration locking, restricted startup, missing objects,
+and the standalone migration command.

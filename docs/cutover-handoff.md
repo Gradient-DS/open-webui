@@ -9,8 +9,27 @@ runtime login. Read/export OWUI rows with the existing tenant-owner credentials
 before relocation; write platform rows by direct SQL as the migrator. No runtime
 role gains cross-database access.
 
-For the OWUI person/group step, run from `backend/` with the OWUI `DATABASE_URL`:
-`python -m open_webui.soev.cutover --person-map person-map.json --group-map group-map.json --excluded excluded.json`
+Run these OWUI steps in order from `backend/`, with the app stopped:
+
+1. As the schema migration login (`<db>_migrator`, allowed to SET ROLE
+   `<db>_admin`), set `PGOPTIONS='-c role=<db>_admin'` and run
+   `python -m open_webui.soev.migrate`. Supply the migration user's
+   `DATABASE_USER`/`DATABASE_PASSWORD` and the tenant's database host/port/name,
+   plus the app's settings, especially `VECTOR_DB=pgvector` and its dimensions,
+   encryption and index options. Connection parts take precedence over
+   `DATABASE_URL`; do not leave runtime parts set with a migration URL.
+   `PGVECTOR_DB_URL`, if supplied, must also use the migration login. Pre-provision
+   extensions when their creation is disabled. The command runs Alembic and the
+   pgvector schema step, exits after completion, and prints JSON counts only.
+2. Switch to the runtime login (`<db>_owui`), clear migration `PGOPTIONS`, set
+   `ENABLE_DB_MIGRATIONS=false`, and run
+   `python -m open_webui.soev.cutover --person-map person-map.json --group-map group-map.json --excluded excluded.json`.
+   This person/group rewrite requires only runtime DML and table locks.
+3. Start the app as the runtime login with `ENABLE_DB_MIGRATIONS=false` and the
+   same vector settings. Startup verifies the vector schema without DDL. The
+   chart uses `postgres.migration.user`, `passwordSecretRef.{name,key}`, and
+   optional `role` for its init step; the app never receives those credentials.
+
 Dry-run always rolls back; add `--apply` to commit after locks and post-checks. JSON output contains counts and outcomes only; explicitly excluded test/demo accounts remain unbound and cannot sign in or hold a platform session.
 
 Evidence: soev-docs `architecture/platform/TARGET.md` §§4, 7, 16; master plan
@@ -38,6 +57,33 @@ all chat branches/attachments accounted for, no pending upload/OAuth sessions, a
 no migration-only privileges remaining. Never rerun the old API reconciliation
 as users. Actual counts and unresolved imports belong in the rehearsal report;
 this change does not perform a tenant cutover.
+
+## Startup DDL inventory (owui-db-role-1116)
+
+With `VECTOR_DB=pgvector`, `AGENT_API_ENABLED=true`, and `SOEV_API_URL` set,
+the only database DDL outside Alembic is in `retrieval/vector/dbs/pgvector.py`:
+
+| Operation | Migration/runtime handling |
+| --- | --- |
+| `CREATE EXTENSION vector` in a conditional DO block | Migration only, still gated by `PGVECTOR_CREATE_EXTENSION`; runtime checks `pg_extension` even when creation is disabled. |
+| `CREATE EXTENSION pgcrypto` in a conditional DO block | Migration only when `PGVECTOR_PGCRYPTO=true`; runtime checks the extension when encryption is enabled. |
+| `Base.metadata.create_all` for `document_chunk` (including its primary key) | Migration only; runtime checks table/column existence and vector type/dimensions. |
+| `CREATE INDEX idx_document_chunk_vector` (ivfflat or HNSW, vector or halfvec) | Migration only; runtime checks that the index is ready/valid and has the configured method. |
+| `CREATE INDEX idx_document_chunk_text_search` (GIN) | Migration only for unencrypted text; runtime checks it in that mode. |
+| `CREATE INDEX idx_document_chunk_collection_name` (btree) | Migration only; runtime checks it. |
+
+The migration entry point runs those operations after Alembic. Startup skips all
+of them with `ENABLE_DB_MIGRATIONS=false`; missing vector objects fail before
+serving requests with their names and the migration command. The audit found no
+active Peewee runner or other application `create_all` outside vector adapters.
+
+Other SQL vector adapters also contain DDL, but are not imported with
+`VECTOR_DB=pgvector` and are unchanged: OpenGauss creates `document_chunk` and
+its vector/collection indexes; MariaDB creates `document_chunk` with inline
+vector/collection indexes (and uses TRUNCATE for its explicit reset operation);
+Oracle creates `document_chunk`, `document_chunk_collection_name_idx`, and
+`document_chunk_vector_ivf_idx`. Non-SQL vector backends retain their own remote
+collection/index provisioning; they are outside this PostgreSQL startup path.
 
 ## Platform deletion feed contract (owui-db-role-1116)
 

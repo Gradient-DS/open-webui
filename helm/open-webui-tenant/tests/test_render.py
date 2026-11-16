@@ -42,7 +42,9 @@ def test_default_single_login_migrates_at_startup():
 
 def test_separate_login_is_only_in_init_and_overrides_database_parts():
     pod, config = objects(MIGRATION)
-    init = env(next(c for c in pod['initContainers'] if c['name'] == 'migrate'))
+    init_container = next(c for c in pod['initContainers'] if c['name'] == 'migrate')
+    assert init_container['command'] == ['python', '-m', 'open_webui.soev.migrate']
+    init = env(init_container)
     app = env(pod['containers'][0])
     assert config['DATABASE_USER'] == 'openwebui'
     assert config['ENABLE_DB_MIGRATIONS'] == 'false'

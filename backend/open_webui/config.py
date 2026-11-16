@@ -67,15 +67,9 @@ logging.getLogger('uvicorn.access').addFilter(EndpointFilter())
 def run_migrations():
     log.info('Running migrations')
     try:
-        from alembic import command
-        from alembic.config import Config as AlembicConfig
+        from open_webui.soev.migrate import upgrade_alembic
 
-        alembic_cfg = AlembicConfig(OPEN_WEBUI_DIR / 'alembic.ini')
-
-        migrations_path = OPEN_WEBUI_DIR / 'migrations'
-        alembic_cfg.set_main_option('script_location', str(migrations_path))
-
-        command.upgrade(alembic_cfg, 'head')
+        upgrade_alembic()
     except Exception as e:
         log.exception(f'Error running migrations: {e}')
         raise

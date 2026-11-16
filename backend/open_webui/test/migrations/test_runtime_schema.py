@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -38,7 +39,7 @@ def role_database(postgres_database):
         engine.dispose()
 
 
-def initialize(url, migrations, **settings):
+def initialize(url, migrations, command=None, **settings):
     env = {
         **os.environ,
         'DATABASE_URL': url.render_as_string(hide_password=False),
@@ -50,7 +51,8 @@ def initialize(url, migrations, **settings):
         **settings,
     }
     return subprocess.run(
-        [
+        command
+        or [
             sys.executable,
             '-c',
             'from open_webui.retrieval.vector.dbs.pgvector import PgvectorClient; '
@@ -93,7 +95,7 @@ def test_runtime_init_with_dml_only(role_database, settings):
             db.execute(text("UPDATE document_chunk SET collection_name = 'finch' WHERE id = 'raven-chunk'"))
             assert db.execute(text('SELECT count(*) FROM document_chunk')).scalar() == 1
             db.execute(text('DELETE FROM document_chunk'))
-        result = initialize(runtime_url, False, **settings)
+        result = initialize(runtime_url, False, **{**settings, 'PGVECTOR_CREATE_EXTENSION': 'true'})
         assert result.returncode == 0, result.stderr
     finally:
         restricted.dispose()
@@ -121,3 +123,70 @@ def test_runtime_init_names_missing_object(role_database, ddl, missing):
     assert result.returncode != 0
     assert f'Missing database object {missing}' in result.stderr
     assert 'migration login before starting Open WebUI' in result.stderr
+
+
+def test_migration_entrypoint_then_restricted_startup(role_database, tmp_path):
+    engine, migration_url, runtime_url, runtime = role_database
+    # Prove the real -m entry point does not continue into application configuration.
+    (tmp_path / 'sitecustomize.py').write_text(
+        'import sys\n'
+        'class RefuseApplicationConfig:\n'
+        '    def find_spec(self, fullname, *args):\n'
+        '        if fullname == "open_webui.config":\n'
+        '            raise ImportError("Application config must not be imported by migration CLI")\n'
+        'sys.meta_path.insert(0, RefuseApplicationConfig())\n'
+    )
+    command = [sys.executable, '-m', 'open_webui.soev.migrate']
+    settings = {
+        'PYTHONPATH': f'{tmp_path}{os.pathsep}{os.environ["PYTHONPATH"]}',
+        'DATABASE_TYPE': 'postgresql',
+        'DATABASE_USER': migration_url.username,
+        'DATABASE_PASSWORD': migration_url.password,
+        'DATABASE_HOST': migration_url.host,
+        'DATABASE_PORT': str(migration_url.port),
+        'DATABASE_NAME': migration_url.database,
+        'PGVECTOR_DB_URL': migration_url.difference_update_query(['options']).render_as_string(hide_password=False),
+        'PGOPTIONS': migration_url.query['options'],
+        'AGENT_API_ENABLED': 'true',
+        'SOEV_API_URL': 'https://platform.raven.invalid',
+    }
+    # The parts must win even when an inherited runtime URL is present.
+    result = initialize(runtime_url, False, command=command, **settings)
+    assert result.returncode == 0, result.stderr
+    counts = json.loads(result.stdout)
+    assert counts['alembic_upgrades'] > 0
+    assert counts['pgvector_tables'] == 1
+    assert counts['pgvector_indexes'] == 3
+    assert result.stderr == ''
+    result = initialize(runtime_url, False, command=command, **settings)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {**counts, 'alembic_upgrades': 0}
+    with engine.begin() as db:
+        db.execute(text(f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {runtime}'))
+        db.execute(text(f'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO {runtime}'))
+    result = initialize(
+        runtime_url,
+        False,
+        command=[sys.executable, '-c', 'from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT'],
+        AGENT_API_ENABLED='true',
+        SOEV_API_URL='https://platform.raven.invalid',
+        SOEV_ARCHIVE_READERS_GROUP_REF='platform:group:00000000-0000-4000-8000-000000000001',
+        SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS='5',
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_migration_entrypoint_does_not_initialize_other_vector_backends(role_database):
+    _, migration_url, _, _ = role_database
+    result = initialize(
+        migration_url,
+        False,
+        command=[sys.executable, '-m', 'open_webui.soev.migrate'],
+        VECTOR_DB='weaviate',
+        WEAVIATE_HTTP_HOST='unreachable.raven.invalid',
+    )
+    assert result.returncode == 0, result.stderr
+    counts = json.loads(result.stdout)
+    assert counts['alembic_upgrades'] > 0
+    assert counts['pgvector_tables'] == counts['pgvector_indexes'] == 0
+    assert result.stderr == ''

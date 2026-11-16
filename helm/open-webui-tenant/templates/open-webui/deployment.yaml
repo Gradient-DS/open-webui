@@ -58,7 +58,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          command: ["python", "-c", "import open_webui.config"]
+          command: ["python", "-m", "open_webui.soev.migrate"]
           envFrom:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
