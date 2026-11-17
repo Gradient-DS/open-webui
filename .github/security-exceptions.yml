@@ -213,3 +213,156 @@ exceptions:
       Verified absent from the running slim container.
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
+
+  # ---------------------------------------------------------------------------
+  # npm audit: @sveltejs/kit 2.70.3, six advisories published 2026-11-16.
+  # All six concern a SvelteKit server (Node adapter, server-side routing,
+  # prerendering, remote functions, form actions). This app ships none of that:
+  # it is a static browser bundle served by the FastAPI backend. Recheck when a
+  # server route, prerendering, remote functions or use:enhance is introduced.
+  # ---------------------------------------------------------------------------
+
+  - id: GHSA-mw6w-2fmv-pvw3
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. adapter-node crashes with an unhandled URIError
+      when a reroute hook rewrites a URL.
+    replacement_considered: >-
+      Fixed in 2.70.4, published 2026-11-05 and inside the 14-day dependency
+      cooldown until 2026-11-19. The bump follows then and this entry goes with
+      it.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. The crash is in
+      the Node adapter's request handling, which never runs: the browser bundle is
+      served by the FastAPI backend as static files. @sveltejs/adapter-node is
+      listed in package.json but no config imports it.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-11-26
+
+  - id: GHSA-rqp5-r3wg-vg35
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. A protocol-relative module import during server-
+      side route resolution.
+    replacement_considered: >-
+      Fixed in 2.70.4, published 2026-11-05 and inside the 14-day dependency
+      cooldown until 2026-11-19. The bump follows then and this entry goes with
+      it.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. Route resolution
+      happens only in the browser; there is no SvelteKit server to resolve a route
+      or import a module.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-11-26
+
+  - id: GHSA-27mw-82g8-phjj
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. Cross-site scripting through an untrusted cache-
+      control header in a prerendered page.
+    replacement_considered: >-
+      No 2.x release fixes it; the fix is in SvelteKit 3.1.1 and later, a major
+      upgrade upstream Open WebUI has not made. Moving the fork alone would put
+      every upstream merge of the frontend in conflict.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. Prerendering is
+      off (the prerender export in +layout.js is commented out), so no page is
+      prerendered and no response header is written into one.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-12-16
+
+  - id: GHSA-3r8g-jcqq-3p5j
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. Denial of service while parsing form data sent
+      to a remote function's form.
+    replacement_considered: >-
+      No 2.x release fixes it; the fix is in SvelteKit 3.1.1 and later, a major
+      upgrade upstream Open WebUI has not made. Moving the fork alone would put
+      every upstream merge of the frontend in conflict.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. Remote functions
+      need a SvelteKit server; the repository has no .remote file and does not
+      enable them.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-12-16
+
+  - id: GHSA-6cf5-gc4q-fm3x
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. Private query.batch remote functions can collide
+      and return another caller's result.
+    replacement_considered: >-
+      No 2.x release fixes it; the fix is in SvelteKit 3.1.1 and later, a major
+      upgrade upstream Open WebUI has not made. Moving the fork alone would put
+      every upstream merge of the frontend in conflict.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. query.batch
+      belongs to remote functions, which are not enabled and have no server to run
+      on here.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-12-16
+
+  - id: GHSA-pfhg-q3qv-9q6r
+    package: "@sveltejs/kit"
+    scanner: npm
+    reason: >-
+      Not reachable in our build. URL redirection to an untrusted site through an
+      enhanced form submission.
+    replacement_considered: >-
+      No 2.x release fixes it; the fix is in SvelteKit 3.1.1 and later, a major
+      upgrade upstream Open WebUI has not made. Moving the fork alone would put
+      every upstream merge of the frontend in conflict.
+    usage_analysis: >-
+      Open WebUI is built as a static single-page app: svelte.config.js uses
+      adapter-static, src/routes/+layout.js sets ssr = false, and src has no
+      +server, +page.server, +layout.server or hooks.server file. Enhanced forms
+      come from $app/forms (use:enhance) and submit to a form action on a
+      SvelteKit server. Nothing under src imports $app/forms or uses use:enhance,
+      and there is no form action to answer one.
+    approved_by: Lex Lubbers, 2026-11-16
+    recheck: 2026-12-16
+
+  # ---------------------------------------------------------------------------
+  # npm audit: picomatch, advisory widened on 2026-11-17 to every release up to
+  # the newest (4.0.7). There is no fixed release to install. Remove this entry
+  # with the bump once a fixed release is past the dependency cooldown.
+  # ---------------------------------------------------------------------------
+
+  - id: GHSA-fc5q-39xc-vjpf
+    package: picomatch
+    scanner: npm
+    reason: >-
+      Not reachable in our build. A crafted glob pattern with repeated extglobs
+      makes pattern matching very slow (ReDoS). The advisory lists every release
+      up to and including the newest, 4.0.7, as affected, so there is no version
+      to upgrade to.
+    replacement_considered: >-
+      picomatch is not a direct dependency. It is pulled in by the build tooling
+      (Vite, the Rollup plugins, tinyglobby, fdir, the Sass file watcher) and by
+      development tools (vitest, svelte-check, i18next-parser). Replacing it would
+      mean replacing Vite and the SvelteKit build chain.
+    usage_analysis: >-
+      picomatch only runs while building, testing or linting the frontend, on a
+      developer machine or a CI runner. The glob patterns it receives come from
+      our own build configuration and from the tools' built-in defaults; no user
+      input reaches them. It is not part of the browser bundle the image serves
+      and the Python backend does not use it, so a deployed tenant has no code
+      path that matches an attacker-chosen pattern.
+    approved_by: Lex Lubbers, 2026-11-17
+    recheck: 2026-12-01
