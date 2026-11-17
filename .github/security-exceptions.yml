@@ -337,3 +337,32 @@ exceptions:
       and there is no form action to answer one.
     approved_by: Lex Lubbers, 2026-11-16
     recheck: 2026-12-16
+
+  # ---------------------------------------------------------------------------
+  # npm audit: picomatch, advisory widened on 2026-11-17 to every release up to
+  # the newest (4.0.7). There is no fixed release to install. Remove this entry
+  # with the bump once a fixed release is past the dependency cooldown.
+  # ---------------------------------------------------------------------------
+
+  - id: GHSA-fc5q-39xc-vjpf
+    package: picomatch
+    scanner: npm
+    reason: >-
+      Not reachable in our build. A crafted glob pattern with repeated extglobs
+      makes pattern matching very slow (ReDoS). The advisory lists every release
+      up to and including the newest, 4.0.7, as affected, so there is no version
+      to upgrade to.
+    replacement_considered: >-
+      picomatch is not a direct dependency. It is pulled in by the build tooling
+      (Vite, the Rollup plugins, tinyglobby, fdir, the Sass file watcher) and by
+      development tools (vitest, svelte-check, i18next-parser). Replacing it would
+      mean replacing Vite and the SvelteKit build chain.
+    usage_analysis: >-
+      picomatch only runs while building, testing or linting the frontend, on a
+      developer machine or a CI runner. The glob patterns it receives come from
+      our own build configuration and from the tools' built-in defaults; no user
+      input reaches them. It is not part of the browser bundle the image serves
+      and the Python backend does not use it, so a deployed tenant has no code
+      path that matches an attacker-chosen pattern.
+    approved_by: Lex Lubbers, 2026-11-17
+    recheck: 2026-12-01
