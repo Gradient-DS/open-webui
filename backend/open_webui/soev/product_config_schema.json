@@ -298,7 +298,7 @@
     "ui.enable_message_rating": "boolean",
     "ui.enable_user_webhooks": "boolean",
     "ui.enable_welcome_message": "boolean",
-    "ui.greeting_template": "string",
+    "ui.greeting_template": "string|object",
     "ui.model_order_list": "array",
     "ui.pending_user_overlay_content": "string",
     "ui.pending_user_overlay_title": "string",

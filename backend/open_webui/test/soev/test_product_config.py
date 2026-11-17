@@ -108,6 +108,16 @@ async def test_default_model_selection_reads_product_config_live(live):
 
 
 @pytest.mark.asyncio
+async def test_greeting_reads_as_one_text_or_one_text_per_language(live):
+    key = 'ui.greeting_template'
+    live.document['values'][key] = 'Fictional welcome'
+    assert await Config.get(key) == 'Fictional welcome'
+    live.document['values'][key] = {'nl-NL': 'Fictief welkom', 'en-US': 'Fictional welcome'}
+    live.now[0] += 60
+    assert await Config.get(key) == {'nl-NL': 'Fictief welkom', 'en-US': 'Fictional welcome'}
+
+
+@pytest.mark.asyncio
 async def test_no_snapshot_never_uses_defaults_and_retries(live, monkeypatch):
     monkeypatch.setattr(Config, 'DEFAULTS', {'models.system_prompt': 'Fictional env prompt'})
     live.fail = True
