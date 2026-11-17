@@ -209,6 +209,20 @@ def test_upstream_errors_keep_status_and_code(monkeypatch):
     assert response.headers['Retry-After'] == '3'
 
 
+def test_a_refused_start_names_the_agents_reason(monkeypatch):
+    """A start the meeting agent refuses keeps its constraint, so the page can say why in the user's language."""
+    refusal = SoevApiError(422, 'invalid_field', "does not transcribe 'tr'", 'chat:language_unsupported')
+    client = _client(monkeypatch, FakeSoev(fail=refusal))
+    start = {'type': 'start', 'language': 'tr', 'consent': {'text_version': '2026-10-07', 'at': 'now'}}
+    response = client.post('/api/v1/meetings', json={'input': start})
+    assert response.status_code == 422
+    assert response.json()['detail'] == {
+        'code': 'invalid_field',
+        'detail': "does not transcribe 'tr'",
+        'constraint': 'chat:language_unsupported',
+    }
+
+
 SSE = {'Accept': 'text/event-stream'}
 
 

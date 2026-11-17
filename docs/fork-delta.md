@@ -424,6 +424,15 @@ redirects to `/`. No sharing UI: transcripts stay private, users share by
 downloading Markdown, .docx (built in the browser with jszip) or PDF (browser
 print via `utils/documentPrint.ts`).
 
+The start form asks the spoken language, Nederlands or English
+(`MEETING_LANGUAGES` in `meeting.ts`), and sends it with `start`. It preselects
+the UI language when that is one of the two, else `MEETING_DEFAULT_LANGUAGE`
+(`config.py`, default `nl`; Helm `meetingDefaultLanguage`; `/api/config`
+`meeting_default_language`), so a UI in any other language never sends its own
+code. Auto-detection is not offered. A start the agent refuses for its language
+(soev-api constraint `chat:language_unsupported`, which the router passes on)
+shows a translated message.
+
 `backend/open_webui/routers/meetings.py` (mounted at `/api/v1/meetings` in
 `main.py`, since no fork router has a matching prefix) only forwards as the
 caller via `identity.build_client()`: audio bytes (64 MiB cap, held in memory,

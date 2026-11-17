@@ -169,6 +169,7 @@ data:
   FEATURE_READ_ALOUD: {{ .Values.openWebui.config.featureReadAloud | quote }}
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
   FEATURE_MEETINGS: {{ .Values.openWebui.config.featureMeetings | quote }}
+  MEETING_DEFAULT_LANGUAGE: {{ .Values.openWebui.config.meetingDefaultLanguage | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
   FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}

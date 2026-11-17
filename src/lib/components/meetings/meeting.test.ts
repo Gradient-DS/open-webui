@@ -9,7 +9,8 @@ import {
 	groupByRange,
 	listMeetings,
 	liveParts,
-	meetingLanguage,
+	MEETING_LANGUAGES,
+	defaultMeetingLanguage,
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
@@ -394,10 +395,29 @@ describe('microphone choice', () => {
 		expect(micConstraints(null)).toMatchObject({ echoCancellation: true, noiseSuppression: true });
 	});
 
-	it('records in the UI language, else lets the transcriber detect it', () => {
-		expect(meetingLanguage('nl-NL')).toBe('nl');
-		expect(meetingLanguage('en')).toBe('en');
-		expect(meetingLanguage(undefined)).toBe('auto');
+	it('offers Dutch and English, by their own names', () => {
+		expect(MEETING_LANGUAGES).toEqual([
+			{ code: 'nl', label: 'Nederlands' },
+			{ code: 'en', label: 'English' }
+		]);
+	});
+
+	it('preselects the UI language when the form offers it', () => {
+		expect(defaultMeetingLanguage('nl-NL', 'en')).toBe('nl');
+		expect(defaultMeetingLanguage('en-US', 'nl')).toBe('en');
+		expect(defaultMeetingLanguage('EN', 'nl')).toBe('en');
+	});
+
+	it('preselects the tenant default for a UI in any other language', () => {
+		expect(defaultMeetingLanguage('tr-TR', 'en')).toBe('en');
+		expect(defaultMeetingLanguage('ar', ' NL ')).toBe('nl');
+		expect(defaultMeetingLanguage(undefined, 'en')).toBe('en');
+	});
+
+	it('never preselects a language the form does not offer', () => {
+		expect(defaultMeetingLanguage('tr-TR', 'tr')).toBe('nl');
+		expect(defaultMeetingLanguage('fr-FR', 'auto')).toBe('nl');
+		expect(defaultMeetingLanguage(undefined, undefined)).toBe('nl');
 	});
 });
 

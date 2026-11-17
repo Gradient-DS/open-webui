@@ -37,9 +37,13 @@ class MeetingInput(BaseModel):
 
 
 def _http_error(error: SoevApiError) -> HTTPException:
+    detail = {'code': error.code, 'detail': error.detail}
+    if error.constraint is not None:
+        # Why the agent refused (`chat:<reason>`): the page words it in the user's language.
+        detail['constraint'] = error.constraint
     return HTTPException(
         status_code=error.status,
-        detail={'code': error.code, 'detail': error.detail},
+        detail=detail,
         headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,
     )
 

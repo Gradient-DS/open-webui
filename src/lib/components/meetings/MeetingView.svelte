@@ -12,6 +12,7 @@
 	import dayjs from '$lib/dayjs';
 	import { mobile, showSidebar } from '$lib/stores';
 	import {
+		LANGUAGE_UNSUPPORTED,
 		MeetingApiError,
 		deleteMeeting,
 		getMeeting,
@@ -52,7 +53,6 @@
 		OUTPUT_KINDS,
 		fileStem,
 		formatTimestamp,
-		meetingLanguage,
 		groupTurns,
 		liveParts,
 		meetingTimes,
@@ -346,7 +346,7 @@
 		titleTimer = setTimeout(saveTitle, 800);
 	};
 
-	const start = async (source: AudioSource, micId: string | null) => {
+	const start = async (source: AudioSource, micId: string | null, language: string) => {
 		let captured: Capture;
 		try {
 			// First call in the click: the share picker needs the user gesture.
@@ -365,7 +365,7 @@
 			const res = await startMeeting(localStorage.token, {
 				type: 'start',
 				...(chosen ? { title: chosen } : {}),
-				language: meetingLanguage($i18n.language),
+				language,
 				consent: { text_version: CONSENT_TEXT_VERSION, at: new Date().toISOString() }
 			});
 			titleSent = chosen;
@@ -379,7 +379,11 @@
 			schedule();
 		} catch (error) {
 			captured.release();
-			toast.error(`${(error as Error)?.message ?? error}`);
+			toast.error(
+				error instanceof MeetingApiError && error.constraint === LANGUAGE_UNSUPPORTED
+					? $i18n.t('This meeting language cannot be transcribed. Choose another language.')
+					: `${(error as Error)?.message ?? error}`
+			);
 		}
 	};
 

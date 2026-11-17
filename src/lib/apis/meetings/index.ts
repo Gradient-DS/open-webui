@@ -10,9 +10,14 @@ import type {
 	MeetingSummary
 } from '$lib/components/meetings/meeting';
 
+/** soev-api's constraint for a start in a language the transcription model does not transcribe. */
+export const LANGUAGE_UNSUPPORTED = 'chat:language_unsupported';
+
 export class MeetingApiError extends Error {
 	status: number;
 	detail: unknown;
+	/** Why the meeting agent refused the input (soev-api's `chat:<reason>`), when it said. */
+	constraint: string | null;
 
 	constructor(status: number, detail: unknown) {
 		const message =
@@ -22,6 +27,8 @@ export class MeetingApiError extends Error {
 		super(message);
 		this.status = status;
 		this.detail = detail;
+		this.constraint =
+			typeof detail === 'string' ? null : ((detail as { constraint?: string })?.constraint ?? null);
 	}
 }
 
