@@ -4,7 +4,7 @@
 	const dispatch = createEventDispatcher();
 
 	import { config, models, settings, theme, user } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { isChatControlSectionEnabled, isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
@@ -28,7 +28,7 @@
 	let showAdvanced = false;
 
 	const systemPromptTextareaClass =
-		'w-full resize-y rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
+		'w-full resize-y rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-sm text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
 	const actionButtonClass =
 		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
 
@@ -267,7 +267,8 @@
 						<Textarea
 							bind:value={system}
 							className={systemPromptTextareaClass}
-							rows="4"
+							minSize={160}
+							maxSize={400}
 							placeholder={$i18n.t('Enter system prompt here')}
 						/>
 					</UserSettingField>
@@ -275,7 +276,8 @@
 			{/if}
 		{/if}
 
-		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
+		<!-- [Gradient] Model parameters follow the tenant's Chat Controls sections, for admins too. -->
+		{#if isChatControlSectionEnabled('params') && ($user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true)))}
 			<UserSettingSection title={$i18n.t('Advanced Parameters')}>
 				<UserSettingRow description={$i18n.t('Show or hide custom generation parameters.')}>
 					<span slot="label">{$i18n.t('Model parameters')}</span>
