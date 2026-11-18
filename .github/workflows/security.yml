@@ -49,7 +49,7 @@ jobs:
       hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@71dea3696135309a19a1541157a249821bc08a2b # v16
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
         with:
           workflow-key: security
 
@@ -57,7 +57,7 @@ jobs:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
     if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' && github.event.pull_request.draft != true }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -74,7 +74,7 @@ jobs:
   # daily run scans the published digests (`published-<branch>`).
   image:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -123,7 +123,7 @@ jobs:
   published-dev:
     name: published dev
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -135,7 +135,7 @@ jobs:
   published-test:
     name: published test
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -147,7 +147,7 @@ jobs:
   published-main:
     name: published main
     needs: resolve-published
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@71dea3696135309a19a1541157a249821bc08a2b # v16
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
     secrets: inherit
     permissions:
       contents: read
@@ -235,6 +235,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@71dea3696135309a19a1541157a249821bc08a2b # v16
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@f5d4eb828c927d5a8abf57303499ef0cefa1bbcb # v17
         with:
           workflow-key: security

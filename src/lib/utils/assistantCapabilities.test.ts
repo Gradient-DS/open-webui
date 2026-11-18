@@ -12,6 +12,7 @@ const ALL_ON: AssistantToggles = {
 	image_generation: true,
 	code_interpreter: true,
 	document_writer: true,
+	workspace: true,
 	live_documents: true,
 	live_mail: true,
 	vision: true,
@@ -23,6 +24,7 @@ const ALL_OFF: AssistantToggles = {
 	image_generation: false,
 	code_interpreter: false,
 	document_writer: false,
+	workspace: false,
 	live_documents: false,
 	live_mail: false,
 	vision: false,
@@ -81,7 +83,8 @@ describe('round-trip togglesFromMeta(applyToggles(...))', () => {
 		ALL_ON,
 		ALL_OFF,
 		{ ...ALL_OFF, web_search: true, citations: true },
-		{ ...ALL_OFF, document_writer: true, vision: true }
+		{ ...ALL_OFF, document_writer: true, vision: true },
+		{ ...ALL_OFF, workspace: true }
 	]) {
 		it(`is identity for ${JSON.stringify(sample)}`, () => {
 			expect(togglesFromMeta(applyToggles({}, sample))).toEqual(sample);
@@ -96,6 +99,15 @@ describe('togglesFromMeta', () => {
 			...ALL_OFF,
 			vision: true
 		});
+	});
+});
+
+describe('Workspace toggle', () => {
+	it('maps the Workspace toggle to a capability and a default feature without a builtin tool', () => {
+		const meta = applyToggles({}, { ...ALL_OFF, workspace: true });
+		expect(meta.capabilities.workspace).toBe(true);
+		expect(meta.defaultFeatureIds).toEqual(['workspace']);
+		expect(meta.builtinTools.workspace).toBeUndefined();
 	});
 });
 

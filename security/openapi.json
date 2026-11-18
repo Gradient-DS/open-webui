@@ -6913,6 +6913,11 @@
             "default": false,
             "title": "Webhooks",
             "type": "boolean"
+          },
+          "workspace": {
+            "default": false,
+            "title": "Workspace",
+            "type": "boolean"
           }
         },
         "title": "FeaturesPermissions",
@@ -29478,6 +29483,69 @@
           }
         ],
         "summary": "Unarchive All Chats",
+        "tags": [
+          "chats"
+        ]
+      }
+    },
+    "/api/v1/chats/{chat_id}/workspace/{element_id}/{part}": {
+      "get": {
+        "operationId": "get_workspace_content_api_v1_chats__chat_id__workspace__element_id___part__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "element_id",
+            "required": true,
+            "schema": {
+              "title": "Element Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "part",
+            "required": true,
+            "schema": {
+              "title": "Part",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Workspace Content",
         "tags": [
           "chats"
         ]

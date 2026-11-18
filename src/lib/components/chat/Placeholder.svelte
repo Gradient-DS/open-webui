@@ -59,6 +59,7 @@
 	export let liveMailState: LiveToolState = 'off';
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
+	export let workspaceEnabled = false;
 	export let webSearchEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
@@ -271,6 +272,7 @@
 						bind:liveMailState
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
+						bind:workspaceEnabled
 						bind:webSearchEnabled
 						bind:atSelectedModel
 						bind:showCommands

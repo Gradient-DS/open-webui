@@ -1,0 +1,315 @@
+"""[Gradient] Workspace file downloads are authorized by the chat and its stored attachments."""
+
+from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from open_webui import config
+from open_webui.models import access_grants
+from open_webui.routers import chats
+from open_webui.soev.client import SoevApiError
+from open_webui.utils import features
+
+
+class WorkspaceBytes(httpx.AsyncByteStream):
+    def __init__(self):
+        self.closed = 0
+
+    async def __aiter__(self):
+        yield b'workspace-'
+        yield b'bytes'
+
+    async def aclose(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def workspace(monkeypatch):
+    user = SimpleNamespace(id='alice', role='user')
+    attachment = {'type': 'workspace', 'element_id': 'element', 'thread_id': 'attached-thread', 'pages': 2}
+    lookup = AsyncMock(return_value=SimpleNamespace(user_id='alice', meta={}, folder_id=None))
+    messages = AsyncMock(return_value=[attachment])
+    monkeypatch.setattr(chats.Chats, 'get_chat_by_id', lookup)
+
+    async def owned(chat_id, user_id, db=None):
+        return await lookup(chat_id, db=db) if user_id == 'alice' else None
+
+    monkeypatch.setattr(chats.Chats, 'get_chat_by_id_and_user_id', owned)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    monkeypatch.setattr(access_grants.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr(chats.ChatMessages, 'get_files_by_chat_id', messages)
+    gate = {'flag': True, 'enable': True, 'permission': True}
+    monkeypatch.setattr(features, 'is_feature_enabled', lambda feature: gate['flag'])
+    monkeypatch.setattr(
+        'open_webui.models.config.Config.get',
+        AsyncMock(side_effect=lambda key: gate['enable'] if key == 'workspace.enable' else {}),
+    )
+    monkeypatch.setattr(
+        'open_webui.utils.access_control.has_permission',
+        AsyncMock(side_effect=lambda uid, key, defaults: gate['permission'] if key == 'features.workspace' else True),
+    )
+    monkeypatch.setattr(
+        chats.ChatMessages, 'get_messages_by_chat_id', AsyncMock(side_effect=AssertionError('Full messages loaded'))
+    )
+    stream = WorkspaceBytes()
+    upstream = httpx.Response(
+        200,
+        stream=stream,
+        headers={
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'Content-Disposition': 'attachment; filename="deck.pptx"',
+            'Cache-Control': 'private, max-age=31536000, immutable',
+            'X-Private-Upstream': 'not forwarded',
+        },
+    )
+    get = AsyncMock(return_value=upstream)
+    monkeypatch.setattr(chats.identity, 'build_client', lambda: SimpleNamespace(chat_get_stream=get))
+    app = FastAPI()
+    app.include_router(chats.router, prefix='/api/v1/chats')
+    app.dependency_overrides[chats.get_verified_user] = lambda: user
+    return SimpleNamespace(
+        client=httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test'),
+        user=user,
+        gate=gate,
+        attachment=attachment,
+        lookup=lookup,
+        messages=messages,
+        get=get,
+        stream=stream,
+        upstream=upstream,
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_relays_bytes_and_headers_as_chat_owner(workspace):
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file?thread_id=request-thread')
+    assert response.status_code == 200
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert response.content == b'workspace-bytes'
+    for header in ('content-type', 'content-disposition', 'cache-control'):
+        assert response.headers[header] == workspace.upstream.headers[header]
+    assert 'x-private-upstream' not in response.headers
+    workspace.lookup.assert_awaited_once_with('chat', db=None)
+    workspace.messages.assert_awaited_once_with('chat')
+    workspace.get.assert_awaited_once_with(
+        '/v1/chat/threads/attached-thread/workspace/element', as_user='owui:user:alice', params={'part': 'file'}
+    )
+    assert workspace.stream.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_page_part_is_one_based_and_relays_image_headers(workspace):
+    workspace.upstream.headers['Content-Type'] = 'image/png'
+    del workspace.upstream.headers['Content-Disposition']
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/page-2')
+    assert response.status_code == 200
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert response.headers['content-type'] == 'image/png'
+    assert 'content-disposition' not in response.headers
+    assert workspace.get.call_args.kwargs['params'] == {'part': 'page:2'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'case', ['foreign', 'admin', 'shared', 'unknown-chat', 'unknown-element', 'not-workspace', 'no-thread']
+)
+async def test_unavailable_attachment_is_404_without_upstream_request(workspace, monkeypatch, case):
+    if case == 'foreign':
+        workspace.user.id = 'bob'
+    elif case == 'admin':
+        workspace.user.id, workspace.user.role = 'admin', 'admin'
+    elif case == 'shared':
+        workspace.user.id = 'bob'
+        monkeypatch.setattr(access_grants.AccessGrants, 'has_access', AsyncMock(return_value=True))
+    elif case == 'unknown-chat':
+        workspace.lookup.return_value = None
+    elif case == 'unknown-element':
+        workspace.attachment['element_id'] = 'elsewhere'
+    elif case == 'not-workspace':
+        workspace.attachment['type'] = 'file'
+    else:
+        del workspace.attachment['thread_id']
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('off', ['flag', 'enable', 'permission'])
+@pytest.mark.parametrize('chat_id', ['chat', 'local:sid-1:chat'])
+async def test_download_is_404_while_the_workspace_is_off(workspace, monkeypatch, off, chat_id):
+    workspace.gate[off] = False
+    temporary = AsyncMock(side_effect=AssertionError('Temporary attachment looked up'))
+    monkeypatch.setattr(chats.agent_threads, 'temporary_workspace', temporary)
+    async with workspace.client as client:
+        response = await client.get(f'/api/v1/chats/{chat_id}/workspace/element/file')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.messages.assert_not_awaited()
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_admin_owner_without_the_workspace_permission_gets_404(workspace):
+    workspace.user.role = 'admin'
+    workspace.gate['permission'] = False
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == 404
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('part', ['workspace', 'page-0', 'page--1', 'page-1.5', 'page-01', 'page:1'])
+async def test_only_file_and_positive_page_parts_are_allowed(workspace, part):
+    async with workspace.client as client:
+        response = await client.get(f'/api/v1/chats/chat/workspace/element/{part}')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [400, 401, 403, 404, 409, 429, 500, 502, 503, 504])
+async def test_upstream_errors_are_resolved_before_response_headers(workspace, status):
+    workspace.get.side_effect = SoevApiError(status, 'upstream_error', 'private upstream problem text')
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == (404 if status == 404 else 502)
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert 'private upstream' not in response.text
+    assert response.json()['detail'] == (
+        chats.ERROR_MESSAGES.NOT_FOUND if status == 404 else 'Workspace file download failed'
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_download_when_admin_chat_access_is_disabled(workspace, monkeypatch):
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', False)
+    workspace.user.id, workspace.user.role = 'admin', 'admin'
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'user_id,role,expected', [('alice', 'user', 200), ('bob', 'user', 404), ('admin', 'admin', 404)]
+)
+async def test_temporary_workspace_is_available_only_to_its_owner(workspace, monkeypatch, user_id, role, expected):
+    class DetachedValues(dict):
+        def get(self, key, default=None):
+            return deepcopy(super().get(key, default))
+
+    store = {
+        'local:socket:chat': {
+            'as_user': 'owui:user:alice',
+            'bookmarks': {'answer': {'thread_id': 'attached-thread', 'position': 4}},
+        }
+    }
+    store = DetachedValues(store)
+    monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
+    chats.agent_threads.remember_temporary_workspace('local:socket:chat', 'alice', [workspace.attachment])
+    workspace.user.id, workspace.user.role = user_id, role
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/workspace/element/file')
+    assert response.status_code == expected
+    workspace.lookup.assert_not_awaited()
+    workspace.messages.assert_not_awaited()
+    if expected == 200:
+        assert response.content == b'workspace-bytes'
+        workspace.get.assert_awaited_once_with(
+            '/v1/chat/threads/attached-thread/workspace/element', as_user='owui:user:alice', params={'part': 'file'}
+        )
+    else:
+        workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['no-chat', 'no-element', 'wrong-owner-emission'])
+async def test_temporary_workspace_requires_a_recorded_attachment(workspace, monkeypatch, case):
+    store = {} if case == 'no-chat' else {'local:socket:chat': {'as_user': 'owui:user:alice', 'bookmarks': {}}}
+    monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
+    if case == 'wrong-owner-emission':
+        chats.agent_threads.remember_temporary_workspace('local:socket:chat', 'bob', [workspace.attachment])
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/workspace/element/file')
+    assert response.status_code == 404
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    workspace.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_files_query_filters_by_chat_without_validating_messages(monkeypatch):
+    from uuid import uuid4
+    from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
+    from open_webui.models.chats import ChatForm, Chats
+
+    chat_id, other_id = str(uuid4()), str(uuid4())
+    attachment = {'type': 'workspace', 'element_id': 'element', 'thread_id': 'thread'}
+    for id in (chat_id, other_id):
+        await Chats.insert_new_chat(id, 'alice', ChatForm(chat={'history': {'messages': {}}}))
+        await Chats.upsert_message_to_chat_by_id_and_message_id(
+            id, 'answer', {'role': 'assistant', 'content': 'large content ' * 1000, 'files': [attachment]}
+        )
+    await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, 'question', {'role': 'user', 'content': 'q'})
+
+    def no_validation(*args, **kwargs):
+        raise AssertionError('The download query must not load and validate complete messages')
+
+    monkeypatch.setattr(ChatMessageModel, 'model_validate', no_validation)
+    assert await ChatMessages.get_files_by_chat_id(chat_id) == [attachment]
+    assert await ChatMessages.get_files_by_chat_id('missing') == []
+
+
+@pytest.mark.asyncio
+async def test_missing_subject_minter_returns_generic_bad_gateway(workspace):
+    workspace.get.side_effect = ValueError('private credential configuration')
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
+    assert response.status_code == 502
+    assert response.json() == {'detail': 'Workspace file download failed'}
+
+
+@pytest.mark.asyncio
+async def test_midstream_failure_aborts_the_body_and_closes_upstream_once(workspace):
+    class BrokenBytes(WorkspaceBytes):
+        async def __aiter__(self):
+            yield b'first chunk'
+            raise httpx.ReadError('private upstream failure')
+
+    stream = BrokenBytes()
+    workspace.get.return_value = httpx.Response(200, stream=stream, headers={'Content-Type': 'image/png'})
+    response = await chats.get_workspace_content('chat', 'element', 'file', user=workspace.user)
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    with pytest.raises(httpx.ReadError):
+        await response({'type': 'http', 'asgi': {'spec_version': '2.4'}}, AsyncMock(), send)
+    assert sent[0]['status'] == 200
+    assert (b'x-content-type-options', b'nosniff') in sent[0]['headers']
+    assert sent[1:] == [{'type': 'http.response.body', 'body': b'first chunk', 'more_body': True}]
+    assert stream.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_failure_sending_headers_still_closes_upstream(workspace):
+    response = await chats.get_workspace_content('chat', 'element', 'file', user=workspace.user)
+    with pytest.raises(RuntimeError, match='connection gone'):
+        await response(
+            {'type': 'http', 'asgi': {'spec_version': '2.4'}},
+            AsyncMock(),
+            AsyncMock(side_effect=RuntimeError('connection gone')),
+        )
+    assert workspace.stream.closed == 1

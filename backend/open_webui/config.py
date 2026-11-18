@@ -1976,6 +1976,9 @@ USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
 
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+USER_PERMISSIONS_FEATURES_WORKSPACE = os.environ.get('USER_PERMISSIONS_FEATURES_WORKSPACE', 'False').lower() == 'true'
+
 DEFAULT_USER_PERMISSIONS = {
     'workspace': {
         'models': USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS,
@@ -2046,6 +2049,7 @@ DEFAULT_USER_PERMISSIONS = {
         'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         # Chat features
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
+        'workspace': USER_PERMISSIONS_FEATURES_WORKSPACE,
         'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
         'code_interpreter': USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
         'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
@@ -2961,6 +2965,8 @@ FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
 FEATURE_ARTIFACTS = os.environ.get('FEATURE_ARTIFACTS', 'True').lower() == 'true'
 
 FEATURE_DOCUMENT_WRITER = os.environ.get('FEATURE_DOCUMENT_WRITER', 'True').lower() == 'true'
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+FEATURE_WORKSPACE = os.environ.get('FEATURE_WORKSPACE', 'False').lower() == 'true'
 
 FEATURE_PLAYGROUND = os.environ.get('FEATURE_PLAYGROUND', 'True').lower() == 'true'
 
@@ -3056,6 +3062,8 @@ ENABLE_CITATION_TEXT_HIGHLIGHT = os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT'
 SOEV_LOGIN_FOOTER = os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)')
 
 ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'True').lower() == 'true'
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+ENABLE_WORKSPACE = os.environ.get('ENABLE_WORKSPACE', 'False').lower() == 'true'
 
 WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MINUTES', '1440'))
 
@@ -3534,6 +3542,7 @@ DEFAULT_CONFIG = {
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
+    'workspace.enable': ENABLE_WORKSPACE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,
     'email.from_address': EMAIL_FROM_ADDRESS,

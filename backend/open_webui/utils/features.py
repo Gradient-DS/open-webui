@@ -13,6 +13,7 @@ from open_webui.config import (
     FEATURE_CAPTURE,
     FEATURE_ARTIFACTS,
     FEATURE_DOCUMENT_WRITER,
+    FEATURE_WORKSPACE,
     FEATURE_PLAYGROUND,
     FEATURE_CHAT_OVERVIEW,
     FEATURE_NOTES_AI_CONTROLS,
@@ -40,6 +41,7 @@ Feature = Literal[
     'capture',
     'artifacts',
     'document_writer',
+    'workspace',
     'playground',
     'chat_overview',
     'notes_ai_controls',
@@ -67,6 +69,7 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'capture': FEATURE_CAPTURE,
     'artifacts': FEATURE_ARTIFACTS,
     'document_writer': FEATURE_DOCUMENT_WRITER,
+    'workspace': FEATURE_WORKSPACE,
     'playground': FEATURE_PLAYGROUND,
     'chat_overview': FEATURE_CHAT_OVERVIEW,
     'notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
@@ -131,3 +134,24 @@ def require_feature(feature: Feature):
         return True
 
     return check_feature
+
+
+async def workspace_allowed(user) -> bool:
+    """[Gradient] The workspace feature flag, ENABLE_WORKSPACE (deployment-authoritative) and the user's permission
+    all allow it; admins need the permission too."""
+    from open_webui.models.config import Config
+    from open_webui.utils.access_control import has_permission
+
+    return bool(
+        is_feature_enabled('workspace')
+        and await Config.get('workspace.enable')
+        and await has_permission(user.id, 'features.workspace', await Config.get('user.permissions'))
+    )
+
+
+async def gate_workspace_features(features: dict, capabilities: dict, user) -> dict:
+    features = dict(features)
+    features['workspace'] = bool(
+        features.get('workspace') and capabilities.get('workspace', False) and await workspace_allowed(user)
+    )
+    return features

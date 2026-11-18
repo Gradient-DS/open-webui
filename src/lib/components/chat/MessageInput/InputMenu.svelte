@@ -45,6 +45,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
+	import CommandLine from '$lib/components/icons/CommandLine.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
@@ -176,6 +177,9 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
+	// [Gradient] The Workspace switch: on/off, editing follows creation.
+	export let showWorkspaceButton = false;
+	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
@@ -306,6 +310,7 @@
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
+	$: showWorkspace = itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
@@ -571,7 +576,7 @@
 
 	// [Gradient] Exported for the pinned composer buttons.
 	export const toggleFeature = (
-		tool: 'image_generation' | 'code_interpreter' | 'document_writer'
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
 	) => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled = !imageGenerationEnabled;
@@ -583,6 +588,8 @@
 			}
 		} else if (tool === 'code_interpreter') {
 			codeInterpreterEnabled = !codeInterpreterEnabled;
+		} else if (tool === 'workspace') {
+			workspaceEnabled = !workspaceEnabled;
 		} else {
 			documentWriterEnabled = !documentWriterEnabled;
 		}
@@ -1054,6 +1061,31 @@
 							onClick={() => showDocumentWriterButton && toggleFeature('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if showWorkspace}
+						<MenuItem
+							label={$i18n.t('Workspace')}
+							pinId="workspace"
+							toggle={workspaceEnabled}
+							tooltipPlacement="top-start"
+							tooltip={!showWorkspaceButton
+								? $i18n.t('Unavailable')
+								: workspaceEnabled
+									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Workspace'),
+								workspaceEnabled,
+								workspaceEnabled
+									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							disabled={!showWorkspaceButton}
+							onClick={() => showWorkspaceButton && toggleFeature('workspace')}
+						>
+							<CommandLine slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
 					{/if}
 

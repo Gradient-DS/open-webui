@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { WEBUI_BASE_URL } from '$lib/constants';
 import type { FileNavOpenRequest } from '$lib/stores';
 import { normalizeDocumentTargetPage } from '$lib/utils/documentPreview';
+import { withoutRemoteLoads } from '$lib/utils/remoteLoads';
 
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -2158,7 +2159,10 @@ const cleanupMermaidTempElements = (id: string) => {
 
 // Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
 // HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
-export const sanitizeSvg = (svg: string): string =>
+// [Gradient] withoutRemoteLoads: a diagram from model output must not fetch from other hosts (CSS url(), images).
+export const sanitizeSvg = (svg: string): string => withoutRemoteLoads(sanitizedSvg(svg));
+
+const sanitizedSvg = (svg: string): string =>
 	DOMPurify.sanitize(svg, {
 		USE_PROFILES: { svg: true, svgFilters: true },
 		WHOLE_DOCUMENT: false,
