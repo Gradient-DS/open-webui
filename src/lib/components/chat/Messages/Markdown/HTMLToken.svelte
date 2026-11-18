@@ -1,9 +1,17 @@
 <script lang="ts">
 	import DOMPurify from 'dompurify';
 	import type { Token } from 'marked';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+
+	import { getContext } from 'svelte';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
+	import { withoutRemoteLoads } from '$lib/utils/remoteLoads';
+	import { externalHost } from '$lib/utils/safeImageUrl';
+
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	export let id: string;
 	export let token: Token;
@@ -12,13 +20,37 @@
 
 	$: text = token.type === 'html' ? token?.text : null;
 	$: html = text ? DOMPurify.sanitize(text) : null;
+
+	// [Gradient] Media and pages from another host load only once the user clicks: rendering them would hand
+	// whatever their URL carries (a prompt-injected answer can put chat content there) to that host.
+	let revealed: string[] = [];
+	const held = (src: string | null | undefined): string | null =>
+		src && !revealed.includes(src) ? externalHost(src) : null;
+	const reveal = (src: string) => (revealed = [...revealed, src]);
 </script>
+
+{#snippet hold(src: string, host: string, label: string)}
+	<button
+		type="button"
+		class="my-2 inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:text-gray-200"
+		title={src}
+		on:click={() => reveal(src)}
+	>
+		<span class="truncate">{$i18n.t(label, { host })}</span>
+	</button>
+{/snippet}
 
 {#if token.type === 'html'}
 	{#if html && html.includes('<video')}
 		{@const video = html.match(/<video[^>]*>([\s\S]*?)<\/video>/)}
 		{@const videoSrc = video && video[1]}
-		{#if videoSrc}
+		{#if videoSrc && held(videoSrc.replaceAll('&amp;', '&'))}
+			{@render hold(
+				videoSrc.replaceAll('&amp;', '&'),
+				held(videoSrc.replaceAll('&amp;', '&')) ?? '',
+				'Load media from {{host}}'
+			)}
+		{:else if videoSrc}
 			<!-- svelte-ignore a11y-media-has-caption -->
 			<video
 				class="w-full my-2"
@@ -35,7 +67,13 @@
 	{:else if html && html.includes('<audio')}
 		{@const audio = html.match(/<audio[^>]*>([\s\S]*?)<\/audio>/)}
 		{@const audioSrc = audio && audio[1]}
-		{#if audioSrc}
+		{#if audioSrc && held(audioSrc.replaceAll('&amp;', '&'))}
+			{@render hold(
+				audioSrc.replaceAll('&amp;', '&'),
+				held(audioSrc.replaceAll('&amp;', '&')) ?? '',
+				'Load media from {{host}}'
+			)}
+		{:else if audioSrc}
 			<!-- svelte-ignore a11y-media-has-caption -->
 			<audio
 				class="w-full my-2"
@@ -66,7 +104,9 @@
 	{:else if token.text && token.text.includes('<iframe')}
 		{@const match = token.text.match(/<iframe\s+[^>]*src="([^"]+)"[^>]*><\/iframe>/)}
 		{@const iframeSrc = match && match[1]}
-		{#if iframeSrc}
+		{#if iframeSrc && held(iframeSrc)}
+			{@render hold(iframeSrc, held(iframeSrc) ?? '', 'Load embedded content from {{host}}')}
+		{:else if iframeSrc}
 			<iframe
 				class="w-full my-2"
 				src={iframeSrc}
@@ -133,10 +173,11 @@
 		<!-- [Gradient] Render raw HTML <table> blocks (e.g. agent-generated
 		     documents that copy a table verbatim from a source) instead of
 		     falling through to escaped text. ``html`` is already
-		     DOMPurify-sanitized above, so {@html} is XSS-safe. -->
+		     DOMPurify-sanitized above, so {@html} is XSS-safe; withoutRemoteLoads keeps it from
+		     fetching other hosts (images, CSS url()) on render. -->
 		<div class="markdown-html-table scrollbar-hidden relative overflow-x-auto max-w-full my-2">
 			<!-- eslint-disable-next-line svelte/no-at-html-tags — `html` is DOMPurify-sanitized above -->
-			{@html html}
+			{@html withoutRemoteLoads(html)}
 		</div>
 	{:else}
 		{token.text}

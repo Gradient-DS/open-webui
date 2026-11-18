@@ -149,18 +149,18 @@ ldap3==2.9.1
 firecrawl-py==4.18.0
 
 ## Trace
-opentelemetry-api==1.45.1 # security: CVE-2026-114603 (tracestate header ReDoS) fixed in 1.45.1
-opentelemetry-sdk==1.45.1
-opentelemetry-exporter-otlp==1.45.1
-opentelemetry-instrumentation==0.66b1
-opentelemetry-instrumentation-fastapi==0.66b1
-opentelemetry-instrumentation-sqlalchemy==0.66b1
-opentelemetry-instrumentation-redis==0.66b1
-opentelemetry-instrumentation-requests==0.66b1
-opentelemetry-instrumentation-logging==0.66b1
-opentelemetry-instrumentation-httpx==0.66b1
-opentelemetry-instrumentation-aiohttp-client==0.66b1
-opentelemetry-instrumentation-system-metrics==0.66b1
+opentelemetry-api==1.45.2 # security: CVE-2026-126360 (traceparent extraction ReDoS) fixed in 1.45.2
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp==1.45.2
+opentelemetry-instrumentation==0.66b2
+opentelemetry-instrumentation-fastapi==0.66b2
+opentelemetry-instrumentation-sqlalchemy==0.66b2
+opentelemetry-instrumentation-redis==0.66b2
+opentelemetry-instrumentation-requests==0.66b2
+opentelemetry-instrumentation-logging==0.66b2
+opentelemetry-instrumentation-httpx==0.66b2
+opentelemetry-instrumentation-aiohttp-client==0.66b2
+opentelemetry-instrumentation-system-metrics==0.66b2
 
 # security: explicit pins for transitive deps flagged by pip-audit/Trivy
 msgpack==1.2.3 # security: GHSA-6v7p-g79w-8964 (OOB read/crash); CVE-2026-114613 (C extension leaks a decoded map value) fixed in 1.2.3

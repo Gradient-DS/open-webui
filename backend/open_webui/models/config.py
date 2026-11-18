@@ -156,6 +156,11 @@ class Config(Base):
         # effect. Sibling feedback_report.* keys stay persistent (admin-toggleable).
         if key == 'feedback_report.webhook_url':
             return False
+        # [Gradient] Same carve-out: the workspace runs model-written code, so the deployment
+        # (ENABLE_WORKSPACE <- chart env) decides and there is no admin toggle. Tenants boot the
+        # workspace build before the env is set, so seed_defaults would pin False for good.
+        if key == 'workspace.enable':
+            return False
         if key.startswith('oauth.') and not cls.OAUTH_PERSISTENT_ENABLED:
             return False
         return True

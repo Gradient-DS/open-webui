@@ -303,7 +303,7 @@ services:
     networks: [internal]
 
   entry:
-    image: nginx:1.28-alpine
+    image: nginx@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598 # 1.30.7-alpine
     ports:
       - "127.0.0.1:8080:80"
     volumes:

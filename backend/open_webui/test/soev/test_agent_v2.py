@@ -36,6 +36,7 @@ WEB_SEARCH_OFF = {
     'attach_live_document': 'off',
     'search_mail': 'off',
     'read_mail': 'off',
+    'workspace_task': 'off',
 }
 
 
@@ -3279,7 +3280,7 @@ def test_a_failed_open_never_names_its_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Chat) -> None:
+async def test_the_summary_settles_the_tools_once_when_the_turn_ends(declared: Chat) -> None:
     declared.api.chat.turns = [
         [
             call('list_documents', 'c1'),
@@ -3295,14 +3296,8 @@ async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Ch
 
     shown = [event['data'] for event in declared.socket if event['type'] == 'status']
     order = [status.get('call_id') or status['description'] for status in shown]
-    assert order == [
-        'c1',
-        'c1',
-        '1 tool called in less than a second',
-        'c2',
-        'c2',
-        '2 tools called in less than a second',
-    ]
+    # Text between tool calls is not the turn's end: the closing line comes once.
+    assert order == ['c1', 'c1', 'c2', 'c2', '2 tools called in less than a second']
 
 
 @pytest.mark.parametrize(
@@ -4125,6 +4120,261 @@ async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
     metadata = source['metadata'][0]
     assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)
     assert metadata['page'] == 1
+
+
+# [Gradient] Delivered workspace files.
+@pytest.mark.asyncio
+@pytest.mark.parametrize('branch', [False, True])
+async def test_a_delivered_workspace_file_is_attached_without_copying_bytes(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, branch: bool
+) -> None:
+    # [Gradient] C1 has no inline bytes; neither the file nor its pages enter OWUI Files.
+    inserted = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'insert_new_file', inserted)
+    workspace = {
+        'type': 'workspace-file',
+        'id': uuid4().hex,
+        'name': 'begroting.xlsx',
+        'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'size': 4,
+        'sha256': 'a' * 64,
+        'key': 'owner/workspace/workbook.xlsx',
+        'pages': [{'key': 'owner/workspace/page.png', 'sha256': 'b' * 64, 'size': 8}],
+        'version': 2,
+        'edits': uuid4().hex,
+    }
+    if branch:
+        await chat.turn('first', 'parent')
+        await chat.turn('second', 'old-answer', 'parent')
+        assert chat.bookmark('parent')['position'] < len(chat.api.chat.threads['thr-1']['events'])
+    chat.api.chat.turns = [[found(workspace), answered('Klaar.')]]
+    await chat.turn('Maak een begroting', 'a1', 'parent' if branch else None)
+    assert chat.bookmark('a1')['thread_id'] == ('thr-2' if branch else 'thr-1')
+    inserted.assert_not_awaited()
+    (event,) = [event['data'] for event in chat.socket if event['type'] == 'files']
+    assert event == {
+        'files': [
+            {
+                'type': 'workspace',
+                'name': workspace['name'],
+                'content_type': workspace['content_type'],
+                'size': 4,
+                'thread_id': chat.bookmark('a1')['thread_id'],
+                'element_id': workspace['id'],
+                'pages': 1,
+                'version': 2,
+                'edits': workspace['edits'],
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('workspace', [False, True])
+async def test_workspace_toggle_always_sends_the_workspace_tool_state(chat: Chat, workspace) -> None:
+    await chat.turn('question', 'a1', features={'workspace': workspace})
+    expected = {**WEB_SEARCH_OFF, 'workspace_task': 'auto' if workspace else 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == expected
+
+
+@pytest.mark.asyncio
+async def test_temporary_workspace_reference_is_recorded_on_delivery_and_expires_with_chat(temporary: Chat):
+    workspace = {
+        'type': 'workspace-file',
+        'id': uuid4().hex,
+        'name': 'deck.pptx',
+        'content_type': 'application/octet-stream',
+        'size': 42,
+        'pages': [],
+        'version': 1,
+    }
+    temporary.api.chat.turns = [[found(workspace), answered('Done')]]
+    chat_id = 'local:sid-1:workspace'
+    await temporary.turn('make a deck', 'answer', chat_id=chat_id)
+    attachment = agent_threads.temporary_workspace(chat_id, workspace['id'], 'alice')
+    assert attachment['thread_id'] == agent_threads.temporary_bookmark(chat_id, 'answer')['thread_id']
+    assert attachment == next(event['data']['files'][0] for event in temporary.socket if event['type'] == 'files')
+    assert not temporary.messages
+    assert agent_threads.temporary_workspace(chat_id, workspace['id'], 'bob') is None
+    await agent_threads.release_temporary(['sid-1'])
+    assert agent_threads.temporary_workspace(chat_id, workspace['id'], 'alice') is None
+
+
+def test_an_original_workspace_attachment_has_no_parent():
+    attachment = agent_v2._workspace_attachment(
+        {
+            'id': 'original',
+            'name': 'deck.pptx',
+            'content_type': 'application/octet-stream',
+            'size': 1,
+            'pages': [],
+            'version': 1,
+        },
+        'thread',
+    )
+    assert attachment['edits'] is None
+
+
+@pytest.mark.asyncio
+async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared: Chat) -> None:
+    child = 'root/delegate_task#0@2'
+    path = {'path': 'argument.path'}
+    writing = {
+        'running': {'template': 'Writing {{path}}...', 'params': path},
+        'done': {'template': 'Wrote {{path}}', 'params': path},
+    }
+    agent_v2.TOOL_STATUS_CACHE['statuses'] = {**STATUSES, 'write_file': writing}
+    _, payload = call('write_file', path='/workspace/deck.html', content='x')
+    declared.api.chat.turns = [
+        [
+            call('delegate_task', brief='b', language='nl'),
+            (f'model_output@{child}', payload),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            ('tool_output', {'call_id': 'c1', 'error': 'no file'}),
+            ('model_output', {'content': 'Helaas.'}),
+        ]
+    ]
+
+    chunks = await declared.turn('Maak een deck', 'a1')
+
+    shown = [(status['call_id'], status['description'], status['done']) for status in statuses(declared)]
+    assert (f'{child}:c1', 'Writing {{path}}...', False) in shown
+    assert (f'{child}:c1', 'Wrote {{path}}', True) in shown
+    assert [call_id for call_id, _, done in shown if done].count('c1') == 1
+    assert content(chunks).endswith('Helaas.')
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_task_rolls_its_steps_into_its_own_line(declared: Chat) -> None:
+    child = 'root/workspace_task#0@2'
+    agent_v2.TOOL_STATUS_CACHE['statuses'] = {
+        **STATUSES,
+        'workspace_task': {'running': {'template': 'Working...', 'params': {}}},
+        'bash': {
+            'running': {
+                'template': '{{description}}...',
+                'params': {'description': 'argument.description'},
+            }
+        },
+    }
+    _, first = call('bash', description='Grafiek maken', command='python a.py')
+    _, second = call('bash', description='Docx bouwen', command='python b.py')
+    declared.api.chat.turns = [
+        [
+            call('workspace_task', task='t', language='nl'),
+            (f'model_output@{child}', first),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            (f'model_output@{child}', second),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            ('tool_output', {'call_id': 'c1', 'text': 'Delivered.'}),
+            ('model_output', {'content': 'Klaar.'}),
+        ]
+    ]
+
+    await declared.turn('Maak een grafiek', 'a1')
+
+    shown = [(s['call_id'], s['description'], s['done']) for s in statuses(declared)]
+    assert {call_id for call_id, _, _ in shown} == {'c1'}
+    assert [description for _, description, _ in shown] == [
+        'Working...',
+        'Working...',
+        'Working...',
+        'Worked in the sandbox for {{duration}}',
+    ]
+    steps = [s['step']['description'] for s in statuses(declared) if 'step' in s]
+    assert steps == ['Grafiek maken', 'Docx bouwen']
+    running = [s for s in statuses(declared) if not s['done']]
+    assert [s['steps'] for s in running] == [0, 1, 2]
+    assert len({s['started_at'] for s in running}) == 1
+    (worked,) = [s for s in statuses(declared) if s['done']]
+    assert 'step' not in worked
+    assert worked['duration']
+    (summary,) = [e['data'] for e in declared.socket if e['type'] == 'status' and e['data'].get('action') == 'summary']
+    assert summary['description'].startswith('1 tool ')
+
+
+@pytest.mark.asyncio
+async def test_a_note_on_a_delivered_file_cites_that_file_for_the_panel(chat: Chat) -> None:
+    workspace = {
+        'type': 'workspace-file',
+        'id': 'chart-element',
+        'name': 'chart.png',
+        'content_type': 'image/png',
+        'size': 4,
+        'sha256': 'a' * 64,
+        'key': 'owner/workspace/chart-element/file.png',
+        'pages': [],
+        'version': 1,
+    }
+    note = {
+        'type': 'file-note',
+        'id': 'chart-element:note',
+        'ref': 'chart-element',
+        'name': 'chart.png',
+        'text': 'A chart.',
+    }
+    chat.api.chat.turns = [[found(workspace, note), answered('Hier is de grafiek', cited(18, 'chart-element:note'))]]
+
+    assert content(await chat.turn('Maak een grafiek', 'a1')) == 'Hier is de grafiek [1]'
+
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['source']['name'] == 'chart.png'
+    assert source['source']['delivered_file']['element_id'] == 'chart-element'
+    assert source['source']['delivered_file']['type'] == 'workspace'
+
+
+@pytest.mark.parametrize(
+    'arguments,expected',
+    [
+        (
+            {'documents': ['d1', 'd2', 'd3', 'd4', 'd5'], 'earlier_files': ['f1']},
+            {
+                'description': 'Working in the sandbox with {{documents}} and {{files}}...',
+                'documents': 'Budget, Minutes, Plan +2',
+                'files': 'chart.html',
+            },
+        ),
+        (
+            {'documents': ['d1', 'd2', 'd3']},
+            {'description': 'Working in the sandbox with {{documents}}...', 'documents': 'Budget, Minutes, Plan'},
+        ),
+        ({'earlier_files': ['f1']}, {'description': 'Working in the sandbox with {{files}}...', 'files': 'chart.html'}),
+        ({}, {'description': 'Working in the sandbox...'}),
+    ],
+)
+def test_workspace_status_lists_three_names_then_counts_the_rest(arguments, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    titles = ['Budget', 'Minutes', 'Plan', 'Roadmap', 'Report']
+    turn.elements = {f'd{i + 1}': {'title': title} for i, title in enumerate(titles)} | {'f1': {'name': 'chart.html'}}
+    turn.tool_statuses = {
+        'workspace_task': {
+            'running': {
+                'template': 'Working in the sandbox with {{documents}} and {{files}}...',
+                'fallback': [
+                    'Working in the sandbox with {{documents}}...',
+                    'Working in the sandbox with {{files}}...',
+                    'Working in the sandbox...',
+                ],
+                'params': {'documents': 'element.documents.title', 'files': 'element.earlier_files.name'},
+            }
+        }
+    }
+    assert turn.tool_status('workspace_task', arguments) == {'action': 'workspace_task', **expected}
+
+
+@pytest.mark.parametrize(
+    'name,shown',
+    [
+        ('report\u202excod.exe', 'reportxcod.exe'),
+        ('deck\u2066.pptx\u2069', 'deck.pptx'),
+        ('zero\u200bwidth.csv', 'zerowidth.csv'),
+        ('../notes\\a.txt', '.._notes_a.txt'),
+        ('\u202e\x07 ', 'file'),
+    ],
+)
+def test_delivered_file_names_lose_hidden_characters(name, shown):
+    element = {'id': 'e', 'name': name, 'content_type': 'text/plain', 'size': 1, 'pages': [], 'version': 1}
+    assert agent_v2._workspace_attachment(element, 'thread')['name'] == shown
 
 
 def usage(prompt: int, completion: int) -> dict[str, int]:

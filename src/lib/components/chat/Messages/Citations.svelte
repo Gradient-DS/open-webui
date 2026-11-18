@@ -1,7 +1,16 @@
 <script lang="ts">
 	import SourceIcon from './Citations/SourceIcon.svelte';
 	import { getContext } from 'svelte';
-	import { config, embed, showControls, showEmbeds } from '$lib/stores';
+	import {
+		config,
+		embed,
+		openDocumentTabSignal,
+		requestedWorkspaceFile,
+		showControls,
+		showDocument,
+		showEmbeds
+	} from '$lib/stores';
+	import { isDeliveredFile } from '$lib/utils/deliveredFile';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { citationAt, reduceSources } from './Citations/reduceSources';
@@ -37,6 +46,16 @@
 	export const showSourceModal = (sourceId) => {
 		// [Gradient] `[N]` opens the entry numbered N (`citationAt`), not the Nth stored one.
 		const citation = citationAt(citations, sourceId);
+
+		// [Gradient] A note on a file the agent delivered opens that file in the document panel.
+		const delivered = citation?.source?.delivered_file;
+		if (delivered && isDeliveredFile(delivered)) {
+			requestedWorkspaceFile.set(delivered);
+			showDocument.set(true);
+			showControls.set(true);
+			openDocumentTabSignal.update((n) => n + 1);
+			return;
+		}
 
 		if (citation) {
 			console.log('Showing citation modal for:', citation);

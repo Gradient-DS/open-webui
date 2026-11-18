@@ -138,6 +138,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import {
@@ -254,6 +255,7 @@
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
+	export let workspaceEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
@@ -313,6 +315,7 @@
 		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		workspaceEnabled,
 		toolApprovalMode
 	};
 
@@ -852,6 +855,10 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.document_writer ?? true
 	);
 
+	$: workspaceCapableModels = selectedModelIds.filter(
+		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.workspace === true
+	);
+
 	let terminalCapableModels = [];
 	$: terminalCapableModels = getCapableModelIds(
 		selectedModelIds,
@@ -906,6 +913,13 @@
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
 
+	$: showWorkspaceButton =
+		selectedModelIds.length > 0 &&
+		selectedModelIds.length === workspaceCapableModels.length &&
+		isFeatureEnabled('workspace') &&
+		$config?.features?.enable_workspace &&
+		$_user?.permissions?.features?.workspace;
+	$: if (!showWorkspaceButton) workspaceEnabled = false;
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -973,6 +987,7 @@
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
 		document_writer: itemState(documentWriterEnabled),
+		workspace: itemState(workspaceEnabled),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
@@ -1029,7 +1044,7 @@
 				toggleWebSearch: () => void;
 				toggleLiveDocuments: () => Promise<void>;
 				toggleLiveMail: () => Promise<void>;
-				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace') => void;
 		  }
 		| undefined;
 	const pinnedStateTooltip = (label: string, on: boolean, description: string) =>
@@ -2548,6 +2563,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
+											{showWorkspaceButton}
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
@@ -2555,6 +2571,7 @@
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
+											bind:workspaceEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
 												serverId: string;
@@ -2862,6 +2879,29 @@
 															class={pinnedToggleClass(documentWriterEnabled)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'workspace' && showWorkspaceButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Workspace'),
+															workspaceEnabled,
+															workspaceEnabled
+																? $i18n.t(
+																		'Make files, analyse data and draw charts in a secure workspace'
+																	)
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Workspace')}
+															aria-pressed={workspaceEnabled}
+															on:click|preventDefault={() => inputMenuRef?.toggleFeature('workspace')}
+															class={pinnedToggleClass(workspaceEnabled)}
+														>
+															<CommandLine className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}

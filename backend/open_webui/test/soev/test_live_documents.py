@@ -188,6 +188,7 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
         'attach_live_document': 'auto',
         'search_mail': 'off',
         'read_mail': 'off',
+        'workspace_task': 'off',
     }
     assert agent_v2._tools({}, False, False, False)['tools']['search_live_documents'] == 'off'
 
