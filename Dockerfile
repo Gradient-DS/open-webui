@@ -38,6 +38,10 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY package.json package-lock.json ./
+# [Gradient] onnxruntime-node's install script downloads CUDA binaries from a GitHub release on
+# linux/x64. This stage only builds the static frontend and never runs a model, and the download
+# makes every amd64 build depend on that release being reachable.
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm ci --force
 
 COPY . .
