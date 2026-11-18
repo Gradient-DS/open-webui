@@ -43,6 +43,9 @@ jobs:
           cache: npm
 
       - name: Install Dependencies
+        # onnxruntime-node would download CUDA binaries from a GitHub release; tests never use them.
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
         run: npm ci --force
 
       - name: Run Frontend Unit Tests
