@@ -8,6 +8,8 @@
  * No full theme resolution, SmartArt, or animations — preview only.
  */
 
+import { inheritFromLayout } from './pptxInherit';
+
 const EMU_PER_PX = 9525;
 const emuToPx = (emu: number) => Math.round(emu / EMU_PER_PX);
 
@@ -256,6 +258,8 @@ const paragraphAlign = (
 	const align = para.getElementsByTagName('a:pPr')[0]?.getAttribute('algn');
 	if (align === 'ctr') return 'center';
 	if (align === 'r') return 'right';
+	// l and the justified modes the preview cannot draw render from the left
+	if (align) return 'left';
 
 	const type = normalizePlaceholderType(ph?.type ?? '');
 	if (type === 'title' || type === 'subTitle') return 'center';
@@ -1000,6 +1004,21 @@ export async function pptxToImages(
 		if (masterDoc) renderBackground(ctx, masterDoc, slideW, slideH);
 		if (layoutDoc) renderBackground(ctx, layoutDoc, slideW, slideH);
 		renderBackground(ctx, slideDoc, slideW, slideH);
+
+		// [Gradient] The layout's and master's graphics, text styles and (in a template) prompts.
+		await inheritFromLayout(
+			ctx,
+			zip,
+			slideDoc,
+			{ doc: layoutDoc, rels: layoutRels },
+			{ doc: masterDoc, rels: masterPath ? await readRels(zip, masterPath) : {} },
+			{
+				media,
+				colorOf: colorFromElement,
+				loadImage,
+				drawText: (target, txBody, rect) => renderTextBody(target, txBody, rect, 16)
+			}
+		);
 
 		const spTree = slideDoc.getElementsByTagName('p:spTree')[0];
 		if (!spTree) {
