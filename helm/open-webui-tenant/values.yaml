@@ -276,9 +276,9 @@ openWebui:
     featureReadAloud: "False"  # Read-aloud button on answers (TTS)
     featureChangelog: "False"
     featureMeetings: "False"  # Vergadering page; also needs the meeting agent allowlisted in soev-api
-    # Vergadering start form: the language preselected when the UI is in a language the form
-    # does not offer. The form offers nl and en; any other value falls back to nl.
-    meetingDefaultLanguage: "nl"
+    # Vergadering start form: the language it preselects. auto lets the transcription model
+    # detect it; nl and en name one. Any other value falls back to auto.
+    meetingDefaultLanguage: "auto"
     featureSystemPrompt: "False"
     featureModels: "True"
     # Show the per-model Quality/Speed meters + legend in the model picker.

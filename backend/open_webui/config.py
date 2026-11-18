@@ -2986,9 +2986,9 @@ FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true
 # [Gradient] Vergadering (meeting assistant) page; also needs the meeting agent in the soev-api catalog.
 FEATURE_MEETINGS = os.environ.get('FEATURE_MEETINGS', 'True').lower() == 'true'
 
-# [Gradient] The language the meeting start form preselects when the UI is in a language the
-# form does not offer (it offers nl and en). A value the form does not offer falls back to nl.
-MEETING_DEFAULT_LANGUAGE = os.environ.get('MEETING_DEFAULT_LANGUAGE', 'nl').strip().lower()
+# [Gradient] The language the meeting start form preselects: auto (the transcription model
+# detects it), nl or en. Any other value falls back to auto.
+MEETING_DEFAULT_LANGUAGE = os.environ.get('MEETING_DEFAULT_LANGUAGE', 'auto').strip().lower()
 
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 

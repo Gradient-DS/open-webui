@@ -309,26 +309,23 @@ export const listMeetings = (
 		.sort((a, b) => (ascending ? 1 : -1) * key(a).localeCompare(key(b)));
 };
 
-/** The languages the start form offers for a meeting, under their own names (never translated). */
+/** The start form's choice that leaves the language to the transcription model. */
+export const AUTO_LANGUAGE = 'auto';
+
+/** The languages the start form offers by name, under their own names (never translated). */
 export const MEETING_LANGUAGES: readonly { code: string; label: string }[] = [
 	{ code: 'nl', label: 'Nederlands' },
 	{ code: 'en', label: 'English' }
 ];
 
 /**
- * The language the start form preselects: the UI language when the form offers it (nl-NL → nl),
- * else the tenant's default (`MEETING_DEFAULT_LANGUAGE`), else the first one offered. A UI in any
- * other language therefore never sends its own code to the transcriber.
+ * The language the start form preselects: the tenant's default (`MEETING_DEFAULT_LANGUAGE`) when
+ * it is automatic detection or a language the form offers, else automatic detection. The UI
+ * language plays no part, so a UI in any language never sends its own code to the transcriber.
  */
-export const defaultMeetingLanguage = (
-	uiLanguage: string | undefined,
-	tenantDefault: string | undefined
-): string => {
-	const offered = MEETING_LANGUAGES.map((language) => language.code);
-	const ui = (uiLanguage ?? '').slice(0, 2).toLowerCase();
-	if (offered.includes(ui)) return ui;
+export const defaultMeetingLanguage = (tenantDefault: string | undefined): string => {
 	const tenant = (tenantDefault ?? '').trim().toLowerCase();
-	return offered.includes(tenant) ? tenant : offered[0];
+	return MEETING_LANGUAGES.some((language) => language.code === tenant) ? tenant : AUTO_LANGUAGE;
 };
 
 /** Groups items (already newest first) under the label `rangeOf` gives each, keeping order. */

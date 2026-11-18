@@ -447,7 +447,7 @@ type Config = {
 		feature_notes_ai_controls?: boolean;
 		feature_voice?: boolean;
 		feature_changelog?: boolean;
-		// [Gradient] Vergadering: the start form's language for a UI language it does not offer.
+		// [Gradient] Vergadering: the language the start form preselects (auto, nl or en).
 		meeting_default_language?: string;
 		feature_system_prompt?: boolean;
 		feature_models?: boolean;

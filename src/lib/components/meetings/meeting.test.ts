@@ -9,6 +9,7 @@ import {
 	groupByRange,
 	listMeetings,
 	liveParts,
+	AUTO_LANGUAGE,
 	MEETING_LANGUAGES,
 	defaultMeetingLanguage,
 	matchesQuery,
@@ -395,29 +396,28 @@ describe('microphone choice', () => {
 		expect(micConstraints(null)).toMatchObject({ echoCancellation: true, noiseSuppression: true });
 	});
 
-	it('offers Dutch and English, by their own names', () => {
+	it('offers Dutch and English by their own names, next to automatic detection', () => {
 		expect(MEETING_LANGUAGES).toEqual([
 			{ code: 'nl', label: 'Nederlands' },
 			{ code: 'en', label: 'English' }
 		]);
+		expect(AUTO_LANGUAGE).toBe('auto');
 	});
 
-	it('preselects the UI language when the form offers it', () => {
-		expect(defaultMeetingLanguage('nl-NL', 'en')).toBe('nl');
-		expect(defaultMeetingLanguage('en-US', 'nl')).toBe('en');
-		expect(defaultMeetingLanguage('EN', 'nl')).toBe('en');
+	it('preselects automatic detection unless the tenant names a default', () => {
+		expect(defaultMeetingLanguage(undefined)).toBe('auto');
+		expect(defaultMeetingLanguage('')).toBe('auto');
+		expect(defaultMeetingLanguage('auto')).toBe('auto');
 	});
 
-	it('preselects the tenant default for a UI in any other language', () => {
-		expect(defaultMeetingLanguage('tr-TR', 'en')).toBe('en');
-		expect(defaultMeetingLanguage('ar', ' NL ')).toBe('nl');
-		expect(defaultMeetingLanguage(undefined, 'en')).toBe('en');
+	it('preselects the tenant default when the form offers it', () => {
+		expect(defaultMeetingLanguage('nl')).toBe('nl');
+		expect(defaultMeetingLanguage(' EN ')).toBe('en');
 	});
 
 	it('never preselects a language the form does not offer', () => {
-		expect(defaultMeetingLanguage('tr-TR', 'tr')).toBe('nl');
-		expect(defaultMeetingLanguage('fr-FR', 'auto')).toBe('nl');
-		expect(defaultMeetingLanguage(undefined, undefined)).toBe('nl');
+		expect(defaultMeetingLanguage('tr')).toBe('auto');
+		expect(defaultMeetingLanguage('nl-NL')).toBe('auto');
 	});
 });
 

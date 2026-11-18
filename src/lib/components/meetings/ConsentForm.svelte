@@ -14,7 +14,7 @@
 		type AudioSource,
 		type Microphone
 	} from './audio';
-	import { MEETING_LANGUAGES, defaultMeetingLanguage } from './meeting';
+	import { AUTO_LANGUAGE, MEETING_LANGUAGES, defaultMeetingLanguage } from './meeting';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -32,11 +32,9 @@
 	let consented = $state(untrack(() => resume));
 	let starting = $state(false);
 
-	// The language spoken in the meeting: the transcriber is told, it does not guess.
+	// The language spoken in the meeting: detected by the transcriber unless the user names one.
 	let language = $state(
-		untrack(() =>
-			defaultMeetingLanguage($i18n.language, $config?.features?.meeting_default_language)
-		)
+		untrack(() => defaultMeetingLanguage($config?.features?.meeting_default_language))
 	);
 
 	// Tab audio needs Chromium on a desktop; elsewhere only the microphone is offered.
@@ -203,6 +201,7 @@
 				aria-label={$i18n.t('Spoken language')}
 				bind:value={language}
 			>
+				<option value={AUTO_LANGUAGE}>{$i18n.t('Detect automatically')}</option>
 				{#each MEETING_LANGUAGES as option (option.code)}
 					<option value={option.code}>{option.label}</option>
 				{/each}
