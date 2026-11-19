@@ -1398,8 +1398,8 @@ json = { "path" = "references/created.txt", "content" = "Invented inline file {t
 
 [[field]]
 route = "PUT /api/v1/skills/id/{id}/files"
-description = "Edit the text file supplied by the bundle import seed."
-json = { "path" = "references/imported.txt", "content" = "Invented edited file {token}" }
+description = "Edit the imported text file where the move control left it: writes run in route order, so the move and remove controls come first."
+json = { "path" = "moved/imported.txt", "content" = "Invented edited file {token}" }
 
 [[field]]
 route = "POST /api/v1/skills/id/{id}/files/move"
@@ -1408,5 +1408,5 @@ json = { "from_path" = "references/", "to_path" = "moved/" }
 
 [[field]]
 route = "POST /api/v1/skills/id/{id}/files/remove"
-description = "Remove the bundle directory after the move control, as its owner."
-json = { "path" = "moved/" }
+description = "Remove the file the create control added, after the move control, as its owner; the imported file stays for the edit control."
+json = { "path" = "moved/created.txt" }

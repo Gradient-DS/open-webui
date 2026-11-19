@@ -45502,7 +45502,7 @@
     },
     "/api/v1/skills/id/{id}/files/content": {
       "get": {
-        "description": "Stream the raw bytes of a skill-bundle file with the correct Content-Type.\n\nAuth (two paths \u2014 both enforce the same read-access check):\n\nA. Normal session: owner / admin / read AccessGrant via get_optional_verified_user\n   (cookie, sk- api key, or normal Bearer JWT without a purpose claim).\n\nB. Phase 8b scoped fetch token: Authorization: Bearer <token> where the JWT\n   has purpose=\"skill_file_read\", skill_id=id, exp\u2264120s, minted by\n   build_agent_payload.  Accepted ONLY here; get_current_user in auth.py\n   blocks it on every other route.",
+        "description": "Stream the raw bytes of a skill-bundle file with the correct Content-Type.\n\nReadable by the skill's owner, an admin, or a user with a read grant.",
         "operationId": "get_skill_file_content_api_v1_skills_id__id__files_content_get",
         "parameters": [
           {

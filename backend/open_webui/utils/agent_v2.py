@@ -2281,7 +2281,8 @@ async def _sent(
     skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_more_texts
     if skipped:
         turn.left_out(skipped)
-    turn.notices.extend(skill_notices)
+    if skill_notices:
+        turn.notices.extend(skill_notices)
     tools = _tools(
         metadata,
         await _web_search_allowed(metadata['user_id']),
