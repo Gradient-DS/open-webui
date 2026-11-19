@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 from open_webui import config
 from open_webui.models.files import Files
-from open_webui.models.skill_files import SkillFiles
+from open_webui.models.skill_files import SkillFileModel, SkillFiles
 from open_webui.models.skills import SkillModel, Skills
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
@@ -60,8 +60,7 @@ def _read_bytes(path: str, limit: int) -> bytes:
         return file.read(limit)
 
 
-async def _bundle(skill: SkillModel, name: str) -> bytes:
-    files = await SkillFiles.get_files_by_skill_id(skill.id)
+async def _bundle(skill: SkillModel, name: str, files: list[SkillFileModel]) -> bytes:
     if len(files) + 1 > 500:
         raise ValueError('Too many skill files')
     content = _skill_md(skill, name).encode()
@@ -69,6 +68,7 @@ async def _bundle(skill: SkillModel, name: str) -> bytes:
     if size > MAX_EXPANDED:
         raise ValueError('Skill bundle too large')
     seen = {'skill.md'}
+    backing = {file.id: file for file in await Files.get_files_by_ids(list({entry.file_id for entry in files}))}
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         info = zipfile.ZipInfo('SKILL.md')
@@ -84,7 +84,7 @@ async def _bundle(skill: SkillModel, name: str) -> bytes:
             ):
                 raise ValueError('Invalid skill file path')
             seen.add(entry.path.casefold())
-            file = await Files.get_file_by_id(entry.file_id)
+            file = backing.get(entry.file_id)
             if file is None:
                 raise ValueError('Missing skill file')
             if not file.path and (file.meta or {}).get('size') == 0 and (file.data or {}).get('content') == '':
@@ -127,24 +127,38 @@ async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[di
     references, notices = [], []
     names: set[str] = set()
     client = identity.build_client() if selected else None
-    for skill in selected[:20]:
-        try:
-            body = await _bundle(skill, _skill_name(skill.id, names))
-        except (OSError, ValueError, yaml.YAMLError):
-            log.warning('Workspace skill unavailable: skill=%s', skill.id)
-            notices.append(_notice(skill.name, metadata.get('user_language')))
-            continue
-        # Include original fields even when normalization would produce the same SKILL.md.
-        source = json.dumps([skill.content, skill.name, skill.description], ensure_ascii=False).encode()
-        fingerprint = hashlib.sha256(source + b'\0' + body).hexdigest()
+    selected = selected[:20]
+    bundles = await SkillFiles.get_files_by_skill_ids([skill.id for skill in selected]) if selected else {}
+    file_ids = {entry.file_id for files in bundles.values() for entry in files}
+    backing = {file.id: file for file in await Files.get_file_metadatas_by_ids(list(file_ids))} if file_ids else {}
+    for skill in selected:
+        name = _skill_name(skill.id, names)
+        files = sorted(bundles[skill.id], key=lambda entry: entry.path)
+        versions = [
+            [
+                entry.path,
+                entry.file_id,
+                entry.updated_at,
+                [file.hash, file.updated_at, (file.meta or {}).get('size')]
+                if (file := backing.get(entry.file_id)) is not None
+                else None,
+            ]
+            for entry in files
+        ]
+        source = json.dumps([skill.content, skill.name, skill.description, name, versions], ensure_ascii=False).encode()
         key = (
             config.SOEV_API_URL,
             hashlib.sha256(config.SOEV_API_KEY.encode()).hexdigest(),
             user,
             skill.id,
-            fingerprint,
+            hashlib.sha256(source).hexdigest(),
         )
-        uploaded = await _reference(key, body, user, client, skill.id)
+        try:
+            uploaded = await _reference(key, skill, name, files, user, client)
+        except (OSError, ValueError, yaml.YAMLError):
+            log.warning('Workspace skill unavailable: skill=%s', skill.id)
+            notices.append(_notice(skill.name, metadata.get('user_language')))
+            continue
         if uploaded is None:
             notices.append(_notice(skill.name, metadata.get('user_language')))
         else:
@@ -153,7 +167,12 @@ async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[di
 
 
 async def _reference(
-    key: tuple[str, ...], body: bytes, user: str, client: SoevClient, skill_id: str
+    key: tuple[str, ...],
+    skill: SkillModel,
+    name: str,
+    files: list[SkillFileModel],
+    user: str,
+    client: SoevClient,
 ) -> dict[str, Any] | None:
     global _upload_lock
     loop = asyncio.get_running_loop()
@@ -163,13 +182,14 @@ async def _reference(
         if key in REFERENCES:
             REFERENCES.move_to_end(key)
             return REFERENCES[key]
+        body = await _bundle(skill, name, files)
         await identity.ensure_link(user, client)
         try:
             uploaded = await client.post_bytes('/v1/chat/skills', body, as_user=user, content_type='application/zip')
         except SoevApiError as error:
             if not 400 <= error.status < 500:
                 raise
-            log.warning('Workspace skill refused: skill=%s status=%s code=%s', skill_id, error.status, error.code)
+            log.warning('Workspace skill refused: skill=%s status=%s code=%s', skill.id, error.status, error.code)
             return None
         REFERENCES[key] = uploaded
         while len(REFERENCES) > CACHE_LIMIT:

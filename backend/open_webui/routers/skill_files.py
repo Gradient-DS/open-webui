@@ -21,6 +21,7 @@ has_permission.
 """
 
 import asyncio
+import hashlib
 import io
 import logging
 import mimetypes
@@ -33,14 +34,14 @@ from fastapi.responses import FileResponse, Response
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.files import FileForm, Files
+from open_webui.models.files import FileForm, Files, FileUpdateForm
 from open_webui.models.skill_files import SkillFileListResponse, SkillFiles
 from open_webui.models.skills import Skills
 from open_webui.models.users import Users
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -439,7 +440,15 @@ async def edit_skill_file(
         },
     )
     await Files.update_file_path_by_id(file.id, file_path, db=db)
-    await Files.update_file_data_by_id(file.id, {'content': form_data.content}, db=db)
+    await Files.update_file_by_id(
+        file.id,
+        FileUpdateForm(
+            hash=hashlib.sha256(content_bytes).hexdigest(),
+            data={'content': form_data.content},
+            meta={'size': len(content_bytes)},
+        ),
+        db=db,
+    )
     return {'path': form_data.path, 'file_id': file.id}
 
 
