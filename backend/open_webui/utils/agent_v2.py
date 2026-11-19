@@ -1906,6 +1906,32 @@ class AgentTurn:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
+        from open_webui.utils.agent_skills import forget_references
+
+        for attempt in range(3):
+            try:
+                stream = self.send(body)
+                async with aclosing(stream):
+                    async for event in stream:
+                        yield event
+                return
+            except SoevApiError as error:
+                skills = body['input'].get('skills')
+                if error.code != 'skill_not_found' or not skills:
+                    raise
+                notices = forget_references(self.as_user, skills, self.metadata.get('user_language'))
+                if attempt == 0:
+                    skills, notices = await _skills(self.metadata, self.as_user)
+                else:
+                    skills = []
+                if skills:
+                    body['input']['skills'] = skills
+                else:
+                    body['input'].pop('skills', None)
+                self.notices.extend(notices)
+                await self.notify()
+
+    async def send(self, body: dict) -> AsyncIterator[ChatEvent]:
         path = self.path('inputs') if self.thread_id else _ROOT
         try:
             stream = self.client.chat_stream(

@@ -4,6 +4,7 @@ import hashlib
 import io
 import re
 import zipfile
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -11,7 +12,7 @@ import httpx
 import pytest
 import yaml
 from open_webui.soev import capabilities
-from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils import agent_skills, agent_v2
 
 
@@ -413,3 +414,171 @@ async def test_turn_input_and_saved_nonfatal_notice(skills, monkeypatch, refused
         assert len(turn.notices) == 1
         upsert.assert_awaited_once_with('invented-chat', 'invented-answer', {'notices': turn.notices})
         emit.assert_awaited_once_with('chat:message:notices', {'notices': turn.notices, 'removed': []})
+
+
+@pytest.fixture
+def prepared_turn(skills, monkeypatch):
+    for name, result in {
+        '_folder_items': ([], []),
+        '_knowledge': ([], []),
+        '_attachments': {},
+        '_texts': ([], []),
+        '_more_texts': ([], []),
+        '_images': [],
+        '_web_search_allowed': False,
+        '_live_documents_allowed': False,
+        '_live_mail_allowed': False,
+        '_documents_allowed': False,
+        '_earlier': None,
+        '_tool_statuses': {},
+        'get_event_emitter': None,
+    }.items():
+        monkeypatch.setattr(agent_v2, name, AsyncMock(return_value=result))
+    data = metadata(chat_id='invented-chat', message_id='invented-answer')
+    turn = agent_v2.AgentTurn(agent_skills.identity.build_client(), data, 'owui:user:fern')
+    monkeypatch.setattr(turn, 'prepare', AsyncMock())
+    monkeypatch.setattr(turn, 'emit', AsyncMock())
+    monkeypatch.setattr(agent_v2.Chats, 'upsert_message_to_chat_by_id_and_message_id', AsyncMock())
+    return turn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('existing_thread', [False, True])
+@pytest.mark.parametrize('give_up', [False, True])
+@pytest.mark.parametrize('language', ['en', 'nl'])
+async def test_skill_not_found_reuploads_once_then_continues(
+    skills, prepared_turn, monkeypatch, existing_thread, give_up, language
+):
+    turn = prepared_turn
+    turn.metadata['user_language'] = language
+    turn.thread_id = 'invented-thread' if existing_thread else None
+    candidates = [skills.skill, SimpleNamespace(**{**vars(skills.skill), 'id': 'summary', 'name': 'Summary'})]
+    agent_skills.Skills.get_skills.return_value = candidates
+    uploaded = []
+
+    async def upload(path, body, **kwargs):
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            frontmatter = yaml.safe_load(archive.read('SKILL.md').decode().split('---\n')[1])
+        reference = {**skills.upload.return_value, 'id': f'{len(uploaded):032x}', 'name': frontmatter['name']}
+        uploaded.append(reference)
+        return reference
+
+    skills.upload.side_effect = upload
+    original, _ = await agent_v2._skills(turn.metadata, turn.as_user)
+    skills.storage.reset_mock()
+    sends = []
+
+    async def chat_stream(client, path, body, **kwargs):
+        sends.append((path, deepcopy(body), kwargs))
+        if len(sends) == 1 or (give_up and len(sends) == 2):
+            raise SoevApiError(404, 'skill_not_found', 'Private detail')
+        yield ChatEvent('connection', {'thread_id': 'invented-thread'})
+        yield ChatEvent('delta', {'text': 'An outline.'})
+
+    monkeypatch.setattr(SoevClient, 'chat_stream', chat_stream)
+    chunks = await agent_v2._sent(turn, 'Draft an outline', turn.metadata, agent='example-agent', model='example-model')
+    result = [chunk async for chunk in chunks]
+    assert agent_v2._ACCEPTED in result
+    assert not any('error' in chunk for chunk in result)
+    assert result[-1]['choices'][0]['delta']['content'] == 'An outline.'
+    assert len(sends) == (3 if give_up else 2)
+    assert skills.upload.await_count == 4  # two original uploads, two fresh uploads
+    assert skills.storage.call_count == 2  # cache hit first, then rebuild both bundles
+    assert sends[0][1]['input']['skills'] == original
+    assert sends[1][1]['input']['skills'] == uploaded[2:]
+    expected_path = '/v1/chat/threads/invented-thread/inputs' if existing_thread else '/v1/chat/threads'
+    assert all(path == expected_path for path, _, _ in sends)
+    assert all(kwargs['as_user'] == turn.as_user for _, _, kwargs in sends)
+    for _, body, _ in sends:
+        assert body['input']['text'] == 'Draft an outline'
+        assert body['model'] == 'example-model'
+    if give_up:
+        assert 'skills' not in sends[2][1]['input']
+        assert turn.notices == [agent_skills._notice(skill.name, language) for skill in candidates]
+        assert not agent_skills.REFERENCES
+        agent_v2.Chats.upsert_message_to_chat_by_id_and_message_id.assert_awaited_once_with(
+            'invented-chat', 'invented-answer', {'notices': turn.notices}
+        )
+        turn.emit.assert_any_await('chat:message:notices', {'notices': turn.notices, 'removed': []})
+    else:
+        assert not turn.notices
+        assert len(agent_skills.REFERENCES) == 2
+        agent_v2.Chats.upsert_message_to_chat_by_id_and_message_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('code', ['thread_not_found', 'invalid_field', 'service_unavailable'])
+async def test_other_send_errors_do_not_refresh_skills(skills, prepared_turn, monkeypatch, code):
+    references, _ = await agent_v2._skills(prepared_turn.metadata, prepared_turn.as_user)
+    error = SoevApiError(404, code, 'Private detail')
+    sends = []
+
+    async def chat_stream(client, path, body, **kwargs):
+        sends.append(body)
+        raise error
+        yield
+
+    monkeypatch.setattr(SoevClient, 'chat_stream', chat_stream)
+    with pytest.raises(SoevApiError) as caught:
+        _ = [event async for event in prepared_turn.events({'input': {'skills': references}})]
+    assert caught.value is error
+    assert len(sends) == 1
+    assert skills.upload.await_count == 1
+    assert len(agent_skills.REFERENCES) == 1
+    assert not prepared_turn.notices
+
+
+@pytest.mark.asyncio
+async def test_different_error_after_skill_refresh_is_not_retried(skills, prepared_turn, monkeypatch):
+    references, _ = await agent_v2._skills(prepared_turn.metadata, prepared_turn.as_user)
+    errors = [SoevApiError(404, 'skill_not_found', 'Missing skill'), SoevApiError(403, 'forbidden', 'Private detail')]
+    sends = []
+
+    async def chat_stream(client, path, body, **kwargs):
+        sends.append(deepcopy(body))
+        raise errors[len(sends) - 1]
+        yield
+
+    monkeypatch.setattr(SoevClient, 'chat_stream', chat_stream)
+    with pytest.raises(SoevApiError) as caught:
+        _ = [event async for event in prepared_turn.events({'input': {'skills': references}})]
+    assert caught.value is errors[1]
+    assert len(sends) == 2
+    assert skills.upload.await_count == 2
+    assert not prepared_turn.notices
+
+
+@pytest.mark.asyncio
+async def test_skill_not_found_without_skills_is_not_retried(skills, prepared_turn, monkeypatch):
+    sends = []
+
+    async def chat_stream(client, path, body, **kwargs):
+        sends.append(body)
+        raise SoevApiError(404, 'skill_not_found', 'Private detail')
+        yield
+
+    monkeypatch.setattr(SoevClient, 'chat_stream', chat_stream)
+    with pytest.raises(SoevApiError, match='Private detail'):
+        _ = [event async for event in prepared_turn.events({'input': {}})]
+    assert len(sends) == 1
+    skills.upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_forgetting_references_is_scoped_to_user_and_turn_skills(skills):
+    async def upload(path, body, **kwargs):
+        return {**skills.upload.return_value, 'id': str(skills.upload.await_count)}
+
+    skills.upload.side_effect = upload
+    old, _ = await agent_v2._skills(metadata(), 'owui:user:fern')
+    skills.skill.content += ' changed'
+    current, _ = await agent_v2._skills(metadata(), 'owui:user:fern')
+    other_user, _ = await agent_v2._skills(metadata(user_id='reed'), 'owui:user:reed')
+    skills.skill.id = 'other-skill'
+    other_skill, _ = await agent_v2._skills(metadata(), 'owui:user:fern')
+    assert len(agent_skills.REFERENCES) == 4
+    assert agent_skills.forget_references('owui:user:fern', current, 'en') == [agent_skills._notice('Outline', 'en')]
+    assert len(agent_skills.REFERENCES) == 2  # all versions of the turn's skill, only for this user
+    remaining = [reference for reference, _ in agent_skills.REFERENCES.values()]
+    assert remaining == other_user + other_skill
+    assert old[0] not in remaining

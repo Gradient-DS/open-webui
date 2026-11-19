@@ -22,7 +22,7 @@ from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
 # Private process memory: shared skill metadata must never expose another user's references.
-REFERENCES: OrderedDict[tuple[str, ...], dict[str, Any]] = OrderedDict()
+REFERENCES: OrderedDict[tuple[str, ...], tuple[dict[str, Any], str]] = OrderedDict()
 CACHE_LIMIT = 512
 _upload_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 MAX_EXPANDED = 100 * 1024 * 1024
@@ -116,6 +116,20 @@ def _notice(name: str, language: str | None) -> str:
     )
 
 
+def forget_references(user: str, references: list[dict[str, Any]], language: str | None) -> list[str]:
+    ids = {reference['id'] for reference in references}
+    matches = {
+        key[3]: (reference['id'], name)
+        for key, (reference, name) in REFERENCES.items()
+        if key[2] == user and reference['id'] in ids
+    }
+    names = dict(matches.values())
+    for key in list(REFERENCES):
+        if key[2] == user and key[3] in matches:
+            del REFERENCES[key]
+    return [_notice(names.get(reference['id'], reference['name']), language) for reference in references]
+
+
 async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
     # The model is server-resolved, including the assistant/LLM split. Never trust metadata.skills selections.
     attached = set((((metadata.get('model') or {}).get('info') or {}).get('meta') or {}).get('skillIds') or [])
@@ -181,7 +195,7 @@ async def _reference(
     async with _upload_lock[1]:
         if key in REFERENCES:
             REFERENCES.move_to_end(key)
-            return REFERENCES[key]
+            return REFERENCES[key][0]
         body = await _bundle(skill, name, files)
         await identity.ensure_link(user, client)
         try:
@@ -191,7 +205,7 @@ async def _reference(
                 raise
             log.warning('Workspace skill refused: skill=%s status=%s code=%s', skill.id, error.status, error.code)
             return None
-        REFERENCES[key] = uploaded
+        REFERENCES[key] = (uploaded, skill.name)
         while len(REFERENCES) > CACHE_LIMIT:
             REFERENCES.popitem(last=False)
         return uploaded
