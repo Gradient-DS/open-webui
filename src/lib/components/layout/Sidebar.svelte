@@ -1090,7 +1090,8 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+					<!-- [Gradient] Skills settings require the same workspace eligibility as the composer toggle. -->
+					{#if isFeatureEnabled('skills') && isFeatureEnabled('workspace') && $config?.features?.enable_workspace && $user?.permissions?.features?.workspace && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 						<div class="">
 							<Tooltip content={$i18n.t('Skills')} placement="right">
 								<a
@@ -1432,7 +1433,8 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+							<!-- [Gradient] Skills settings require the same workspace eligibility as the composer toggle. -->
+							{#if isFeatureEnabled('skills') && isFeatureEnabled('workspace') && $config?.features?.enable_workspace && $user?.permissions?.features?.workspace && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-skills-button"

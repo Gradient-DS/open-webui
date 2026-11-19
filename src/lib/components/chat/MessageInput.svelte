@@ -883,9 +883,10 @@
 	$: showToolsButton =
 		isFeatureEnabled('tools') && (($tools ?? []).length > 0 || ($toolServers ?? []).length > 0);
 
+	// [Gradient] Workspace skills are automatic on agent turns; direct models keep per-message selection.
 	let showSkillsButton = false;
 	$: showSkillsButton =
-		isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
+		!agentRouted && isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -1044,7 +1045,9 @@
 				toggleWebSearch: () => void;
 				toggleLiveDocuments: () => Promise<void>;
 				toggleLiveMail: () => Promise<void>;
-				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace') => void;
+				toggleFeature: (
+					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
+				) => void;
 		  }
 		| undefined;
 	const pinnedStateTooltip = (label: string, on: boolean, description: string) =>
@@ -2564,6 +2567,7 @@
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
 											{showWorkspaceButton}
+											{agentRouted}
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
@@ -2898,7 +2902,8 @@
 															type="button"
 															aria-label={$i18n.t('Workspace')}
 															aria-pressed={workspaceEnabled}
-															on:click|preventDefault={() => inputMenuRef?.toggleFeature('workspace')}
+															on:click|preventDefault={() =>
+																inputMenuRef?.toggleFeature('workspace')}
 															class={pinnedToggleClass(workspaceEnabled)}
 														>
 															<CommandLine className="size-4" strokeWidth="1.75" />

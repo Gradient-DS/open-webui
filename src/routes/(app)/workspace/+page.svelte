@@ -29,6 +29,9 @@
 			goto('/workspace/tools', { replaceState: true });
 		} else if (
 			isFeatureEnabled('skills') &&
+			isFeatureEnabled('workspace') &&
+			$config?.features?.enable_workspace &&
+			$user?.permissions?.features?.workspace &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.skills)
 		) {
 			goto('/workspace/skills', { replaceState: true });

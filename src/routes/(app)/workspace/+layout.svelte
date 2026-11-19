@@ -41,7 +41,13 @@
 			return;
 		}
 
-		if ($page.url.pathname.includes('/skills') && !isFeatureEnabled('skills')) {
+		if (
+			$page.url.pathname.includes('/skills') &&
+			(!isFeatureEnabled('skills') ||
+				!isFeatureEnabled('workspace') ||
+				!$config?.features?.enable_workspace ||
+				!$user?.permissions?.features?.workspace)
+		) {
 			goto('/');
 			return;
 		}
