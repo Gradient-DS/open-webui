@@ -114,7 +114,7 @@
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import { getActiveSide, getHistorySide } from '$lib/utils/dataSeparation';
+	import { getActiveSide } from '$lib/utils/dataSeparation';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -928,11 +928,6 @@
 	$: strictDataSeparation = $config?.features?.feature_strict_data_separation ?? false;
 	$: dataSeparationMessages =
 		strictDataSeparation && history ? createMessagesList(history, history.currentId) : [];
-	// Side the conversation is already locked to by prior messages (history only — does NOT
-	// depend on webSearchEnabled, so the defensive guard below can't form a reactive cycle).
-	$: dataSeparationHistorySide = strictDataSeparation
-		? getHistorySide(dataSeparationMessages)
-		: null;
 	$: dataSeparationSide = strictDataSeparation
 		? getActiveSide({
 				messages: dataSeparationMessages,
