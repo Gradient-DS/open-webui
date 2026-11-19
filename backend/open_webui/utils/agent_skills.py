@@ -29,14 +29,27 @@ MAX_EXPANDED = 100 * 1024 * 1024
 _FRONTMATTER = re.compile(r'\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)(?:\r?\n|\Z)', re.DOTALL)
 
 
-def _skill_md(skill: SkillModel) -> str:
+def _skill_name(skill_id: str, used: set[str]) -> str:
+    base = re.sub(r'^[^a-z0-9]+', '', skill_id.lower())[:64]
+    name = base
+    attempt = 0
+    while not name or name in used:
+        source = skill_id if attempt == 0 else f'{skill_id}\0{attempt}'
+        suffix = hashlib.sha256(source.encode()).hexdigest()[:8]
+        name = f'{(base or "skill")[:55]}-{suffix}'
+        attempt += 1
+    used.add(name)
+    return name
+
+
+def _skill_md(skill: SkillModel, name: str) -> str:
     match = _FRONTMATTER.match(skill.content)
     frontmatter = yaml.safe_load(match[1]) if match else {}
     if frontmatter is None:
         frontmatter = {}
     if not isinstance(frontmatter, dict):
         raise ValueError('Invalid skill frontmatter')
-    frontmatter['name'] = 'skill-' + hashlib.sha256(skill.id.encode()).hexdigest()[:58]
+    frontmatter['name'] = name
     frontmatter['description'] = skill.description or skill.name
     body = skill.content[match.end() :] if match else skill.content
     return '---\n' + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False) + '---\n' + body
@@ -47,11 +60,11 @@ def _read_bytes(path: str, limit: int) -> bytes:
         return file.read(limit)
 
 
-async def _bundle(skill: SkillModel) -> bytes:
+async def _bundle(skill: SkillModel, name: str) -> bytes:
     files = await SkillFiles.get_files_by_skill_id(skill.id)
     if len(files) + 1 > 500:
         raise ValueError('Too many skill files')
-    content = _skill_md(skill).encode()
+    content = _skill_md(skill, name).encode()
     size = len(content)
     if size > MAX_EXPANDED:
         raise ValueError('Skill bundle too large')
@@ -112,10 +125,11 @@ async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[di
     if len(selected) > 20:
         log.warning('Workspace skill limit: left out %d skills', len(selected) - 20)
     references, notices = [], []
+    names: set[str] = set()
     client = identity.build_client() if selected else None
     for skill in selected[:20]:
         try:
-            body = await _bundle(skill)
+            body = await _bundle(skill, _skill_name(skill.id, names))
         except (OSError, ValueError, yaml.YAMLError):
             log.warning('Workspace skill unavailable: skill=%s', skill.id)
             notices.append(_notice(skill.name, metadata.get('user_language')))

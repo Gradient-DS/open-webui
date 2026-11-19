@@ -1,5 +1,6 @@
 """[Gradient] Workspace skills use caller-owned uploads without contacting the platform."""
 
+import hashlib
 import io
 import re
 import zipfile
@@ -65,6 +66,7 @@ async def test_bundles_override_identity_preserve_body_and_include_raw_bytes(ski
         text = archive.read('SKILL.md').decode()
         frontmatter = yaml.safe_load(text.split('---\n')[1])
         assert re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', frontmatter['name'])
+        assert frontmatter['name'] == 'invented-outline'
         assert frontmatter['description'] == 'Draft an outline'
         assert frontmatter['license'] == 'MIT'
         assert text.endswith('Original body\n')
@@ -163,7 +165,7 @@ async def test_missing_bundle_file_is_not_silently_dropped(skills):
 async def test_plain_content_and_empty_description(skills):
     skills.skill.content = 'Plain body'
     skills.skill.description = ''
-    body = await agent_skills._bundle(skills.skill)
+    body = await agent_skills._bundle(skills.skill, 'invented-outline')
     with zipfile.ZipFile(io.BytesIO(body)) as archive:
         assert 'description: Outline\n' in archive.read('SKILL.md').decode()
         assert archive.read('SKILL.md').decode().endswith('---\nPlain body')
@@ -199,6 +201,37 @@ async def test_simultaneous_unchanged_turns_upload_once(skills):
 
     await asyncio.gather(*(agent_v2._skills(metadata(), 'owui:user:fern') for _ in range(3)))
     assert skills.upload.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_readable_unique_capped_names_with_deterministic_collision_suffix(skills):
+    ids = ['__Draft-Outline', 'draft-outline', 'a' * 65, 'a' * 64 + 'b', '___']
+    agent_skills.Skills.get_skills.return_value = [
+        SimpleNamespace(**{**vars(skills.skill), 'id': skill_id, 'updated_at': len(ids) - i})
+        for i, skill_id in enumerate(ids)
+    ]
+    await agent_v2._skills(metadata(), 'owui:user:fern')
+    names = []
+    for call in skills.upload.await_args_list:
+        with zipfile.ZipFile(io.BytesIO(call.args[1])) as archive:
+            names.append(yaml.safe_load(archive.read('SKILL.md').decode().split('---\n')[1])['name'])
+    assert names == [
+        'draft-outline',
+        'draft-outline-' + hashlib.sha256(ids[1].encode()).hexdigest()[:8],
+        'a' * 64,
+        'a' * 55 + '-' + hashlib.sha256(ids[3].encode()).hexdigest()[:8],
+        'skill-' + hashlib.sha256(ids[4].encode()).hexdigest()[:8],
+    ]
+    assert len(set(names)) == len(ids)
+    assert all(re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', name) for name in names)
+    assert [agent_skills._skill_name(skill_id, set(names[:i])) for i, skill_id in enumerate(ids)] == names
+
+
+def test_collision_with_an_existing_suffixed_slug():
+    used = {'outline'}
+    first = agent_skills._skill_name('_outline', used)
+    used.remove('outline')
+    assert agent_skills._skill_name(first, used) != first
 
 
 @pytest.mark.asyncio
