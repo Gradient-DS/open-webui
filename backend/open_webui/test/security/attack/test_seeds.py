@@ -1177,3 +1177,12 @@ def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alo
     assert (name, content, content_type) == ('data', '{"a": {"b": "p1"}}', 'application/json')
     assert filename.startswith('f-') and filename.endswith('.json') and '{token}' not in filename
     assert fields['form'] == {'idx': 'p1'}
+
+
+def test_skill_seed_exercises_atomic_import_with_real_zip_bytes():
+    from open_webui.utils.skill_imports import read_bundle
+
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
+    content, files = read_bundle(entry['body']['bundle'])
+    assert content == entry['body']['content']
+    assert files == [('references/imported.txt', b'Invented import fixture')]

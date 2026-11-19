@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
@@ -568,12 +568,15 @@ async def _resolve_scoped_user(request: Request, skill_id: str) -> object | None
     return user
 
 
-async def _stream_skill_file(skill_id: str, path: str, db: AsyncSession) -> FileResponse:
+async def _stream_skill_file(skill_id: str, path: str, db: AsyncSession) -> Response:
     """Resolve and stream the backing file for a skill-bundle path."""
     row = await SkillFiles.get_file_by_path(skill_id, path, db=db)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     file = await Files.get_file_by_id(row.file_id, db=db)
+    # [Gradient] Storage rejects zero-byte uploads; imported empty files live inline.
+    if file and not file.path and (file.meta or {}).get('size') == 0 and (file.data or {}).get('content') == '':
+        return Response(b'', media_type=(file.meta or {}).get('content_type') or 'application/octet-stream')
     if not file or not file.path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 

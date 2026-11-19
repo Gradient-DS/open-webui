@@ -446,9 +446,9 @@ actor = "admin"
 key = "skill"
 name = "id"
 prefix = "/api/v1/skills/id/{id}"
-description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token."
+description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token. The base64 zip exercises atomic bundle import and single-folder stripping; files are new and private to the creator."
 via = "POST /api/v1/skills/create"
-body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content" }
+body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content", "bundle" = "UEsDBBQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAb3V0bGluZS9TS0lMTC5tZHMsKUlMzlYozs7MyVFIzs8rSc0rAQBQSwMEFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAABvdXRsaW5lL3JlZmVyZW5jZXMvaW1wb3J0ZWQudHh088wrS80rSU1RyMwtyC8qUUjLrCgpLUoFAFBLAQIUAxQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAAAAAAAAAAACAAQAAAABvdXRsaW5lL1NLSUxMLm1kUEsBAhQDFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAAAAAAAAAAAAAIABRAAAAG91dGxpbmUvcmVmZXJlbmNlcy9pbXBvcnRlZC50eHRQSwUGAAAAAAIAAgCLAAAAmgAAAAAA" }
 extract = "id"
 actor = "admin"
 
@@ -1384,3 +1384,29 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
+
+# [Gradient] Imported bundles seed real paths; no private platform service is needed.
+[[field]]
+route = "GET /api/v1/skills/id/{id}/files/content"
+description = "The skill seed imports this raw file. The same skill read-access check protects stored and empty file content."
+params = { "path" = "references/imported.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files"
+description = "Create a new inline path on the seeded, owned skill, without borrowing another user's File."
+json = { "path" = "references/created.txt", "content" = "Invented inline file {token}" }
+
+[[field]]
+route = "PUT /api/v1/skills/id/{id}/files"
+description = "Edit the text file supplied by the bundle import seed."
+json = { "path" = "references/imported.txt", "content" = "Invented edited file {token}" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/move"
+description = "Move the directory seeded by the imported bundle; the remove control follows it."
+json = { "from_path" = "references/", "to_path" = "moved/" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/remove"
+description = "Remove the bundle directory after the move control, as its owner."
+json = { "path" = "moved/" }

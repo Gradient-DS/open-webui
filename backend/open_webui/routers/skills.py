@@ -20,8 +20,8 @@ from open_webui.models.skills import (
     SkillUserResponse,
 )
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from pydantic import BaseModel
+from open_webui.utils.auth import get_verified_user
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui import config
 from open_webui.utils.access_control import can_bypass_access_control
@@ -150,10 +150,15 @@ async def export_skills(
 ############################
 
 
+# [Gradient] A bundle is base64 zip bytes, never existing File ids or storage paths.
+class SkillCreateForm(SkillForm):
+    bundle: str | None = Field(default=None, max_length=34952536)
+
+
 @router.post('/create', response_model=Optional[SkillResponse])
 async def create_new_skill(
     request: Request,
-    form_data: SkillForm,
+    form_data: SkillCreateForm,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -196,7 +201,18 @@ async def create_new_skill(
     )
 
     try:
-        skill = await Skills.insert_new_skill(user.id, form_data, db=db)
+        if form_data.bundle is not None:
+            from open_webui.utils.skill_imports import import_skill
+
+            if form_data.access_grants:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Import skills privately before sharing them')
+            skill = await import_skill(
+                SkillForm.model_validate(form_data.model_dump(exclude={'bundle'})), form_data.bundle, user, db
+            )
+        else:
+            skill = await Skills.insert_new_skill(
+                user.id, SkillForm.model_validate(form_data.model_dump(exclude={'bundle'})), db=db
+            )
         if skill:
             await publish_event(
                 request,

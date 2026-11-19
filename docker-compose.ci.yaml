@@ -111,6 +111,8 @@ services:
     environment:
       # Stop GitHub update checks and Hugging Face downloads on normal requests.
       OFFLINE_MODE: "true"
+      # [Gradient] Exercise local skill bundle CRUD and import in the security sweep.
+      FEATURE_SKILL_FILES: "true"
       HF_HUB_OFFLINE: "1"
       # Config persisted by an earlier request must not override CI destinations.
       ENABLE_PERSISTENT_CONFIG: "false"

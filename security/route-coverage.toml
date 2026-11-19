@@ -17,6 +17,10 @@
 # available, while the remote KB portion requires soev-api. Keep this route in
 # ordinary reads and crossuser admin-refusal checks, with no sharing allowance.
 
+# POST /api/v1/skills/create (including its bundle field) and the skill file content
+# route have no waiver: the skill seed imports a real zip and authorization tests
+# check owner reads and cross-user refusals, including empty-file content.
+
 # --- OAuth: the sealed stack has no identity provider ------------------------
 # Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real
 # surface. An OIDC issuer stub on the CI network would close all seven.
