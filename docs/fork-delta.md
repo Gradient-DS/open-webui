@@ -444,6 +444,20 @@ event payload. Inputs return once soev-api accepts them; the turn runs on and th
 page polls. Every route refuses with 403 when the flag is off (admins too) and 503
 without `SOEV_API_URL`.
 
+A recording larger than one upload goes up in pieces (`pieces.ts`, 32 MiB each):
+the first as a file of its own, every later one with `?continues=<id of the
+first>`, which the router passes on. `finish` lists the pieces in order and the
+meeting agent joins them before transcription, so the speech model gets the one
+recording and speakers stay the same throughout. A recording resumed after an
+interruption is still a recording of its own, with its own speaker numbers.
+
+One recording runs for at most `MEETING_MAX_MINUTES` (`config.py`, default
+`120`; Helm `meetingMaxMinutes`; `/api/config` `meeting_max_minutes`). The
+recorder warns five minutes before (`limitState` in `recorder.ts`) and at the
+limit stops as the stop button does: the recording is sent and transcribed.
+Set it within what the tenant's transcription model takes in one call: at the
+recorder's 96 kbit/s, 120 minutes are about 86 MB.
+
 Frontend, all fork-owned: `src/routes/(app)/meetings/`,
 `src/lib/components/meetings/` (consent and source choice, recorder, view, list,
 sidebar entry, export), `src/lib/apis/meetings/`. The list and the meeting

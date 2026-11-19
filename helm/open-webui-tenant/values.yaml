@@ -279,6 +279,10 @@ openWebui:
     # Vergadering start form: the language it preselects. auto lets the transcription model
     # detect it; nl and en name one. Any other value falls back to auto.
     meetingDefaultLanguage: "auto"
+    # Vergadering: the longest one recording runs, in minutes. The recorder warns five minutes
+    # before and then stops and finishes the meeting. Keep it within what the tenant's
+    # transcription model takes in one call.
+    meetingMaxMinutes: "120"
     featureSystemPrompt: "False"
     featureModels: "True"
     # Show the per-model Quality/Speed meters + legend in the model picker.

@@ -51,6 +51,7 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
     monkeypatch.setattr(main, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(main, 'FEATURE_MEETINGS', enabled)
     monkeypatch.setattr(main, 'MEETING_DEFAULT_LANGUAGE', 'en')
+    monkeypatch.setattr(main, 'MEETING_MAX_MINUTES', 90)
     monkeypatch.setattr(main, 'decode_token', lambda token: {'id': 'alice'})
     monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='alice', role='user')))
     monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='tutorial'))
@@ -71,5 +72,6 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
     assert bool(result['features']['enable_onedrive_integration']) is present
     assert result['features']['feature_agent_api_enabled'] is True
     assert result['features']['meeting_default_language'] == 'en'
+    assert result['features']['meeting_max_minutes'] == 90
     assert result['default_models'] == 'tutorial'
     assert saved['live_documents.enable'] is enabled

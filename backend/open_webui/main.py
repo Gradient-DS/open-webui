@@ -101,6 +101,7 @@ from open_webui.config import (
     FEATURE_READ_ALOUD,
     FEATURE_MEETINGS,
     MEETING_DEFAULT_LANGUAGE,
+    MEETING_MAX_MINUTES,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -2862,6 +2863,7 @@ async def get_app_config(request: Request):
                     'feature_changelog': FEATURE_CHANGELOG,
                     'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
                     'meeting_default_language': MEETING_DEFAULT_LANGUAGE,  # [Gradient]
+                    'meeting_max_minutes': MEETING_MAX_MINUTES,  # [Gradient]
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,

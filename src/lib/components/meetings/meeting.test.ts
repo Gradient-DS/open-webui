@@ -37,6 +37,9 @@ import {
 	initialCutState,
 	rmsOf,
 	sendWhenIdle,
+	limitState,
+	LIMIT_WARNING_S,
+	MAX_RECORDING_MINUTES,
 	type CutState,
 	type RecorderLike
 } from './recorder';
@@ -312,6 +315,25 @@ describe('segment rotation', () => {
 		next.rotate();
 		expect(resumed).toEqual([7]);
 		expect(created.every((recorder) => recorder.state === 'inactive')).toBe(true);
+	});
+});
+
+describe('recording limit', () => {
+	const max = MAX_RECORDING_MINUTES * 60;
+
+	it('lets a recording run until five minutes before its limit, then warns, then ends it', () => {
+		expect(MAX_RECORDING_MINUTES).toBe(120);
+		expect(limitState(0, max)).toBe('within');
+		expect(limitState(max - LIMIT_WARNING_S - 1, max)).toBe('within');
+		expect(limitState(max - LIMIT_WARNING_S, max)).toBe('ending');
+		expect(limitState(max - 1, max)).toBe('ending');
+		expect(limitState(max, max)).toBe('reached');
+		expect(limitState(max + 30, max)).toBe('reached');
+	});
+
+	it('warns from the start when the limit is shorter than the warning', () => {
+		expect(limitState(0, 120)).toBe('ending');
+		expect(limitState(120, 120)).toBe('reached');
 	});
 });
 
