@@ -84,6 +84,7 @@
 	// [Gradient] Keep assistant composition and selection migration outside the chat lifecycle.
 	import {
 		effectiveModels as models,
+		activeAssistant,
 		activeAssistantId,
 		reconcileAssistantSelection,
 		reconcileFolderSelection,
@@ -443,6 +444,9 @@
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
+		// [Gradient] An assistant chat starts from the assistant's selection, so its choices stay
+		// with the chat and never become the user's own for chats without an assistant.
+		if ($activeAssistantId) return;
 		if (equal($settings.composerTools, preferences)) return;
 		settings.update((value) => ({ ...value, composerTools: preferences }));
 		composerSettingsSave = composerSettingsSave.then(async () => {
@@ -1145,10 +1149,14 @@
 	};
 
 	// [Gradient] Refresh defaults only when assistant identity changes, never on history updates.
+	// Picking or removing an assistant in a chat not yet started sets its starting state again.
 	let oldActiveAssistantId = $activeAssistantId;
 	$: if ($activeAssistantId !== oldActiveAssistantId) {
 		oldActiveAssistantId = $activeAssistantId;
-		if (!history?.currentId) resetInput();
+		if (!history?.currentId) {
+			if (!chatIdProp) composerInitialized = false;
+			resetInput();
+		}
 	}
 	const resetInput = async () => {
 		if (selectedModelIds.filter((id) => id).length > 0) {
@@ -1175,12 +1183,16 @@
 	let settingDefaults = false;
 	const setDefaults = async (newChat = false) => {
 		if (settingDefaults || composerInitialized || (chatIdProp && !newChat)) return;
-		if ($settings.composerTools) {
+		// [Gradient] An assistant sets the starting state of every new chat with it: its selected
+		// functionalities, tools, skills and filters are on, the rest off. The user's own saved
+		// choices (composerTools) start chats without an assistant.
+		if (!$activeAssistant && $settings.composerTools) {
 			restoreComposerPreferences(composerPreferences($settings.composerTools));
 			return;
 		}
 		settingDefaults = true;
 		let liveWaiting: LiveFamily[] = [];
+		let assistantFeatureIds: string[] | null = null;
 
 		try {
 			if (!$tools) {
@@ -1197,18 +1209,32 @@
 			// data separation starts web search off, unless the user turned it on in Settings: it may
 			// reach the open internet, which would lock a fresh chat away from internal documents
 			// before anything is sent. OneDrive and mail search ask for consent on their first use.
-			if (!history?.currentId) {
+			const assistant = $activeAssistant;
+			assistantFeatureIds = assistant ? (assistant.info?.meta?.defaultFeatureIds ?? []) : null;
+			const starts = (id: string) => assistantFeatureIds?.includes(id) ?? true;
+			if (assistantFeatureIds) {
+				imageGenerationEnabled = false;
+				codeInterpreterEnabled = false;
+				selectedToolIds = [];
+				selectedSkillIds = [];
+				selectedFilterIds = [];
+			}
+			if (assistantFeatureIds || !history?.currentId) {
 				const webSearchAllowed =
 					$config?.features?.enable_web_search &&
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search);
 				const always = ($settings?.webSearch ?? null) === 'always';
 				const strict = $config?.features?.feature_strict_data_separation ?? false;
-				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
-				documentWriterEnabled = true;
+				// An assistant's web search starts on under strict separation too.
+				webSearchEnabled = Boolean(
+					webSearchAllowed && (assistantFeatureIds ? starts('web_search') : always || !strict)
+				);
+				documentWriterEnabled = starts('document_writer');
 				// OneDrive and mail search start on only with a grant; without one the composer
 				// offers to connect instead. A grant still loading is applied when it arrives.
-				const documentsOffered = Boolean($config?.features?.enable_live_documents);
-				const mailOffered = Boolean($config?.features?.enable_live_mail);
+				const documentsOffered =
+					Boolean($config?.features?.enable_live_documents) && starts('live_documents');
+				const mailOffered = Boolean($config?.features?.enable_live_mail) && starts('live_mail');
 				const documentsGranted = liveGranted($liveGrants, 'live_documents');
 				const mailGranted = liveGranted($liveGrants, 'mail');
 				liveDocumentsState = liveDefaultState(documentsOffered, documentsGranted);
@@ -1251,7 +1277,7 @@
 					selectedToolIds = authed;
 					pendingOAuthTools = unauthed;
 					await continueOAuthRedirect();
-				} else if ($settings?.tools) {
+				} else if (!assistantFeatureIds && $settings?.tools) {
 					selectedToolIds = $settings.tools;
 				} else {
 					selectedToolIds = selectedToolIds.filter((id) => !id.startsWith('direct_server:'));
@@ -1278,13 +1304,15 @@
 				}
 
 				// Set Default Features
-				if (model?.info?.meta?.defaultFeatureIds) {
+				const defaultFeatureIds: string[] | undefined =
+					assistantFeatureIds ?? model?.info?.meta?.defaultFeatureIds;
+				if (defaultFeatureIds) {
 					if (
 						model.info?.meta?.capabilities?.['image_generation'] &&
 						$config?.features?.enable_image_generation &&
 						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 					) {
-						imageGenerationEnabled = model.info.meta.defaultFeatureIds.includes('image_generation');
+						imageGenerationEnabled = defaultFeatureIds.includes('image_generation');
 					}
 
 					if (
@@ -1294,7 +1322,7 @@
 					) {
 						// [Gradient] A default-on web search starts on, also under strict separation;
 						// otherwise the chat keeps the starting state set above.
-						if (model.info.meta.defaultFeatureIds.includes('web_search')) {
+						if (defaultFeatureIds.includes('web_search')) {
 							webSearchEnabled = true;
 						}
 					}
@@ -1304,7 +1332,7 @@
 						$config?.features?.enable_code_interpreter &&
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 					) {
-						codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
+						codeInterpreterEnabled = defaultFeatureIds.includes('code_interpreter');
 					}
 
 					// [Gradient] The workspace switch follows the model default; it is not a saved composer choice.
@@ -1314,7 +1342,7 @@
 						$config?.features?.enable_workspace &&
 						$user?.permissions?.features?.workspace
 					) {
-						workspaceEnabled = model.info.meta.defaultFeatureIds.includes('workspace');
+						workspaceEnabled = defaultFeatureIds.includes('workspace');
 					}
 				}
 
@@ -1329,7 +1357,10 @@
 		} finally {
 			if (!composerInitialized) {
 				restoreComposerPreferences(
-					composerPreferences($settings.composerTools, currentComposerPreferences())
+					composerPreferences(
+						assistantFeatureIds ? {} : $settings.composerTools,
+						currentComposerPreferences()
+					)
 				);
 			}
 			liveDefaultWait = liveWaiting.length
