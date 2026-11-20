@@ -1129,6 +1129,23 @@
 			{/if}
 		</div>
 
+		<!-- [Gradient] Council information search (raadsinformatie). -->
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Council information')}
+				</div>
+				<Switch bind:state={permissions.features.council} />
+			</div>
+			{#if defaultPermissions?.features?.council && !permissions.features.council}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
 		<!-- [Gradient] The workspace permission shows only where the tenant has the workspace feature. -->
 		{#if isFeatureEnabled('workspace')}
 			<div class="flex flex-col w-full">

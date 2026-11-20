@@ -5587,6 +5587,51 @@
         "title": "CopyModelForm",
         "type": "object"
       },
+      "CouncilConfigForm": {
+        "additionalProperties": false,
+        "properties": {
+          "COUNCIL_ORGANIZATIONS": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CouncilOrganization"
+            },
+            "maxItems": 25,
+            "title": "Council Organizations",
+            "type": "array"
+          },
+          "ENABLE_COUNCIL": {
+            "title": "Enable Council",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ENABLE_COUNCIL"
+        ],
+        "title": "CouncilConfigForm",
+        "type": "object"
+      },
+      "CouncilOrganization": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "CouncilOrganization",
+        "type": "object"
+      },
       "CreateArchiveForm": {
         "properties": {
           "never_delete": {
@@ -6872,6 +6917,11 @@
           "code_interpreter": {
             "default": true,
             "title": "Code Interpreter",
+            "type": "boolean"
+          },
+          "council": {
+            "default": true,
+            "title": "Council",
             "type": "boolean"
           },
           "direct_tool_servers": {
@@ -32505,6 +32555,98 @@
           }
         ],
         "summary": "Set Connections Config",
+        "tags": [
+          "configs"
+        ]
+      }
+    },
+    "/api/v1/configs/council": {
+      "get": {
+        "operationId": "get_council_config_api_v1_configs_council_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Council Config",
+        "tags": [
+          "configs"
+        ]
+      },
+      "post": {
+        "description": "The admin's switch and organizations; none searches every organization. Keys are checked for form only:\none the source no longer knows is skipped by the agents and reported to the model.",
+        "operationId": "set_council_config_api_v1_configs_council_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CouncilConfigForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Council Config",
+        "tags": [
+          "configs"
+        ]
+      }
+    },
+    "/api/v1/configs/council/sources": {
+      "get": {
+        "description": "Every organization the admin can choose from, read from the source the agents search.",
+        "operationId": "get_council_sources_api_v1_configs_council_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Council Sources",
         "tags": [
           "configs"
         ]

@@ -1524,6 +1524,93 @@ async def test_web_search_allowed_needs_the_tenant_setting_and_the_users_permiss
     assert await agent_v2._web_search_allowed('u1') is allowed
 
 
+COUNCIL_TOOLS = ('search_council_documents', 'read_council_document')
+ZUIDPLAS = {'organizations': [{'key': 'zuidplas', 'label': 'Zuidplas'}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('allowed', 'listed', 'sent'),
+    [(True, True, True), (False, True, False), (True, False, False)],
+    ids=['allowed-and-listed', 'not-allowed', 'not-listed'],
+)
+async def test_council_tools_are_sent_only_where_allowed_and_listed(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, allowed: bool, listed: bool, sent: bool
+) -> None:
+    """[Gradient] Agents that do not list the council tools never read their names or the scope."""
+    monkeypatch.setattr(agent_v2, '_council_allowed', AsyncMock(return_value=allowed))
+    statuses = {name: {} for name in COUNCIL_TOOLS} if listed else {}
+    monkeypatch.setattr(agent_v2, '_tool_statuses', AsyncMock(return_value=statuses))
+    monkeypatch.setattr(agent_v2.council, 'scope', AsyncMock(return_value=ZUIDPLAS))
+    await chat.turn('question', 'a1', features={'council': True})
+    turn = chat.mutations()[-1][1]['input']
+    if sent:
+        assert turn['tools'] == {**WEB_SEARCH_OFF, **dict.fromkeys(COUNCIL_TOOLS, 'auto')}
+        assert turn['council'] == ZUIDPLAS
+    else:
+        assert turn['tools'] == WEB_SEARCH_OFF
+        assert 'council' not in turn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('features', 'state'), [({'council': True}, 'auto'), ({'council': False}, 'off'), ({}, 'off')])
+async def test_the_council_control_sends_its_state_with_the_admins_scope(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, features: dict, state: str
+) -> None:
+    monkeypatch.setattr(agent_v2, '_council_allowed', AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_v2, '_tool_statuses', AsyncMock(return_value={name: {} for name in COUNCIL_TOOLS}))
+    monkeypatch.setattr(agent_v2.council, 'scope', AsyncMock(return_value=ZUIDPLAS))
+    await chat.turn('question', 'a1', features={**features, 'council_organizations': ['amsterdam']})
+    turn = chat.mutations()[-1][1]['input']
+    assert {name: turn['tools'][name] for name in COUNCIL_TOOLS} == dict.fromkeys(COUNCIL_TOOLS, state)
+    assert turn['council'] == ZUIDPLAS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('agent_api', 'enabled', 'role', 'permitted', 'allowed'),
+    [
+        (False, True, 'admin', True, False),
+        (True, False, 'admin', True, False),
+        (True, True, 'admin', False, True),
+        (True, True, 'user', True, True),
+        (True, True, 'user', False, False),
+        (True, True, None, True, False),
+    ],
+    ids=['no-agent-api', 'tenant-off', 'admin', 'user-permitted', 'user-denied', 'unknown-user'],
+)
+async def test_council_allowed_needs_the_agent_api_the_tenant_setting_and_the_users_permission(
+    monkeypatch: pytest.MonkeyPatch, agent_api: bool, enabled: bool, role: str | None, permitted: bool, allowed: bool
+) -> None:
+    async def config_get(key: str, default=None):
+        return {'council.enable': enabled, 'user.permissions': {}}.get(key, default)
+
+    import open_webui.env
+
+    monkeypatch.setattr(open_webui.env, 'AGENT_API_ENABLED', agent_api)
+    monkeypatch.setattr(agent_v2.Config, 'get', config_get)
+    monkeypatch.setattr(
+        agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='u1', role=role) if role else None)
+    )
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=permitted))
+    assert await agent_v2._council_allowed('u1') is allowed
+
+
+@pytest.mark.asyncio
+async def test_the_council_scope_keeps_only_well_formed_organizations_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    stored = [
+        {'key': 'zuidplas', 'label': 'Zuidplas'},
+        {'key': 'Zuid plas', 'label': 'Broken'},
+        {'key': 'gouda'},
+        {'key': 'zuidplas', 'label': 'Again'},
+        'amsterdam',
+    ]
+    monkeypatch.setattr(agent_v2.council.Config, 'get', AsyncMock(return_value=stored))
+    assert await agent_v2.council.scope() == {
+        'organizations': [{'key': 'zuidplas', 'label': 'Zuidplas'}, {'key': 'gouda', 'label': 'gouda'}]
+    }
+
+
 @pytest.mark.asyncio
 async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     await chat.turn('question', 'a1', system_prompt=' ', chat_system_prompt=None)

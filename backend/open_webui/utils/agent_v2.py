@@ -29,7 +29,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev import acting, agent_threads, assistant_files, council, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -173,6 +173,16 @@ _GENERIC = {
     'attach_live_document': ('Opening documents...', 'Opened documents', 'Could not open document'),
     'search_mail': ('Searching your mail...', 'Searched your mail', 'Could not search your mail'),
     'read_mail': ('Reading email...', 'Read email', 'Could not read email'),
+    'search_council_documents': (
+        'Searching council information...',
+        'Searched council information',
+        'Could not search council information',
+    ),
+    'read_council_document': (
+        'Reading council document...',
+        'Read council document',
+        'Could not read council document',
+    ),
     _COMPACTION: (
         'Summarising the earlier conversation...',
         'Summarised the earlier conversation',
@@ -961,6 +971,32 @@ async def _web_search_allowed(user_id: str) -> bool:
     )
 
 
+async def _council_allowed(user_id: str) -> bool:
+    """[Gradient] `features` is client-supplied: council search must be on for the tenant and the user's to use."""
+    from open_webui.env import AGENT_API_ENABLED
+
+    if not AGENT_API_ENABLED or not await Config.get(council.ENABLE):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.council', await Config.get('user.permissions')
+    )
+
+
+async def _council(metadata: dict[str, Any], client: SoevClient) -> dict[str, Any]:
+    """[Gradient] The council tools' states and the admin's `council` scope, or nothing: they are sent only where the
+    admin allows them and the agents list them, so agents without them never read their names."""
+    if not await _council_allowed(metadata['user_id']):
+        return {}
+    listed = await _tool_statuses(client)
+    if not all(name in listed for name in council.TOOLS):
+        return {}
+    state = 'auto' if (metadata.get('features') or {}).get('council') else 'off'
+    return {'tools': dict.fromkeys(council.TOOLS, state), 'council': await council.scope()}
+
+
 async def _documents_allowed(user_id: str) -> bool:
     """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
     if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
@@ -1290,7 +1326,12 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-_GRANULARITY = {'document-text': 'document', 'search-result': 'snippet', 'live-document': 'file-snippet'}
+_GRANULARITY = {
+    'document-text': 'document',
+    'search-result': 'snippet',
+    'live-document': 'file-snippet',
+    'council-result': 'snippet',
+}
 
 
 async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
@@ -2289,6 +2330,8 @@ async def _sent(
         await _live_documents_allowed(),
         await _live_mail_allowed(),
     )
+    councils = await _council(metadata, turn.client)
+    tools['tools'].update(councils.pop('tools', {}))
     notes = attachments.pop('attachment_notes', []) + _skipped_notes(skipped)
     collection = {}
     references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])
@@ -2318,6 +2361,7 @@ async def _sent(
             **_instructions(metadata),
             **_zone(metadata),
             **tools,
+            **councils,
             'documents': documents,
         }
     }

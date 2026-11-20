@@ -1972,6 +1972,9 @@ USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
     os.getenv('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
 )
 
+# [Gradient] Council information search (raadsinformatie); the admin switch is the real gate.
+USER_PERMISSIONS_FEATURES_COUNCIL = os.getenv('USER_PERMISSIONS_FEATURES_COUNCIL', 'True').lower() == 'true'
+
 
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
@@ -2057,6 +2060,7 @@ DEFAULT_USER_PERMISSIONS = {
         'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
         'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
         'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
+        'council': USER_PERMISSIONS_FEATURES_COUNCIL,
     },
     'settings': {
         'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
@@ -3171,6 +3175,10 @@ DEFAULT_CONFIG = {
     'google_drive.api_key': GOOGLE_DRIVE_API_KEY,
     'live_mail.enable': os.getenv('ENABLE_LIVE_MAIL', 'False').lower() == 'true',
     'live_documents.enable': os.getenv('ENABLE_LIVE_DOCUMENTS', 'False').lower() == 'true',
+    # [Gradient] Council information search: the admin's switch, and the organization keys it searches
+    # (Open Besluitvorming source keys; empty searches every organization).
+    'council.enable': os.getenv('ENABLE_COUNCIL', 'False').lower() == 'true',
+    'council.organizations': [],
     'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
     'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
     'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,
