@@ -31,7 +31,6 @@
 	import DefaultFiltersSelector from './DefaultFiltersSelector.svelte';
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
-	import DataWarnings from './DataWarnings.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
 	import TerminalSelector from './TerminalSelector.svelte';
 	import TTSVoiceInput from './TTSVoiceInput.svelte';
@@ -116,8 +115,6 @@
 	let capabilities = getDefaultCapabilities();
 	let defaultFeatureIds = [];
 	let builtinTools = {};
-	let dataWarnings: Record<string, boolean> = {};
-	let dataWarningMessage: string = '';
 
 	let actionIds = [];
 	let accessGrants = [];
@@ -342,18 +339,6 @@
 			}
 		}
 
-		if (Object.values(dataWarnings).some((v) => v)) {
-			info.meta.data_warnings = dataWarnings;
-			info.meta.data_warning_message = dataWarningMessage || '';
-		} else {
-			if (info.meta.data_warnings) {
-				delete info.meta.data_warnings;
-			}
-			if (info.meta.data_warning_message) {
-				delete info.meta.data_warning_message;
-			}
-		}
-
 		if (terminalId) {
 			info.meta.terminalId = terminalId;
 		} else {
@@ -413,8 +398,6 @@
 		capabilities = { ...DEFAULT_CAPABILITIES, ...(defaultMeta.capabilities ?? {}) };
 		defaultFeatureIds = defaultMeta.defaultFeatureIds ?? [];
 		builtinTools = defaultMeta.builtinTools ?? {};
-		dataWarnings = defaultMeta.data_warnings ?? {};
-		dataWarningMessage = defaultMeta.data_warning_message ?? '';
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');
@@ -485,8 +468,7 @@
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 			defaultFeatureIds = model?.meta?.defaultFeatureIds ?? defaultFeatureIds;
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
-			dataWarnings = model?.meta?.data_warnings ?? dataWarnings;
-			dataWarningMessage = model?.meta?.data_warning_message ?? dataWarningMessage;
+
 			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
@@ -1035,12 +1017,6 @@
 							</div>
 						{/if}
 
-						<!-- [Gradient] Model data warnings are saved with the model metadata. -->
-						{#if $config?.features?.enable_data_warnings}
-							<div class="my-3">
-								<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
-							</div>
-						{/if}
 						{#if capabilities.terminal}
 							<div class="my-3">
 								<TerminalSelector bind:terminalId />

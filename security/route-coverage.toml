@@ -1,3 +1,4 @@
+# owui-dead-features: the data-warning acceptance route is deleted, not waived.
 # owui-dead-features: local credential and MFA issuers are removed; no new waivers.
 # owui-dead-features: tool/function execution and tool OAuth are unmounted, not waived.
 # owui-dead-features: local compaction, approval resolution and task config are unmounted.

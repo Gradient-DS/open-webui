@@ -1577,6 +1577,7 @@ routes = [
   "POST /api/v1/auths/update/password",
   "POST /api/v1/chats/{id}/compact",
   "POST /api/v1/chats/{id}/messages/{message_id}/resolve",
+  "POST /api/v1/data-warnings/accept",
   "POST /api/v1/embeddings",
   "POST /api/v1/functions/id/{id}/valves/user/update",
   "POST /api/v1/retrieval/process/url",

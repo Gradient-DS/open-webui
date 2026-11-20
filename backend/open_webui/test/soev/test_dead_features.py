@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'POST /api/v1/data-warnings/accept',
     'POST /api/v1/auths/signin',
     'POST /api/v1/auths/signup',
     'POST /api/v1/auths/ldap',

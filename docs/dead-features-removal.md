@@ -306,3 +306,29 @@ Type check: touched files 171 → 170 diagnostics, zero additions.
 The underlying i18next parser ran with a temporary config scoped to the root
 layout and output under `/tmp/owui-dead-i18n/`; both catalogs contain the new key.
 This avoids rewriting upstream locale catalogs with the broad npm script.
+
+## Fork-only data warnings and obsolete setting reads
+
+Deleted the fork's data-warning acceptance route, log writer/read helpers, API
+client, confirmation flow, assistant-editor component and metadata controls.
+Removed `features.enable_data_warnings` default/environment parsing, public
+exposure and frontend type. Legacy ORM rows remain solely so console offboarding
+can erase them. Removed special merging of obsolete warning metadata; general
+model metadata behavior stays. The removed test covered insertion by this retired
+feature; no isolation or authorization assertion was removed.
+
+Also replaced the stale, unused requests for legacy positive/negative feedback
+label keys in `/api/config` with the live reasons/tags keys that the response
+already reads. No evaluation-model or arena route/behavior was changed.
+
+Removed POST `/api/v1/data-warnings/accept`: 311 → 310 operations;
+97 → 96 writable-body operations; 948 → 944 writable strings. No dead default
+remains for data warnings. Inventory declarations were removed only for that route.
+Validation: S plus `backend/open_webui/test/security/test_plane_findings.py` and
+`backend/open_webui/test/soev/test_model_catalog.py`: 444 passed,
+20 dependency warnings. Ruff: zero new findings.
+
+Targeted Vitest (`composerPreferences.test.ts`, `deadFeatures.test.ts`,
+`assistantCapabilities.test.ts`): 25 passed. Prettier passed on touched files.
+Targeted ESLint: 104 inherited findings, zero additions. Type check: touched
+files 460 → 452 diagnostics against the valid baseline, zero additions.

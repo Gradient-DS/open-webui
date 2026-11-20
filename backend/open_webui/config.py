@@ -2356,9 +2356,6 @@ ENABLE_USER_ARCHIVAL = os.environ.get('ENABLE_USER_ARCHIVAL', 'True').lower() ==
 DEFAULT_ARCHIVE_RETENTION_DAYS = int(os.environ.get('DEFAULT_ARCHIVE_RETENTION_DAYS', '1095'))
 
 
-ENABLE_DATA_WARNINGS = os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true'
-
-
 FEATURE_CHAT_CONTROLS = os.environ.get('FEATURE_CHAT_CONTROLS', 'True').lower() == 'true'
 
 FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
@@ -2745,7 +2742,6 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.tags': [],
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
-    'features.enable_data_warnings': ENABLE_DATA_WARNINGS,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,

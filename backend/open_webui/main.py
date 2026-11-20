@@ -180,7 +180,6 @@ from open_webui.routers import (
     chats,
     cloud_sync,
     configs,
-    data_warnings,
     evaluations,
     export,
     feedback_report,
@@ -984,7 +983,6 @@ app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-
 
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
-app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
 # Bug report admission and delivery policy live in soev-api.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
@@ -2261,8 +2259,8 @@ async def get_app_config(request: Request):
         'ui.enable_citation_relevance',
         'ui.enable_citation_text_highlight',
         'evaluation.feedback.layer2.enable',
-        'evaluation.feedback.layer2.positive_tags',
-        'evaluation.feedback.layer2.negative_tags',
+        'evaluation.feedback.reasons',
+        'evaluation.feedback.tags',
         'evaluation.feedback.layer3.enable',
         'evaluation.feedback.layer3.prompt',
         'evaluation.feedback.category_tags.enable',
@@ -2277,7 +2275,6 @@ async def get_app_config(request: Request):
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'features.enable_data_warnings',
         'ui.enable_welcome_message',
         'ui.greeting_template',
         'ui.enable_acceptance_modal',
@@ -2436,7 +2433,6 @@ async def get_app_config(request: Request):
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
-                    'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
                     'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }

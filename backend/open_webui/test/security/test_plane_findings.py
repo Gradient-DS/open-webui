@@ -177,34 +177,6 @@ def test_a_legacy_webhook_url_the_guard_refuses_does_not_break_notifications(mon
     assert not loaded.get('targets')
 
 
-def test_accepting_a_data_warning_returns_the_logged_row(monkeypatch):
-    # PLANE-005: insert_log validated the ORM row without from_attributes, so the
-    # handler answered 500 after the audit row was already committed.
-    import asyncio
-    from contextlib import asynccontextmanager
-
-    from open_webui.models import data_warnings
-
-    class Session:
-        def add(self, row):
-            pass
-
-        async def commit(self):
-            pass
-
-        async def refresh(self, row):
-            pass
-
-    @asynccontextmanager
-    async def session(db=None):
-        yield Session()
-
-    monkeypatch.setattr(data_warnings, 'get_async_db_context', session)
-    form = data_warnings.DataWarningLogForm(chat_id='chat-1', model_id='model-1', capabilities=['web'])
-    logged = asyncio.run(data_warnings.DataWarningLogs.insert_log('control-user', form))
-    assert logged.user_id == 'control-user'
-
-
 @pytest.mark.parametrize(
     'order_by, direction',
     [('no_such', 'asc'), ('title', 'sideways'), ('chat', 'asc'), ('meta', 'desc'), ('__class__', 'desc'), ('', 'asc')],
