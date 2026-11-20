@@ -110,7 +110,7 @@ async def _bundle(skill: SkillModel, name: str, files: list[SkillFileModel]) -> 
 
 def _notice(name: str, language: str | None) -> str:
     return (
-        f'De vaardigheid “{name}” kon niet worden geladen. Deze beurt gaat verder zonder deze vaardigheid.'
+        f'De skill “{name}” kon niet worden geladen. Deze beurt gaat verder zonder deze skill.'
         if (language or '').lower().startswith('nl')
         else f'The skill “{name}” could not be loaded. This turn continues without it.'
     )
