@@ -1,6 +1,7 @@
 // [Gradient] Citation document helpers shared by both presentation hosts.
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { rectsFromMetadata } from '$lib/utils/citationRects';
+import { officeKind } from '$lib/utils/officePreview';
 import type { CitationDocument } from './citationDocuments';
 import type { DisplayCitation } from './reduceSources';
 
@@ -11,9 +12,10 @@ export function citationFileInfo(
 	const fileName = documents[0]?.metadata?.name ?? citation?.source?.name ?? '';
 	const fileId = documents[0]?.metadata?.file_id;
 	const isPDF = fileName.toLowerCase().endsWith('.pdf');
-	const isDocx = fileName.toLowerCase().endsWith('.docx');
-	const isXlsx = fileName.toLowerCase().endsWith('.xlsx');
-	const isPptx = fileName.toLowerCase().endsWith('.pptx');
+	const office = officeKind(fileName);
+	const isDocx = office === 'docx';
+	const isXlsx = office === 'xlsx';
+	const isPptx = office === 'pptx';
 	const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
 	const isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
 	return {
