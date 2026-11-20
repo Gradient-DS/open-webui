@@ -25,6 +25,19 @@ export const SEGMENT_MIN_MS = 20_000;
 export const SEGMENT_MAX_MS = 45_000;
 export const SILENCE_HOLD_MS = 400;
 
+/** How long a recording runs at most when the tenant names no limit of its own. */
+export const MAX_RECORDING_MINUTES = 120;
+/** The recorder warns this long before a recording reaches its limit. */
+export const LIMIT_WARNING_S = 300;
+
+export type LimitState = 'within' | 'ending' | 'reached';
+
+/** Where a recording that has run `elapsedS` seconds stands against its limit of `maxS`. */
+export const limitState = (elapsedS: number, maxS: number): LimitState => {
+	if (elapsedS >= maxS) return 'reached';
+	return elapsedS >= maxS - LIMIT_WARNING_S ? 'ending' : 'within';
+};
+
 export type CutState = {
 	/** When the current segment started (ms). */
 	segmentStart: number;

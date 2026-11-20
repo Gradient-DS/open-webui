@@ -49,8 +49,8 @@ def test_derived_counts(surface):
     ), f'Expected 236 routes / 2673 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
         50,
-        106,
-    ), f'Expected 50 routes / 106 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        107,
+    ), f'Expected 50 routes / 107 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):

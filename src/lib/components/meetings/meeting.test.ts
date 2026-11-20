@@ -9,7 +9,9 @@ import {
 	groupByRange,
 	listMeetings,
 	liveParts,
-	meetingLanguage,
+	AUTO_LANGUAGE,
+	MEETING_LANGUAGES,
+	defaultMeetingLanguage,
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
@@ -35,6 +37,9 @@ import {
 	initialCutState,
 	rmsOf,
 	sendWhenIdle,
+	limitState,
+	LIMIT_WARNING_S,
+	MAX_RECORDING_MINUTES,
 	type CutState,
 	type RecorderLike
 } from './recorder';
@@ -313,6 +318,25 @@ describe('segment rotation', () => {
 	});
 });
 
+describe('recording limit', () => {
+	const max = MAX_RECORDING_MINUTES * 60;
+
+	it('lets a recording run until five minutes before its limit, then warns, then ends it', () => {
+		expect(MAX_RECORDING_MINUTES).toBe(120);
+		expect(limitState(0, max)).toBe('within');
+		expect(limitState(max - LIMIT_WARNING_S - 1, max)).toBe('within');
+		expect(limitState(max - LIMIT_WARNING_S, max)).toBe('ending');
+		expect(limitState(max - 1, max)).toBe('ending');
+		expect(limitState(max, max)).toBe('reached');
+		expect(limitState(max + 30, max)).toBe('reached');
+	});
+
+	it('warns from the start when the limit is shorter than the warning', () => {
+		expect(limitState(0, 120)).toBe('ending');
+		expect(limitState(120, 120)).toBe('reached');
+	});
+});
+
 /** Feeds `rms` every 100 ms from `from` to `to` (ms) and returns the times a cut was decided. */
 const run = (state: CutState, from: number, to: number, rms: (t: number) => number) => {
 	const cuts: number[] = [];
@@ -394,10 +418,28 @@ describe('microphone choice', () => {
 		expect(micConstraints(null)).toMatchObject({ echoCancellation: true, noiseSuppression: true });
 	});
 
-	it('records in the UI language, else lets the transcriber detect it', () => {
-		expect(meetingLanguage('nl-NL')).toBe('nl');
-		expect(meetingLanguage('en')).toBe('en');
-		expect(meetingLanguage(undefined)).toBe('auto');
+	it('offers Dutch and English by their own names, next to automatic detection', () => {
+		expect(MEETING_LANGUAGES).toEqual([
+			{ code: 'nl', label: 'Nederlands' },
+			{ code: 'en', label: 'English' }
+		]);
+		expect(AUTO_LANGUAGE).toBe('auto');
+	});
+
+	it('preselects automatic detection unless the tenant names a default', () => {
+		expect(defaultMeetingLanguage(undefined)).toBe('auto');
+		expect(defaultMeetingLanguage('')).toBe('auto');
+		expect(defaultMeetingLanguage('auto')).toBe('auto');
+	});
+
+	it('preselects the tenant default when the form offers it', () => {
+		expect(defaultMeetingLanguage('nl')).toBe('nl');
+		expect(defaultMeetingLanguage(' EN ')).toBe('en');
+	});
+
+	it('never preselects a language the form does not offer', () => {
+		expect(defaultMeetingLanguage('tr')).toBe('auto');
+		expect(defaultMeetingLanguage('nl-NL')).toBe('auto');
 	});
 });
 

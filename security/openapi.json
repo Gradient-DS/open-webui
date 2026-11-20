@@ -40433,6 +40433,7 @@
     },
     "/api/v1/meetings/audio": {
       "post": {
+        "description": "Forward one upload; `continues` names the upload whose bytes follow on in this one,\nfor a recording larger than the 64 MiB a single upload may carry.",
         "operationId": "upload_audio_api_v1_meetings_audio_post",
         "parameters": [
           {
@@ -40444,6 +40445,23 @@
               "minLength": 1,
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "continues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Continues"
             }
           }
         ],
