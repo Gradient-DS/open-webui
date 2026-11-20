@@ -61,3 +61,15 @@ Skill-file routes have stable OpenAPI declarations. Outside the platform route,
 their matcher preserves the original 404 behavior when `FEATURE_SKILL_FILES` is
 off; on the platform route the live product gates control access. Scoped content
 tokens retain their existing authentication path.
+
+Dictation (`feature.voice` and `permissions.chat.stt`) and read-aloud
+(`feature.read_aloud` and `permissions.chat.tts`) are independent product features.
+Both the effective tenant flag and permission must allow the operation, including
+for administrators. The composer and response controls use those same decisions;
+read-aloud does not require dictation. Voice calls and `permissions.chat.call`
+remain pinned false, with their implementation retained. Audio requests use the
+requesting person’s platform login and retain platform admission.
+
+Regenerate the runtime schema from the soev-solutions registry with
+`uv run python -m soev_platform.contract.owui.runtime_schema` and update the
+complete fictional product fixture when its feature vocabulary changes.

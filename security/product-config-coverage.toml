@@ -50,3 +50,10 @@ classification = "authenticated_bug_report"
 rule = "Forwards strict bounded context to soev-api with the requesting person login. No local webhook, identity enrichment or content logging. Platform tenant admission, mode authority and delivery policy apply."
 proof = "backend/open_webui/test/apps/webui/routers/test_feedback_report.py"
 seed = "security/attack-surface.toml:POST /api/v1/feedback/report"
+
+[audio]
+routes = ["POST /api/v1/audio/speech", "POST /api/v1/audio/transcriptions"]
+classification = "feature_and_person_authority"
+rule = "Read-aloud and dictation require their independent effective product flags and chat.tts/chat.stt permissions, including for administrators. Each request forwards only its requesting person's platform login. Voice calls remain pinned disabled."
+proof = "backend/open_webui/test/soev/test_product_config.py:test_audio_admission_uses_effective_product_and_permission"
+seed = "soev-solutions/scripts/ci/owui_fullstack/soev_bootstrap.py:ci_product_config"

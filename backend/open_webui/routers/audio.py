@@ -26,7 +26,7 @@ class SpeechForm(BaseModel):
 
 @router.post('/speech')
 async def speech(request: Request, form_data: SpeechForm, user=Depends(get_verified_user)):
-    if not (await feature_enabled('read_aloud') or await feature_enabled('voice_call')):
+    if not await feature_enabled('read_aloud'):
         raise HTTPException(status_code=403, detail="Feature 'read_aloud' is not available in your plan")
     if not await has_permission(user.id, 'chat.tts', await Config.get('user.permissions')):
         raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)

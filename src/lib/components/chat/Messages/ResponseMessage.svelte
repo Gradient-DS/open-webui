@@ -42,9 +42,9 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import {
+		hasFeatureAccess,
 		canContinueResponse,
-		canRegenerateResponse,
-		isFeatureEnabled
+		canRegenerateResponse
 	} from '$lib/utils/features';
 	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -664,6 +664,7 @@
 			: $config?.audio?.tts?.voice);
 
 	const speak = async () => {
+		if (!hasFeatureAccess('read_aloud', $user, 'chat.tts')) return;
 		const content = removeAllDetails(visibleResponseContent);
 		if (!content.trim().length) {
 			toast.info($i18n.t('No content to speak'));
@@ -1712,7 +1713,7 @@
 									</Tooltip>
 								{/if}
 
-								{#if isFeatureEnabled('read_aloud') && !readOnly && ($user?.permissions?.chat?.tts ?? true)}
+								{#if hasFeatureAccess('read_aloud', $user, 'chat.tts') && !readOnly}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}

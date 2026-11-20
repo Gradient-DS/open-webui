@@ -28,7 +28,7 @@
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { hasFeatureAccess } from '$lib/utils/features';
 
 	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -2393,7 +2393,7 @@
 
 	const openCallOverlay = () => {
 		// [Gradient] Tenant gate; covers the ?call=true URL and the desktop call shortcut.
-		if (!isFeatureEnabled('voice_call')) return;
+		if (!hasFeatureAccess('voice_call', $user, 'chat.call')) return;
 		setTimeout(() => {
 			showCallOverlay.set(true);
 			showControls.set(true);

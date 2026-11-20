@@ -528,3 +528,124 @@ async def test_platform_local_signup_and_oauth_registration_refuse_before_writes
     assert signup.value.status_code == oauth.value.status_code == 403
     create.assert_not_called()
     assert not live.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('feature', 'permission', 'path'),
+    [
+        ('voice', 'stt', '/audio/transcriptions'),
+        ('read_aloud', 'tts', '/audio/speech'),
+    ],
+)
+@pytest.mark.parametrize('enabled', [False, True])
+@pytest.mark.parametrize('allowed', [False, True])
+@pytest.mark.parametrize('entitled', [False, True])
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_audio_admission_uses_effective_product_and_permission(
+    live: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    feature: str,
+    permission: str,
+    path: str,
+    enabled: bool,
+    allowed: bool,
+    entitled: bool,
+    role: str,
+) -> None:
+    """Legacy administrator roles cannot bypass product availability or permissions."""
+    from fastapi.responses import Response
+    from open_webui.routers import audio
+    from open_webui.utils.auth import get_verified_user
+
+    feature_key, permission_key = f'feature.{feature}', f'permissions.chat.{permission}'
+    live.document['values'][feature_key] = enabled
+    live.document['values'][permission_key] = allowed
+    live.document['entitlements'][feature_key] = entitled
+    if not entitled:
+        del live.document['values'][feature_key]
+    other = 'read_aloud' if feature == 'voice' else 'voice'
+    live.document['values'][f'feature.{other}'] = False
+    app = FastAPI()
+    app.include_router(audio.router, prefix='/audio')
+    actor = SimpleNamespace(id='fictional-reader', role=role)
+    app.dependency_overrides[get_verified_user] = lambda: actor
+    speech = AsyncMock(return_value=Response(b'fictional-audio', media_type='audio/mpeg'))
+    transcribe = AsyncMock(return_value={'text': 'Fictional dictation.'})
+    monkeypatch.setattr(audio.primitives, 'speech', speech)
+    monkeypatch.setattr(audio.primitives, 'transcribe', transcribe)
+    monkeypatch.setattr(audio, 'publish_event', AsyncMock())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url='https://fictional-owui.invalid'
+    ) as api:
+        body = (
+            {'json': {'input': 'Fictional speech.'}}
+            if permission == 'tts'
+            else {'files': {'file': ('fictional.wav', b'fictional-audio', 'audio/wav')}}
+        )
+        response = await api.post(path, **body)
+    admitted = enabled and allowed and entitled
+    assert response.status_code == (200 if admitted else 403), response.text
+    upstream = speech if permission == 'tts' else transcribe
+    assert upstream.await_count == int(admitted)
+    if admitted:
+        assert upstream.call_args.args[-1] is actor
+    assert await feature_enabled('voice_call') is False
+    assert await has_permission(actor.id, 'chat.call') is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('permission', ['stt', 'tts'])
+async def test_unentitled_audio_permission_refuses_even_with_stored_enablement(
+    live: SimpleNamespace, permission: str
+) -> None:
+    """Permission entitlements constrain otherwise enabled audio features."""
+    key = f'permissions.chat.{permission}'
+    live.document['entitlements'][key] = False
+    del live.document['values'][key]
+    assert await has_permission('fictional-reader', f'chat.{permission}') is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('dictation', 'read_aloud'), [(False, False), (True, False), (False, True), (True, True)])
+async def test_authenticated_config_advertises_independent_audio_features(
+    live: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_capabilities: set[str],
+    dictation: bool,
+    read_aloud: bool,
+) -> None:
+    """The authenticated browser configuration exposes independent audio choices."""
+    from open_webui import main
+
+    live.document['values']['feature.voice'] = dictation
+    live.document['values']['feature.read_aloud'] = read_aloud
+    actor = SimpleNamespace(id='fictional-reader', role='user')
+    monkeypatch.setattr(main, 'decode_token', lambda token: {'id': actor.id})
+    monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
+    monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=actor))
+    monkeypatch.setattr(main.sessions, 'session_user', lambda user, data: user)
+    app = FastAPI()
+    app.get('/api/config')(main.get_app_config)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url='https://fictional-owui.invalid'
+    ) as api:
+        response = await api.get('/api/config', headers={'Authorization': 'Bearer fictional-session'})
+    assert response.status_code == 200, response.text
+    features = response.json()['features']
+    assert features['feature_voice'] is dictation
+    assert features['feature_read_aloud'] is read_aloud
+    assert features['feature_voice_call'] is False
+
+
+@pytest.mark.asyncio
+async def test_voice_call_stays_refused_with_dictation_and_read_aloud_enabled(live: SimpleNamespace) -> None:
+    """Restoring audio primitives grants no real-time call capability."""
+    assert await feature_enabled('voice') is True
+    assert await feature_enabled('read_aloud') is True
+    assert await feature_enabled('voice_call') is False
+    assert (await Config.get('user.permissions'))['chat']['call'] is False
+    with pytest.raises(HTTPException) as error:
+        await require_feature('voice_call')()
+    assert error.value.status_code == 403
+    assert error.value.detail == "Feature 'voice_call' is not available in your plan"

@@ -43,6 +43,9 @@ export function isFeatureEnabled(feature: Feature): boolean {
 	}
 	const key = `feature_${feature}` as keyof typeof $config.features;
 	const value = $config.features[key];
+	if (feature === 'voice' || feature === 'read_aloud' || feature === 'voice_call') {
+		return value === true;
+	}
 	// If the key is explicitly set, use that value; otherwise default to true
 	// (features are opt-out, so an absent key in the authenticated config means enabled)
 	return typeof value === 'boolean' ? value : value == null ? true : Boolean(value);
@@ -63,7 +66,7 @@ interface PermissionTree {
 
 export function hasFeatureAccess(
 	feature: Feature,
-	user: { role?: string; permissions?: PermissionTree } | null,
+	user: { role?: string; permissions?: PermissionTree } | null | undefined,
 	permissionPath?: string
 ): boolean {
 	// First check: feature must be enabled globally
@@ -86,6 +89,9 @@ export function hasFeatureAccess(
 			perms = undefined;
 			break;
 		}
+	}
+	if (feature === 'voice' || feature === 'read_aloud' || feature === 'voice_call') {
+		return perms === true;
 	}
 	return Boolean(perms ?? true); // Default to true if permission not set
 }

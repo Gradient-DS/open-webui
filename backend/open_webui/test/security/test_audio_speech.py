@@ -75,11 +75,12 @@ async def test_speech_fixture_reaches_the_handler_for_owner_and_second_user(spee
     assert len(records) == 2
     assert all(record['path'] == '/v1/audio/speech' and record['body'] == body['json'] for record in records)
     assert (ROUTE in waivers()) is (mode == 'waive')
-    declaration = crossuser.expected_refusals()[ROUTE]
-    assert declaration['status'] == (401 if mode == 'waive' else 403)
-    assert declaration['detail'] == (
-        'identity:platform_login' if mode == 'waive' else "Feature 'read_aloud' is not available in your plan"
-    )
+    if mode == 'waive':
+        declaration = crossuser.expected_refusals()[ROUTE]
+        assert declaration['status'] == 401
+        assert declaration['detail'] == 'identity:platform_login'
+    else:
+        assert ROUTE not in crossuser.expected_refusals()
 
 
 @pytest.mark.asyncio
@@ -113,14 +114,12 @@ def test_speech_coverage_requires_private_hits_and_rejects_stale_public_waiver(m
     from . import test_route_coverage as coverage
 
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    declaration = crossuser.expected_refusals()[ROUTE]
-    assert declaration['status'] == (401 if mode == 'waive' else 403)
-    assert declaration['detail'] == (
-        'identity:platform_login' if mode == 'waive' else "Feature 'read_aloud' is not available in your plan"
-    )
-    if mode == 'drive':
-        assert declaration['all_actors']
-        assert declaration['json'] == {'detail': declaration['detail']}
+    if mode == 'waive':
+        declaration = crossuser.expected_refusals()[ROUTE]
+        assert declaration['status'] == 401
+        assert declaration['detail'] == 'identity:platform_login'
+    else:
+        assert ROUTE not in crossuser.expected_refusals()
     monkeypatch.setattr(coverage, 'operations', lambda: {ROUTE})
     hits = {'hits': []}
     monkeypatch.setattr(coverage, 'evidence', lambda: hits)
@@ -138,7 +137,7 @@ def test_speech_coverage_requires_private_hits_and_rejects_stale_public_waiver(m
 
 
 @pytest.mark.asyncio
-async def test_platform_speech_control_requires_exact_plan_refusal_for_every_actor(monkeypatch):
+async def test_disabled_platform_speech_requires_exact_plan_refusal_for_every_actor(monkeypatch):
     from open_webui.routers import audio
     from open_webui.soev import product_config
     from open_webui.utils.auth import get_verified_user
@@ -147,16 +146,21 @@ async def test_platform_speech_control_requires_exact_plan_refusal_for_every_act
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     monkeypatch.setattr(audio, 'feature_enabled', feature_enabled)
     monkeypatch.setattr(product_config, 'v2_enabled', lambda: True)
-    monkeypatch.setattr(product_config, 'refresh', AsyncMock(return_value={}))
-    assert product_config.DISABLED['feature.read_aloud'] is False
+    monkeypatch.setattr(
+        product_config, 'refresh', AsyncMock(return_value={'values': {'feature.read_aloud': False}, 'entitlements': {}})
+    )
+    assert 'feature.read_aloud' in product_config.FEATURES
     assert product_config.DISABLED['feature.voice_call'] is False
     app = FastAPI()
     app.include_router(audio.router, prefix='/api/v1/audio')
     upstream = AsyncMock(side_effect=AssertionError('Disabled speech must not call the platform'))
     monkeypatch.setattr(audio.primitives, 'speech', upstream)
-    declaration = crossuser.expected_refusals()[ROUTE]
-    assert declaration['all_actors'] and declaration['status'] == 403
-    assert declaration['json'] == {'detail': "Feature 'read_aloud' is not available in your plan"}
+    assert ROUTE not in crossuser.expected_refusals()
+    declaration = {
+        'status': 403,
+        'detail': "Feature 'read_aloud' is not available in your plan",
+        'json': {'detail': "Feature 'read_aloud' is not available in your plan"},
+    }
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as http:
         for name in ('admin', 'user', 'intruder'):

@@ -2437,8 +2437,7 @@ async def get_app_config(request: Request):
                     'feature_voice': await feature_enabled('voice', FEATURE_VOICE),
                     'feature_voice_call': await feature_enabled('voice', FEATURE_VOICE)
                     and await feature_enabled('voice_call', FEATURE_VOICE_CALL),
-                    'feature_read_aloud': await feature_enabled('voice', FEATURE_VOICE)
-                    and await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
+                    'feature_read_aloud': await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
                     'feature_changelog': await feature_enabled('changelog', FEATURE_CHANGELOG),
                     'feature_meetings': await feature_enabled('meetings', FEATURE_MEETINGS)
                     and await capabilities.has(capabilities.MEETINGS),
