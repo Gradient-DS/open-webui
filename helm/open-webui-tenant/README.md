@@ -170,3 +170,20 @@ login isolation checks. The focused backend tests are
 login with CREATEDB/CREATEROLE; these tests create disposable databases and
 fictional roles to check migration locking, restricted startup, missing objects,
 and the standalone migration command.
+
+
+## Retired OWUI settings
+
+Local login/MFA/password recovery, OWUI web loaders/chunking, personal OneDrive,
+local connector sync/document pipeline, custom tools, data warnings and local
+cleanup worker switches no longer render into the OWUI ConfigMap or pod secrets.
+Platform connector schedules and the organisational picker are independent.
+Reader-backed legacy defaults (RAG hybrid/catalog and archive erasure helpers)
+remain, along with the explicit voice and automation exceptions.
+
+Legacy loader-worker/sync-daemon templates remain pending a coordinated CI
+workflow change: the external-Postgres CI assertion explicitly requires the loader
+manifests and six database-host references. No active OWUI protocol is restored
+by enabling those workloads. Their workload isolation policies remain intact.
+See [the removal report](../../docs/dead-features-removal.md) for retained keys,
+validation and the outstanding workload cleanup.

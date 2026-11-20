@@ -465,3 +465,50 @@ OpenAPI equality tests regenerated the specification and passed. Temporary SQLit
 export/test state is cleaned automatically; no Postgres roles/databases were made.
 Normal pre-commit hooks ran on every category commit. Nothing was pushed, deployed,
 or changed in the platform registry, CI workflows or running services.
+
+## Deployment wiring follow-up
+
+Deleted 67 retired OWUI ConfigMap environment entries, their chart value fields,
+obsolete Confluence/pipeline secret definitions and six obsolete OWUI pod-secret
+injections. Removed the unused fork FEATURE_WEBPAGE_URL declaration. Preserved
+TENANT_NAME/logging, extraction/upload guards, live connection picker, Graph
+invites, OAuth, workspace, API-key, voice and automation settings. Removed the
+unused Confluence hostname derivation from the FQDN allowlist; no allow rule was
+broadened. Existing isolation policies and assertions remain unchanged.
+
+The removed ConfigMap entries are:
+
+`AUTO_ARCHIVE_RETENTION_DAYS`, `CHAT_RETENTION_TTL_DAYS`, `CHUNK_OVERLAP`, `CHUNK_SIZE`, `CONFLUENCE_AUTH_MODE`, `CONFLUENCE_BASIC_AUTH_USERNAME`, `CONFLUENCE_KB_MODE`, `CONFLUENCE_MAX_PAGES_PER_SYNC`, `CONFLUENCE_MAX_PAGE_SIZE_MB`, `CONFLUENCE_OAUTH_CLIENT_ID`, `CONFLUENCE_SHARED_KB_OWNER_ID`, `CONFLUENCE_SITE_URL`, `CONFLUENCE_SYNC_INTERVAL_MINUTES`, `DATA_RETENTION_TTL_DAYS`, `DATA_RETENTION_WARNING_DAYS`, `DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED`, `DISTRIBUTED_DOC_PIPELINE_ENABLED`, `DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED`, `ENABLE_2FA`, `ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE`, `ENABLE_CONFLUENCE_INTEGRATION`, `ENABLE_CONFLUENCE_SYNC`, `ENABLE_DATA_WARNINGS`, `ENABLE_DIRECT_CONNECTIONS`, `ENABLE_FORGOT_PASSWORD`, `ENABLE_GOOGLE_DRIVE_SYNC`, `ENABLE_LOGIN_FORM`, `ENABLE_ONEDRIVE_PERSONAL`, `ENABLE_ONEDRIVE_SYNC`, `ENABLE_PASSWORD_AUTH`, `ENABLE_RETENTION_WARNING_EMAIL`, `ENABLE_SIGNUP`, `ENABLE_WEB_LOADER_SSL_VERIFICATION`, `EXTERNAL_WEB_LOADER_URL`, `FEATURE_BUILTIN_TOOLS`, `FEATURE_TOOLS`, `FEATURE_TOOL_SERVERS`, `FEATURE_WEBPAGE_URL`, `GOOGLE_DRIVE_MAX_FILES_PER_SYNC`, `GOOGLE_DRIVE_MAX_FILE_SIZE_MB`, `GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES`, `KNOWLEDGE_RETENTION_TTL_DAYS`, `LOADER_WORKER_URL`, `ONEDRIVE_CLIENT_ID_PERSONAL`, `ONEDRIVE_MAX_FILES_PER_SYNC`, `ONEDRIVE_MAX_FILE_SIZE_MB`, `ONEDRIVE_SYNC_INTERVAL_MINUTES`, `OPENWEBUI_BASE_URL`, `PASSWORD_RESET_EXPIRY_MINUTES`, `PIPELINE_API_BASE_URL`, `PIPELINE_CHUNK_OVERLAP`, `PIPELINE_CHUNK_SIZE`, `PIPELINE_INGEST_CALLBACK_URL`, `PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS`, `PIPELINE_PRESIGN_TTL_SECONDS`, `PIPELINE_RECONCILE_INTERVAL_SECONDS`, `REQUIRE_2FA`, `SEARXNG_LANGUAGE`, `SEARXNG_QUERY_URL`, `SYNC_DAEMON_ENABLED`, `SYNC_DAEMON_URL`, `SYNC_MAX_JOB_WALL_CLOCK_SECONDS`, `TWO_FA_GRACE_PERIOD_DAYS`, `USER_INACTIVITY_TTL_DAYS`, `WEB_LOADER_ENGINE`, `WEB_SEARCH_ENGINE`, `WEB_SEARCH_RESULT_COUNT`.
+
+Reader-backed RAG, Ollama and two legacy archive defaults listed above still have
+chart seeds. Legacy permission leaves are kept in the upstream permission
+aggregate/import contract. No new alias or fallback is introduced for a removed
+chart setting; it has no template consumer.
+
+Unfinished item: deleting the loader-worker and sync-daemon workload templates,
+associated values, secrets and policies requires a coordinated CI change. The
+existing `.github/workflows/pr-checks.yaml` external-Postgres assertion explicitly
+requires the loader manifests and exactly six host references. The brief forbids
+CI workflow changes; the templates were left intact rather than making that
+required check fail or changing its assertion. They default off and the OWUI
+protocol/settings are absent. The existing sync-daemon config persistence
+namespace exception also remains with its existing test; upload-guard persistence
+and all security assertions remain untouched.
+
+```sh
+python -m pytest -c backend/pytest.ini helm/open-webui-tenant/tests/test_render.py backend/open_webui/test/soev/test_product_config.py backend/open_webui/test/soev/test_dead_features.py backend/open_webui/test/util/test_features.py backend/open_webui/test/security/test_deployed_config.py -q
+helm lint helm/open-webui-tenant
+helm template test-release helm/open-webui-tenant
+helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/external-postgres-values.yaml
+helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/strict-egress-values.yaml
+helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/v2-values.yaml
+```
+
+Pytest: 85 passed, 20 dependency warnings. Helm lint: passed (the existing optional
+icon recommendation remains). All four template renders passed; the unchanged CI
+assertions were reproduced locally: exactly six external DB-host occurrences,
+no bundled Postgres service for external DB, no unrestricted CIDR in strict mode,
+OIDC hostname retained, metadata range excluded by default, and no v2 legacy
+subject authority/migration Job. No containers or cluster calls were involved.
+Ruff: zero new findings. No routes or frontend source changed in this category;
+OpenAPI and the last frontend check results remain unchanged.

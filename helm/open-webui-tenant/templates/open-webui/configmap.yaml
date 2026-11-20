@@ -12,13 +12,8 @@ data:
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
+  TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
-
-  # In-cluster base URL OWUI passes to the loader-worker as `callback_base_url`
-  # when submitting sync jobs. Read by services/sync/base_worker.py at the
-  # env var name OPENWEBUI_BASE_URL. Empty value -> loader-worker raises
-  # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
-  OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
 
   {{- with .Values.soevApi.url }}
   SOEV_API_URL: {{ . | quote }}
@@ -41,12 +36,9 @@ data:
 
   # Authentication
   WEBUI_AUTH: {{ .Values.openWebui.config.webuiAuth | quote }}
-  ENABLE_SIGNUP: {{ .Values.openWebui.config.enableSignup | quote }}
-  ENABLE_LOGIN_FORM: {{ .Values.openWebui.config.enableLoginForm | quote }}
   DEFAULT_USER_ROLE: {{ .Values.openWebui.config.defaultUserRole | quote }}
   ENABLE_OAUTH_SIGNUP: {{ .Values.openWebui.config.enableOauthSignup | quote }}
   OAUTH_INVITE_REQUIRED: {{ .Values.openWebui.config.oauthInviteRequired | quote }}
-  ENABLE_PASSWORD_AUTH: {{ .Values.openWebui.config.enablePasswordAuth | quote }}
   JWT_EXPIRES_IN: {{ .Values.openWebui.config.jwtExpiresIn | quote }}
 
   # Microsoft OAuth / EntraID SSO
@@ -106,8 +98,6 @@ data:
   RAG_TOP_K: {{ .Values.openWebui.config.ragTopK | quote }}
   RAG_TOP_K_RERANKER: {{ .Values.openWebui.config.ragTopKReranker | quote }}
   RAG_RELEVANCE_THRESHOLD: {{ .Values.openWebui.config.ragRelevanceThreshold | quote }}
-  CHUNK_SIZE: {{ .Values.openWebui.config.chunkSize | quote }}
-  CHUNK_OVERLAP: {{ .Values.openWebui.config.chunkOverlap | quote }}
   RAG_HYBRID_BM25_WEIGHT: {{ .Values.openWebui.config.ragHybridBm25Weight | quote }}
   ENABLE_RAG_HYBRID_SEARCH: {{ .Values.openWebui.config.enableRagHybridSearch | quote }}
   RAG_ALLOWED_FILE_EXTENSIONS: {{ .Values.openWebui.config.ragAllowedFileExtensions | quote }}
@@ -130,15 +120,8 @@ data:
   # without touching sharedServices.namespace.
   EXTERNAL_DOCUMENT_LOADER_URL: {{ .Values.openWebui.config.externalDocumentLoaderUrl | default (include "open-webui-tenant.sharedServices.gatewayUrl" .) | quote }}
 
-  # Web Search (via shared Gateway)
+  # Platform web search availability
   ENABLE_WEB_SEARCH: {{ .Values.openWebui.config.enableWebSearch | quote }}
-  WEB_SEARCH_ENGINE: {{ .Values.openWebui.config.webSearchEngine | quote }}
-  SEARXNG_LANGUAGE: {{ .Values.openWebui.config.searxngLanguage | quote }}
-  WEB_SEARCH_RESULT_COUNT: {{ .Values.openWebui.config.webSearchResultCount | quote }}
-  ENABLE_WEB_LOADER_SSL_VERIFICATION: {{ .Values.openWebui.config.enableWebLoaderSslVerification | quote }}
-  WEB_LOADER_ENGINE: {{ .Values.openWebui.config.webLoaderEngine | quote }}
-  SEARXNG_QUERY_URL: "{{ include "open-webui-tenant.sharedServices.gatewayUrl" . }}/search"
-  EXTERNAL_WEB_LOADER_URL: "{{ include "open-webui-tenant.sharedServices.gatewayUrl" . }}/extract"
 
   # Feature Flags
   FEATURE_CHAT_CONTROLS: {{ .Values.openWebui.config.featureChatControls | quote }}
@@ -157,7 +140,6 @@ data:
   FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
-  FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
   FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
   # Soev skill-bundles feature. FEATURE_SKILL_FILES = simple skills (files/tree/
   # editing forwarded to the agent). ENABLE_SKILL_EXECUTION = full mode (adds the
@@ -165,14 +147,11 @@ data:
   # sandbox). Pair ENABLE_SKILL_EXECUTION with the agent's skill_execution_enabled.
   FEATURE_SKILL_FILES: {{ .Values.openWebui.config.featureSkillFiles | quote }}
   ENABLE_SKILL_EXECUTION: {{ .Values.openWebui.config.enableSkillExecution | quote }}
-  FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
-  FEATURE_WEBPAGE_URL: {{ .Values.openWebui.config.featureWebpageUrl | quote }}
   FEATURE_REFERENCE_CHATS: {{ .Values.openWebui.config.featureReferenceChats | quote }}
   FEATURE_SIMPLE_ASSISTANT_BUILDER: {{ .Values.openWebui.config.featureSimpleAssistantBuilder | quote }}
   FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
-  FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
   FEATURE_STRICT_DATA_SEPARATION: {{ .Values.openWebui.config.featureStrictDataSeparation | quote }}
   WHATS_NEW_MODELS: {{ .Values.openWebui.config.whatsNewModels | toJson | quote }}
@@ -208,8 +187,7 @@ data:
   # Agent trace download (admins)
   ENABLE_AGENT_TRACE_DOWNLOAD: {{ .Values.openWebui.config.enableAgentTraceDownload | default "false" | quote }}
 
-  # MCP
-  ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
+  # Legacy permission metadata
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}
 
   # Audio
@@ -303,19 +281,9 @@ data:
   {{- end }}
   {{- /* googleDriveApiKey moved to secrets template */ -}}
 
-  # Google Drive Sync
-  ENABLE_GOOGLE_DRIVE_SYNC: {{ .Values.openWebui.config.enableGoogleDriveSync | quote }}
-  GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.googleDriveSyncIntervalMinutes | quote }}
-  GOOGLE_DRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.googleDriveMaxFilesPerSync | quote }}
-  GOOGLE_DRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.googleDriveMaxFileSizeMb | quote }}
-
   # OneDrive Integration
   ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}
-  ENABLE_ONEDRIVE_PERSONAL: {{ .Values.openWebui.config.enableOnedrivePersonal | quote }}
   ENABLE_ONEDRIVE_BUSINESS: {{ .Values.openWebui.config.enableOnedriveBusiness | quote }}
-  {{- if .Values.openWebui.config.onedriveClientIdPersonal }}
-  ONEDRIVE_CLIENT_ID_PERSONAL: {{ .Values.openWebui.config.onedriveClientIdPersonal | quote }}
-  {{- end }}
   {{- if .Values.openWebui.config.onedriveClientIdBusiness }}
   ONEDRIVE_CLIENT_ID_BUSINESS: {{ .Values.openWebui.config.onedriveClientIdBusiness | quote }}
   {{- end }}
@@ -326,99 +294,7 @@ data:
   ONEDRIVE_SHAREPOINT_TENANT_ID: {{ .Values.openWebui.config.onedriveSharepointTenantId | quote }}
   {{- end }}
 
-  # OneDrive Sync
-  ENABLE_ONEDRIVE_SYNC: {{ .Values.openWebui.config.enableOnedriveSync | quote }}
-  ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
-  ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
-  ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
-
-  # Confluence Integration (Atlassian Cloud OAuth)
-  # CONFLUENCE_OAUTH_CLIENT_SECRET is set via the secrets template.
-  ENABLE_CONFLUENCE_INTEGRATION: {{ .Values.openWebui.config.enableConfluenceIntegration | quote }}
-  {{- if .Values.openWebui.config.confluenceOauthClientId }}
-  CONFLUENCE_OAUTH_CLIENT_ID: {{ .Values.openWebui.config.confluenceOauthClientId | quote }}
-  {{- end }}
-
-  # Confluence Basic Auth (username + API token)
-  # CONFLUENCE_BASIC_AUTH_API_TOKEN is set via the secrets template.
-  CONFLUENCE_AUTH_MODE: {{ .Values.openWebui.config.confluenceAuthMode | quote }}
-  {{- if .Values.openWebui.config.confluenceSiteUrl }}
-  CONFLUENCE_SITE_URL: {{ .Values.openWebui.config.confluenceSiteUrl | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.confluenceBasicAuthUsername }}
-  CONFLUENCE_BASIC_AUTH_USERNAME: {{ .Values.openWebui.config.confluenceBasicAuthUsername | quote }}
-  {{- end }}
-
-  # Confluence Sync
-  ENABLE_CONFLUENCE_SYNC: {{ .Values.openWebui.config.enableConfluenceSync | quote }}
-  CONFLUENCE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.confluenceSyncIntervalMinutes | quote }}
-  CONFLUENCE_MAX_PAGES_PER_SYNC: {{ .Values.openWebui.config.confluenceMaxPagesPerSync | quote }}
-  CONFLUENCE_MAX_PAGE_SIZE_MB: {{ .Values.openWebui.config.confluenceMaxPageSizeMb | quote }}
-
-  # Confluence shared KB
-  CONFLUENCE_KB_MODE: {{ .Values.openWebui.config.confluenceKbMode | quote }}
-  {{- if .Values.openWebui.config.confluenceSharedKbOwnerId }}
-  CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
-  {{- end }}
-
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
-  SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
-
-  # Shared-services loader-worker (per-tenant). Cloud-source sync workers
-  # submit jobs to the loader-worker pod.
-  # See helm/open-webui-tenant/templates/loader-worker/.
-  {{- if .Values.loaderWorker.enabled }}
-  LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
-  {{- else if .Values.openWebui.config.loaderWorkerUrl }}
-  LOADER_WORKER_URL: {{ .Values.openWebui.config.loaderWorkerUrl | quote }}
-  {{- end }}
-  TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
-
-  # Sync-daemon (stateless per-tenant cloud sync — replaces the loader-worker).
-  # SYNC_DAEMON_ENABLED is the per-tenant switch (D-2): false → OWUI's own sync
-  # schedulers run (loader path); true → OWUI accepts the daemon principal and
-  # the daemon owns scheduling. SYNC_API_KEY is a secret (see deployment.yaml).
-  # See helm/open-webui-tenant/templates/sync-daemon/.
-  SYNC_DAEMON_ENABLED: {{ .Values.syncDaemon.owuiFlagEnabled | quote }}
-  {{- if .Values.syncDaemon.enabled }}
-  SYNC_DAEMON_URL: "http://{{ include "open-webui-tenant.syncDaemon.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.syncDaemon.service.port | default 8010 }}"
-  {{- else if .Values.openWebui.config.syncDaemonUrl }}
-  SYNC_DAEMON_URL: {{ .Values.openWebui.config.syncDaemonUrl | quote }}
-  {{- end }}
-
-  # Distributed document pipeline (warren). When enabled, KB ingestion (upload +
-  # add-file + reindex + batch) is delegated to the external pipeline instead of
-  # native parse+embed; warren POSTs chunked_text back to this server's /ingest.
-  # PIPELINE_API_KEY is a secret (see deployment.yaml + external-secrets.yaml).
-  DISTRIBUTED_DOC_PIPELINE_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineEnabled | default "false" | quote }}
-  # Also route chat attachments (non-KB uploads → the file-{id} cache) through
-  # warren. Independent of the KB flag above; reuses all the PIPELINE_* config.
-  DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineChatEnabled | default "false" | quote }}
-  # Also route cloud sync (bulk) through warren. Independent of the KB/chat flags
-  # above; reuses all the PIPELINE_* config.
-  DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineSyncEnabled | default "false" | quote }}
-  {{- if .Values.openWebui.config.pipelineApiBaseUrl }}
-  PIPELINE_API_BASE_URL: {{ .Values.openWebui.config.pipelineApiBaseUrl | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelineIngestCallbackUrl }}
-  PIPELINE_INGEST_CALLBACK_URL: {{ .Values.openWebui.config.pipelineIngestCallbackUrl | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelinePresignTtlSeconds }}
-  PIPELINE_PRESIGN_TTL_SECONDS: {{ .Values.openWebui.config.pipelinePresignTtlSeconds | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelineChunkSize }}
-  PIPELINE_CHUNK_SIZE: {{ .Values.openWebui.config.pipelineChunkSize | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelineChunkOverlap }}
-  PIPELINE_CHUNK_OVERLAP: {{ .Values.openWebui.config.pipelineChunkOverlap | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelineReconcileIntervalSeconds }}
-  PIPELINE_RECONCILE_INTERVAL_SECONDS: {{ .Values.openWebui.config.pipelineReconcileIntervalSeconds | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.pipelineJobMaxWallClockSeconds }}
-  PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.pipelineJobMaxWallClockSeconds | quote }}
-  {{- end }}
-
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
   {{- if .Values.openWebui.config.emailGraphTenantId }}
@@ -436,10 +312,6 @@ data:
   {{- if .Values.openWebui.config.emailInviteHeading }}
   EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
   {{- end }}
-
-  # Forgot Password (self-service reset)
-  ENABLE_FORGOT_PASSWORD: {{ .Values.openWebui.config.enableForgotPassword | quote }}
-  PASSWORD_RESET_EXPIRY_MINUTES: {{ .Values.openWebui.config.passwordResetExpiryMinutes | quote }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 
@@ -475,8 +347,6 @@ data:
   # User Archival
   ENABLE_USER_ARCHIVAL: {{ .Values.openWebui.config.enableUserArchival | quote }}
   DEFAULT_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.defaultArchiveRetentionDays | quote }}
-  ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE: {{ .Values.openWebui.config.enableAutoArchiveOnSelfDelete | quote }}
-  AUTO_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.autoArchiveRetentionDays | quote }}
 
   # Storage Provider (S3)
   {{- if .Values.openWebui.config.storageProvider }}
@@ -558,19 +428,4 @@ data:
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
   {{- end }}
 
-  # Two-Factor Authentication (TOTP)
-  ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
-  REQUIRE_2FA: {{ .Values.openWebui.config.require2fa | default "false" | quote }}
-  TWO_FA_GRACE_PERIOD_DAYS: {{ .Values.openWebui.config.twoFaGracePeriodDays | default "7" | quote }}
-
-  # Data Retention TTL
-  DATA_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote }}
-  USER_INACTIVITY_TTL_DAYS: {{ .Values.openWebui.config.userInactivityTtlDays | default "0" | quote }}
-  CHAT_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote }}
-  KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
-  DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
-  ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
-
-  # Data Sovereignty Warnings
-  ENABLE_DATA_WARNINGS: {{ .Values.openWebui.config.enableDataWarnings | default "true" | quote }}
 {{- end }}

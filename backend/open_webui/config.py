@@ -2399,8 +2399,6 @@ FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 
 
 ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
 
-FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
-
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
