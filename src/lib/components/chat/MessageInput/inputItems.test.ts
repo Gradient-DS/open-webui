@@ -40,14 +40,7 @@ describe('composer bar', () => {
 			pinned: ['tools', 'attach_meetings', 'web_search'],
 			states: { web_search: 'on', live_mail: 'on', image_generation: 'on', 'filter:f1': 'on' }
 		});
-		expect(ids).toEqual([
-			'attach_meetings',
-			'live_mail',
-			'web_search',
-			'image_generation',
-			'filter:f1',
-			'tools'
-		]);
+		expect(ids).toEqual(['attach_meetings', 'live_mail', 'web_search', 'filter:f1', 'tools']);
 	});
 
 	it('leaves out items that are off and not pinned, and stale pins', () => {

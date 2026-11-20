@@ -29,6 +29,7 @@ export type Feature =
 	| 'input_menu'
 	| 'temporary_chat'
 	| 'builtin_tools'
+	| 'browser_code_execution'
 	| 'simple_assistant_builder';
 
 /**
@@ -37,6 +38,8 @@ export type Feature =
  * Used for SaaS tier-based feature control.
  */
 export function isFeatureEnabled(feature: Feature): boolean {
+	if (['tools', 'tool_servers', 'builtin_tools', 'browser_code_execution'].includes(feature))
+		return false;
 	const $config = get(config);
 	if (!$config?.features) {
 		return false; // Config not loaded yet — hide features until authenticated config arrives

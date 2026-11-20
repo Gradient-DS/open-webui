@@ -83,11 +83,8 @@ def test_required_drive_routes_have_seeded_targets_and_authorization_coverage(mo
     required = set(seeds.SURFACE['required_drive_routes'])
     assert required <= set(seeds.ordinary_targets())
     crossuser, _ = targets()
-    image_prompt = 'POST /api/v1/tasks/image_prompt/completions'
-    assert required - {image_prompt} <= set(crossuser)
+    assert required <= set(crossuser)
     assert 'GET /api/v1/cloud-sync/policy' in platform_operations()
-    refusal = next(entry for entry in seeds.SURFACE['control'] if entry['route'] == image_prompt)
-    assert refusal['all_actors'] and refusal['status'] == 404
 
 
 @pytest.mark.parametrize('route', seeds.SURFACE['required_drive_routes'])
@@ -590,7 +587,6 @@ def test_destructive_routes_have_reasons_exist_in_spec_and_never_become_ordinary
     required = {
         'POST /api/v1/auths/signout',
         'DELETE /api/v1/auths/api_key',
-        'POST /api/v1/auths/update/password',
         'DELETE /api/v1/auths/oauth/sessions/{provider}',
     }
     assert required <= seeds.DESTRUCTIVE.keys()
@@ -710,14 +706,13 @@ def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
         seeds.resolve_parameters(client, surface=silent, spec=spec)
 
 
-def test_active_function_serves_chat_actions_and_user_valves():
+def test_active_functions_have_no_product_parameter_bindings():
     for path, name in [
         ('/api/chat/actions/{action_id}', 'action_id'),
         ('/api/v1/functions/id/{id}/valves/user/update', 'id'),
     ]:
-        declaration = seeds.parameter_for(path, name)
-        key = declaration.get('same_as', declaration['key'])
-        assert key == 'active_function', path
+        with pytest.raises(KeyError, match='Unaccounted'):
+            seeds.parameter_for(path, name)
 
 
 @pytest.mark.parametrize(
@@ -752,10 +747,12 @@ def test_knowledge_file_seeder_adds_a_file_nothing_else_uses(key, provided):
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
     # RFC 6238 appendix B, SHA-1 seed "12345678901234567890", truncated to 6 digits.
+    from .client import totp_code
+
     secret = base64.b32encode(b'12345678901234567890').decode()
     for at, code in [(59, '287082'), (1111111109, '081804'), (1234567890, '005924'), (2000000000, '279037')]:
-        assert seeds.totp_code(secret, at=at) == code
-    assert seeds.totp_code(secret.rstrip('=').lower(), at=59) == '287082'
+        assert totp_code(secret, at=at) == code
+    assert totp_code(secret.rstrip('=').lower(), at=59) == '287082'
 
 
 PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
@@ -966,49 +963,6 @@ def test_product_config_inventory_has_real_routes_proofs_and_seeds():
     assert set(coverage['skill_files']['routes']) == expected
 
 
-def test_ollama_seed_uses_the_configured_upstream_catalog(monkeypatch):
-    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.values['model'] = 'fictional/catalog-model'
-    ctx.request = Mock(side_effect=AssertionError('No retired OWUI discovery route'))
-    monkeypatch.setenv('OLLAMA_BASE_URLS', 'http://empty.invalid;http://ollama.invalid')
-    responses = [Mock(), Mock()]
-    responses[0].json.return_value = {'models': []}
-    responses[1].json.return_value = {'models': [{'model': 'fictional-ollama'}]}
-    get = Mock(side_effect=responses)
-    monkeypatch.setattr(seeds.requests, 'get', get)
-    assert seeds.seed_ollama_connection(ctx, entry) == '1'
-    assert ctx.values['upstream_model'] == 'fictional-ollama'
-    assert [call.args for call in get.call_args_list] == [
-        ('http://empty.invalid/api/tags',),
-        ('http://ollama.invalid/api/tags',),
-    ]
-    for response in responses:
-        response.raise_for_status.assert_called_once_with()
-        response.close.assert_called_once_with()
-    ctx.request.assert_not_called()
-
-
-def test_ollama_seed_refuses_an_empty_catalog_instead_of_substituting_a_model(monkeypatch):
-    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'ollama_index')
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.values['model'] = 'fictional/catalog-model'
-    monkeypatch.setenv('OLLAMA_BASE_URLS', 'http://ollama.invalid')
-    response = Mock()
-    response.json.return_value = {'models': []}
-    monkeypatch.setattr(seeds.requests, 'get', Mock(return_value=response))
-    with pytest.raises(RuntimeError, match='No model is available'):
-        seeds.seed_ollama_connection(ctx, entry)
-    assert 'upstream_model' not in ctx.values
-    response.close.assert_called_once_with()
-
-
-def test_ollama_seed_requires_explicit_upstream_configuration(monkeypatch):
-    monkeypatch.delenv('OLLAMA_BASE_URLS', raising=False)
-    with pytest.raises(KeyError, match='OLLAMA_BASE_URLS'):
-        seeds.seed_ollama_connection(Mock(), {})
-
-
 @pytest.mark.parametrize('default', [None, '', 'a/b,c/d', ['ci/chat']])
 def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, default):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
@@ -1018,24 +972,8 @@ def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, default
         seeds.seed_model(ctx, {'key': 'model'})
 
 
-def test_connection_proxy_fields_use_the_upstream_model():
-    # These routes resolve the model against a connection's own list, not the registry.
-    direct = {
-        'POST /ollama/api/chat/{url_idx}',
-        'POST /ollama/api/embed/{url_idx}',
-        'POST /ollama/api/embeddings/{url_idx}',
-        'POST /ollama/api/generate/{url_idx}',
-        'POST /ollama/v1/responses/{url_idx}',
-        'POST /ollama/v1/chat/completions/{url_idx}',
-        'POST /ollama/v1/messages/{url_idx}',
-        'POST /ollama/v1/completions/{url_idx}',
-        'POST /ollama/v1/embeddings/{url_idx}',
-    }
-    models = {
-        entry['route']: entry['json']['model'] for entry in seeds.SURFACE['field'] if 'model' in entry.get('json', {})
-    }
-    assert direct <= models.keys()
-    assert {route for route, value in models.items() if value == '{upstream_model}'} == direct
+def test_connection_proxy_fields_are_retired():
+    assert not any(entry['route'].startswith('POST /ollama/') for entry in seeds.SURFACE['field'])
 
 
 LIVE_READS = [
@@ -1260,17 +1198,8 @@ def test_query_boolean_fields_use_the_platform_wire_format():
     assert request.url.endswith('include_sidebar=true&include_archived=false&page=1')
 
 
-def test_disabled_oauth_client_is_fresh_in_each_resolution_without_http(monkeypatch):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
-    route = '/oauth/clients/{client_id}/authorize'
-    parameter = seeds.parameter_for(route, 'client_id')
-    surface = {'parameter': [parameter]}
-    spec = {'paths': {route: {'get': {}}}}
-    actor = Mock()
-    tokens = ['fictional-first-pass', 'fictional-second-pass']
-    monkeypatch.setattr(seeds.secrets, 'token_hex', Mock(side_effect=tokens))
-    resolved = [seeds.resolve_parameters(actor, surface=surface, spec=spec) for _ in tokens]
-    assert [result[route, 'client_id'] for result in resolved] == [
-        f'mcp:fictional-disabled-{token}' for token in tokens
-    ]
-    actor.request.assert_not_called()
+def test_retired_product_routes_have_no_remaining_seeds_or_controls():
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    assert not retired & set(seeds.ordinary_targets())
+    for kind in ('field', 'control', 'destructive', 'shared'):
+        assert not retired & {entry.get('route', entry.get('id')) for entry in seeds.SURFACE.get(kind, [])}

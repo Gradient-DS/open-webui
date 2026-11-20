@@ -14,11 +14,8 @@
 		getSessionUser,
 		userSignIn,
 		userSignUp,
-		updateUserTimezone,
-		requestPasswordReset
+		updateUserTimezone
 	} from '$lib/apis/auths';
-	import TwoFactorChallenge from '$lib/components/auth/TwoFactorChallenge.svelte';
-	import TwoFactorSetup from '$lib/components/chat/Settings/Account/TwoFactorSetup.svelte';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -46,9 +43,6 @@
 
 	let ldapUsername = '';
 
-	let show2FAChallenge = false;
-	let show2FASetup = false;
-	let partialToken = '';
 	let submitting = false;
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
@@ -82,36 +76,7 @@
 			return null;
 		});
 
-		if (response?.requires_2fa) {
-			partialToken = response.partial_token;
-			show2FAChallenge = true;
-			return;
-		}
-
-		// The 2FA grace period has expired — the user must enroll before a
-		// session is granted.
-		if (response?.requires_2fa_setup) {
-			partialToken = response.partial_token;
-			show2FASetup = true;
-			return;
-		}
-
 		await setSessionUser(response);
-	};
-
-	let forgotSubmitted = false;
-
-	const forgotPasswordHandler = async () => {
-		const res = await requestPasswordReset(email).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (res) {
-			forgotSubmitted = true;
-			toast.success(
-				$i18n.t('If an account with that email exists, a password reset link has been sent.')
-			);
-		}
 	};
 
 	const signUpHandler = async () => {
@@ -128,13 +93,6 @@
 				return null;
 			}
 		);
-
-		// The 2FA grace period has expired (zero-day grace) — enroll first.
-		if (sessionUser?.requires_2fa_setup) {
-			partialToken = sessionUser.partial_token;
-			show2FASetup = true;
-			return;
-		}
 
 		await setSessionUser(sessionUser);
 	};
@@ -155,8 +113,6 @@
 				await ldapSignInHandler();
 			} else if (mode === 'signin') {
 				await signInHandler();
-			} else if (mode === 'forgot') {
-				await forgotPasswordHandler();
 			} else {
 				await signUpHandler();
 			}
@@ -327,40 +283,7 @@
 									/>
 								</div>
 							{/if}
-							{#if show2FAChallenge}
-								<TwoFactorChallenge
-									{partialToken}
-									onSuccess={async (sessionUser) => {
-										show2FAChallenge = false;
-										await setSessionUser(sessionUser);
-									}}
-									onCancel={() => {
-										show2FAChallenge = false;
-										partialToken = '';
-									}}
-								/>
-							{:else if show2FASetup}
-								<div class="flex flex-col">
-									<div class="text-2xl font-normal">
-										{$i18n.t('Two-Factor Authentication Required')}
-									</div>
-									<div class="mt-1 mb-4 text-sm text-gray-500 dark:text-gray-400">
-										{$i18n.t(
-											'Your administrator requires two-factor authentication for all accounts.'
-										)}
-									</div>
-									<TwoFactorSetup
-										token={partialToken}
-										on:enabled={async (e) => {
-											show2FASetup = false;
-											partialToken = '';
-											if (e.detail) {
-												await setSessionUser(e.detail);
-											}
-										}}
-									/>
-								</div>
-							{:else}
+							{#if authState === 'form'}
 								<form
 									class=" flex flex-col justify-center"
 									on:submit={(e) => {
@@ -378,8 +301,6 @@
 												})}
 											{:else if mode === 'signin'}
 												{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
-											{:else if mode === 'forgot'}
-												{$i18n.t('Forgot password?')}
 											{:else}
 												{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 											{/if}
@@ -448,7 +369,7 @@
 												</div>
 											{/if}
 
-											{#if mode !== 'forgot'}
+											{#if $config?.features.enable_login_form}
 												<div>
 													<label for="password" class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Password')}</label
@@ -511,54 +432,16 @@
 													><div class="self-center">
 														{mode === 'signin'
 															? $i18n.t('Sign in')
-															: mode === 'forgot'
-																? $i18n.t('Reset password')
-																: onboardingEnabled
-																	? $i18n.t('Create Admin Account')
-																	: $i18n.t('Create Account')}
+															: onboardingEnabled
+																? $i18n.t('Create Admin Account')
+																: $i18n.t('Create Account')}
 													</div>
 													{#if submitting}<div class="ml-2 self-center">
 															<Spinner />
 														</div>{/if}</button
 												>
 
-												{#if mode === 'signin' && $config?.features?.enable_login_form && $config?.features?.enable_forgot_password}
-													<div class="mt-2 text-sm text-center">
-														<button
-															class="font-normal underline"
-															type="button"
-															on:click={() => {
-																forgotSubmitted = false;
-																mode = 'forgot';
-															}}
-														>
-															{$i18n.t('Forgot password?')}
-														</button>
-													</div>
-												{/if}
-
-												{#if mode === 'forgot'}
-													<div class="mt-4 text-sm text-center">
-														{#if forgotSubmitted}
-															<p class="text-gray-500">
-																{$i18n.t(
-																	'If an account with that email exists, a password reset link has been sent.'
-																)}
-															</p>
-														{/if}
-														<button
-															class="font-normal underline mt-2"
-															type="button"
-															on:click={() => {
-																mode = 'signin';
-															}}
-														>
-															{$i18n.t('Back to sign in')}
-														</button>
-													</div>
-												{/if}
-
-												{#if mode !== 'forgot' && $config?.features.enable_signup && !onboardingEnabled}
+												{#if $config?.features.enable_signup && !onboardingEnabled}
 													<div class=" mt-4 text-sm text-center">
 														{mode === 'signin'
 															? $i18n.t("Don't have an account?")
@@ -584,7 +467,7 @@
 									</div>
 								</form>
 
-								{#if mode !== 'forgot' && Object.keys($config?.oauth?.providers ?? {}).length > 0}
+								{#if Object.keys($config?.oauth?.providers ?? {}).length > 0}
 									<div class="inline-flex items-center justify-center w-full">
 										<hr class="w-32 h-px my-4 border-0 dark:bg-gray-100/10 bg-gray-700/10" />
 										{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
@@ -691,7 +574,7 @@
 									</div>
 								{/if}
 
-								{#if mode !== 'forgot' && $config?.features.enable_ldap && $config?.features.enable_login_form}
+								{#if $config?.features.enable_ldap && $config?.features.enable_login_form}
 									<div class="mt-2">
 										<button
 											class="flex justify-center items-center text-xs w-full text-center underline"

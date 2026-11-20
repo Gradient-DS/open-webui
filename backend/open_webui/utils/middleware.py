@@ -73,7 +73,7 @@ from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.context_compaction import compact_messages_for_request
 from open_webui.utils.data_separation import request_mixes_data_sources
-from open_webui.utils.features import feature_enabled
+from open_webui.utils.features import feature_enabled, is_feature_enabled
 from open_webui.utils.files import (
     convert_markdown_base64_images,
     get_file_url_from_base64,
@@ -6216,7 +6216,7 @@ async def streaming_chat_response_handler(response, ctx):
                                     code = blocking_code + '\n' + code
 
                                 ci_engine = await Config.get('code_interpreter.engine')
-                                if ci_engine == 'pyodide':
+                                if ci_engine == 'pyodide' and is_feature_enabled('browser_code_execution'):
                                     ci_output = await event_caller(
                                         {
                                             'type': 'execute:python',

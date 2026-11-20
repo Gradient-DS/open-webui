@@ -14,7 +14,6 @@
 	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
-	import { get2FAStatus } from '$lib/apis/auths';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
 	import { setAppFontFamily, setTextScale } from '$lib/utils/text-scale';
@@ -49,7 +48,6 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
-	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
 	import WhatsNew from '$lib/components/layout/Overlay/WhatsNew.svelte';
 	import { shouldShowWhatsNew } from '$lib/utils/whatsNew';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
@@ -62,9 +60,6 @@
 	let loaded = false;
 	let DB = null;
 	let localDBChats = [];
-
-	let show2FAOverlay = false;
-	let grace2FAExpiresAt: number | null = null;
 
 	let version;
 	let showAcceptanceModal = false;
@@ -144,7 +139,9 @@
 	};
 
 	const setToolServers = async () => {
-		let toolServersData = await getToolServersData($settings?.toolServers ?? []);
+		let toolServersData = isFeatureEnabled('tool_servers')
+			? await getToolServersData($settings?.toolServers ?? [])
+			: [];
 		toolServersData = toolServersData.filter((data) => {
 			if (!data || data.error) {
 				toast.error(
@@ -159,9 +156,11 @@
 		toolServers.set(toolServersData);
 
 		// Inject enabled terminal servers as always-on tool servers
-		const enabledTerminals = (($settings as any)?.terminalServers ?? []).filter(
-			(s: any) => s.enabled || s.url === $selectedTerminalId
-		);
+		const enabledTerminals = isFeatureEnabled('tool_servers')
+			? (($settings as any)?.terminalServers ?? []).filter(
+					(s: any) => s.enabled || s.url === $selectedTerminalId
+				)
+			: [];
 
 		// Fetch terminal servers the user has access to (for FileNav + terminal_id)
 		const systemTerminals = await getTerminalServers(localStorage.token);
@@ -213,7 +212,7 @@
 	};
 
 	const setTools = async () => {
-		const toolsData = await getTools(localStorage.token);
+		const toolsData = isFeatureEnabled('tools') ? await getTools(localStorage.token) : [];
 		tools.set(toolsData);
 	};
 
@@ -278,19 +277,6 @@
 				checkLocalDBChats(),
 				setBanners().catch((e) => console.error('Failed to load banners:', e)),
 				setTools().catch((e) => console.error('Failed to load tools:', e)),
-				(async () => {
-					if (
-						$config?.features?.require_2fa &&
-						$config?.features?.enable_2fa &&
-						$config?.features?.enable_login_form
-					) {
-						const status = await get2FAStatus(localStorage.token).catch(() => null);
-						if (status && !status.totp_enabled && !status.is_sso_user) {
-							grace2FAExpiresAt = status.grace_period_expires_at ?? null;
-							show2FAOverlay = true;
-						}
-					}
-				})().catch((e) => console.error('Failed to check 2FA status:', e)),
 				Promise.all([
 					setUserSettings(),
 					setModels().catch((e) => console.error('Failed to load models:', e))
@@ -564,9 +550,7 @@
 					</div>
 				{/if}
 
-				<TwoFactorRequired bind:show={show2FAOverlay} gracePeriodExpiresAt={grace2FAExpiresAt} />
-
-				{#if loaded && !show2FAOverlay}
+				{#if loaded}
 					<WhatsNew bind:show={showWhatsNew} />
 				{/if}
 

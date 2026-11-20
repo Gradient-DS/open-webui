@@ -62,7 +62,6 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'platform_thread',
         'platform_thread_versions',
         'platform_thread_read',
-        'disabled_oauth_client',
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
@@ -207,57 +206,20 @@ reason = "Unrelated waiver"
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_catalog_embedding_waivers_are_drive_only_and_never_skip_probes(monkeypatch, tmp_path, mode):
+def test_local_embedding_routes_are_retired_in_both_modes(monkeypatch, mode):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     routes = {'POST /api/embeddings', 'POST /api/v1/embeddings'}
-    assert coverage.waivers().keys() & routes == (routes if mode == 'drive' else set())
-    for route in routes:
-        assert not seeds.route_waived(route)
-        assert plane._target(route, {}, plane.Seeding()) == route.split(' ', 1)[1]
-    monkeypatch.setattr(coverage, 'operations', lambda: routes)
-    monkeypatch.setattr(coverage, 'evidence', lambda: {'hits': []})
-    if mode == 'drive':
-        coverage.assert_every_route_is_driven_or_waived()
-        monkeypatch.setattr(coverage, 'evidence', lambda: {'hits': sorted(routes)})
-        with pytest.raises(AssertionError, match='waived but actually driven'):
-            coverage.assert_no_waiver_covers_a_route_the_plane_actually_reached()
-    else:
-        with pytest.raises(AssertionError, match='POST /api/embeddings'):
-            coverage.assert_every_route_is_driven_or_waived()
+    assert not routes & (set(plane.operations()) | coverage.waivers().keys())
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_function_seeds_and_refusal_controls_follow_the_runtime(monkeypatch, mode):
+def test_function_and_tool_targets_are_retired_in_both_modes(monkeypatch, mode):
     from . import crossuser
 
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-    parameters = [p for p in seeds.SURFACE['parameter'] if p['key'] in {'function', 'active_function', 'action'}]
-    spec = {
-        'paths': {
-            path: item
-            for path, item in seeds.SPEC['paths'].items()
-            if path.startswith('/api/v1/functions/') or path == '/api/chat/actions/{action_id}'
-        }
-    }
-    endpoint = Mock(return_value='installed-function')
-    active = Mock(return_value='installed-action')
-    monkeypatch.setattr(seeds, '_seed_endpoint', endpoint)
-    monkeypatch.setitem(seeds._SEEDERS, 'seed_active_function', active)
-    resolved = seeds.resolve_parameters(Mock(), surface={'parameter': parameters}, spec=spec)
-    action = resolved['/api/chat/actions/{action_id}', 'action_id']
-    functions = {r for r in plane.operations() if r.split(' ', 1)[1].startswith('/api/v1/functions/')}
-    assert all(plane._target(route, resolved, plane.Seeding()) is not None for route in functions)
-    if mode == 'drive':
-        endpoint.assert_not_called()
-        active.assert_not_called()
-        assert action.startswith('attack_active_')
-        assert functions <= crossuser.expected_refusals().keys()
-        assert functions <= coverage.waivers().keys()
-        assert not functions & crossuser._shared().keys()
-        assert 'POST /api/chat/actions/{action_id}' in crossuser.expected_refusals()
-    else:
-        active.assert_not_called()
-        assert action.startswith('fictional-retired-')
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    assert not retired & (set(seeds.ordinary_targets()) | crossuser.expected_refusals().keys())
+    assert not {'active_function', 'action', 'tool'} & {p['key'] for p in seeds.SURFACE['parameter']}
 
 
 def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_route(monkeypatch):
@@ -274,7 +236,7 @@ def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_rout
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.example.invalid')
     app = FastAPI()
     app.include_router(functions.router, prefix='/api/v1/functions')
-    declarations = crossuser.expected_refusals()
+    declaration = {'status': 403, 'detail': 'Custom functions are disabled under v2'}
     observed = set()
     with TestClient(app) as client:
         for route in app.routes:
@@ -283,12 +245,13 @@ def test_v2_function_waivers_match_observed_http_refusals_for_every_mounted_rout
             for method in route.methods:
                 operation = f'{method} {route.path}'
                 response = client.request(method, route.path.replace('{id}', 'fictional-function'), json={})
-                assert crossuser.refused_as_expected(declarations[operation], response.status_code, response.text)
+                assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
                 assert not entered_the_handler(response)
                 observed.add(operation)
     functions_in_spec = {r for r in plane.operations() if r.split(' ', 1)[1].startswith('/api/v1/functions/')}
-    assert observed == functions_in_spec
-    assert observed <= coverage.waivers().keys()
+    assert len(observed) == 4
+    assert not functions_in_spec
+    assert not observed & coverage.waivers().keys()
 
 
 @pytest.mark.parametrize('actor', ['admin', 'user', 'intruder'])
@@ -326,7 +289,7 @@ def test_v2_action_refuses_every_actor_before_local_dispatch(monkeypatch, actor)
         response = client.post(
             '/api/chat/actions/fictional-action', json={'chat_id': 'fictional-chat', 'model': 'fictional-model'}
         )
-    declaration = crossuser.expected_refusals()['POST /api/chat/actions/{action_id}']
+    declaration = {'all_actors': True, 'status': 409, 'detail': 'unavailable', 'json': {'state': 'unavailable'}}
     assert declaration['all_actors'] and declaration['json'] == {'state': 'unavailable'}
     assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
     ownership.assert_not_awaited()
@@ -360,26 +323,14 @@ async def test_v2_legacy_share_access_update_refuses_every_logged_in_actor(monke
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_retired_approval_is_an_exact_all_actor_control_and_never_waived(monkeypatch, mode):
+def test_retired_approval_has_no_route_or_sweep_control(monkeypatch, mode):
     from . import crossuser
 
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     route = 'POST /api/v1/chats/{id}/messages/{message_id}/resolve'
-    assert route in plane.operations()
+    assert route not in plane.operations()
     assert route not in coverage.waivers()
-    assert not seeds.route_waived(route)
-    field = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
-    assert field['json'] == {'call_id': 'call_{token}', 'action': 'reject'}
-    declaration = crossuser.expected_refusals().get(route)
-    if mode == 'waive':
-        assert declaration is None
-        return
-    assert declaration['all_actors'] is True
-    assert declaration['status'] == 409
-    assert declaration['json'] == {'state': 'unavailable'}
-    assert crossuser.refused_as_expected(declaration, 409, '{"state":"unavailable"}')
-    for status, body in [(200, '{}'), (404, '{"state":"unavailable"}'), (409, '{"state":"other"}')]:
-        assert not crossuser.refused_as_expected(declaration, status, body)
+    assert route not in crossuser.expected_refusals()
 
 
 def test_fanout_controls_require_the_platform_without_new_waivers():
@@ -390,19 +341,19 @@ def test_fanout_controls_require_the_platform_without_new_waivers():
     assert not routes & set(seeds.SOEV_BACKED)
 
 
-def test_platform_oauth_authorization_has_a_seed_and_an_exact_refusal(monkeypatch):
+def test_tool_oauth_has_no_seed_or_refusal_control():
     from . import crossuser
 
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     route = 'GET /oauth/clients/{client_id}/authorize'
-    parameter = seeds.parameter_for('/oauth/clients/{client_id}/authorize', 'client_id')
-    assert seeds.seed_enabled(parameter)
-    assert parameter['seeded_by'] == 'seed_disabled_oauth_client'
-    ctx = seeds.SeedContext(None, None, seeds.SURFACE, token='fictional-pass')
-    assert seeds.seed_disabled_oauth_client(ctx, parameter) == 'mcp:fictional-disabled-fictional-pass'
-    assert route in seeds.ordinary_targets()
-    declaration = crossuser.expected_refusals()[route]
-    assert declaration['all_actors'] is True
-    assert declaration['status'] == 403
-    assert declaration['json'] == {'detail': 'The requested action has been restricted as a security measure.'}
+    assert route not in seeds.ordinary_targets()
+    assert route not in crossuser.expected_refusals()
     assert route not in coverage.waivers()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_retired_product_routes_are_absent_in_both_sweep_modes(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    assert not retired & (set(plane.operations()) | coverage.waivers().keys() | crossuser.expected_refusals().keys())

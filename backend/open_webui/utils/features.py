@@ -5,7 +5,6 @@ from typing import Literal
 from fastapi import HTTPException, status
 from open_webui.config import (
     FEATURE_ARTIFACTS,
-    FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
     FEATURE_CHANGELOG,
     FEATURE_CHAT_CONTROLS,
@@ -21,8 +20,6 @@ from open_webui.config import (
     FEATURE_SKILLS,
     FEATURE_SYSTEM_PROMPT,
     FEATURE_TERMINAL_SERVERS,
-    FEATURE_TOOL_SERVERS,
-    FEATURE_TOOLS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
 )
@@ -49,6 +46,7 @@ Feature = Literal[
     'tool_servers',
     'terminal_servers',
     'builtin_tools',
+    'browser_code_execution',
 ]
 
 FEATURE_FLAGS: dict[Feature, bool] = {
@@ -68,11 +66,12 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'models': FEATURE_MODELS,
     'knowledge': FEATURE_KNOWLEDGE,
     'prompts': FEATURE_PROMPTS,
-    'tools': FEATURE_TOOLS,
+    'tools': False,
     'skills': FEATURE_SKILLS,
-    'tool_servers': FEATURE_TOOL_SERVERS,
+    'tool_servers': False,
     'terminal_servers': FEATURE_TERMINAL_SERVERS,
-    'builtin_tools': FEATURE_BUILTIN_TOOLS,
+    'builtin_tools': False,
+    'browser_code_execution': False,
 }
 
 
@@ -92,6 +91,8 @@ def is_feature_enabled(feature: Feature) -> bool:
 async def feature_enabled(feature: str, legacy: bool | list[str] | None = None) -> bool | list[str]:
     from open_webui.soev import product_config
 
+    if feature in {'tools', 'tool_servers', 'builtin_tools', 'browser_code_execution'}:
+        return False
     if product_config.v2_enabled():
         return await product_config.get(f'feature.{feature}')
     if legacy is not None:

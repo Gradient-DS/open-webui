@@ -309,3 +309,11 @@ describe('effective audio control visibility', () => {
 		expect(hasFeatureAccess('voice_call', user, 'chat.call')).toBe(false);
 	});
 });
+
+it.each<Feature>(['tools', 'tool_servers', 'builtin_tools', 'browser_code_execution'])(
+	'never restores retired %s authoring from stale flags',
+	(feature) => {
+		vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: true } });
+		expect(isFeatureEnabled(feature)).toBe(false);
+	}
+);

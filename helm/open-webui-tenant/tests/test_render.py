@@ -41,6 +41,49 @@ def env(container):
     return {entry['name']: entry for entry in container.get('env', [])}
 
 
+def test_retired_settings_cannot_restore_owui_controls_or_credentials():
+    pod, config = objects(
+        {
+            'openWebui.config.enable2fa': 'true',
+            'openWebui.config.enableForgotPassword': 'true',
+            'openWebui.config.enableOnedrivePersonal': 'true',
+            'openWebui.config.enableConfluenceSync': 'true',
+            'openWebui.config.distributedDocPipelineEnabled': 'true',
+            'openWebui.config.featureTools': 'true',
+            'openWebui.config.featureToolServers': 'true',
+            'openWebui.config.dataRetentionTtlDays': '7',
+            'secrets.confluenceOauthClientSecret': 'fictional-unused-secret',
+            'secrets.pipelineApiKey': 'fictional-unused-key',
+            'secrets.loaderIngestApiKey': 'fictional-worker-only-key',
+            'secrets.syncApiKey': 'fictional-worker-only-key',
+        }
+    )
+    assert (
+        not {
+            'ENABLE_2FA',
+            'ENABLE_FORGOT_PASSWORD',
+            'ENABLE_ONEDRIVE_PERSONAL',
+            'ENABLE_CONFLUENCE_SYNC',
+            'DISTRIBUTED_DOC_PIPELINE_ENABLED',
+            'FEATURE_TOOLS',
+            'FEATURE_TOOL_SERVERS',
+            'DATA_RETENTION_TTL_DAYS',
+        }
+        & config.keys()
+    )
+    for container in (pod['containers'][0], next(c for c in pod['initContainers'] if c['name'] == 'migrate')):
+        assert (
+            not {'CONFLUENCE_OAUTH_CLIENT_SECRET', 'PIPELINE_API_KEY', 'LOADER_INGEST_API_KEY', 'SYNC_API_KEY'}
+            & env(container).keys()
+        )
+    assert config['FEATURE_VOICE'] == 'False'
+    assert config['ENABLE_SKILL_EXECUTION'] == 'False'
+    assert config['ENABLE_WEB_SEARCH'] == 'true'
+    assert config['ENABLE_API_KEYS'] == 'false'
+    assert config['RAG_FILE_SNIFF_MODE'] == 'enforce'
+    assert config['TENANT_NAME'] == 'default'
+
+
 def test_default_single_login_migrates_only_in_init():
     pod, config = objects()
     init_container = next(c for c in pod['initContainers'] if c['name'] == 'migrate')

@@ -261,22 +261,6 @@ other app containers so they use the same credentials.
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: microsoft-client-secret
 {{- end }}
-# Confluence / Atlassian OAuth (only if configured)
-{{- if or .Values.secrets.confluenceOauthClientSecret .Values.externalSecrets.onepassword.fields.confluenceOauthClientSecret }}
-- name: CONFLUENCE_OAUTH_CLIENT_SECRET
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: confluence-oauth-client-secret
-{{- end }}
-# Confluence basic-auth API token (only if configured)
-{{- if or .Values.secrets.confluenceBasicAuthApiToken .Values.externalSecrets.onepassword.fields.confluenceBasicAuthApiToken }}
-- name: CONFLUENCE_BASIC_AUTH_API_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: confluence-basic-auth-api-token
-{{- end }}
 # Email Graph API secret (only if configured)
 {{- if or .Values.secrets.emailGraphClientSecret .Values.externalSecrets.onepassword.fields.emailGraphClientSecret }}
 - name: EMAIL_GRAPH_CLIENT_SECRET
@@ -299,42 +283,6 @@ other app containers so they use the same credentials.
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: soev-api-key
-{{- end }}
-# Loader-worker → /ingest callback bearer
-{{- if or .Values.secrets.loaderIngestApiKey .Values.externalSecrets.onepassword.fields.loaderIngestApiKey }}
-- name: LOADER_INGEST_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: loader-ingest-api-key
-{{- end }}
-# Distributed doc-pipeline submit bearer (matches pipeline-api inbound PIPELINE_API_KEY)
-{{- if or .Values.secrets.pipelineApiKey .Values.externalSecrets.onepassword.fields.pipelineApiKey }}
-- name: PIPELINE_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: pipeline-api-key
-{{- end }}
-# Sync machine key — OWUI validates the daemon inbound (SyncPrincipal
-# on /sync/diff, /sync/cleanup, /api/v1/sync-daemon/*, D-5). Mounted
-# whenever a value exists; the sync_daemon.enabled flag gates use.
-{{- if or .Values.secrets.syncApiKey .Values.externalSecrets.onepassword.fields.syncApiKey }}
-- name: SYNC_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: sync-api-key
-{{- end }}
-# Sync-daemon bearer — OWUI presents this to the daemon on the manual
-# "Sync now" / cancel forwards (services/sync/daemon_client). Mounted
-# whenever a value exists; SYNC_DAEMON_URL (configmap) gates use.
-{{- if or .Values.secrets.syncDaemonApiKey .Values.externalSecrets.onepassword.fields.syncDaemonApiKey }}
-- name: SYNC_DAEMON_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: sync-daemon-api-key
 {{- end }}
 # S3 Storage credentials (only if configured)
 {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
@@ -494,10 +442,6 @@ Output: YAML list of {matchName} / {matchPattern}.
 {{- if eq (toString $c.enableOnedriveIntegration) "true" }}{{ $patterns = append $patterns "*.sharepoint.com" }}{{ end -}}
 {{- if eq (toString $c.enableGoogleDriveIntegration) "true" }}
 {{- $names = concat $names (list "accounts.google.com" "oauth2.googleapis.com" "www.googleapis.com") -}}
-{{- end -}}
-{{- if eq (toString $c.enableConfluenceIntegration) "true" }}
-{{- $names = concat $names (list "auth.atlassian.com" "api.atlassian.com") -}}
-{{- with $c.confluenceSiteUrl }}{{ $names = append $names (urlParse .).host }}{{ end -}}
 {{- end -}}
 {{- if and (eq (toString $c.storageProvider) "s3") $c.s3EndpointUrl }}{{ $names = append $names (urlParse $c.s3EndpointUrl).host }}{{ end -}}
 {{- $names = concat $names $fqdn.extraNames -}}

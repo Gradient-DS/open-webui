@@ -10,11 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 372 operations. Audit bodies across all
-# OpenAPI methods (376 including HEAD/OPTIONS), because writable_string_fields
-# excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
-# TRACE is valid but absent today.
-# Shared mailbox routes add three operations and one writable address field.
+# The product exposes 307 five-method operations and 310 across all HTTP methods.
+# Derive all methods; GET/HEAD/OPTIONS bodies are deliberately excluded from string writes.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
 OPENAPI_METHODS = FIVE_METHODS | {'head', 'options', 'trace'}
 
@@ -34,8 +31,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (369 + 3, 373 + 3), (
-        f'Expected 372 five-method operations / 376 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (307, 310), (
+        f'Expected 307 five-method operations / 310 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,13 +60,11 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (
-        138 + 1,
-        1845 + 1,
-    ), f'Expected 139 routes / 1846 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (96, 944), (
+        f'Expected 96 routes / 944 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
-    # image_prompt refuses platform mode before consuming either field.
-    for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
+    for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title'):
         assert {'language', 'message_id'} <= set(fields[f'POST /api/v1/tasks/{task}/completions'])
     # Membership edits remain in the attack surface even though the handler refuses them.
     assert 'POST /api/v1/groups/id/{id}/update' not in operations
@@ -80,24 +75,23 @@ def test_derived_counts(surface):
         'threads[].thread_id',
         'threads[].versions[]',
     ]
-    assert query_counts == (
-        36,
-        78,
-    ), f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    assert query_counts == (35, 77), (
+        f'Expected 35 routes / 77 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    )
 
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
-    # External knowledge retired 7 writable routes and 37 fields; keep the guard margin.
+    # Initial committed surface: 139 body routes / 1846 fields, with floor margins 10 / 231.
+    # Product retirement removed exactly 43 body routes / 902 fields; retain those margins.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 - 17 - 11 - 7 - 61 and strings >= 2400 - 403 - 30 - 37 - 315, (
-        f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
-        'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
+    assert routes >= 139 - 43 - 10 and strings >= 1846 - 902 - 231, (
+        f'Derivation collapsed: {routes} routes / {strings} writable string fields'
     )
+    # Query retirement: 1 routes / 1 fields; original margins remain 9 / 10.
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
-    assert routes >= 40 - 13 and strings >= 90 - 1 - 21, (
-        f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
-        'original floor 40 / 90, less the retired source query parameter.'
+    assert routes >= 36 - 1 - 9 and strings >= 78 - 1 - 10, (
+        f'Query derivation collapsed: {routes} routes / {strings} string query parameters'
     )
 
 
@@ -105,12 +99,12 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 9 + 1 and media == {'application/json': 7 + 1, 'multipart/form-data': 2}, (
-        f'Expected 10 blind body operations (8 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
+    assert len(blind) == 7 and media == {'multipart/form-data': 2, 'application/json': 5}, (
+        f'Expected 7 blind body operations (5 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == set(), (
-        f'Expected no blind read bodies alongside 8 JSON write bodies; measured read bodies: {sorted(read_bodies)}.'
+        f'Expected no blind read bodies alongside 5 JSON write bodies; measured read bodies: {sorted(read_bodies)}.'
     )
 
 
@@ -128,7 +122,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        f'Expected exact waivers for 10 blind operations (8 JSON writes + 2 multipart); measured {len(blind)} blind.'
+        f'Expected exact waivers for 7 blind operations (5 JSON writes + 2 multipart); measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')
     for route in sorted(missing):

@@ -422,7 +422,6 @@
   "services/model_request_bodies.py:ChatCompletionBody:ChatMessage",
   "services/model_request_bodies.py:MessagesBody:ChatMessage",
   "services/model_request_bodies.py:TaskCompletionBody:ChatMessage",
-  "services/retention/service.py:DataRetentionService._cleanup_stale_chats:Chats",
   "socket/main.py:chat_events:Chats",
   "socket/main.py:get_event_emitter.__event_emitter__:Chats",
   "socket/main.py:get_folder_unread_counts:Chats",

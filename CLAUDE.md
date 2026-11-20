@@ -99,6 +99,18 @@ behaviour. Never exempt a route or loosen an assertion to make a count match. Us
 - `src/routes/+layout.svelte` — root layout, app initialization
 - `src/lib/stores/` — global state (user, settings, models, chats)
 
+## Retired product features
+
+The product no longer offers local credential login/MFA, OWUI RAG/web loaders,
+inference proxies, custom tools/functions/tool servers, local retention workers,
+image generation controls, channels or browser code execution. Upstream source
+remains behind the fork's mount/UI boundaries; do not restore a route or control
+merely because its implementation remains. Platform search, cloud connections,
+voice, scheduled automations/calendar, skills and workspace/sandboxes stay.
+Jupyter execution and the code editor's Python formatter stay independent of the
+retired browser interpreter. Exact route removals, retained config dependencies
+and validation are in [docs/dead-features-removal.md](docs/dead-features-removal.md).
+
 ## Models under the v2 runtime
 
 With `AGENT_API_ENABLED` and `SOEV_API_URL` set, `soev/model_catalog.py` reads models

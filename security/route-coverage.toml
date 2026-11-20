@@ -1,5 +1,12 @@
-# Indexed Ollama model authorization has exact all-actor refusal controls in
-# attack-surface.toml; platform speech requires successful private-stack evidence.
+# owui-dead-features: the data-warning acceptance route is deleted, not waived.
+# owui-dead-features: local credential and MFA issuers are removed; no new waivers.
+# owui-dead-features: tool/function execution and tool OAuth are unmounted, not waived.
+# owui-dead-features: local compaction, approval resolution and task config are unmounted.
+# owui-dead-features: the image-prompt task is unmounted, without a waiver.
+# owui-dead-features: inference proxies and local embedding dispatch are unmounted.
+# owui-dead-features: four OWUI web-loader/search operations are unmounted; no new waivers.
+# Inference proxies are unmounted. Platform speech requires successful
+# private-stack evidence.
 # Terminal HEAD refusal evidence requires exact status 403 and an empty body;
 # its GET sibling requires the exact Feature is unavailable detail.
 # Platform autocomplete has an exact all-actor 400 disabled-feature control in
@@ -55,15 +62,6 @@ id = "GET /oauth/{provider}/login/callback"
 reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_login_provider). utils/oauth.py registers login providers only from environment configuration and the sealed stack has no OAuth issuer to register. Closes with an OIDC issuer stub."
 
 [[waived]]
-id = "GET /oauth/clients/{client_id}/authorize"
-runtime_soev_backed = "waive"
-reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
-
-[[waived]]
-id = "GET /oauth/clients/{client_id}/callback"
-reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
-
-[[waived]]
 id = "POST /api/v1/auths/oauth/{provider}/token/exchange"
 runtime_soev_backed = "waive"
 reason = "Standalone mode only: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_exchange_provider). auths.py:token_exchange needs an environment-registered OAUTH_PROVIDERS entry and an access token from its issuer; neither can be created through the application's HTTP API. Closes with an OIDC issuer stub. With soev-api configured, drive mode probes the explicit 403 refusal with a fictional provider and token; it has no waiver."
@@ -94,23 +92,6 @@ reason = "Never attempted: every owner pass skips it because `target_id` is decl
 # These waivers affect the coverage gate only: the passes still attempt both
 # routes, and a hit makes the stale-waiver gate fail. The public Ollama registry
 # must continue driving them without waivers.
-
-[[waived]]
-id = "POST /api/embeddings"
-runtime_soev_backed = "drive"
-reason = "The private v2 sweep left this route unentered: utils/models.py:get_all_base_models loads only soev-api catalog models, while utils/embeddings.py:generate_embeddings only dispatches owned_by=ollama. HTTP controls against the actual handler confirm a valid catalog model and input return 404 without provider I/O. A direct Ollama connection cannot add a model to the v2 registry. Closes when the dispatcher supports catalog embeddings."
-
-[[waived]]
-id = "POST /api/v1/embeddings"
-runtime_soev_backed = "drive"
-reason = "Same handler as /api/embeddings: the private v2 sweep left this alias unentered. A valid catalog model and input return 404 without provider I/O in the actual-handler HTTP control; the v2 registry never includes Ollama models. Applies only in private drive mode. Closes when the dispatcher supports catalog embeddings."
-
-# --- Singletons -----------------------------------------------------------------
-
-[[waived]]
-id = "GET /api/v1/auths/password/reset/{token}/validate"
-runtime_soev_backed = "waive"
-reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
 
 [[waived]]
 id = "GET /cache/{path}"
@@ -410,26 +391,6 @@ reason = "soev/thread_routes.py relays current cache authorization using only th
 
 # --- v2 custom functions: refused by the router dependency ----------------------
 # Keep every route in the passes. A successful handler entry invalidates its waiver.
-
-[[waived]]
-id = "GET /api/v1/functions/"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/id/{id}/valves/user"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "GET /api/v1/functions/id/{id}/valves/user/spec"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
-
-[[waived]]
-id = "POST /api/v1/functions/id/{id}/valves/user/update"
-runtime_soev_backed = "drive"
-reason = "The private sweep observed functions/create returning 403 after #535. routers/functions.py applies require_custom_functions to every route; its 403 precedes handler entry, even for admins. Offline HTTP controls check every mounted route. Closes if custom functions become available under v2."
 
 [[waived]]
 id = "GET /api/v1/threads/{thread_id}/versions"
