@@ -10,6 +10,7 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import { config } from '$lib/stores';
 	import type { Capture } from './audio';
 	import { finishMeeting } from './finish';
 	import { partStore } from './parts';
@@ -22,7 +23,9 @@
 		initialCutState,
 		rmsOf,
 		sendWhenIdle,
+		limitState,
 		AUDIO_BITS_PER_SECOND,
+		MAX_RECORDING_MINUTES,
 		type RecorderLike
 	} from './recorder';
 
@@ -74,6 +77,12 @@
 			toast.warning($i18n.t('A part of the live transcript could not be sent.'));
 		}
 	});
+
+	// A recording stops by itself at the tenant's limit, so it still fits one transcription.
+	const maxSeconds =
+		untrack(() => $config?.features?.meeting_max_minutes ?? MAX_RECORDING_MINUTES) * 60;
+	let startedAt = 0;
+	let limitAnnounced = false;
 
 	let clock: ReturnType<typeof setInterval> | null = null;
 	let sampler: ReturnType<typeof setInterval> | null = null;
@@ -196,6 +205,23 @@
 		await finish();
 	};
 
+	// The time comes from the clock, not from counting ticks: a busy or hidden tab skips ticks.
+	const tick = () => {
+		seconds = Math.floor((performance.now() - startedAt) / 1000);
+		if (phase !== 'recording') return;
+		const state = limitState(seconds, maxSeconds);
+		if (state === 'within') return;
+		const time = formatTimestamp(maxSeconds);
+		if (state === 'reached') {
+			toast.info($i18n.t('The recording reached its limit of {{time}} and was stopped.', { time }));
+			stop();
+			return;
+		}
+		if (limitAnnounced) return;
+		limitAnnounced = true;
+		toast.warning($i18n.t('The recording stops by itself at {{time}}.', { time }));
+	};
+
 	const discard = async () => {
 		phase = 'done';
 		await rotator?.stop();
@@ -227,7 +253,8 @@
 		);
 		rotator.start();
 
-		clock = setInterval(() => (seconds += 1), 1000);
+		startedAt = performance.now();
+		clock = setInterval(tick, 1000);
 		listen();
 		requestWakeLock();
 		document.addEventListener('visibilitychange', onVisibility);

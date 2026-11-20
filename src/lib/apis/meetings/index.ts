@@ -10,9 +10,14 @@ import type {
 	MeetingSummary
 } from '$lib/components/meetings/meeting';
 
+/** soev-api's constraint for a start in a language the transcription model does not transcribe. */
+export const LANGUAGE_UNSUPPORTED = 'chat:language_unsupported';
+
 export class MeetingApiError extends Error {
 	status: number;
 	detail: unknown;
+	/** Why the meeting agent refused the input (soev-api's `chat:<reason>`), when it said. */
+	constraint: string | null;
 
 	constructor(status: number, detail: unknown) {
 		const message =
@@ -22,6 +27,8 @@ export class MeetingApiError extends Error {
 		super(message);
 		this.status = status;
 		this.detail = detail;
+		this.constraint =
+			typeof detail === 'string' ? null : ((detail as { constraint?: string })?.constraint ?? null);
 	}
 }
 
@@ -64,12 +71,17 @@ export const sendMeetingInput = (token: string, id: string, input: MeetingInput)
 export const deleteMeeting = (token: string, id: string) =>
 	request<void>(token, `/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-export const uploadMeetingAudio = (token: string, audio: Blob, name: string) =>
-	request<Record<string, unknown>>(token, `/audio?name=${encodeURIComponent(name)}`, {
-		method: 'POST',
-		body: audio,
-		headers: { 'Content-Type': audio.type || 'application/octet-stream' }
-	});
+/** Uploads one audio object; `continues` names the upload whose bytes this one follows. */
+export const uploadMeetingAudio = (token: string, audio: Blob, name: string, continues?: string) =>
+	request<Record<string, unknown>>(
+		token,
+		`/audio?name=${encodeURIComponent(name)}${continues ? `&continues=${encodeURIComponent(continues)}` : ''}`,
+		{
+			method: 'POST',
+			body: audio,
+			headers: { 'Content-Type': audio.type || 'application/octet-stream' }
+		}
+	);
 
 /** Sends an input and calls `onFrame` for each SSE frame of the turn it runs (contract C6). */
 export const streamMeetingInput = async (

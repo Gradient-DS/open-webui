@@ -6,6 +6,7 @@
 
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { config } from '$lib/stores';
 	import {
 		audioCapabilities,
 		listMicrophones,
@@ -13,6 +14,7 @@
 		type AudioSource,
 		type Microphone
 	} from './audio';
+	import { AUTO_LANGUAGE, MEETING_LANGUAGES, defaultMeetingLanguage } from './meeting';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -21,14 +23,19 @@
 		onCancel,
 		resume = false
 	}: {
-		onStart: (source: AudioSource, micId: string | null) => Promise<void>;
+		onStart: (source: AudioSource, micId: string | null, language: string) => Promise<void>;
 		onCancel: () => void;
-		/** Continuing an interrupted meeting: its consent stands, only the source is asked. */
+		/** Continuing an interrupted meeting: its consent and language stand, only the source is asked. */
 		resume?: boolean;
 	} = $props();
 
 	let consented = $state(untrack(() => resume));
 	let starting = $state(false);
+
+	// The language spoken in the meeting: detected by the transcriber unless the user names one.
+	let language = $state(
+		untrack(() => defaultMeetingLanguage($config?.features?.meeting_default_language))
+	);
 
 	// Tab audio needs Chromium on a desktop; elsewhere only the microphone is offered.
 	const can = audioCapabilities(typeof navigator !== 'undefined' ? navigator : undefined);
@@ -107,7 +114,7 @@
 		if (!consented || starting) return;
 		starting = true;
 		try {
-			await onStart(source, source === 'display' ? null : micId);
+			await onStart(source, source === 'display' ? null : micId, language);
 		} finally {
 			starting = false;
 		}
@@ -187,6 +194,20 @@
 	{/if}
 
 	{#if !resume}
+		<div class="mt-3 px-2">
+			<div class="mb-1 text-xs text-gray-500">{$i18n.t('Spoken language')}</div>
+			<select
+				class="w-full rounded-lg border border-gray-100 bg-transparent px-2 py-1.5 text-[0.8125rem] text-gray-800 outline-hidden dark:border-gray-850 dark:text-gray-200"
+				aria-label={$i18n.t('Spoken language')}
+				bind:value={language}
+			>
+				<option value={AUTO_LANGUAGE}>{$i18n.t('Detect automatically')}</option>
+				{#each MEETING_LANGUAGES as option (option.code)}
+					<option value={option.code}>{option.label}</option>
+				{/each}
+			</select>
+		</div>
+
 		<div
 			class="mt-4 flex cursor-pointer items-start gap-2.5 px-2"
 			role="checkbox"

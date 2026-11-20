@@ -13,6 +13,8 @@ export type AudioRef = {
 	size?: number;
 	media_type?: string;
 	name?: string;
+	/** The first piece of the recording this piece continues; absent on a file of its own. */
+	continues?: string;
 };
 
 export type MeetingInput =
@@ -309,10 +311,23 @@ export const listMeetings = (
 		.sort((a, b) => (ascending ? 1 : -1) * key(a).localeCompare(key(b)));
 };
 
-/** The meeting language for the transcriber: the UI language's code (nl-NL → nl), else auto-detect. */
-export const meetingLanguage = (uiLanguage: string | undefined): string => {
-	const code = (uiLanguage ?? '').slice(0, 2).toLowerCase();
-	return /^[a-z]{2}$/.test(code) ? code : 'auto';
+/** The start form's choice that leaves the language to the transcription model. */
+export const AUTO_LANGUAGE = 'auto';
+
+/** The languages the start form offers by name, under their own names (never translated). */
+export const MEETING_LANGUAGES: readonly { code: string; label: string }[] = [
+	{ code: 'nl', label: 'Nederlands' },
+	{ code: 'en', label: 'English' }
+];
+
+/**
+ * The language the start form preselects: the tenant's default (`MEETING_DEFAULT_LANGUAGE`) when
+ * it is automatic detection or a language the form offers, else automatic detection. The UI
+ * language plays no part, so a UI in any language never sends its own code to the transcriber.
+ */
+export const defaultMeetingLanguage = (tenantDefault: string | undefined): string => {
+	const tenant = (tenantDefault ?? '').trim().toLowerCase();
+	return MEETING_LANGUAGES.some((language) => language.code === tenant) ? tenant : AUTO_LANGUAGE;
 };
 
 /** Groups items (already newest first) under the label `rangeOf` gives each, keeping order. */
