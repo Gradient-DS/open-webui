@@ -225,3 +225,15 @@ def test_import_limits_are_checked_before_storage(seeded, storage, monkeypatch, 
     assert create(seeded).status_code == 413
     assert not storage
     assert counts(seeded) == [0, 0, 0]
+
+
+def test_second_user_uploads_the_same_skill_privately(seeded, storage):
+    first = create(seeded)
+    second = create(seeded, principal='admin')
+    assert first.status_code == second.status_code == 200, second.text
+    assert second.json()['user_id'] == 'admin'
+    assert second.json()['id'].startswith('outline-import-') and first.json()['id'] == 'outline-import'
+    assert counts(seeded) == [2, 4, 4]
+    own = seeded.client.get(f'/api/v1/skills/id/{second.json()["id"]}', headers=seeded.headers('owner'))
+    assert own.status_code == 401
+    assert create(seeded).status_code == 400

@@ -1,5 +1,6 @@
 import logging
 import re
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -181,6 +182,10 @@ async def create_new_skill(
         )
 
     existing = await Skills.get_skill_by_id(form_data.id, db=db)
+    # [Gradient] Skill ids are global, and two users may upload the same bundle: the later one gets a suffix.
+    if existing is not None and form_data.bundle is not None and existing.user_id != user.id:
+        form_data.id = f'{form_data.id[:56]}-{secrets.token_hex(3)}'
+        existing = await Skills.get_skill_by_id(form_data.id, db=db)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
