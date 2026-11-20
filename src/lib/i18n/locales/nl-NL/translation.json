@@ -3183,7 +3183,7 @@
   "Set system-wide interface defaults for every account. Personal settings override these defaults.": "",
   "Set the birth date saved with your profile.": "",
   "Set the default models that are automatically selected for all users when a new chat is created.": "Stel de standaardmodellen in die automatisch worden geselecteerd voor alle gebruikers bij het aanmaken van een nieuwe chat.",
-  "Set the default system prompt for new chats.": "",
+  "Set the default system prompt for new chats.": "Stel de standaard systeemprompt in voor nieuwe chats.",
   "Set the display name shown across your account.": "",
   "Set the models that are automatically pinned to the sidebar for all users.": "Stel de modellen in die automatisch worden vastgepind aan de zijbalk voor alle gebruikers.",
   "Set the number of layers, which will be off-loaded to GPU. Increasing this value can significantly improve performance for models that are optimized for GPU acceleration but may also consume more power and GPU resources.": "Stel het aantal lagen in dat wordt overgeheveld naar de GPU. Het verhogen van deze waarde kan de prestaties aanzienlijk verbeteren voor modellen die geoptimaliseerd zijn voor GPU-versnelling, maar kan ook meer stroom en GPU-bronnen verbruiken.",

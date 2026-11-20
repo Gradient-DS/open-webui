@@ -43,6 +43,15 @@ describe('shared citation documents', () => {
 		const hit = { ...deck, metadata: [{ granularity: 'file-snippet' }] };
 		expect(citationFileInfo(hit, mergeCitationDocuments(hit)).isPreviewable).toBe(false);
 	});
+	it('previews Office templates like their documents', () => {
+		const info = (name: string) => {
+			const template = { ...citation, source: { name } };
+			return citationFileInfo(template, mergeCitationDocuments(template));
+		};
+		expect(info('House style.potx')).toMatchObject({ isPptx: true, isPreviewable: true });
+		expect(info('Letter.DOTX')).toMatchObject({ isDocx: true, showSnippetRail: true });
+		expect(info('Budget.xltx')).toMatchObject({ isXlsx: true, isPreviewable: true });
+	});
 	it('preserves input order when a whole-document citation has no score', () => {
 		expect(
 			mergeCitationDocuments({ ...citation, distances: [undefined, 0.9] }).map(

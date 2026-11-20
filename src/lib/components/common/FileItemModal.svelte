@@ -4,7 +4,7 @@
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
-	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { officeKind, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
@@ -170,17 +170,13 @@
 		(item?.name &&
 			(item.name.toLowerCase().endsWith('.xls') ||
 				item.name.toLowerCase().endsWith('.xlsx') ||
+				item.name.toLowerCase().endsWith('.xltx') ||
 				item.name.toLowerCase().endsWith('.csv')));
 
-	$: isDocx =
-		item?.meta?.content_type ===
-			'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-		(item?.name && item.name.toLowerCase().endsWith('.docx'));
-
-	$: isPptx =
-		item?.meta?.content_type ===
-			'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
-		(item?.name && item.name.toLowerCase().endsWith('.pptx'));
+	// [Gradient] Office templates (.dotx, .xltx, .potx) preview like their documents.
+	$: office = officeKind(item?.name, item?.meta?.content_type);
+	$: isDocx = office === 'docx';
+	$: isPptx = office === 'pptx';
 
 	const loadExcelContent = async (content: OriginalContent) => {
 		try {
