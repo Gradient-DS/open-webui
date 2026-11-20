@@ -278,7 +278,7 @@ describe('canContinueResponse', () => {
 	});
 });
 
-it.each<Feature>(['tools', 'tool_servers', 'builtin_tools'])(
+it.each<Feature>(['tools', 'tool_servers', 'builtin_tools', 'browser_code_execution'])(
 	'never restores retired %s authoring from stale flags',
 	(feature) => {
 		vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: true } });

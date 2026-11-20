@@ -1,5 +1,7 @@
 """Retired product routes stay absent without editing upstream routers."""
 
+import pytest
+
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
@@ -77,7 +79,7 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
     } <= actual & committed
 
 
-async def _authenticated_config(monkeypatch):
+async def _authenticated_config(monkeypatch, saved=None):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -91,7 +93,7 @@ async def _authenticated_config(monkeypatch):
     monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
     monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=user))
     monkeypatch.setattr(main.sessions, 'session_user', lambda *_: user)
-    monkeypatch.setattr(main.Config, 'get_many', AsyncMock(return_value={'onedrive.enable': True}))
+    monkeypatch.setattr(main.Config, 'get_many', AsyncMock(return_value={'onedrive.enable': True, **(saved or {})}))
     monkeypatch.setattr(main, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr(main.capabilities, 'has', AsyncMock(return_value=True))
     monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='fictional-model'))
@@ -116,3 +118,54 @@ def test_local_retention_workers_cannot_start():
 
     assert not hasattr(main, 'periodic_archive_cleanup')
     assert not hasattr(main, 'periodic_data_retention_cleanup')
+
+
+@pytest.mark.parametrize('engine,offered', [('pyodide', False), ('jupyter', True)])
+def test_browser_execution_cannot_be_restored_by_saved_enable_flags(monkeypatch, engine, offered):
+    import asyncio
+
+    result = asyncio.run(
+        _authenticated_config(
+            monkeypatch,
+            {
+                'code_execution.enable': True,
+                'code_execution.engine': engine,
+                'code_interpreter.enable': True,
+                'code_interpreter.engine': engine,
+            },
+        )
+    )
+    assert result['features']['enable_code_execution'] is offered
+    assert result['features']['enable_code_interpreter'] is offered
+    assert result['features']['enable_pyodide_file_persistence'] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('engine', ['pyodide', 'jupyter'])
+async def test_code_tool_never_calls_the_browser_and_preserves_server_execution(monkeypatch, engine):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from open_webui.tools import builtin
+    from open_webui.utils import code_interpreter
+
+    async def setting(key, default=None):
+        return {'code_interpreter.engine': engine, 'code_interpreter.jupyter.url': 'https://jupyter.invalid'}.get(
+            key, default
+        )
+
+    monkeypatch.setattr(builtin.Config, 'get', setting)
+    browser = AsyncMock(side_effect=AssertionError('Retired browser execution was called'))
+    server = AsyncMock(return_value={'stdout': 'fictional server result', 'stderr': '', 'result': ''})
+    monkeypatch.setattr(code_interpreter, 'execute_code_jupyter', server)
+    result = json.loads(
+        await builtin.execute_code('print("fictional")', __request__=SimpleNamespace(), __event_call__=browser)
+    )
+    browser.assert_not_awaited()
+    if engine == 'pyodide':
+        assert 'error' in result
+        server.assert_not_awaited()
+    else:
+        assert result['stdout'] == 'fictional server result'
+        server.assert_awaited_once()

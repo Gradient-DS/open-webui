@@ -269,3 +269,40 @@ src/lib/utils/authPage.test.ts src/lib/apis/auths/index.test.ts
 account settings and auth API client. Targeted ESLint: 12 inherited findings,
 zero new. `npm run check`: touched files 124 → 120 diagnostics against the valid
 baseline, zero additions.
+
+## Browser code execution
+
+Disabled Pyodide execution through the existing fork feature gates, including
+stale selected tools and historical file-navigation tabs. Code blocks default to
+no execution while config loads. `/api/config` offers execution/interpreter only
+for an explicitly configured Jupyter engine, and never offers Pyodide persistence.
+Both legacy-tag handling and the upstream built-in execute tool now gate browser
+RPC production; stale execute RPCs are explicitly refused by the frontend before
+creating a worker. Added the refusal's Dutch and English translations.
+
+No route removed: `/api/v1/utils/code/execute` is an independent authenticated
+Jupyter endpoint and remains. No code/Jupyter default is classified dead except
+`code_interpreter.prompt_template`, retained because preserved upstream prompt
+injection still reads it for Jupyter/legacy turns. Browser execution is a product
+removal despite its registry's live classification.
+
+Pyodide files, asset serving and isolation code also support the kept code
+editor's Python text formatter. These remain for formatting; user-code execution
+and the interpreter filesystem UI are not offered. No isolation assertion or
+sandbox test was removed or weakened.
+
+Validation: `python -m pytest -c backend/pytest.ini
+backend/open_webui/test/soev/test_dead_features.py
+backend/open_webui/test/util/test_features.py
+backend/open_webui/test/security/test_openapi_surface.py -q`: 32 passed,
+20 dependency warnings. Tests prove a stored Pyodide enable flag cannot offer
+execution, no browser RPC occurs, and configured Jupyter execution still works.
+OpenAPI remains identical. Ruff has zero new findings in changed Python files.
+
+Targeted Vitest (`features.test.ts`, `deadFeatures.test.ts`, `inputItems.test.ts`):
+44 passed. Prettier passed on touched frontend files and both locale files.
+ESLint: no new findings against upstream baseline; fork utility files clean.
+Type check: touched files 171 → 170 diagnostics, zero additions.
+The underlying i18next parser ran with a temporary config scoped to the root
+layout and output under `/tmp/owui-dead-i18n/`; both catalogs contain the new key.
+This avoids rewriting upstream locale catalogs with the broad npm script.

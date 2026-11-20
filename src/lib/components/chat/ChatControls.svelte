@@ -5,7 +5,6 @@
 <script lang="ts">
 	import { onMount, tick, getContext } from 'svelte';
 	import {
-		config,
 		terminalServers,
 		showControls,
 		showCallOverlay,
@@ -95,7 +94,7 @@
 	);
 	$: showFilesTab =
 		terminalFilesAvailable ||
-		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
+		(codeInterpreterEnabled && isFeatureEnabled('browser_code_execution'));
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
 	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
@@ -362,7 +361,7 @@
 								/>
 							{:else if activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId}
 								<FileNav {chatId} />
-							{:else if activeTab === 'files' && codeInterpreterEnabled}
+							{:else if activeTab === 'files' && codeInterpreterEnabled && isFeatureEnabled('browser_code_execution')}
 								<PyodideFileNav />
 							{:else if activeTab === 'document'}
 								<Document />
@@ -510,7 +509,7 @@
 								/>
 							{:else if activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId}
 								<FileNav overlay={dragged} {chatId} />
-							{:else if activeTab === 'files' && codeInterpreterEnabled}
+							{:else if activeTab === 'files' && codeInterpreterEnabled && isFeatureEnabled('browser_code_execution')}
 								<PyodideFileNav overlay={dragged} />
 							{:else if activeTab === 'document'}
 								<Document overlay={dragged} />

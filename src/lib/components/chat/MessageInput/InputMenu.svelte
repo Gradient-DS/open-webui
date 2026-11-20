@@ -305,7 +305,9 @@
 		!!$config?.features?.enable_image_generation &&
 		(showImageGenerationButton || imageGenerationEnabled);
 	$: showCodeInterpreter =
-		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
+		itemAllowed('code_interpreter') &&
+		!!$config?.features?.enable_code_interpreter &&
+		(showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
 	$: showToolPermissions =

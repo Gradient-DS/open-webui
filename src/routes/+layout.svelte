@@ -1,4 +1,5 @@
 <script>
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { io } from 'socket.io-client';
 	import { spring } from 'svelte/motion';
 	import { createPyodideWorker } from '$lib/pyodide/createPyodideWorker';
@@ -675,6 +676,10 @@
 		// because the backend's sio.call blocks waiting for our callback response.
 		if (data?.session_id === $socket.id) {
 			if (type === 'execute:python') {
+				if (!isFeatureEnabled('browser_code_execution')) {
+					cb?.({ error: $i18n.t('Browser code execution is unavailable.') });
+					return;
+				}
 				console.log('execute:python', data);
 				executePythonAsWorker(data.id, data.code, cb, data.files || []);
 				return;

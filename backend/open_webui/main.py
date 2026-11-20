@@ -127,7 +127,6 @@ from open_webui.env import (
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-    ENABLE_PYODIDE_FILE_PERSISTENCE,
     # SCIM
     ENABLE_SCIM,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
@@ -2327,7 +2326,7 @@ async def get_app_config(request: Request):
                     'enable_api_keys': config.get('auth.enable_api_keys'),
                     'enable_password_change_form': False,
                     'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
-                    'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
+                    'enable_pyodide_file_persistence': False,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     # [Gradient] v2 mode keeps the picker to the soev-api catalog.
@@ -2344,8 +2343,10 @@ async def get_app_config(request: Request):
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
                     'web_search_confirmation_content': config.get('web.search.confirmation.content'),
-                    'enable_code_execution': config.get('code_execution.enable'),
-                    'enable_code_interpreter': config.get('code_interpreter.enable'),
+                    'enable_code_execution': bool(config.get('code_execution.enable'))
+                    and config.get('code_execution.engine') == 'jupyter',
+                    'enable_code_interpreter': bool(config.get('code_interpreter.enable'))
+                    and config.get('code_interpreter.engine') == 'jupyter',
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
                     'enable_image_generation': False,
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),

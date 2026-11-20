@@ -22,6 +22,7 @@ from open_webui.env import (
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.chats import Chats, chat_search_content_query, chat_search_terms
 from open_webui.models.config import Config
+from open_webui.utils.features import is_feature_enabled
 from open_webui.models.groups import Groups
 from open_webui.models.memories import Memories
 from open_webui.models.notes import Notes
@@ -530,7 +531,7 @@ async def execute_code(
             code = blocking_code + '\n' + code
 
         engine = await Config.get('code_interpreter.engine', 'pyodide')
-        if engine == 'pyodide':
+        if engine == 'pyodide' and is_feature_enabled('browser_code_execution'):
             # Execute via frontend pyodide using bidirectional event call
             if __event_call__ is None:
                 return JSONCodec.dumps(
