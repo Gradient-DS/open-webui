@@ -34,8 +34,7 @@ preserve_configuration = true
 # sub or unset; an unsafe batch refuses 403 without applying any other setting.
 
 # Required owner controls for sweep12's previously unentered operations.
-# The image-prompt operation has an exact all-actor refusal below; its supported
-# title-task control uses the same seeded chat, model and authenticated owner.
+# Retired image-prompt execution has no route or positive-control declaration.
 required_drive_routes = [
   "GET /api/v1/chats/",
   "GET /api/v1/chats/list",

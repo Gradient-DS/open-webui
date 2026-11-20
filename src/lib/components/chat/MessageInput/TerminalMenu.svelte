@@ -12,6 +12,7 @@
 	} from '$lib/stores';
 	import { getToolServersData } from '$lib/apis';
 	import { isTemporaryChatId } from '$lib/utils/chatId';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -31,7 +32,9 @@
 			chatContext(t) !== false &&
 			!(isTemporaryChatId($activeChatId) && chatContext(t)?.context_id === 'chat_id')
 	);
-	$: directTerminals = ($settings?.terminalServers ?? []).filter((s) => s.url);
+	$: directTerminals = isFeatureEnabled('tool_servers')
+		? ($settings?.terminalServers ?? []).filter((s) => s.url)
+		: [];
 
 	const refreshTerminalServersStore = async (servers: typeof directTerminals) => {
 		// Preserve system terminals (those with an `id`) — only refresh direct ones

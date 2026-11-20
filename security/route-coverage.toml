@@ -5,8 +5,8 @@
 # owui-dead-features: the image-prompt task is unmounted, without a waiver.
 # owui-dead-features: inference proxies and local embedding dispatch are unmounted.
 # owui-dead-features: four OWUI web-loader/search operations are unmounted; no new waivers.
-# Platform speech and indexed Ollama model authorization have exact all-actor
-# refusal controls in attack-surface.toml; coverage requires their recorded evidence.
+# Platform speech has exact all-actor refusal controls in attack-surface.toml;
+# coverage requires their recorded evidence. Inference proxies are unmounted.
 # Terminal HEAD refusal evidence requires exact status 403 and an empty body;
 # its GET sibling requires the exact Feature is unavailable detail.
 # Platform autocomplete has an exact all-actor 400 disabled-feature control in

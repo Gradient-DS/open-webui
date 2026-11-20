@@ -94,7 +94,10 @@ async def _authenticated_config(monkeypatch, saved=None):
     monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
     monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=user))
     monkeypatch.setattr(main.sessions, 'session_user', lambda *_: user)
-    monkeypatch.setattr(main.Config, 'get_many', AsyncMock(return_value={'onedrive.enable': True, **(saved or {})}))
+    values = {'onedrive.enable': True, **(saved or {})}
+    monkeypatch.setattr(
+        main.Config, 'get_many', AsyncMock(side_effect=lambda *keys: {k: values[k] for k in keys if k in values})
+    )
     monkeypatch.setattr(main, 'feature_enabled', AsyncMock(return_value=True))
     monkeypatch.setattr(main.capabilities, 'has', AsyncMock(return_value=True))
     monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='fictional-model'))
@@ -170,3 +173,17 @@ async def test_code_tool_never_calls_the_browser_and_preserves_server_execution(
     else:
         assert result['stdout'] == 'fictional server result'
         server.assert_awaited_once()
+
+
+def test_retained_feedback_definitions_use_the_live_keys(monkeypatch):
+    import asyncio
+
+    definitions = [{'id': 'clarity', 'labels': {'en': 'Clarity', 'nl': 'Duidelijkheid'}}]
+    result = asyncio.run(
+        _authenticated_config(
+            monkeypatch,
+            {'evaluation.feedback.reasons': definitions, 'evaluation.feedback.tags': definitions},
+        )
+    )
+    assert result['features']['feedback_reasons'] == definitions
+    assert result['features']['feedback_tags'] == definitions

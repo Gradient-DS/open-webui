@@ -11,7 +11,7 @@ from open_webui import config, env
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.config import Config
-from open_webui.routers import archives, auths, configs
+from open_webui.routers import auths, configs
 from open_webui.soev.client import SoevApiError
 from open_webui.utils.auth import get_admin_user, get_verified_user
 

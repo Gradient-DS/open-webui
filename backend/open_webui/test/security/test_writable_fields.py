@@ -10,11 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 372 operations. Audit bodies across all
-# OpenAPI methods (376 including HEAD/OPTIONS), because writable_string_fields
-# excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
-# TRACE is valid but absent today.
-# Shared mailbox routes add three operations and one writable address field.
+# The product exposes 307 five-method operations and 310 across all HTTP methods.
+# Derive all methods; GET/HEAD/OPTIONS bodies are deliberately excluded from string writes.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
 OPENAPI_METHODS = FIVE_METHODS | {'head', 'options', 'trace'}
 
@@ -103,11 +100,11 @@ def test_blind_body_counts(surface):
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
     assert len(blind) == 7 and media == {'multipart/form-data': 2, 'application/json': 5}, (
-        f'Expected 10 blind body operations (8 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
+        f'Expected 7 blind body operations (5 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == set(), (
-        f'Expected no blind read bodies alongside 8 JSON write bodies; measured read bodies: {sorted(read_bodies)}.'
+        f'Expected no blind read bodies alongside 5 JSON write bodies; measured read bodies: {sorted(read_bodies)}.'
     )
 
 
@@ -125,7 +122,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        f'Expected exact waivers for 10 blind operations (8 JSON writes + 2 multipart); measured {len(blind)} blind.'
+        f'Expected exact waivers for 7 blind operations (5 JSON writes + 2 multipart); measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')
     for route in sorted(missing):

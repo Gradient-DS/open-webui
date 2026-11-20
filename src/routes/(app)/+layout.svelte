@@ -139,7 +139,9 @@
 	};
 
 	const setToolServers = async () => {
-		let toolServersData = await getToolServersData($settings?.toolServers ?? []);
+		let toolServersData = isFeatureEnabled('tool_servers')
+			? await getToolServersData($settings?.toolServers ?? [])
+			: [];
 		toolServersData = toolServersData.filter((data) => {
 			if (!data || data.error) {
 				toast.error(
@@ -154,9 +156,11 @@
 		toolServers.set(toolServersData);
 
 		// Inject enabled terminal servers as always-on tool servers
-		const enabledTerminals = (($settings as any)?.terminalServers ?? []).filter(
-			(s: any) => s.enabled || s.url === $selectedTerminalId
-		);
+		const enabledTerminals = isFeatureEnabled('tool_servers')
+			? (($settings as any)?.terminalServers ?? []).filter(
+					(s: any) => s.enabled || s.url === $selectedTerminalId
+				)
+			: [];
 
 		// Fetch terminal servers the user has access to (for FileNav + terminal_id)
 		const systemTerminals = await getTerminalServers(localStorage.token);
@@ -208,7 +212,7 @@
 	};
 
 	const setTools = async () => {
-		const toolsData = await getTools(localStorage.token);
+		const toolsData = isFeatureEnabled('tools') ? await getTools(localStorage.token) : [];
 		tools.set(toolsData);
 	};
 

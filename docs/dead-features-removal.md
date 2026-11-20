@@ -332,3 +332,136 @@ Targeted Vitest (`composerPreferences.test.ts`, `deadFeatures.test.ts`,
 `assistantCapabilities.test.ts`): 25 passed. Prettier passed on touched files.
 Targeted ESLint: 104 inherited findings, zero additions. Type check: touched
 files 460 → 452 diagnostics against the valid baseline, zero additions.
+
+## Exhaustive remaining dead defaults
+
+Compared with the untouched branch base, DEFAULT_CONFIG has 354 → 234 keys: 120 defaults removed. The registry classifies 69 remaining defaults as dead; six are explicit scope exceptions. This is a key-name audit only, with no tenant values read. The complete list and retained readers follow.
+
+### Explicitly out of scope (6)
+
+Scheduled automations and voice task settings are explicitly preserved by the brief.
+
+`automations.auth_token_expires_in`, `automations.enable`, `automations.max_count`, `automations.min_interval`, `task.voice.prompt.enable`, `task.voice.prompt_template`.
+
+### OAuth and provisioning
+
+The retained OAuth manager registers providers and reads admission/role/group/provisioning metadata. See utils/oauth.py and routers/auths.py. Removing these reads/defaults would alter kept login/provisioning paths.
+
+`oauth.allowed_roles`, `oauth.allowed_tenants`, `oauth.blocked_groups`, `oauth.enable_group_creation`, `oauth.enable_group_mapping`, `oauth.enable_role_mapping`, `oauth.feishu.client_id`, `oauth.feishu.client_secret`, `oauth.feishu.redirect_uri`, `oauth.feishu.scope`, `oauth.github.client_id`, `oauth.github.client_secret`, `oauth.github.redirect_uri`, `oauth.github.scope`, `oauth.google.client_id`, `oauth.google.client_secret`, `oauth.google.redirect_uri`, `oauth.google.scope`, `oauth.group_claim`, `oauth.group_default_share`, `oauth.roles_claim`, `ui.default_group_id`, `ui.default_user_role`.
+
+### Legacy catalog dependency
+
+utils/models.py:get_all_base_models still reads these on its non-v2 path. Every public Ollama proxy and embedding alias is unmounted.
+
+`ollama.api_configs`, `ollama.base_urls`, `ollama.enable`.
+
+### Retained RAG/loader reads
+
+Retained upstream middleware, builtin tools and retrieval loader utilities read these on non-v2 paths. The platform turn bypasses them; upload/extraction guards remain. See retrieval/utils.py, utils/middleware.py and tools/builtin.py.
+
+`rag.bypass_embedding_and_retrieval`, `rag.enable_hybrid_search`, `rag.enable_hybrid_search_enriched_texts`, `rag.full_context`, `rag.hybrid_bm25_weight`, `rag.pdf_extract_images`, `rag.pdf_loader_mode`, `rag.relevance_threshold`, `rag.template`, `rag.top_k`, `rag.top_k_reranker`.
+
+### Local orchestration imports
+
+Preserved upstream turn/tool helpers still read these on non-v2 paths. Product compaction/approval routes are unmounted and their UI gates are false. See utils/subagents.py, utils/tools.py and utils/context_compaction.py.
+
+`chat.context_compaction.enable`, `chat.context_compaction.model`, `chat.context_compaction.prompt_template`, `chat.context_compaction.retention_percentage`, `chat.context_compaction.token_cap`, `chat.context_compaction.token_threshold`, `chat.tool_permissions.enable`, `subagents.background_enabled`, `subagents.enable`, `subagents.max_async`, `subagents.max_concurrent`, `subagents.max_iterations`, `subagents.max_output`, `subagents.system_prompt`.
+
+### Task completion dependencies
+
+Kept task completion handlers have upstream non-v2 branches that read these. V2 routes use soev.task/1 and bypass them; the configuration read route is unmounted.
+
+`task.autocomplete.prompt_template`, `task.follow_up.prompt_template`, `task.model.default`, `task.model.external`, `task.model.params`, `task.query.prompt_template`, `task.tags.prompt_template`, `task.title.prompt_template`.
+
+### Jupyter prompt dependency
+
+Preserved upstream prompt injection reads this for Jupyter/legacy execution. Browser RPC emission and UI execution are disabled.
+
+`code_interpreter.prompt_template`.
+
+### Tool-server boot dependency
+
+Boot migration and retained upstream OAuth/tool helpers still read the connection container. Tool routes/callbacks are unmounted and personal URL probes are gated off.
+
+`tool_server.connections`.
+
+### Offboarding/archive dependency
+
+The retained deletion service imports offboarding_store and user_archives, which read these. The console offboarding worker imports the shared storage-erasure helper through that chain. Local cleanup workers and archive routes are gone.
+
+`admin.default_archive_retention_days`, `admin.enable_user_archival`.
+
+
+No migration purges tenant configuration rows or historical credential/archive/log
+rows in this run. Their active entry points are removed; table models required
+for console erasure and helpers imported by preserved upstream implementations
+remain. The platform registry and cutover documentation were read only.
+
+## Channels and final client reachability audit
+
+Channels, their sidebar entry and channel routes had already been removed on the
+starting branch. No channel source or schema migration was repeated. Targeted
+channel removal/migration regressions pass, including the original security
+assertions. Deleted the empty fork archive router and its unused response forms,
+and unused subagent/MFA config forms; these had no registered operations.
+
+Saved personal tool-server/terminal settings cannot start browser probes or expose
+the integrations panel. System terminals and the workspace feature remain. Tool
+startup dependency installation is behind the immutable retired-feature gate.
+Corrected stale inventory comments; the exact surface assertions remain 310 total
+operations, 96 writable bodies / 944 string leaves, and 35 query operations / 77
+string leaves. No routes were added during this run; 66 operations were removed.
+
+Final backend command: S plus these exact files (all in one process):
+
+```sh
+python -m pytest -c backend/pytest.ini \
+  backend/open_webui/test/soev/test_dead_features.py \
+  backend/open_webui/test/security/test_openapi_surface.py \
+  backend/open_webui/test/security/test_writable_fields.py \
+  backend/open_webui/test/security/attack/test_plane.py \
+  backend/open_webui/test/security/attack/test_seeds.py \
+  backend/open_webui/test/security/attack/test_crossuser.py \
+  backend/open_webui/test/security/attack/test_soev_mode.py \
+  backend/open_webui/test/security/test_route_coverage.py \
+  backend/open_webui/test/security/test_platform_config_writes.py \
+  backend/open_webui/test/soev/test_admin_person_boundary.py \
+  backend/open_webui/test/authorization/test_routes.py \
+  backend/open_webui/test/security/test_removed_channels_admin_chats.py \
+  backend/open_webui/test/migrations/test_remove_channels.py \
+  backend/open_webui/test/util/test_features.py -q
+```
+
+Result: 534 passed, 5 existing optional Postgres cases skipped, 24 dependency
+warnings. A separate final product/config/channel selection passed 63 tests with
+5 existing Postgres skips and 24 warnings. No skip or assertion was loosened.
+
+```sh
+node node_modules/vitest/vitest.mjs run src/lib/utils/features.test.ts src/lib/utils/composerPreferences.test.ts src/lib/utils/deadFeatures.test.ts src/lib/components/chat/MessageInput/inputItems.test.ts src/lib/utils/authPage.test.ts src/lib/apis/auths/index.test.ts --exclude '**/nothing'
+node node_modules/eslint/bin/eslint.js --format json 'src/routes/(app)/+layout.svelte' src/lib/components/chat/SettingsModal.svelte src/lib/components/chat/MessageInput/TerminalMenu.svelte
+node node_modules/prettier/bin/prettier.cjs --check 'src/routes/(app)/+layout.svelte' src/lib/components/chat/SettingsModal.svelte src/lib/components/chat/MessageInput/TerminalMenu.svelte
+npm run check
+```
+
+Vitest: 66 passed. Prettier: passed. The final three upstream frontend files
+have 12 inherited ESLint findings and zero new findings. Upstream lint findings
+are retained to honor the no-reformat policy; newly authored fork utilities and
+tests are clean. This is a limitation against the requested whole-file ESLint
+cleanliness, not a claim that inherited lint errors were fixed.
+
+The first type-check baseline ran with a dependency-cache permission failure,
+which forced a fallback Vite configuration. After isolating local caches, a valid
+supplemental baseline was captured with untouched Chat/InputMenu source restored
+and then restored to the working changes. Valid baseline: 5,450 errors / 164
+warnings; final tree: 5,350 errors / 161 warnings (whole-tree check still exits 1).
+Across all 20 surviving touched TypeScript/Svelte files, 776 baseline diagnostics
+became 763, zero additions. Comparison ignores shifted line numbers and the
+TypeScript diagnostic's abbreviated `... N more ...` property count, which changes
+when retired config types are deleted; the property names and diagnostics remain
+matched. No diagnostic was suppressed in source or configuration.
+
+All Python files touched in the final audit have zero new Ruff F findings.
+OpenAPI equality tests regenerated the specification and passed. Temporary SQLite
+export/test state is cleaned automatically; no Postgres roles/databases were made.
+Normal pre-commit hooks ran on every category commit. Nothing was pushed, deployed,
+or changed in the platform registry, CI workflows or running services.
