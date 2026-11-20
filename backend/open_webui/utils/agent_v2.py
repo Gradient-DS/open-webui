@@ -1330,7 +1330,7 @@ _GRANULARITY = {
     'document-text': 'document',
     'search-result': 'snippet',
     'live-document': 'file-snippet',
-    'council-result': 'snippet',
+    'council-result': 'council-snippet',
 }
 
 
@@ -1347,6 +1347,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
         'granularity': _GRANULARITY.get(element.get('type')),
+        **_council_preview(element),
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:
@@ -1363,6 +1364,26 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'text': element.get('text') or '',
         **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
+    }
+
+
+def _council_preview(element: dict[str, Any]) -> dict[str, Any]:
+    """[Gradient] A council hit's image of its matched PDF page and the matched words in its fragment, as
+    `[start, end)` ranges of its text; only well-formed ranges, for the citation panel to mark."""
+    if element.get('type') != 'council-result':
+        return {}
+    text = element.get('text') or ''
+    highlights = [
+        [start, end]
+        for start, end in (
+            span for span in element.get('highlights') or () if isinstance(span, (list, tuple)) and len(span) == 2
+        )
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text)
+    ]
+    preview = element.get('preview_url')
+    return {
+        **({'preview_url': preview} if isinstance(preview, str) and preview.startswith('https://') else {}),
+        **({'highlights': highlights} if highlights else {}),
     }
 
 

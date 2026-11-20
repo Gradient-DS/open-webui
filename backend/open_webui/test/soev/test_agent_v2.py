@@ -1596,6 +1596,23 @@ async def test_council_allowed_needs_the_agent_api_the_tenant_setting_and_the_us
     assert await agent_v2._council_allowed('u1') is allowed
 
 
+def test_a_council_hit_carries_its_page_image_and_only_well_formed_highlights() -> None:
+    element = {
+        'type': 'council-result',
+        'text': 'woningbouw in het Middengebied',
+        'preview_url': 'https://pages.example/26.jpg',
+        'highlights': [[0, 10], [18, 30], [5, 99], [3, 3], 'x'],
+    }
+    assert agent_v2._council_preview(element) == {
+        'preview_url': 'https://pages.example/26.jpg',
+        'highlights': [[0, 10], [18, 30]],
+    }
+    assert agent_v2._council_preview({**element, 'preview_url': 'http://pages.example/26.jpg'}) == {
+        'highlights': [[0, 10], [18, 30]]
+    }
+    assert agent_v2._council_preview({**element, 'type': 'council-text'}) == {}
+
+
 @pytest.mark.asyncio
 async def test_the_council_scope_keeps_only_well_formed_organizations_once(monkeypatch: pytest.MonkeyPatch) -> None:
     stored = [
