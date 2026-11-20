@@ -227,7 +227,7 @@ from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
 from open_webui.soev.login_attach import validate_login_config
 from open_webui.soev.thread_approvals import require_legacy_approval
-from open_webui.soev.product_surface import product_router
+from open_webui.soev.product_surface import product_permissions, product_router
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.tasks import (
@@ -2492,7 +2492,7 @@ async def get_app_config(request: Request):
                         'height': config.get('file.image_compression_height'),
                     },
                 },
-                'permissions': {**(config.get('user.permissions') or {})},
+                'permissions': product_permissions(config.get('user.permissions') or {}),
                 'google_drive': {
                     'client_id': config.get('google_drive.client_id'),
                     'api_key': config.get('google_drive.api_key'),

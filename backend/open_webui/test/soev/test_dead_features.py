@@ -124,6 +124,27 @@ def test_local_retention_workers_cannot_start():
     assert not hasattr(main, 'periodic_data_retention_cleanup')
 
 
+def test_public_permissions_omit_retired_fields_without_changing_stored_authorization(monkeypatch):
+    import asyncio
+    from copy import deepcopy
+
+    stored = {
+        'chat': {'valves': True, 'continue_response': True, 'stt': True, 'tts': False, 'call': True},
+        'features': {'direct_tool_servers': True, 'image_generation': True, 'automations': True, 'api_keys': True},
+        'sharing': {'tools': True, 'public_tools': True, 'notes': False},
+        'workspace': {'tools': True, 'tools_import': True, 'tools_export': True, 'skills': True},
+    }
+    original = deepcopy(stored)
+    result = asyncio.run(_authenticated_config(monkeypatch, {'user.permissions': stored}))
+    assert result['permissions'] == {
+        'chat': {'stt': True, 'tts': False, 'call': True},
+        'features': {'automations': True, 'api_keys': True},
+        'sharing': {'notes': False},
+        'workspace': {'skills': True},
+    }
+    assert stored == original
+
+
 @pytest.mark.parametrize('engine,offered', [('pyodide', False), ('jupyter', True)])
 def test_browser_execution_cannot_be_restored_by_saved_enable_flags(monkeypatch, engine, offered):
     import asyncio

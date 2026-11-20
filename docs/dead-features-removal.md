@@ -512,3 +512,35 @@ OIDC hostname retained, metadata range excluded by default, and no v2 legacy
 subject authority/migration Job. No containers or cluster calls were involved.
 Ruff: zero new findings. No routes or frontend source changed in this category;
 OpenAPI and the last frontend check results remain unchanged.
+
+## Public permission metadata
+
+The final `/api/config` audit found dead leaves still traveling inside the kept
+`user.permissions` aggregate. The fork now filters these nine leaves from its
+public response: `permissions.chat.continue_response`,
+`permissions.chat.valves`, `permissions.features.direct_tool_servers`,
+`permissions.features.image_generation`, `permissions.sharing.tools`,
+`permissions.sharing.public_tools`, `permissions.workspace.tools`,
+`permissions.workspace.tools_import`, `permissions.workspace.tools_export`.
+Their upstream stored/default permission vocabulary remains because retained
+upstream auth/permission helpers consume that aggregate. Filtering makes a fresh
+response object and never changes stored permissions or backend authorization.
+
+The registry-dead leaves `permissions.chat.call` and
+`permissions.features.automations` remain explicit voice/automation exceptions.
+Jupyter's code-interpreter permission is not classified dead; it stays. The same
+applies to the out-of-scope voice_call feature and voice/automation defaults.
+Admin-only feature declarations/routes had already been removed before this run;
+OpenAI persistent settings and Confluence's old persistent enable key were also
+already absent. Historical Config rows and the upstream permission aggregate
+were not migrated or purged, and no kept permission was widened.
+
+```sh
+python -m pytest -c backend/pytest.ini backend/open_webui/test/soev/test_dead_features.py backend/open_webui/test/soev/test_product_config.py backend/open_webui/test/soev/test_session_boundary.py backend/open_webui/test/security/test_openapi_surface.py backend/open_webui/test/util/test_features.py backend/open_webui/test/security/test_platform_config_writes.py -q
+```
+
+Result: 96 passed, 24 dependency warnings. The config-response regression uses
+stored true flags to prove all nine retired leaves disappear, voice/automations/
+API keys/skills remain, and the stored authorization object is unchanged. Fresh
+OpenAPI equals the committed specification; inventory classification and counts
+remain unchanged. Ruff: zero new findings. No frontend source changed.
