@@ -92,6 +92,8 @@
 
 	export let files = [];
 
+	// [Gradient] Agent skills are automatic whenever the workspace is on.
+	export let agentRouted = false;
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
 
@@ -225,6 +227,10 @@
 		void prepareBusinessDocumentPicker().catch(() => {});
 	}
 	let tab = '';
+	$: if (agentRouted && tab === 'skills') {
+		tab = '';
+		directTab = false;
+	}
 	// Opened straight into a submenu from a pinned composer button: no back row.
 	let directTab = false;
 
@@ -296,7 +302,10 @@
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
 	$: showSkills =
-		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
+		!agentRouted &&
+		itemAllowed('skills') &&
+		isFeatureEnabled('skills') &&
+		Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
 	$: showLiveMail =
 		itemAllowed('live_mail') && (!!$config?.features?.enable_live_mail || liveMailState !== 'off');
@@ -445,7 +454,7 @@
 		tools = items;
 	};
 
-	const setSkills = (skillItems: IntegrationItem[] | null, query = '') => {
+	const setSkills = (skillItems: IntegrationItem[] | null) => {
 		skills = (skillItems ?? [])
 			.filter((skill) => skill.is_active)
 			.reduce<Record<string, IntegrationItem>>((a, skill) => {
@@ -485,7 +494,7 @@
 		if (q) {
 			const skillItems = await getSkills(localStorage.token, q).catch(() => []);
 			if (requestId !== skillRequestId) return;
-			setSkills(skillItems, q);
+			setSkills(skillItems);
 			return;
 		}
 
@@ -493,7 +502,7 @@
 			await _skills.set(await getSkills(localStorage.token));
 		}
 		if (requestId !== skillRequestId) return;
-		setSkills($_skills, q);
+		setSkills($_skills);
 	};
 
 	const scheduleToolSearch = () => {
@@ -1232,7 +1241,7 @@
 									{:else if tab === 'tools'}
 										{$i18n.t('Tools')}
 										<span class="ml-0.5 text-gray-500">{toolIds.length}</span>
-									{:else if tab === 'skills'}
+									{:else if tab === 'skills' && !agentRouted}
 										{$i18n.t('Skills')}
 										<span class="ml-0.5 text-gray-500">{skillIds.length}</span>
 									{/if}
@@ -1392,7 +1401,7 @@
 								</div>
 							{/if}
 						</div>
-					{:else if tab === 'skills'}
+					{:else if tab === 'skills' && !agentRouted}
 						<SearchInput bind:value={skillQuery} placeholder={$i18n.t('Search skills')} />
 
 						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">

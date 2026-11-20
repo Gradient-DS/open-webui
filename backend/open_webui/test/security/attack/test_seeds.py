@@ -526,11 +526,11 @@ def test_skill_seed_survives_an_existing_name_and_repeated_resolution():
         and isinstance(node.value, ast.Call)
         and any(k.arg == 'unique' and ast.literal_eval(k.value) for k in node.value.keywords)
     ]
-    assert set(unique_fields) == {'id', 'name'}, 'Review all skill uniqueness constraints when the model changes'
+    assert set(unique_fields) == {'id'}, 'Review all skill uniqueness constraints when the model changes'
     entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
     owner, admin = Mock(spec=seeds.AttackClient), Mock(spec=seeds.AttackClient)
     with sqlite3.connect(':memory:') as db:
-        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT UNIQUE)')
+        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT)')
         db.execute('INSERT INTO skill VALUES (?, ?)', ('previous-id', 'Attack skill'))
 
         def create(method, path, **kwargs):
@@ -1177,3 +1177,12 @@ def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alo
     assert (name, content, content_type) == ('data', '{"a": {"b": "p1"}}', 'application/json')
     assert filename.startswith('f-') and filename.endswith('.json') and '{token}' not in filename
     assert fields['form'] == {'idx': 'p1'}
+
+
+def test_skill_seed_exercises_atomic_import_with_real_zip_bytes():
+    from open_webui.utils.skill_imports import read_bundle
+
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
+    content, files = read_bundle(entry['body']['bundle'])
+    assert content == entry['body']['content']
+    assert files == [('references/imported.txt', b'Invented import fixture')]

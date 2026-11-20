@@ -190,10 +190,14 @@ class SoevClient:
             result['thread_id'] = _chat_thread_id(response)
         return result
 
-    async def post_bytes(self, path: str, body: bytes, *, as_user: str, params: dict | None = None) -> dict:
+    async def post_bytes(
+        self, path: str, body: bytes, *, as_user: str, params: dict | None = None, content_type: str | None = None
+    ) -> dict:
         if not as_user:
             raise ValueError('Uploading bytes requires an acting user')
-        response = await self._request('POST', path, content=body, as_user=as_user, params=params)
+        response = await self._request(
+            'POST', path, content=body, as_user=as_user, params=params, content_type=content_type
+        )
         return self._json_object(response)
 
     async def complete_task(self, body: dict, *, as_user: str) -> dict:
@@ -407,6 +411,7 @@ class SoevClient:
         *,
         body: dict | None = None,
         content: bytes | None = None,
+        content_type: str | None = None,
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
@@ -420,6 +425,9 @@ class SoevClient:
             headers['X-Soev-Subject'] = self._subject_minter(as_user)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
+        # [Gradient] Raw uploads declare their format without changing image uploads.
+        if content_type is not None:
+            headers['Content-Type'] = content_type
         started = time.perf_counter()
         status = None
         route = path.split('?', 1)[0]

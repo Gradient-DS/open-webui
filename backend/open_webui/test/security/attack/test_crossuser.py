@@ -528,3 +528,9 @@ def test_subject_scoped_results_allow_independent_objects_but_still_catch_disclo
         resource_ids=['owner-resource'],
     )
     assert len(result.violations) == 2
+
+
+def test_imported_skill_files_still_require_the_seeded_skill_owners_access():
+    routes, _ = crossuser.targets()
+    assert 'GET /api/v1/skills/id/{id}/files/content' in routes
+    assert crossuser._owner_key('/api/v1/skills/id/{id}/files/content', seeds.SURFACE) == 'admin'
