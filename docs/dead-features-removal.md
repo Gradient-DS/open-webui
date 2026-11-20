@@ -189,3 +189,39 @@ The first command passed 95 tests; 38 existing parameter cases require the
 unconfigured Postgres test target and were skipped by their existing fixtures.
 No skip condition or assertion was loosened. SQLite cases and the non-database
 worker absence check run. No frontend source changed.
+
+## User-authored tools, functions and tool servers
+
+Unmounted every remaining tools/functions operation, POST
+`/api/chat/actions/{action_id}`, and GET tool-OAuth authorize/callback operations:
+21 operations total (exact tombstones are in `security/attack-surface.toml`).
+Upstream handlers remain. Deleted fork tool availability environment flags,
+OAuth-client timeout default and obsolete sweep seeds/controls/waivers.
+Tool-server, tool-authoring and OWUI built-in-tool gates are permanently false;
+voice, skills and terminals retain their independent gates. Kept the existing
+upstream function/action authorization assertions with independent test fixtures.
+
+Chat initialization now checks the tools gate before fetching, allowing kept
+composer defaults to initialize after the tool route is removed. The image menu
+also checks availability even for old saved state or URL selection. Retained
+`tool_server.connections`: boot migration and upstream helpers still read it.
+No local tool data is offered by the v2 runtime.
+
+Inventory: 345 → 324 operations; 111 → 107 writable-body operations;
+1,108 → 967 writable strings; 36 → 35 query-string operations, 78 → 77 strings.
+Validation: S plus `backend/open_webui/test/util/test_features.py`: 411 passed,
+20 dependency warnings. Ruff: zero new findings on all changed Python files.
+
+Frontend: targeted Vitest for `features.test.ts`, `composerPreferences.test.ts`,
+`deadFeatures.test.ts`, `inputItems.test.ts`: 51 passed. ESLint is clean on the
+fork utility files. The two minimally touched upstream Svelte files retain their
+49 pre-existing ESLint findings, with zero additions (compared by file, rule,
+severity and message, ignoring shifted lines). Prettier is clean on all touched
+frontend files. No new lint suppression was added.
+
+The first type-check baseline failed to load Vite configuration, suppressing four
+warnings on unchanged self-closing tags. A supplemental baseline temporarily used
+the untouched `5953cb095` versions of Chat.svelte and InputMenu.svelte under the
+working config, then restored the edits in a finally block. Against that baseline,
+`npm run check` has 263 diagnostics in these files both before and after: zero new
+errors/warnings. Both baseline logs are retained in `/tmp` for review.

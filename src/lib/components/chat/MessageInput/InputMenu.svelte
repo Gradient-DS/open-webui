@@ -301,7 +301,9 @@
 		(!!$config?.features?.enable_live_documents || liveDocumentsState !== 'off');
 	$: showWebSearch = itemAllowed('web_search') && (showWebSearchButton || webSearchEnabled);
 	$: showImageGeneration =
-		itemAllowed('image_generation') && (showImageGenerationButton || imageGenerationEnabled);
+		itemAllowed('image_generation') &&
+		!!$config?.features?.enable_image_generation &&
+		(showImageGenerationButton || imageGenerationEnabled);
 	$: showCodeInterpreter =
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =

@@ -34,8 +34,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (342, 345), (
-        f'Expected 342 five-method operations / 345 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (321, 324), (
+        f'Expected 321 five-method operations / 324 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,8 +63,8 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (111, 1108), (
-        f'Expected 111 routes / 1108 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (107, 967), (
+        f'Expected 107 routes / 967 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title'):
@@ -78,8 +78,8 @@ def test_derived_counts(surface):
         'threads[].thread_id',
         'threads[].versions[]',
     ]
-    assert query_counts == (36, 78), (
-        f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    assert query_counts == (35, 77), (
+        f'Expected 35 routes / 77 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
     )
 
 
@@ -94,7 +94,7 @@ def test_derivation_cannot_silently_collapse(surface):
         'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
     )
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
-    assert routes >= 40 - 13 and strings >= 90 - 1 - 21, (
+    assert routes >= 40 - 13 - 4 - 1 and strings >= 90 - 1 - 21 - 141 - 1, (
         f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
         'original floor 40 / 90, less the retired source query parameter.'
     )
@@ -104,7 +104,7 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 10 and media == {'multipart/form-data': 2, 'application/json': 8}, (
+    assert len(blind) == 7 and media == {'multipart/form-data': 2, 'application/json': 5}, (
         f'Expected 10 blind body operations (8 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}

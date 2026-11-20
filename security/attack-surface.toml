@@ -295,47 +295,6 @@ depends_on = []
 actor = "user"
 
 [[parameter]]
-key = "active_function"
-v2_refused_value = "attack_active_{token}"
-name = "id"
-prefix = "/api/v1/functions/id/{id}/valves/user"
-description = "routers/functions.py:update_function_user_valves_by_id answers 400 'Function is not active' for an inactive function, and FunctionForm has no is_active: a function is created off. seed_active_function creates an Action and turns it on with /toggle, which the passes drive against the shared {function} only, so this one stays active through every pass."
-seeded_by = "seed_refused_target"
-depends_on = []
-actor = "user"
-content = """
-from pydantic import BaseModel
-
-class Action:
-    class Valves(BaseModel):
-        label: str = "seed"
-    class UserValves(BaseModel):
-        label: str = "seed"
-    def __init__(self):
-        self.valves = self.Valves()
-    async def action(self, body: dict) -> dict:
-        return body
-"""
-
-[[parameter]]
-key = "action"
-name = "action_id"
-prefix = "/api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action resolves Functions.id and refuses 'Action not available' unless the function is an active Action the model surfaces (admins included without the bypass), so it takes the always-active one, which seed_active_function also makes global."
-same_as = "active_function"
-
-[[parameter]]
-key = "tool"
-v2_refused_value = "fictional-disabled-tool-{token}"
-name = "id"
-prefix = "/api/v1/tools/id/{id}"
-description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs. Admin satisfies workspace.tools/workspace.tools_import; no package installation or external import is needed."
-via = "POST /api/v1/tools/create"
-body = { "id" = "attack_tool_{token}", "name" = "Attack tool", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
-extract = "id"
-actor = "user"
-
-[[parameter]]
 key = "skill"
 v2_refused_value = "fictional-disabled-skill-{token}"
 name = "id"
@@ -459,13 +418,6 @@ name = "provider"
 prefix = "/oauth/{provider}"
 description = "utils/oauth.py registers login providers from environment configuration. With soev-api configured, callback account selection uses only the verified token sub. Startup refuses custom OAUTH_SUB_CLAIM or oauth.sub_claim settings. The login token's /v1/me person selects an unknown login's account by user.person_id and must agree with a known account's person_id before login. Null person bindings are written from /v1/me with uniqueness enforced; new accounts and credentials are inserted atomically with the verified person, and concurrent creation resolves by person_id. No platform OAuth session lacks a verified person; email never attaches. Another subject already bound to that provider or a person mismatch refuses 403; discovery failures refuse 503 before signup. Unit coverage: test/soev/test_login_attach.py and test/soev/test_login_subject.py. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 unseedable = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
-
-[[parameter]]
-key = "oauth_client"
-name = "client_id"
-prefix = "/oauth/clients/{client_id}"
-description = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
-unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -627,15 +579,6 @@ name = "thread_id"
 prefix = "/api/v1/threads/{thread_id}/read"
 description = "Marks the authenticated caller's conversation watermark using server time after authorizing the current projection. Shared readers update only their own state; an unrelated caller receives the same 404 as a missing chat. Requires ENABLE_V2_THREADS and reuses the caller-owned meeting thread. No request body or writable fields."
 same_as = "meeting"
-
-[[parameter]]
-key = "disabled_oauth_client"
-name = "client_id"
-prefix = "/oauth/clients/{client_id}/authorize"
-backed_by = "soev-solutions"
-seeded_by = "seed_disabled_oauth_client"
-depends_on = []
-description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id containing the fresh pass token drives this boundary for every authenticated actor without reusing a previous pass fixture."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -892,27 +835,6 @@ description = "update_prompt_version refuses a version_id that is not a history 
 json = { "version_id" = "{prompt_history}" }
 
 [[field]]
-route = "POST /api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action answers 400 'Model not found' without a registered model and reads chat_id, id and session_id from the body for its event emitter; main.py:chat_action checks chat_id against the caller's chats. The seeded model, the caller's chat and a message id reach the Action."
-json = { "model" = "{model}", "chat_id" = "{chat}", "id" = "message_{token}", "session_id" = "attack-{token}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /api/v1/tools/id/{id}/update"
-description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Tools code updates it in place."
-json = { "id" = "{tool}", "name" = "Attack tool", "content" = '''from pydantic import BaseModel
-
-class Tools:
-    class Valves(BaseModel):
-        label: str = "seed"
-    class UserValves(BaseModel):
-        label: str = "seed"
-    def __init__(self):
-        self.valves = self.Valves()
-    def echo(self, text: str) -> str:
-        return text
-''' }
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/add"
 description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
@@ -967,18 +889,6 @@ allow = ["same-object"]
 reason = "A user's avatar, shown wherever the user appears to any verified user."
 
 [[shared]]
-runtime_soev_backed = "waive"
-route = "GET /api/v1/functions/id/{id}/valves/user/spec"
-allow = ["same-object"]
-reason = "routers/functions.py:get_function_user_valves_spec_by_id serves an active function's UserValves JSON schema to any verified user: the form the per-user settings dialog renders. It is the function's code, identical for every caller, and carries no user's values."
-
-[[shared]]
-runtime_soev_backed = "waive"
-route = "POST /api/v1/functions/id/{id}/valves/user/update"
-allow = ["same-object", "write"]
-reason = "routers/functions.py:update_function_user_valves_by_id writes the caller's own user.settings.functions.valves[id] (models/functions.py:update_user_valves_by_id_and_user_id), never the function or another user's settings; the answer echoes the caller's own values. Measured live: after both accounts wrote, each read back only its own label. Functions carry no access grants to check against, unlike tools (routers/tools.py checks read access before a user-valves write)."
-
-[[shared]]
 route = "GET /api/v1/groups/id/{id}/info"
 allow = ["owner-marker", "resource-id", "same-object"]
 reason = "routers/groups.py:get_group_info_by_id serves a group's name, description and member count to any verified user, for the access-control picker."
@@ -1001,43 +911,6 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves/user"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves/user/spec"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/valves/user/update"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/chat/actions/{action_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "main.chat_action calls thread_content.refuse_local_content before verify_chat_ownership or action dispatch; threads.enabled() makes this an unconditional 409 unavailable for every authenticated actor in drive mode."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1332,15 +1205,6 @@ json = { category = "bug", description = "Fictional sweep delivery control", "co
 route = "POST /api/v1/auths/signup"
 description = "Platform signup refuses before user creation or first-user promotion; identities come from the login provider."
 v2 = { json = { email = "fictional-signup-{token}@example.invalid", password = "Fictional-Signup-Passw0rd!", name = "Fictional signup" } }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /oauth/clients/{client_id}/authorize"
-status = 403
-detail = "The requested action has been restricted as a security measure."
-json = { detail = "The requested action has been restricted as a security measure." }
-reason = "Platform tool servers are disabled; refuse authorization before OAuth registration can persist product configuration."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1749,132 +1613,6 @@ detail = "Feature is unavailable"
 json = { detail = "Feature is unavailable" }
 reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/create"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/export"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/access/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "DELETE /api/v1/tools/id/{id}/delete"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/spec"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/valves/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/user"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/user/spec"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/valves/user/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/list"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
 [[field]]
 route = "POST /api/v1/tasks/auto/completions"
 description = "A valid autocomplete request reaches the disabled task feature in the platform runtime."
@@ -1895,18 +1633,39 @@ reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplet
 [retired_product]
 reason = "Product-owner removal of local runtime features (owui-dead-features)."
 routes = [
+  "DELETE /api/v1/tools/id/{id}/delete",
+  "GET /api/v1/functions/",
+  "GET /api/v1/functions/id/{id}/valves/user",
+  "GET /api/v1/functions/id/{id}/valves/user/spec",
   "GET /api/v1/tasks/config",
+  "GET /api/v1/tools/",
+  "GET /api/v1/tools/export",
+  "GET /api/v1/tools/id/{id}",
+  "GET /api/v1/tools/id/{id}/valves",
+  "GET /api/v1/tools/id/{id}/valves/spec",
+  "GET /api/v1/tools/id/{id}/valves/user",
+  "GET /api/v1/tools/id/{id}/valves/user/spec",
+  "GET /api/v1/tools/list",
+  "GET /oauth/clients/{client_id}/authorize",
+  "GET /oauth/clients/{client_id}/callback",
   "GET /ollama/",
   "HEAD /ollama/",
+  "POST /api/chat/actions/{action_id}",
   "POST /api/embeddings",
   "POST /api/v1/chats/{id}/compact",
   "POST /api/v1/chats/{id}/messages/{message_id}/resolve",
   "POST /api/v1/embeddings",
+  "POST /api/v1/functions/id/{id}/valves/user/update",
   "POST /api/v1/retrieval/process/url",
   "POST /api/v1/retrieval/process/web",
   "POST /api/v1/retrieval/process/web/search",
   "POST /api/v1/retrieval/process/youtube",
   "POST /api/v1/tasks/image_prompt/completions",
+  "POST /api/v1/tools/create",
+  "POST /api/v1/tools/id/{id}/access/update",
+  "POST /api/v1/tools/id/{id}/update",
+  "POST /api/v1/tools/id/{id}/valves/update",
+  "POST /api/v1/tools/id/{id}/valves/user/update",
   "POST /ollama/api/chat",
   "POST /ollama/api/chat/{url_idx}",
   "POST /ollama/api/embed",

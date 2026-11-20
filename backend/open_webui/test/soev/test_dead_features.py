@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'POST /api/chat/actions/{action_id}',
+    'GET /oauth/clients/{client_id}/authorize',
+    'GET /oauth/clients/{client_id}/callback',
     'GET /api/v1/tasks/config',
     'POST /api/v1/chats/{id}/compact',
     'POST /api/v1/chats/{id}/messages/{message_id}/resolve',
@@ -45,7 +48,10 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
     actual = {f'{method} {route.path}' for route in app.routes for method in getattr(route, 'methods', [])}
     spec = json.loads((Path(__file__).resolve().parents[4] / 'security/openapi.json').read_text())
     committed = {f'{method.upper()} {path}' for path, item in spec['paths'].items() for method in item}
-    assert not any(route.split(' ', 1)[1].startswith(('/ollama', '/openai')) for route in actual)
+    assert not any(
+        route.split(' ', 1)[1].startswith(('/ollama', '/openai', '/api/v1/tools/', '/api/v1/functions/'))
+        for route in actual
+    )
     assert not actual & RETIRED
     assert not committed & RETIRED
     assert {

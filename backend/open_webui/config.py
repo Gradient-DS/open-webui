@@ -2401,7 +2401,6 @@ FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true
 
 FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 
-FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 
 FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
 
@@ -2423,13 +2422,11 @@ FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'tr
 
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
 
-FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'False').lower() == 'true'
 
 FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'False').lower() == 'true'
 
 FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False').lower() == 'true'
 
-FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 
 FEATURE_STRICT_DATA_SEPARATION = os.environ.get('FEATURE_STRICT_DATA_SEPARATION', 'False').lower() == 'true'
 
@@ -2541,7 +2538,6 @@ DEFAULT_CONFIG = {
     'ollama.api_configs': OLLAMA_API_CONFIGS,
     'models.base_models_cache': ENABLE_BASE_MODELS_CACHE,
     'tool_server.connections': TOOL_SERVER_CONNECTIONS,
-    'oauth.client.timeout': OAUTH_CLIENT_TIMEOUT,
     'terminal_server.connections': TERMINAL_SERVER_CONNECTIONS,
     'code_execution.enable': ENABLE_CODE_EXECUTION,
     'code_execution.engine': CODE_EXECUTION_ENGINE,

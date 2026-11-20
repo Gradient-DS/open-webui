@@ -60,7 +60,6 @@ from open_webui.config import (
     ENV,
     # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
     FEATURE_ARTIFACTS,
-    FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
     FEATURE_CHANGELOG,
     FEATURE_CHAT_CONTROLS,
@@ -84,8 +83,6 @@ from open_webui.config import (
     FEATURE_SYSTEM_PROMPT,
     FEATURE_TEMPORARY_CHAT,
     FEATURE_TERMINAL_SERVERS,
-    FEATURE_TOOL_SERVERS,
-    FEATURE_TOOLS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
@@ -129,7 +126,6 @@ from open_webui.env import (
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
-    ENABLE_PLUGINS,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     ENABLE_PYODIDE_FILE_PERSISTENCE,
     # SCIM
@@ -547,7 +543,7 @@ async def lifespan(app: FastAPI):
             log.warning(f'Failed to pre-fetch models at startup: {e}')
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
-    if len(await Config.get('tool_server.connections', []) or []) > 0:
+    if await feature_enabled('tool_servers') and len(await Config.get('tool_server.connections', []) or []) > 0:
         mock_request = Request(
             {
                 'type': 'http',
@@ -946,7 +942,11 @@ app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
-app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
+app.include_router(
+    product_router(tools.router, exclude={route.path for route in tools.router.routes}),
+    prefix='/api/v1/tools',
+    tags=['tools'],
+)
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
@@ -954,7 +954,11 @@ app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories']
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
 app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
-app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
+app.include_router(
+    product_router(functions.router, exclude={route.path for route in functions.router.routes}),
+    prefix='/api/v1/functions',
+    tags=['functions'],
+)
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
@@ -2327,8 +2331,8 @@ async def get_app_config(request: Request):
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     # [Gradient] v2 mode keeps the picker to the soev-api catalog.
-                    'enable_plugins': ENABLE_PLUGINS,
-                    'enable_functions': ENABLE_PLUGINS and not model_catalog.is_v2(),
+                    'enable_plugins': False,
+                    'enable_functions': False,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,  # [Gradient]
@@ -2385,7 +2389,7 @@ async def get_app_config(request: Request):
                     'feature_model_meters': await feature_enabled('model_meters', FEATURE_MODEL_METERS),
                     'feature_knowledge': await feature_enabled('knowledge', FEATURE_KNOWLEDGE),
                     'feature_prompts': await feature_enabled('prompts', FEATURE_PROMPTS),
-                    'feature_tools': await feature_enabled('tools', FEATURE_TOOLS),
+                    'feature_tools': False,
                     'feature_skills': await feature_enabled('skills', FEATURE_SKILLS),
                     'feature_skill_files': await feature_enabled('skill_files', FEATURE_SKILL_FILES),
                     'enable_skill_execution': ENABLE_SKILL_EXECUTION,
@@ -2400,10 +2404,10 @@ async def get_app_config(request: Request):
                     'feature_input_menu': await feature_enabled('input_menu', FEATURE_INPUT_MENU),
                     'feature_temporary_chat': await feature_enabled('temporary_chat', FEATURE_TEMPORARY_CHAT)
                     and not soev_threads.enabled(),
-                    'feature_tool_servers': await feature_enabled('tool_servers', FEATURE_TOOL_SERVERS),
+                    'feature_tool_servers': False,
                     'feature_terminal_servers': await feature_enabled('terminal_servers', FEATURE_TERMINAL_SERVERS),
                     'feature_user_demographics': await feature_enabled('user_demographics', FEATURE_USER_DEMOGRAPHICS),
-                    'feature_builtin_tools': await feature_enabled('builtin_tools', FEATURE_BUILTIN_TOOLS),
+                    'feature_builtin_tools': False,
                     'feature_strict_data_separation': await feature_enabled(
                         'strict_data_separation', FEATURE_STRICT_DATA_SEPARATION
                     ),
@@ -3018,7 +3022,14 @@ async def check_db_health():
 # [Gradient] Local embedding dispatch has no product route.
 app.router.routes = product_router(
     app.router,
-    exclude={'/api/embeddings', '/api/v1/embeddings', '/api/v1/chats/{id}/messages/{message_id}/resolve'},
+    exclude={
+        '/api/embeddings',
+        '/api/v1/embeddings',
+        '/api/v1/chats/{id}/messages/{message_id}/resolve',
+        '/api/chat/actions/{action_id}',
+        '/oauth/clients/{client_id}/authorize',
+        '/oauth/clients/{client_id}/callback',
+    },
 ).routes
 
 

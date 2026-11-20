@@ -277,3 +277,11 @@ describe('canContinueResponse', () => {
 		expect(canContinueResponse(agent, { role: 'admin' })).toBe(false);
 	});
 });
+
+it.each<Feature>(['tools', 'tool_servers', 'builtin_tools'])(
+	'never restores retired %s authoring from stale flags',
+	(feature) => {
+		vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: true } });
+		expect(isFeatureEnabled(feature)).toBe(false);
+	}
+);

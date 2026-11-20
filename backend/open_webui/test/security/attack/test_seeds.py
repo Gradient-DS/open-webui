@@ -707,14 +707,13 @@ def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
         seeds.resolve_parameters(client, surface=silent, spec=spec)
 
 
-def test_active_function_serves_chat_actions_and_user_valves():
+def test_active_functions_have_no_product_parameter_bindings():
     for path, name in [
         ('/api/chat/actions/{action_id}', 'action_id'),
         ('/api/v1/functions/id/{id}/valves/user/update', 'id'),
     ]:
-        declaration = seeds.parameter_for(path, name)
-        key = declaration.get('same_as', declaration['key'])
-        assert key == 'active_function', path
+        with pytest.raises(KeyError, match='Unaccounted'):
+            seeds.parameter_for(path, name)
 
 
 @pytest.mark.parametrize(
@@ -1198,22 +1197,6 @@ def test_query_boolean_fields_use_the_platform_wire_format():
     fields = seeds.resolve_fields(ctx)
     request = requests.Request('GET', 'https://owui.invalid/fictional', **fields['GET /fictional']).prepare()
     assert request.url.endswith('include_sidebar=true&include_archived=false&page=1')
-
-
-def test_disabled_oauth_client_is_fresh_in_each_resolution_without_http(monkeypatch):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
-    route = '/oauth/clients/{client_id}/authorize'
-    parameter = seeds.parameter_for(route, 'client_id')
-    surface = {'parameter': [parameter]}
-    spec = {'paths': {route: {'get': {}}}}
-    actor = Mock()
-    tokens = ['fictional-first-pass', 'fictional-second-pass']
-    monkeypatch.setattr(seeds.secrets, 'token_hex', Mock(side_effect=tokens))
-    resolved = [seeds.resolve_parameters(actor, surface=surface, spec=spec) for _ in tokens]
-    assert [result[route, 'client_id'] for result in resolved] == [
-        f'mcp:fictional-disabled-{token}' for token in tokens
-    ]
-    actor.request.assert_not_called()
 
 
 def test_retired_product_routes_have_no_remaining_seeds_or_controls():

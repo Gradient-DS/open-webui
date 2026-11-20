@@ -37,6 +37,7 @@ export type Feature =
  * Used for SaaS tier-based feature control.
  */
 export function isFeatureEnabled(feature: Feature): boolean {
+	if (['tools', 'tool_servers', 'builtin_tools'].includes(feature)) return false;
 	const $config = get(config);
 	if (!$config?.features) {
 		return false; // Config not loaded yet — hide features until authenticated config arrives

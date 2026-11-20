@@ -1213,7 +1213,7 @@
 
 		try {
 			if (!$tools) {
-				tools.set(await getTools(localStorage.token));
+				tools.set(isFeatureEnabled('tools') ? await getTools(localStorage.token) : []);
 			}
 			if (!$functions) {
 				functions.set(

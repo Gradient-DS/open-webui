@@ -267,10 +267,6 @@ class SeedContext:
         raise RuntimeError(f'Seeding file {file_id} did not complete within {timeout}s')
 
 
-def seed_disabled_oauth_client(ctx, parameter):
-    return f'mcp:fictional-disabled-{ctx.token}'
-
-
 def seed_refused_target(ctx, parameter):
     return 'fictional-retired-' + ctx.token
 
@@ -535,7 +531,6 @@ def seed_cloud_authorize_connection(ctx, parameter):
 _SEEDERS = {
     function.__name__: function
     for function in (
-        seed_disabled_oauth_client,
         seed_request_user,
         seed_console_access,
         seed_refused_target,
