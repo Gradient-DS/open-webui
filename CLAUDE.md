@@ -280,6 +280,10 @@ whatever the user's own `ui.composerTools` says. Picking or removing an assistan
 state again. After that the user switches anything as usual; choices made with an assistant active are stored on the
 chat only and never written to `ui.composerTools`.
 
+An assistant that uses tools (a tool functionality in `defaultFeatureIds`, `toolIds` or knowledge) runs only on a
+model that can call them (`pickableLLMs` in `utils/assistants.ts`): the picker leaves out catalog models whose
+`meta.soev.capabilities.tools` is `unsupported`, and a selected one makes way for the default model that can.
+
 Mail shares ui.composerTools/chat.features persistence with every composer feature,
 including the initial message. Search statuses retain structured order/from/to/cc
 options for English/Dutch rendering, including zero-result searches.

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { models, pinnedModels, settings, user } from '$lib/stores';
+	import { config, models, pinnedModels, settings, user } from '$lib/stores';
 	// [Gradient] The picker contains LLMs only and disables compare for assistant chats.
-	import { activeAssistantId, llmSelection } from '$lib/stores/assistant';
-	import { isLLM } from '$lib/utils/assistants';
+	import { activeAssistant, activeAssistantId, llmSelection } from '$lib/stores/assistant';
+	import { pickableLLMId, pickableLLMs } from '$lib/utils/assistants';
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Selector from './ModelSelector/Selector.svelte';
@@ -47,9 +47,14 @@
 		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
 
+	// [Gradient] An assistant that uses tools runs only on a model that can call them: the others
+	// leave the picker, and a selected one makes way for the default model that can.
 	$: if (selectedModels.length > 0 && $models.length > 0) {
+		const preferred = [...($settings?.models ?? []), ...($config?.default_models ?? '').split(',')];
 		const _selectedModels = llmSelection(selectedModels).map((model) =>
-			$models.map((m) => m.id).includes(model) ? model : ''
+			$models.map((m) => m.id).includes(model)
+				? pickableLLMId(model, $models, $activeAssistant, preferred)
+				: ''
 		);
 
 		if (!equal(_selectedModels, selectedModels)) {
@@ -77,7 +82,7 @@
 					bind:this={selector}
 					id="model"
 					placeholder={$i18n.t('Select a model')}
-					items={$models.filter(isLLM).map((model) => ({
+					items={pickableLLMs($models, $activeAssistant).map((model) => ({
 						value: model.id,
 						label: model.name,
 						model: model

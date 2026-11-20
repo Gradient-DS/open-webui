@@ -7,7 +7,14 @@ export type AssistantModel = {
 	owned_by?: string;
 	info?: {
 		base_model_id?: string | null;
-		meta?: { capabilities?: object | null; hidden?: boolean };
+		meta?: {
+			capabilities?: object | null;
+			hidden?: boolean;
+			defaultFeatureIds?: string[];
+			toolIds?: string[];
+			knowledge?: unknown[];
+			soev?: { capabilities?: { tools?: string } | null } | null;
+		};
 		params?: object;
 	};
 };
@@ -100,3 +107,42 @@ export const defaultLLMId = (models: AssistantModel[], preferredIds: string[] = 
 	preferredIds.find((id) => models.some((model) => model.id === id && isLLM(model))) ??
 	models.find((model) => isLLM(model) && !model.info?.meta?.hidden)?.id ??
 	'';
+
+/** Functionalities the agent runs as tool calls. */
+const TOOL_FEATURES = ['web_search', 'document_writer', 'workspace', 'live_documents', 'live_mail'];
+
+/** Whether the assistant has anything the agent can only do with tool calls. */
+export const usesTools = (assistant?: AssistantModel | null): boolean => {
+	const meta = assistant?.info?.meta;
+	return (
+		(meta?.defaultFeatureIds ?? []).some((id) => TOOL_FEATURES.includes(id)) ||
+		(meta?.toolIds ?? []).length > 0 ||
+		(meta?.knowledge ?? []).length > 0
+	);
+};
+
+/** The agent's own rule: only a model the catalog marks `unsupported` gets no tools. */
+export const supportsTools = (model?: AssistantModel | null): boolean =>
+	model?.info?.meta?.soev?.capabilities?.tools !== 'unsupported';
+
+/** The LLMs the picker offers: with an assistant that uses tools, only those that can call them. */
+export const pickableLLMs = <T extends AssistantModel>(
+	models: T[],
+	assistant?: AssistantModel | null
+): T[] => {
+	const llms = models.filter(isLLM);
+	return usesTools(assistant) ? llms.filter(supportsTools) : llms;
+};
+
+/** The selected LLM, or the default pickable one when the assistant's tools rule it out. */
+export const pickableLLMId = (
+	id: string,
+	models: AssistantModel[],
+	assistant?: AssistantModel | null,
+	preferredIds: string[] = []
+): string => {
+	const pickable = pickableLLMs(models, assistant);
+	if (!isLLM(models.find((model) => model.id === id))) return id;
+	if (pickable.some((model) => model.id === id)) return id;
+	return defaultLLMId(pickable, preferredIds) || id;
+};
