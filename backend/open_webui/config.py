@@ -714,12 +714,8 @@ ENABLE_ONEDRIVE_INTEGRATION = os.getenv('ENABLE_ONEDRIVE_INTEGRATION', 'False').
 
 
 ONEDRIVE_CLIENT_ID = os.getenv('ONEDRIVE_CLIENT_ID', '')
-ONEDRIVE_CLIENT_ID_PERSONAL = os.getenv('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID)
 ONEDRIVE_CLIENT_ID_BUSINESS = os.getenv('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID)
 
-ENABLE_ONEDRIVE_PERSONAL = os.getenv('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true' and bool(
-    ONEDRIVE_CLIENT_ID_PERSONAL
-)
 ENABLE_ONEDRIVE_BUSINESS = os.getenv('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true' and bool(
     ONEDRIVE_CLIENT_ID_BUSINESS
 )
@@ -2815,9 +2811,7 @@ DEFAULT_CONFIG = {
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
-    'onedrive.client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
     'onedrive.enable_business': ENABLE_ONEDRIVE_BUSINESS,
-    'onedrive.enable_personal': ENABLE_ONEDRIVE_PERSONAL,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

@@ -53,3 +53,33 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
         'POST /api/v1/audio/speech',
         'GET /api/v1/skills/',
     } <= actual & committed
+
+
+async def _authenticated_config(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from fastapi import Request
+    from open_webui import main
+
+    user = SimpleNamespace(id='fictional-user', role='user')
+    monkeypatch.setattr(main, 'decode_token', lambda _: {'id': user.id})
+    monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
+    monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=user))
+    monkeypatch.setattr(main.sessions, 'session_user', lambda *_: user)
+    monkeypatch.setattr(main.Config, 'get_many', AsyncMock(return_value={'onedrive.enable': True}))
+    monkeypatch.setattr(main, 'feature_enabled', AsyncMock(return_value=True))
+    monkeypatch.setattr(main.capabilities, 'has', AsyncMock(return_value=True))
+    monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='fictional-model'))
+    request = Request({'type': 'http', 'headers': [(b'authorization', b'Bearer fictional')], 'app': main.app})
+    return await main.get_app_config(request)
+
+
+def test_personal_connector_settings_are_not_published(monkeypatch):
+    import asyncio
+
+    result = asyncio.run(_authenticated_config(monkeypatch))
+    assert 'enable_onedrive_personal' not in result['features']
+    assert 'client_id_personal' not in result['onedrive']
+    assert result['features']['enable_onedrive_integration']
+    assert result['features']['enable_image_generation'] is False

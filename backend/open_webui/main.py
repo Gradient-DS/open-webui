@@ -2335,9 +2335,7 @@ async def get_app_config(request: Request):
         'bug_reports.enabled',
         'google_drive.client_id',
         'google_drive.api_key',
-        'onedrive.enable_personal',
         'onedrive.enable_business',
-        'onedrive.client_id_personal',
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
@@ -2489,7 +2487,6 @@ async def get_app_config(request: Request):
                     'enable_memories': config.get('memories.enable'),
                     **(
                         {
-                            'enable_onedrive_personal': config.get('onedrive.enable_personal'),
                             'enable_onedrive_business': config.get('onedrive.enable_business')
                             and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                         }
@@ -2573,7 +2570,6 @@ async def get_app_config(request: Request):
                     'api_key': config.get('google_drive.api_key'),
                 },
                 'onedrive': {
-                    'client_id_personal': config.get('onedrive.client_id_personal'),
                     'client_id_business': config.get('onedrive.client_id_business'),
                     'sharepoint_url': config.get('onedrive.sharepoint_url'),
                     'sharepoint_tenant_id': config.get('onedrive.sharepoint_tenant_id'),

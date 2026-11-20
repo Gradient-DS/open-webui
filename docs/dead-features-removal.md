@@ -118,3 +118,19 @@ Vitest: 18 passed. ESLint and Prettier: passed. Check: inherited tree errors rem
 touched files have zero errors/warnings in both baseline and current logs.
 `--exclude '**/nothing'` replaces Vite's blanket `**/.worktrees/**` test exclusion,
 which would otherwise hide every explicitly selected test in this worktree.
+
+## Connector settings
+
+Local connector sync defaults/routes (Confluence, Topdesk, Google Drive and
+OneDrive local sync loops, daemon/document-pipeline wiring) were already absent.
+Removed the remaining personal OneDrive config defaults, environment parsing and
+`/api/config` exposure (`onedrive.enable_personal`, `onedrive.client_id_personal`).
+Platform cloud-sync schedules/connections, business picker, live documents and
+mail remain; these are not the obsolete OWUI connector sync settings.
+No dead connector default remains. No routes added or removed; OpenAPI unchanged.
+
+Validation: `python -m pytest -c backend/pytest.ini
+backend/open_webui/test/soev/test_dead_features.py
+backend/open_webui/test/soev/test_feature_capabilities.py
+backend/open_webui/test/soev/test_live_documents.py -q` passed (48 tests,
+16 dependency warnings). No frontend source changed.
