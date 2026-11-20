@@ -526,11 +526,11 @@ def test_skill_seed_survives_an_existing_name_and_repeated_resolution():
         and isinstance(node.value, ast.Call)
         and any(k.arg == 'unique' and ast.literal_eval(k.value) for k in node.value.keywords)
     ]
-    assert set(unique_fields) == {'id', 'name'}, 'Review all skill uniqueness constraints when the model changes'
+    assert set(unique_fields) == {'id'}, 'Review all skill uniqueness constraints when the model changes'
     entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
     owner, admin = Mock(spec=seeds.AttackClient), Mock(spec=seeds.AttackClient)
     with sqlite3.connect(':memory:') as db:
-        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT UNIQUE)')
+        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT)')
         db.execute('INSERT INTO skill VALUES (?, ?)', ('previous-id', 'Attack skill'))
 
         def create(method, path, **kwargs):
