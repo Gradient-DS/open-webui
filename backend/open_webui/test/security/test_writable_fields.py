@@ -34,8 +34,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (369 + 3, 373 + 3), (
-        f'Expected 372 five-method operations / 376 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (368, 372), (
+        f'Expected 368 five-method operations / 372 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,10 +63,9 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (
-        138 + 1,
-        1845 + 1,
-    ), f'Expected 139 routes / 1846 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (135, 1839), (
+        f'Expected 135 routes / 1839 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     # image_prompt refuses platform mode before consuming either field.
     for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
@@ -80,17 +79,16 @@ def test_derived_counts(surface):
         'threads[].thread_id',
         'threads[].versions[]',
     ]
-    assert query_counts == (
-        36,
-        78,
-    ), f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    assert query_counts == (36, 78), (
+        f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    )
 
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
     # External knowledge retired 7 writable routes and 37 fields; keep the guard margin.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 - 17 - 11 - 7 - 61 and strings >= 2400 - 403 - 30 - 37 - 315, (
+    assert routes >= 225 - 17 - 11 - 7 - 61 - 4 and strings >= 2400 - 403 - 30 - 37 - 315 - 7, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
         'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
     )
@@ -105,7 +103,7 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 9 + 1 and media == {'application/json': 7 + 1, 'multipart/form-data': 2}, (
+    assert len(blind) == 10 and media == {'multipart/form-data': 2, 'application/json': 8}, (
         f'Expected 10 blind body operations (8 JSON writes; 2 multipart); measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}

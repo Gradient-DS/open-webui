@@ -406,3 +406,12 @@ def test_platform_oauth_authorization_has_a_seed_and_an_exact_refusal(monkeypatc
     assert declaration['status'] == 403
     assert declaration['json'] == {'detail': 'The requested action has been restricted as a security measure.'}
     assert route not in coverage.waivers()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_retired_product_routes_are_absent_in_both_sweep_modes(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    assert not retired & (set(plane.operations()) | coverage.waivers().keys() | crossuser.expected_refusals().keys())

@@ -89,7 +89,6 @@ from open_webui.config import (
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
-    FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
     # [Gradient] typed-KB file limit
@@ -238,6 +237,7 @@ from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
 from open_webui.soev.login_attach import validate_login_config
 from open_webui.soev.thread_approvals import require_legacy_approval
+from open_webui.soev.product_surface import product_router
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.tasks import (
@@ -979,7 +979,14 @@ app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
 app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
 
 app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
-app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieval'])
+# [Gradient] File ingestion stays on the platform; OWUI web loaders/search are retired.
+app.include_router(
+    product_router(
+        retrieval.router, exclude={'/process/url', '/process/web', '/process/youtube', '/process/web/search'}
+    ),
+    prefix='/api/v1/retrieval',
+    tags=['retrieval'],
+)
 
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
@@ -1335,7 +1342,6 @@ async def chat_completion(
             'filter_ids': form_data.pop('filter_ids', []),
             'tool_ids': form_data.get('tool_ids', None),
             'tool_servers': tool_servers,
-            'rag_filter': form_data.pop('rag_filter', None),  # [Gradient] RAG filter passthrough
             'assistant_id': split_assistant_id,  # [Gradient] the assistant of an assistant/LLM split turn
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
@@ -2305,7 +2311,6 @@ async def get_app_config(request: Request):
         'email.enable_forgot_password',
         'email.enable_invites',
         'email.invite_heading',
-        'rag.enable_filter_ui',
         'rag.file.allowed_extensions',
         'document_writer.enable',
         'ui.enable_citation_relevance',
@@ -2401,7 +2406,6 @@ async def get_app_config(request: Request):
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
                     'web_search_confirmation_content': config.get('web.search.confirmation.content'),
-                    'enable_rag_filter_ui': config.get('rag.enable_filter_ui'),  # [Gradient]
                     'enable_code_execution': config.get('code_execution.enable'),
                     'enable_code_interpreter': config.get('code_interpreter.enable'),
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
@@ -2454,7 +2458,7 @@ async def get_app_config(request: Request):
                     'feature_chat_controls_sections': await feature_enabled(
                         'chat_controls_sections', FEATURE_CHAT_CONTROLS_SECTIONS
                     ),
-                    'feature_webpage_url': await feature_enabled('webpage_url', FEATURE_WEBPAGE_URL),
+                    'feature_webpage_url': False,
                     'feature_reference_chats': await feature_enabled('reference_chats', FEATURE_REFERENCE_CHATS),
                     'feature_simple_assistant_builder': await feature_enabled(
                         'simple_assistant_builder', FEATURE_SIMPLE_ASSISTANT_BUILDER

@@ -1274,3 +1274,10 @@ def test_disabled_oauth_client_is_fresh_in_each_resolution_without_http(monkeypa
         f'mcp:fictional-disabled-{token}' for token in tokens
     ]
     actor.request.assert_not_called()
+
+
+def test_retired_product_routes_have_no_remaining_seeds_or_controls():
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    assert not retired & set(seeds.ordinary_targets())
+    for kind in ('field', 'control', 'destructive', 'shared'):
+        assert not retired & {entry.get('route', entry.get('id')) for entry in seeds.SURFACE.get(kind, [])}

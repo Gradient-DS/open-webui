@@ -2102,3 +2102,12 @@ status = 403
 detail = "Model not found"
 json = { detail = "Model not found" }
 reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
+
+[retired_product]
+reason = "Product-owner removal of local runtime features (owui-dead-features)."
+routes = [
+  "POST /api/v1/retrieval/process/url",
+  "POST /api/v1/retrieval/process/web",
+  "POST /api/v1/retrieval/process/web/search",
+  "POST /api/v1/retrieval/process/youtube",
+]
