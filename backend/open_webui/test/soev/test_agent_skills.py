@@ -76,7 +76,7 @@ async def test_bundles_override_identity_preserve_body_and_include_raw_bytes(ski
         text = archive.read('SKILL.md').decode()
         frontmatter = yaml.safe_load(text.split('---\n')[1])
         assert re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', frontmatter['name'])
-        assert frontmatter['name'] == 'invented-outline'
+        assert frontmatter['name'] == 'outline'
         assert frontmatter['description'] == 'Draft an outline'
         assert frontmatter['license'] == 'MIT'
         assert text.endswith('Original body\n')
@@ -253,7 +253,7 @@ async def test_simultaneous_unchanged_turns_upload_once(skills):
 async def test_readable_unique_capped_names_with_deterministic_collision_suffix(skills):
     ids = ['__Draft-Outline', 'draft-outline', 'a' * 65, 'a' * 64 + 'b', '___']
     agent_skills.Skills.get_skills.return_value = [
-        SimpleNamespace(**{**vars(skills.skill), 'id': skill_id, 'updated_at': len(ids) - i})
+        SimpleNamespace(**{**vars(skills.skill), 'id': skill_id, 'name': '', 'updated_at': len(ids) - i})
         for i, skill_id in enumerate(ids)
     ]
     await agent_v2._skills(metadata(), 'owui:user:fern')
@@ -271,6 +271,14 @@ async def test_readable_unique_capped_names_with_deterministic_collision_suffix(
     assert len(set(names)) == len(ids)
     assert all(re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', name) for name in names)
     assert [agent_skills._skill_name(skill_id, set(names[:i])) for i, skill_id in enumerate(ids)] == names
+
+
+def test_name_comes_from_the_skill_name_not_its_suffixed_id():
+    used: set[str] = set()
+    assert agent_skills._skill_name('house-style-784e24', used, 'House Style (Docx)') == 'house-style-docx'
+    again = agent_skills._skill_name('house-style', used, 'House Style (Docx)')
+    assert again == 'house-style-docx-' + hashlib.sha256(b'house-style').hexdigest()[:8]
+    assert agent_skills._skill_name('fallback-id', used, '¿?') == 'fallback-id'
 
 
 def test_collision_with_an_existing_suffixed_slug():

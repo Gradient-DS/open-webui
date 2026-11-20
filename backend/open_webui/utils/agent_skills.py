@@ -29,8 +29,10 @@ MAX_EXPANDED = 100 * 1024 * 1024
 _FRONTMATTER = re.compile(r'\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)(?:\r?\n|\Z)', re.DOTALL)
 
 
-def _skill_name(skill_id: str, used: set[str]) -> str:
-    base = re.sub(r'^[^a-z0-9]+', '', skill_id.lower())[:64]
+def _skill_name(skill_id: str, used: set[str], label: str = '') -> str:
+    # The agent reads the skill's own name; ids are global and may carry a suffix another user's upload caused.
+    slug = re.sub(r'[^a-z0-9_-]+', '-', label.lower()).strip('-')
+    base = re.sub(r'^[^a-z0-9]+', '', slug or skill_id.lower())[:64]
     name = base
     attempt = 0
     while not name or name in used:
@@ -146,7 +148,7 @@ async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[di
     file_ids = {entry.file_id for files in bundles.values() for entry in files}
     backing = {file.id: file for file in await Files.get_file_metadatas_by_ids(list(file_ids))} if file_ids else {}
     for skill in selected:
-        name = _skill_name(skill.id, names)
+        name = _skill_name(skill.id, names, skill.name or '')
         files = sorted(bundles[skill.id], key=lambda entry: entry.path)
         versions = [
             [
