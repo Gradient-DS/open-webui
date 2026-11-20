@@ -88,3 +88,33 @@ Inventory: 372 → 349 operations; 135 → 114 writable-body operations;
 1,839 → 1,152 writable strings. Validation: S plus
 `backend/open_webui/test/security/attack/test_ollama_refusals.py` passed
 (400 tests, 20 dependency warnings). No frontend source changed.
+
+## Image generation
+
+Unmounted POST `/api/v1/tasks/image_prompt/completions`; OWUI image engine routes
+and defaults were already removed. The public generation availability is always
+false, independently of platform image-input capability. Removed the image prompt
+default, composer pin entry, saved generation restoration and outgoing generation
+preference. Image uploads/vision and platform agent image behavior are unchanged.
+The retained upstream components still have internal generation properties, now
+disabled by the product gate. No image-generation config default remains.
+
+Inventory: 349 → 348 operations; 114 → 113 writable-body operations;
+1,152 → 1,112 writable strings. Validation: S plus
+`test/soev/test_feature_capabilities.py` and `test/soev/test_task_turns.py`
+passed (512 tests, 20 dependency warnings). Upstream task refusal assertions remain
+covered independently of the retired product inventory.
+
+Frontend commands:
+
+```sh
+node node_modules/vitest/vitest.mjs run src/lib/utils/deadFeatures.test.ts src/lib/utils/composerPreferences.test.ts src/lib/components/chat/MessageInput/inputItems.test.ts --exclude '**/nothing'
+node node_modules/eslint/bin/eslint.js src/lib/utils/composerPreferences.ts src/lib/utils/deadFeatures.test.ts src/lib/components/chat/MessageInput/inputItems.ts src/lib/components/chat/MessageInput/inputItems.test.ts
+node node_modules/prettier/bin/prettier.cjs --check src/lib/utils/composerPreferences.ts src/lib/utils/deadFeatures.test.ts src/lib/components/chat/MessageInput/inputItems.ts src/lib/components/chat/MessageInput/inputItems.test.ts
+npm run check
+```
+
+Vitest: 18 passed. ESLint and Prettier: passed. Check: inherited tree errors remain;
+touched files have zero errors/warnings in both baseline and current logs.
+`--exclude '**/nothing'` replaces Vite's blanket `**/.worktrees/**` test exclusion,
+which would otherwise hide every explicitly selected test in this worktree.

@@ -83,11 +83,8 @@ def test_required_drive_routes_have_seeded_targets_and_authorization_coverage(mo
     required = set(seeds.SURFACE['required_drive_routes'])
     assert required <= set(seeds.ordinary_targets())
     crossuser, _ = targets()
-    image_prompt = 'POST /api/v1/tasks/image_prompt/completions'
-    assert required - {image_prompt} <= set(crossuser)
+    assert required <= set(crossuser)
     assert 'GET /api/v1/cloud-sync/policy' in platform_operations()
-    refusal = next(entry for entry in seeds.SURFACE['control'] if entry['route'] == image_prompt)
-    assert refusal['all_actors'] and refusal['status'] == 404
 
 
 @pytest.mark.parametrize('route', seeds.SURFACE['required_drive_routes'])
@@ -752,10 +749,12 @@ def test_knowledge_file_seeder_adds_a_file_nothing_else_uses(key, provided):
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
     # RFC 6238 appendix B, SHA-1 seed "12345678901234567890", truncated to 6 digits.
+    from .client import totp_code
+
     secret = base64.b32encode(b'12345678901234567890').decode()
     for at, code in [(59, '287082'), (1111111109, '081804'), (1234567890, '005924'), (2000000000, '279037')]:
-        assert seeds.totp_code(secret, at=at) == code
-    assert seeds.totp_code(secret.rstrip('=').lower(), at=59) == '287082'
+        assert totp_code(secret, at=at) == code
+    assert totp_code(secret.rstrip('=').lower(), at=59) == '287082'
 
 
 PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}

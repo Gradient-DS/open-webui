@@ -24,7 +24,6 @@ export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'live_mail', section: 'tools', pinnable: true },
 	{ id: 'live_documents', section: 'tools', pinnable: true },
 	{ id: 'web_search', section: 'tools', pinnable: true },
-	{ id: 'image_generation', section: 'tools', pinnable: true },
 	{ id: 'code_interpreter', section: 'tools', pinnable: true },
 	{ id: 'document_writer', section: 'tools', pinnable: true },
 	{ id: 'filter:*', section: 'tools', pinnable: true },

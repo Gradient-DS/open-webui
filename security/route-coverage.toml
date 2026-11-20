@@ -1,3 +1,4 @@
+# owui-dead-features: the image-prompt task is unmounted, without a waiver.
 # owui-dead-features: inference proxies and local embedding dispatch are unmounted.
 # owui-dead-features: four OWUI web-loader/search operations are unmounted; no new waivers.
 # Platform speech and indexed Ollama model authorization have exact all-actor

@@ -34,8 +34,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (346, 349), (
-        f'Expected 346 five-method operations / 349 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (345, 348), (
+        f'Expected 345 five-method operations / 348 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,12 +63,11 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (114, 1152), (
-        f'Expected 114 routes / 1152 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (113, 1112), (
+        f'Expected 113 routes / 1112 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
-    # image_prompt refuses platform mode before consuming either field.
-    for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title'):
+    for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title'):
         assert {'language', 'message_id'} <= set(fields[f'POST /api/v1/tasks/{task}/completions'])
     # Membership edits remain in the attack surface even though the handler refuses them.
     assert 'POST /api/v1/groups/id/{id}/update' not in operations
@@ -88,7 +87,7 @@ def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
     # External knowledge retired 7 writable routes and 37 fields; keep the guard margin.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 - 17 - 11 - 7 - 61 - 4 - 21 and strings >= 2400 - 403 - 30 - 37 - 315 - 7 - 687, (
+    assert routes >= 225 - 17 - 11 - 7 - 61 - 4 - 21 - 1 and strings >= 2400 - 403 - 30 - 37 - 315 - 7 - 687 - 40, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
         'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
     )

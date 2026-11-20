@@ -46,7 +46,6 @@ required_drive_routes = [
   "POST /api/v1/knowledge/{id}/file/move",
   "POST /api/v1/knowledge/{id}/file/remove",
   "POST /api/v1/knowledge/{id}/file/update",
-  "POST /api/v1/tasks/image_prompt/completions"
 ]
 
 # Caller-index 404s return 403 no_access without content; individual chat 404s stay unavailable.
@@ -1287,20 +1286,6 @@ detail = "unavailable"
 json = { "state" = "unavailable" }
 reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tasks/image_prompt/completions"
-status = 404
-detail = "Not Found"
-json = { "detail" = "Not Found" }
-reason = "tasks.generate_image_prompt explicitly refuses under v2; image prompt generation is not a soev.task/1 operation."
-
-[[field]]
-route = "POST /api/v1/tasks/image_prompt/completions"
-description = "task_completion_body requires a JSON object before generate_image_prompt can return its declared v2 404."
-v2 = { json = { model = "{model}", messages = [{ role = "user", content = "Fictional image prompt control" }] } }
-
 [[field]]
 route = "POST /api/v1/tasks/title/completions"
 description = "Supported typed task positive control for the image-prompt refusal, using the seeded owner's completed thread and catalog model."
@@ -1941,6 +1926,7 @@ routes = [
   "POST /api/v1/retrieval/process/web",
   "POST /api/v1/retrieval/process/web/search",
   "POST /api/v1/retrieval/process/youtube",
+  "POST /api/v1/tasks/image_prompt/completions",
   "POST /ollama/api/chat",
   "POST /ollama/api/chat/{url_idx}",
   "POST /ollama/api/embed",

@@ -981,7 +981,9 @@ app.include_router(
 )
 
 
-app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
+app.include_router(
+    product_router(tasks.router, exclude={'/image_prompt/completions'}), prefix='/api/v1/tasks', tags=['tasks']
+)
 
 app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
 # [Gradient] File ingestion stays on the platform; OWUI web loaders/search are retired.
@@ -2414,7 +2416,7 @@ async def get_app_config(request: Request):
                     'enable_code_execution': config.get('code_execution.enable'),
                     'enable_code_interpreter': config.get('code_interpreter.enable'),
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
-                    'enable_image_generation': model_catalog.is_v2() and await capabilities.has(capabilities.IMAGES),
+                    'enable_image_generation': False,
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
                     'enable_community_sharing': config.get('ui.enable_community_sharing'),
                     'enable_citation_relevance': config.get('ui.enable_citation_relevance'),  # [Gradient]

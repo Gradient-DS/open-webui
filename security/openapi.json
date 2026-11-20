@@ -25141,50 +25141,6 @@
         ]
       }
     },
-    "/api/v1/tasks/image_prompt/completions": {
-      "post": {
-        "operationId": "generate_image_prompt_api_v1_tasks_image_prompt_completions_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TaskCompletionBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Image Prompt",
-        "tags": [
-          "tasks"
-        ]
-      }
-    },
     "/api/v1/tasks/moa/completions": {
       "post": {
         "operationId": "generate_moa_response_api_v1_tasks_moa_completions_post",

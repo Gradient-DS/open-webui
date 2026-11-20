@@ -2699,7 +2699,6 @@ DEFAULT_CONFIG = {
     'chat.tool_permissions.enable': ENABLE_TOOL_PERMISSIONS,
     'task.title.prompt_template': TITLE_GENERATION_PROMPT_TEMPLATE,
     'task.tags.prompt_template': TAGS_GENERATION_PROMPT_TEMPLATE,
-    'task.image.prompt_template': IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
     'task.follow_up.prompt_template': FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
     'task.follow_up.enable': ENABLE_FOLLOW_UP_GENERATION,
     'task.tags.enable': ENABLE_TAGS_GENERATION,

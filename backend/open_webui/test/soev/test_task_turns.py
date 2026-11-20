@@ -202,15 +202,16 @@ async def test_image_prompt_is_unavailable_in_platform_mode(task_api, monkeypatc
 
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     route = 'POST /api/v1/tasks/image_prompt/completions'
-    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    entry = {
+        'route': route,
+        'json': {'model': '{model}', 'messages': [{'role': 'user', 'content': 'Fictional image prompt control'}]},
+    }
     context = seeds.SeedContext(None, None, seeds.SURFACE)
     context.values['model'] = FORM['model']
     parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
-    response = await task_api.browser.post(
-        '/tasks/image_prompt/completions', **crossuser._benign(route, parameters, seeds.SPEC)
-    )
+    response = await task_api.browser.post('/tasks/image_prompt/completions', **parameters.fields[route])
     assert response.status_code == 404
-    declaration = crossuser.expected_refusals()[route]
+    declaration = {'status': 404, 'detail': 'Not Found', 'json': {'detail': 'Not Found'}}
     assert crossuser.refused_as_expected(declaration, response.status_code, response.text)
     assert task_api.platform.requests == []
 

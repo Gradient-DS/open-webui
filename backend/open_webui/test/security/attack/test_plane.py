@@ -57,7 +57,7 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
 
 def test_body_builder_can_plant_each_derived_field():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (114, 1152)
+    assert (len(fields), sum(map(len, fields.values()))) == (113, 1112)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name
@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 349
+    assert len(plane.operations()) == 348
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -831,14 +831,17 @@ def test_image_prompt_drive_sends_the_body_before_checking_the_v2_refusal(monkey
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     path = '/api/v1/tasks/image_prompt/completions'
     route = f'POST {path}'
-    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    entry = {
+        'route': route,
+        'json': {'model': '{model}', 'messages': [{'role': 'user', 'content': 'Fictional image prompt control'}]},
+    }
     context = seeds.SeedContext(None, None, seeds.SURFACE)
     context.values['model'] = 'fictional-model'
     parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
     client = Mock(spec=plane.transport.AttackClient)
     client.request.side_effect = lambda *args, **kwargs: response(404, {'detail': 'Not Found'})
 
-    spec = {**seeds.SPEC, 'paths': {path: seeds.SPEC['paths'][path]}}
+    spec = tiny_spec([route], ['model'])
     outcome = plane.drive_every_route(client, parameters, spec=spec)[route]
 
     client.request.assert_called_once_with(
@@ -846,7 +849,8 @@ def test_image_prompt_drive_sends_the_body_before_checking_the_v2_refusal(monkey
         path,
         json={'model': 'fictional-model', 'messages': [{'role': 'user', 'content': 'Fictional image prompt control'}]},
     )
-    declaration = crossuser.expected_refusals()[route]
+    declaration = {'status': 404, 'detail': 'Not Found', 'json': {'detail': 'Not Found'}}
+    assert route not in plane.operations()
     assert declaration['status'] == 404
     assert crossuser.refused_as_expected(declaration, outcome.status, outcome.body)
     assert not crossuser.refused_as_expected(declaration, 422, '{"detail":"body missing"}')
@@ -918,7 +922,7 @@ def test_conversation_mark_read_is_driven_as_a_bodyless_write(monkeypatch):
 
 
 def test_fanout_queries_extend_existing_reads_without_adding_routes():
-    assert len(plane.operations()) == 349
+    assert len(plane.operations()) == 348
     for path, name in [
         ('/api/v1/chats/', 'include_sidebar'),
         ('/api/v1/chats/list', 'include_sidebar'),
