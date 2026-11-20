@@ -302,20 +302,17 @@ async def test_message_delete_preflight_keeps_a_thread_another_message_still_use
 
 
 @pytest.mark.asyncio
-async def test_retention_under_v2_only_counts_console_offboarding_candidates(mirror, monkeypatch):
-    from open_webui.services.retention import service
-    from open_webui.services.retention.service import DataRetentionService
+async def test_local_retention_worker_is_removed_without_remote_or_local_deletion(mirror, monkeypatch):
+    import importlib
+    from pathlib import Path
 
-    inactive = AsyncMock(return_value=1)
-    warnings = AsyncMock()
+    main = importlib.import_module('open_webui.main')
     delete = AsyncMock()
-    monkeypatch.setattr(service, '_inactive_user_count', inactive)
-    monkeypatch.setattr(DataRetentionService, '_send_warning_emails', warnings)
     monkeypatch.setattr(Chats, 'soft_delete_by_id', delete)
-    report = await DataRetentionService.run_cleanup(None, 30, 30, 30, 0, enable_warning_email=True)
-    assert report.users_deleted == report.chats_deleted == report.warnings_sent == 0
-    inactive.assert_awaited_once()
-    warnings.assert_not_called()
+    assert not hasattr(main, 'periodic_data_retention_cleanup')
+    assert not hasattr(main, 'periodic_archive_cleanup')
+    service = Path(main.__file__).parent / 'services/retention/service.py'
+    assert not service.exists()
     delete.assert_not_called()
     mirror.remote.get.assert_not_called()
     mirror.remote.chat_delete.assert_not_called()

@@ -86,3 +86,10 @@ def test_personal_connector_settings_are_not_published(monkeypatch):
     assert 'client_id_personal' not in result['onedrive']
     assert result['features']['enable_onedrive_integration']
     assert result['features']['enable_image_generation'] is False
+
+
+def test_local_retention_workers_cannot_start():
+    from open_webui import main
+
+    assert not hasattr(main, 'periodic_archive_cleanup')
+    assert not hasattr(main, 'periodic_data_retention_cleanup')

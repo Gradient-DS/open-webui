@@ -179,7 +179,6 @@ from open_webui.models.users import Users
 from open_webui.routers import (
     agent_threads,
     analytics,
-    archives,
     audio,
     auths,
     automations,
@@ -394,71 +393,6 @@ https://github.com/open-webui/open-webui
         print(f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui')
 
 
-async def periodic_archive_cleanup():
-    """Periodic task to delete expired archives (runs daily)"""
-    from open_webui.services.archival import ArchiveService
-
-    while True:
-        try:
-            # Wait 24 hours before first run and between runs
-            await asyncio.sleep(24 * 60 * 60)
-
-            stats = await ArchiveService.cleanup_expired_archives()
-            if stats['deleted'] > 0:
-                log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
-        except Exception as e:
-            log.error(f'Error in archive cleanup: {e}')
-
-
-async def periodic_data_retention_cleanup():
-    """Periodic task to enforce data retention TTL (runs daily)"""
-    from open_webui.services.retention.service import DataRetentionService
-
-    while True:
-        try:
-            # Wait 24 hours before first run and between runs
-            await asyncio.sleep(24 * 60 * 60)
-
-            retention_config = await Config.get_many(
-                'admin.data_retention_ttl_days',
-                'admin.user_inactivity_ttl_days',
-                'admin.chat_retention_ttl_days',
-                'admin.knowledge_retention_ttl_days',
-                'admin.data_retention_warning_days',
-                'admin.enable_retention_warning_email',
-                'admin.enable_user_archival',
-                'admin.default_archive_retention_days',
-            )
-            master_ttl = retention_config.get('admin.data_retention_ttl_days') or 0
-            if master_ttl <= 0:
-                continue  # Retention disabled, skip
-
-            report = await DataRetentionService.run_cleanup(
-                app=app,
-                master_ttl=master_ttl,
-                user_inactivity_ttl=retention_config.get('admin.user_inactivity_ttl_days'),
-                chat_ttl=retention_config.get('admin.chat_retention_ttl_days'),
-                knowledge_ttl=retention_config.get('admin.knowledge_retention_ttl_days'),
-                warning_days=retention_config.get('admin.data_retention_warning_days'),
-                enable_warning_email=retention_config.get('admin.enable_retention_warning_email'),
-                enable_archival=retention_config.get('admin.enable_user_archival'),
-                archive_retention_days=retention_config.get('admin.default_archive_retention_days'),
-            )
-
-            total = report.users_deleted + report.chats_deleted + report.knowledge_deleted + report.warnings_sent
-            if total > 0 or report.errors:
-                log.info(
-                    f'Data retention cleanup: {report.warnings_sent} warnings sent, '
-                    f'{report.users_deleted} users deleted '
-                    f'({report.users_archived} archived), '
-                    f'{report.chats_deleted} chats soft-deleted, '
-                    f'{report.knowledge_deleted} KBs soft-deleted, '
-                    f'{len(report.errors)} errors'
-                )
-        except Exception as e:
-            log.error(f'Error in data retention cleanup: {e}')
-
-
 async def periodic_export_cleanup():
     """Periodic task to delete expired data exports (runs every 6 hours)"""
     from open_webui.services.export.service import ExportService
@@ -564,9 +498,7 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup = asyncio.create_task(periodic_usage_pool_cleanup())
     app.state.periodic_session_pool_cleanup = asyncio.create_task(periodic_session_pool_cleanup())
-    # [Gradient] GDPR archival / retention / export cleanup workers
-    asyncio.create_task(periodic_archive_cleanup())
-    asyncio.create_task(periodic_data_retention_cleanup())
+    # [Gradient] Platform policy owns retention; only disposable export files expire locally.
     asyncio.create_task(periodic_export_cleanup())
 
     await capabilities.refresh()
@@ -1002,7 +934,6 @@ app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
-app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
 app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
@@ -2340,7 +2271,6 @@ async def get_app_config(request: Request):
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
         'features.enable_data_warnings',
-        'admin.data_retention_ttl_days',
         'ui.enable_welcome_message',
         'ui.greeting_template',
         'ui.enable_acceptance_modal',
@@ -2504,7 +2434,6 @@ async def get_app_config(request: Request):
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
-                    'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
                     'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }

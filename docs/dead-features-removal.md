@@ -159,3 +159,33 @@ Inventory: 348 → 345 operations; 113 → 111 writable-body operations;
 `backend/open_webui/test/soev/test_agent_compaction.py` and
 `backend/open_webui/test/soev/test_task_turns.py` passed (498 tests,
 20 dependency warnings). No frontend source changed.
+
+## Local retention and archival workers
+
+Deleted the fork's daily archival and TTL scheduler functions, their startup tasks,
+the complete `services/retention/` implementation, unused retention config forms
+and eight defaults/environment parses. Removed local retention TTL exposure from
+`/api/config` and the empty archive-router mount. Archive management routes were
+already removed, so the OpenAPI operation count is unchanged.
+
+Kept `admin.enable_user_archival` and `admin.default_archive_retention_days`:
+`services/deletion/offboarding_store.py` and `models/user_archives.py` still read
+them. The shared offboarding/archive helper chain remains as a dependency of the
+retained deletion service and its security boundaries. Removing it would require
+expanding this change into offboarding; its v2 console refusal remains tested.
+Platform retention/deletion mirroring is retained. Chat archive/unarchive is a
+personal sidebar organization choice, not the retired account archival policy,
+and is retained (it has no dead registry setting).
+
+Updated the legacy content-access inventory for the deleted service, preserving
+its exact source equality and unguarded-writer assertions. Validation:
+
+```sh
+python -m pytest -c backend/pytest.ini backend/open_webui/test/soev/test_retention_mirror.py backend/open_webui/test/soev/test_product_config.py backend/open_webui/test/soev/test_thread_content_inventory.py backend/open_webui/test/soev/test_policy_jobs.py backend/open_webui/test/security/test_openapi_surface.py -q
+python -m pytest -c backend/pytest.ini backend/open_webui/test/soev/test_dead_features.py -q
+```
+
+The first command passed 95 tests; 38 existing parameter cases require the
+unconfigured Postgres test target and were skipped by their existing fixtures.
+No skip condition or assertion was loosened. SQLite cases and the non-database
+worker absence check run. No frontend source changed.

@@ -467,8 +467,6 @@ async def test_platform_lifespan_completes_without_config_writes(live, monkeypat
     for name in (
         'periodic_usage_pool_cleanup',
         'periodic_session_pool_cleanup',
-        'periodic_archive_cleanup',
-        'periodic_data_retention_cleanup',
         'periodic_export_cleanup',
     ):
         monkeypatch.setattr(main, name, AsyncMock())

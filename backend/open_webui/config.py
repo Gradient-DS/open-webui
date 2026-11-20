@@ -2355,9 +2355,6 @@ ENABLE_USER_ARCHIVAL = os.environ.get('ENABLE_USER_ARCHIVAL', 'True').lower() ==
 
 DEFAULT_ARCHIVE_RETENTION_DAYS = int(os.environ.get('DEFAULT_ARCHIVE_RETENTION_DAYS', '1095'))
 
-ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = os.environ.get('ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE', 'False').lower() == 'true'
-
-AUTO_ARCHIVE_RETENTION_DAYS = int(os.environ.get('AUTO_ARCHIVE_RETENTION_DAYS', '365'))
 
 ENABLE_2FA = os.environ.get('ENABLE_2FA', 'False').lower() == 'true'
 
@@ -2367,17 +2364,6 @@ TWO_FA_GRACE_PERIOD_DAYS = int(os.environ.get('TWO_FA_GRACE_PERIOD_DAYS', '7'))
 
 ENABLE_DATA_WARNINGS = os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true'
 
-DATA_RETENTION_TTL_DAYS = int(os.environ.get('DATA_RETENTION_TTL_DAYS', '0'))
-
-USER_INACTIVITY_TTL_DAYS = int(os.environ.get('USER_INACTIVITY_TTL_DAYS', '0'))
-
-CHAT_RETENTION_TTL_DAYS = int(os.environ.get('CHAT_RETENTION_TTL_DAYS', '0'))
-
-KNOWLEDGE_RETENTION_TTL_DAYS = int(os.environ.get('KNOWLEDGE_RETENTION_TTL_DAYS', '0'))
-
-DATA_RETENTION_WARNING_DAYS = int(os.environ.get('DATA_RETENTION_WARNING_DAYS', '30'))
-
-ENABLE_RETENTION_WARNING_EMAIL = os.environ.get('ENABLE_RETENTION_WARNING_EMAIL', 'False').lower() == 'true'
 
 FEATURE_CHAT_CONTROLS = os.environ.get('FEATURE_CHAT_CONTROLS', 'True').lower() == 'true'
 
@@ -2773,16 +2759,8 @@ DEFAULT_CONFIG = {
     'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
     'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
     # ── Gradient-DS fork-custom persistent config ──
-    'admin.auto_archive_retention_days': AUTO_ARCHIVE_RETENTION_DAYS,
-    'admin.chat_retention_ttl_days': CHAT_RETENTION_TTL_DAYS,
-    'admin.data_retention_ttl_days': DATA_RETENTION_TTL_DAYS,
-    'admin.data_retention_warning_days': DATA_RETENTION_WARNING_DAYS,
     'admin.default_archive_retention_days': DEFAULT_ARCHIVE_RETENTION_DAYS,
-    'admin.enable_auto_archive_on_self_delete': ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
-    'admin.enable_retention_warning_email': ENABLE_RETENTION_WARNING_EMAIL,
     'admin.enable_user_archival': ENABLE_USER_ARCHIVAL,
-    'admin.knowledge_retention_ttl_days': KNOWLEDGE_RETENTION_TTL_DAYS,
-    'admin.user_inactivity_ttl_days': USER_INACTIVITY_TTL_DAYS,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
     'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
     'auth.enable_2fa': ENABLE_2FA,

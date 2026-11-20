@@ -393,25 +393,6 @@ class TwoFAConfigForm(BaseModel):
 ####################################
 
 
-DATA_RETENTION_CONFIG_KEYS = {
-    'DATA_RETENTION_TTL_DAYS': 'admin.data_retention_ttl_days',
-    'USER_INACTIVITY_TTL_DAYS': 'admin.user_inactivity_ttl_days',
-    'CHAT_RETENTION_TTL_DAYS': 'admin.chat_retention_ttl_days',
-    'KNOWLEDGE_RETENTION_TTL_DAYS': 'admin.knowledge_retention_ttl_days',
-    'DATA_RETENTION_WARNING_DAYS': 'admin.data_retention_warning_days',
-    'ENABLE_RETENTION_WARNING_EMAIL': 'admin.enable_retention_warning_email',
-}
-
-
-class DataRetentionConfigForm(BaseModel):
-    DATA_RETENTION_TTL_DAYS: int
-    USER_INACTIVITY_TTL_DAYS: int
-    CHAT_RETENTION_TTL_DAYS: int
-    KNOWLEDGE_RETENTION_TTL_DAYS: int
-    DATA_RETENTION_WARNING_DAYS: int
-    ENABLE_RETENTION_WARNING_EMAIL: bool
-
-
 class PlatformRetentionConfigForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
     temporary_idle_hours: int | None = Field(ge=1, le=720, strict=True)
