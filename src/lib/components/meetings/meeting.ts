@@ -13,6 +13,8 @@ export type AudioRef = {
 	size?: number;
 	media_type?: string;
 	name?: string;
+	/** The first piece of the recording this piece continues; absent on a file of its own. */
+	continues?: string;
 };
 
 export type MeetingInput =

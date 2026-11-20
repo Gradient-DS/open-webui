@@ -184,6 +184,23 @@ def test_audio_is_forwarded_with_its_name(monkeypatch):
     assert fake.calls == [('POST_BYTES', '/v1/audio', 'owui:user:u1', {'name': 'chunk-1.webm'}, 40)]
 
 
+def test_a_later_piece_names_the_upload_it_continues(monkeypatch):
+    """A recording larger than one upload goes up in pieces; each later one says which upload it continues."""
+    fake = FakeSoev()
+    client = _client(monkeypatch, fake)
+    head = 'a' * 32
+    response = client.post(
+        '/api/v1/meetings/audio', params={'name': 'meeting-1.webm', 'continues': head}, content=b'the bytes that follow'
+    )
+    assert response.status_code == 201, response.text
+    assert fake.calls == [
+        ('POST_BYTES', '/v1/audio', 'owui:user:u1', {'name': 'meeting-1.webm', 'continues': head}, 21)
+    ]
+    malformed = client.post('/api/v1/meetings/audio', params={'name': 'x.webm', 'continues': '../x'}, content=b'x')
+    assert malformed.status_code == 422
+    assert len(fake.calls) == 1
+
+
 @pytest.mark.parametrize('declared', [True, False])
 def test_audio_over_64_mib_is_refused(monkeypatch, declared):
     """The cap holds whether or not the client declares a length."""

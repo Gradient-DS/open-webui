@@ -2990,6 +2990,12 @@ FEATURE_MEETINGS = os.environ.get('FEATURE_MEETINGS', 'True').lower() == 'true'
 # detects it), nl or en. Any other value falls back to auto.
 MEETING_DEFAULT_LANGUAGE = os.environ.get('MEETING_DEFAULT_LANGUAGE', 'auto').strip().lower()
 
+# [Gradient] The longest one meeting recording runs, in minutes; the recorder stops and finishes
+# it there. Keep it within what the tenant's transcription model takes in one call.
+MEETING_MAX_MINUTES = int(os.environ.get('MEETING_MAX_MINUTES', '120'))
+if MEETING_MAX_MINUTES < 1:
+    raise ValueError(f'MEETING_MAX_MINUTES must be at least 1, got {MEETING_MAX_MINUTES}')
+
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 
 FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'
