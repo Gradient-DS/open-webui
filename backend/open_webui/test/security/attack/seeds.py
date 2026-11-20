@@ -21,10 +21,8 @@ from urllib.parse import quote, unquote
 
 import requests
 
-from . import oidc
-from .client import AttackClient, AuthenticationError, json_body, totp_code
+from .client import AttackClient, AuthenticationError, json_body
 from .diagnostics import timed
-from .identities import create_oidc_identity
 
 ROOT = Path(__file__).resolve().parents[5]
 SURFACE_PATH = ROOT / 'security/attack-surface.toml'
@@ -290,25 +288,6 @@ def seed_console_access(ctx, parameter):
     return 'allowed' if payload['console_url'] is not None else 'unavailable'
 
 
-def seed_ollama_connection(ctx, parameter):
-    # The platform picker has catalog ids, while these surviving proxies require
-    # a backend's own model id. Read the sealed stack's configured upstream
-    # catalog: OWUI's administrative tags endpoint no longer exists.
-    urls = os.environ['OLLAMA_BASE_URLS'].split(';')
-    for index, url in enumerate(urls):
-        response = requests.get(url.rstrip('/') + '/api/tags', timeout=60)
-        try:
-            response.raise_for_status()
-            models = response.json()['models']
-        finally:
-            response.close()
-        if models:
-            model = _extract(models, '0.model', name=parameter['key'], via='configured Ollama catalog')
-            ctx.provide(parameter, 'upstream_model', model)
-            return str(index)
-    raise RuntimeError('No model is available in the configured Ollama catalogs')
-
-
 def upstream_path(ctx, parameter):
     return parameter['value']
 
@@ -560,7 +539,6 @@ _SEEDERS = {
         seed_request_user,
         seed_console_access,
         seed_refused_target,
-        seed_ollama_connection,
         upstream_path,
         seed_export,
         seed_model,

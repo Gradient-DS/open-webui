@@ -973,7 +973,12 @@ app.add_middleware(
 app.mount('/ws', socket_app)
 
 
-app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
+# [Gradient] Inference belongs to the platform; preserve the upstream router source.
+app.include_router(
+    product_router(ollama.router, exclude={route.path for route in ollama.router.routes}),
+    prefix='/ollama',
+    tags=['ollama'],
+)
 
 
 app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
@@ -3082,6 +3087,10 @@ async def check_db_health():
     """Verify database connectivity by issuing a lightweight ping."""
     await async_db_ping()
     return {'status': True}
+
+
+# [Gradient] Local embedding dispatch has no product route.
+app.router.routes = product_router(app.router, exclude={'/api/embeddings', '/api/v1/embeddings'}).routes
 
 
 # --- static assets & files ---

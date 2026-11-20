@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'POST /api/embeddings',
+    'POST /api/v1/embeddings',
     'POST /api/v1/retrieval/process/url',
     'POST /api/v1/retrieval/process/web',
     'POST /api/v1/retrieval/process/youtube',
@@ -39,6 +41,7 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
     actual = {f'{method} {route.path}' for route in app.routes for method in getattr(route, 'methods', [])}
     spec = json.loads((Path(__file__).resolve().parents[4] / 'security/openapi.json').read_text())
     committed = {f'{method.upper()} {path}' for path, item in spec['paths'].items() for method in item}
+    assert not any(route.split(' ', 1)[1].startswith(('/ollama', '/openai')) for route in actual)
     assert not actual & RETIRED
     assert not committed & RETIRED
     assert {

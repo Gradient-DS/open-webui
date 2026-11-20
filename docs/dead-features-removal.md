@@ -70,3 +70,21 @@ removed; coverage and authorization assertions remain in force.
 Validation: S passed (395 tests, 20 dependency warnings); regenerated OpenAPI;
 Ruff F passed on new/helper/security files, with no new upstream Ruff findings.
 No frontend source changed in this category.
+
+## Direct connections and inference proxies
+
+Unmounted all 21 remaining `/ollama/*` operations and both POST embedding aliases
+(`/api/embeddings`, `/api/v1/embeddings`). OpenAI proxies and direct-connection UI
+were already absent. Upstream router/embedding implementations remain; the fork's
+mount code filters them. Removed the fork-only Ollama sweep seeder and its tests;
+kept all three-actor upstream proxy authorization assertions using independent
+fixtures. Removed only stale inventory controls, parameters, and embedding waivers.
+
+Retained `ollama.enable`, `ollama.base_urls`, `ollama.api_configs`: retained
+`utils/models.py` can still read them on the upstream catalog path when v2 is off.
+All OpenAI/direct defaults were already absent. No new UI flags or defaults added.
+
+Inventory: 372 → 349 operations; 135 → 114 writable-body operations;
+1,839 → 1,152 writable strings. Validation: S plus
+`backend/open_webui/test/security/attack/test_ollama_refusals.py` passed
+(400 tests, 20 dependency warnings). No frontend source changed.
