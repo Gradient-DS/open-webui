@@ -1,5 +1,8 @@
 {
   "disabled": {
+    "evaluation.arena.enable": false,
+    "evaluation.arena.models": [],
+    "events.webhooks": [],
     "feature.admin_evaluations": false,
     "feature.admin_functions": false,
     "feature.admin_settings": false,
@@ -14,11 +17,14 @@
     "permissions.features.automations": false,
     "permissions.features.direct_tool_servers": false,
     "permissions.features.image_generation": false,
+    "permissions.features.webhooks": false,
     "permissions.sharing.public_tools": false,
     "permissions.sharing.tools": false,
     "permissions.workspace.tools": false,
     "permissions.workspace.tools_export": false,
-    "permissions.workspace.tools_import": false
+    "permissions.workspace.tools_import": false,
+    "ui.enable_user_webhooks": false,
+    "webhook_url": ""
   },
   "features": [
     "auth.enable_api_keys",
@@ -33,13 +39,11 @@
     "document_writer.enable",
     "email.enable_invites",
     "email.invite_expiry_hours",
-    "evaluation.arena.enable",
     "evaluation.feedback.category_tags.enable",
     "evaluation.feedback.conversation.enable",
     "evaluation.feedback.conversation.scale_max",
     "evaluation.feedback.layer2.enable",
     "evaluation.feedback.layer3.enable",
-    "events.webhooks",
     "feature.artifacts",
     "feature.capture",
     "feature.changelog",
@@ -109,7 +113,6 @@
     "permissions.features.memories",
     "permissions.features.notes",
     "permissions.features.web_search",
-    "permissions.features.webhooks",
     "permissions.settings.interface",
     "permissions.sharing.folders",
     "permissions.sharing.knowledge",
@@ -146,12 +149,10 @@
     "ui.enable_citation_text_highlight",
     "ui.enable_community_sharing",
     "ui.enable_message_rating",
-    "ui.enable_user_webhooks",
     "user.permissions",
     "users.enable_status",
     "web.search.confirmation.enable",
-    "web.search.enable",
-    "webhook_url"
+    "web.search.enable"
   ],
   "settings": {
     "agent_api.selected_agent": "string",
@@ -170,8 +171,6 @@
     "email.invite_expiry_hours": "integer",
     "email.invite_heading": "string",
     "email.invite_subject": "string",
-    "evaluation.arena.enable": "boolean",
-    "evaluation.arena.models": "array",
     "evaluation.feedback.category_tags.enable": "boolean",
     "evaluation.feedback.conversation.enable": "boolean",
     "evaluation.feedback.conversation.header": "string",
@@ -182,7 +181,6 @@
     "evaluation.feedback.layer3.prompt": "string",
     "evaluation.feedback.reasons": "array",
     "evaluation.feedback.tags": "array",
-    "events.webhooks": "array",
     "feature.artifacts": "boolean",
     "feature.capture": "boolean",
     "feature.changelog": "boolean",
@@ -256,7 +254,6 @@
     "permissions.features.memories": "boolean",
     "permissions.features.notes": "boolean",
     "permissions.features.web_search": "boolean",
-    "permissions.features.webhooks": "boolean",
     "permissions.settings.interface": "boolean",
     "permissions.sharing.folders": "boolean",
     "permissions.sharing.knowledge": "boolean",
@@ -300,7 +297,6 @@
     "ui.enable_citation_text_highlight": "boolean",
     "ui.enable_community_sharing": "boolean",
     "ui.enable_message_rating": "boolean",
-    "ui.enable_user_webhooks": "boolean",
     "ui.enable_welcome_message": "boolean",
     "ui.greeting_template": "string|object",
     "ui.model_order_list": "array",
@@ -313,7 +309,6 @@
     "users.enable_status": "boolean",
     "web.search.confirmation.content": "string",
     "web.search.confirmation.enable": "boolean",
-    "web.search.enable": "boolean",
-    "webhook_url": "string"
+    "web.search.enable": "boolean"
   }
 }
