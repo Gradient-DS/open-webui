@@ -1,3 +1,4 @@
+# owui-dead-features: local credential and MFA issuers are removed; no new waivers.
 # owui-dead-features: tool/function execution and tool OAuth are unmounted, not waived.
 # owui-dead-features: local compaction, approval resolution and task config are unmounted.
 # owui-dead-features: the image-prompt task is unmounted, without a waiver.
@@ -90,11 +91,6 @@ reason = "Never attempted: every owner pass skips it because `target_id` is decl
 # These waivers affect the coverage gate only: the passes still attempt both
 # routes, and a hit makes the stale-waiver gate fail. The public Ollama registry
 # must continue driving them without waivers.
-
-[[waived]]
-id = "GET /api/v1/auths/password/reset/{token}/validate"
-runtime_soev_backed = "waive"
-reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
 
 [[waived]]
 id = "GET /cache/{path}"

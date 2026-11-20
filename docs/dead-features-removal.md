@@ -225,3 +225,47 @@ the untouched `5953cb095` versions of Chat.svelte and InputMenu.svelte under the
 working config, then restored the edits in a finally block. Against that baseline,
 `npm run check` has 263 diagnostics in these files both before and after: zero new
 errors/warnings. Both baseline logs are retained in `/tmp` for review.
+
+## Local authentication, LDAP, password recovery and OWUI MFA
+
+Removed 13 operations: all six `/api/v1/auths/2fa/*` operations and local
+signin/signup/LDAP/password-change/recovery/validation. Deleted the fork's TOTP
+router, password-recovery handlers/forms, MFA frontend components, reset-password
+page, MFA/recovery API clients and MFA enrollment/grace UI. Upstream password,
+LDAP and signup handlers remain unmounted. Their UI availability gates are false;
+dead MFA/recovery settings are no longer read or published by `/api/config`.
+Removed LDAP, local form, local admin-detail, MFA and recovery defaults where no
+retained route reads them. OIDC login, session/profile/timezone reads and writes,
+API keys, invitations and backchannel logout remain.
+
+Retained dead defaults used by the kept OAuth manager/provisioning path:
+non-OIDC provider registration keys; OAuth role/group/tenant policy keys;
+`ui.default_user_role` and `ui.default_group_id`. These are source-level reads,
+including registration at startup and callback admission. They are not safe to
+remove merely because Keycloak is the intended provider. MFA/reset token models
+and their helper dependencies remain because console offboarding erases those
+existing database rows, and preserved upstream handlers import some helpers.
+Purpose-token refusal and revocation remain enforced on kept sessions/API keys.
+
+Retired issuer tests now exercise the actual app route set, require exact 404,
+no account/secret writes, no session issuance and no cookies. Tests still cover
+revoked token/user markers, valid codes, full sessions, wrong/right passwords,
+and both platform and standalone settings. Updated the public-route auth audit
+by removing stale declarations; its unguarded-route assertion is unchanged.
+Derivation floors retain their original margins, subtracting exact retired
+body/query route and field counts; query floors are not exempted.
+
+Inventory: 324 → 311 operations; 107 → 97 writable-body operations;
+967 → 948 writable strings; query counts remain 35 / 77.
+Validation: S plus `attack/test_platform_session_issuers.py`,
+`soev/test_session_issuers.py`, `security/test_totp_password.py`,
+`soev/test_session_boundary.py`, `soev/test_local_password_boundary.py`,
+`authorization/test_routes.py` (all under `backend/open_webui/test/`):
+465 passed, 20 dependency warnings. Ruff: zero new findings.
+
+Frontend: `node node_modules/vitest/vitest.mjs run
+src/lib/utils/authPage.test.ts src/lib/apis/auths/index.test.ts
+--exclude '**/nothing'`: 14 passed. Prettier passed on auth page, app layout,
+account settings and auth API client. Targeted ESLint: 12 inherited findings,
+zero new. `npm run check`: touched files 124 → 120 diagnostics against the valid
+baseline, zero additions.

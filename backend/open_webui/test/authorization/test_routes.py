@@ -9,23 +9,13 @@ from starlette.staticfiles import StaticFiles
 
 PUBLIC_ROUTES = {
     'MOUNT /ws': 'Socket.IO transport handshake is public; socket events authenticate their tokens.',
-    'GET /ollama/': 'Constant compatibility health status; no backend call.',
-    'HEAD /ollama/': 'Constant compatibility health status; no backend call.',
-    'POST /api/v1/auths/password/forgot': 'Starts password recovery before login.',
-    'GET /api/v1/auths/password/reset/{token}/validate': 'Validates a recovery capability before login.',
-    'POST /api/v1/auths/password/reset': 'Authenticates the reset capability inside the handler.',
-    'POST /api/v1/auths/ldap': 'Authenticates LDAP credentials to establish a session.',
-    'POST /api/v1/auths/signin': 'Authenticates credentials to establish a session.',
-    'POST /api/v1/auths/signup': 'Creates an account when registration policy allows it.',
     'POST /api/v1/auths/signout': 'Clears session cookies, including expired sessions.',
     'POST /api/v1/auths/oauth/{provider}/token/exchange': 'Authenticates an external OAuth token to establish a session.',
-    'POST /api/v1/auths/2fa/verify': 'Consumes a partial-login token and second factor before a full session exists.',
     'GET /api/v1/chats/share/{share_id}': 'Anyone-read shares are anonymous; other shares check identity.',
     'WEBSOCKET /api/v1/terminals/{server_id}/api/terminals/{session_id}': 'Public upgrade; first message authenticates before connecting upstream.',
     'GET /api/config': 'Login screen bootstrap exposes the public configuration subset.',
     'GET /api/version': 'Public application version metadata.',
     'GET /api/changelog': 'Public release notes.',
-    'GET /oauth/clients/{client_id}/callback': 'Completes external-client OAuth with callback state validation.',
     'GET /oauth/{provider}/login': 'Starts federated login before a session exists.',
     'GET /oauth/{provider}/callback': 'Completes federated login with OAuth state validation.',
     'GET /oauth/{provider}/login/callback': 'Alternate federated-login callback with OAuth state validation.',
@@ -52,14 +42,12 @@ DEV_PUBLIC_ROUTES = {
 def authentication_dependencies():
     from open_webui.routers.scim import get_scim_auth
     from open_webui.routers.skill_files import get_skill_file_content
-    from open_webui.routers.totp import get_2fa_setup_user
     from open_webui.utils.auth import get_admin_user, get_current_user, get_verified_user
 
     return {
         get_verified_user,
         get_admin_user,
         get_current_user,  # Real session authentication, also allows pending accounts.
-        get_2fa_setup_user,  # Session or signed, purpose-scoped enrollment token.
         get_scim_auth,  # Configured SCIM service bearer.
         get_skill_file_content,  # Handler authenticates a session or signed skill-scoped token and checks read grants.
     }

@@ -18,7 +18,6 @@
 	import { generateInitialsImage } from '$lib/utils';
 
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import TwoFactorSetup from './Account/TwoFactorSetup.svelte';
 	import { copyToClipboard } from '$lib/utils';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -381,13 +380,6 @@
 			<UserSettingSection title={$i18n.t('Password')}>
 				<UpdatePassword />
 			</UserSettingSection>
-		{/if}
-
-		{#if $config?.features?.enable_2fa && $config?.features?.enable_login_form}
-			<hr class="border-gray-50 dark:border-gray-850/30 my-4" />
-			<div class="mt-2">
-				<TwoFactorSetup />
-			</div>
 		{/if}
 
 		{#if ($config?.features?.enable_api_keys ?? true) && ($user?.permissions?.features?.api_keys ?? false)}

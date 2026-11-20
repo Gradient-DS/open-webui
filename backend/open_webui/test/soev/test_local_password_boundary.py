@@ -8,7 +8,8 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from open_webui import config, env
-from open_webui.constants import ERROR_MESSAGES
+from open_webui.models.password_reset import PasswordResetTokens
+from importlib import import_module
 from open_webui.routers import auths
 from open_webui.soev.login_attach import platform_mode
 from open_webui.soev.policy_jobs import v2_enabled
@@ -25,9 +26,9 @@ async def password_app(monkeypatch):
         (auths.Auths, 'authenticate_user'),
         (auths.Auths, 'get_auth_by_user_id'),
         (auths.Auths, 'update_user_password_by_id'),
-        (auths.PasswordResetTokens, 'get_by_token_hash'),
-        (auths.PasswordResetTokens, 'create'),
-        (auths.PasswordResetTokens, 'mark_used'),
+        (PasswordResetTokens, 'get_by_token_hash'),
+        (PasswordResetTokens, 'create'),
+        (PasswordResetTokens, 'mark_used'),
         (auths.Config, 'get'),
         (auths, 'create_session_response'),
     ):
@@ -37,7 +38,7 @@ async def password_app(monkeypatch):
     mint = Mock()
     monkeypatch.setattr(auths, 'create_token', mint)
     app = FastAPI()
-    app.include_router(auths.router, prefix='/api/v1/auths')
+    app.router.routes = list(import_module('open_webui.main').app.router.routes)
     app.dependency_overrides[auths.get_async_session] = lambda: None
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url='https://chat.example.invalid'
@@ -67,14 +68,14 @@ async def test_platform_password_paths_refuse_before_account_work(
     ctx = password_app
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', agent_enabled)
     response = await ctx.http.request(method, f'/api/v1/auths{path}', **({'json': body} if body else {}))
-    assert response.status_code == 403
-    assert response.json() == {'detail': ERROR_MESSAGES.ACCESS_PROHIBITED}
+    assert response.status_code == 404
+    assert response.json() == {'detail': 'Not Found'}
     assert response.headers.get_list('set-cookie') == []
     for call in ctx.calls:
         call.assert_not_awaited()
     ctx.mint.assert_not_called()
-    record = next(r for r in caplog.records if getattr(r, 'code', None) == f'oauth_platform_{code}_refused')
-    assert 'fern@example.invalid' not in repr(vars(record))
+    assert 'fern@example.invalid' not in response.text
+    assert all('fern@example.invalid' not in repr(vars(record)) for record in caplog.records)
 
 
 @pytest.mark.parametrize(

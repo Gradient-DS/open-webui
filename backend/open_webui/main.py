@@ -130,7 +130,6 @@ from open_webui.env import (
     ENABLE_PYODIDE_FILE_PERSISTENCE,
     # SCIM
     ENABLE_SCIM,
-    ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
@@ -207,11 +206,9 @@ from open_webui.routers import (
     tasks,
     terminals,
     tools,
-    totp,
     users,
     utils,
 )
-from open_webui.services.email.auth import is_mail_configured  # [Gradient]
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.socket.main import (
     MODELS,
@@ -927,8 +924,23 @@ app.include_router(
 
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
-app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
-app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
+# [Gradient] Keycloak owns credentials and signup; retain session/profile/API-key handlers.
+app.include_router(
+    product_router(
+        auths.router,
+        exclude={
+            '/signin',
+            '/signup',
+            '/ldap',
+            '/update/password',
+            '/password/forgot',
+            '/password/reset',
+            '/password/reset/{token}/validate',
+        },
+    ),
+    prefix='/api/v1/auths',
+    tags=['auths'],
+)
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
@@ -2207,11 +2219,7 @@ async def get_app_config(request: Request):
     config = await Config.get_many(
         'oauth.enable',
         'oauth.auto_redirect',
-        'ldap.enable',
-        'ui.enable_signup',
-        'ui.enable_login_form',
         'auth.enable_api_keys',
-        'ui.enable_password_change_form',
         'folders.enable',
         'folders.max_file_count',
         'calendar.enable',
@@ -2247,10 +2255,6 @@ async def get_app_config(request: Request):
         'ui.pending_user_overlay_content',
         'ui.watermark',
         # --- [Gradient] fork feature flags & integration config ---
-        'auth.enable_2fa',
-        'auth.require_2fa',
-        'auth.2fa_grace_period_days',
-        'email.enable_forgot_password',
         'email.enable_invites',
         'email.invite_heading',
         'rag.file.allowed_extensions',
@@ -2308,13 +2312,9 @@ async def get_app_config(request: Request):
             # --- Public: required by login/signup page pre-auth ---
             'auth': WEBUI_AUTH,
             'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
-            'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            'enable_ldap': config.get('ldap.enable'),
-            'enable_2fa': config.get('auth.enable_2fa'),  # [Gradient] TOTP 2FA
-            'enable_signup': config.get('ui.enable_signup'),
-            'enable_login_form': config.get('ui.enable_login_form'),
-            # [Gradient] Login page needs this pre-auth for the "forgot password" link.
-            'enable_forgot_password': bool(config.get('email.enable_forgot_password')) and is_mail_configured(),
+            'enable_ldap': False,
+            'enable_signup': False,
+            'enable_login_form': False,
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {'websocket_heartbeat_interval': WEBSOCKET_HEARTBEAT_INTERVAL}
@@ -2325,7 +2325,7 @@ async def get_app_config(request: Request):
             **(
                 {
                     'enable_api_keys': config.get('auth.enable_api_keys'),
-                    'enable_password_change_form': config.get('ui.enable_password_change_form'),
+                    'enable_password_change_form': False,
                     'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
                     'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
@@ -2435,8 +2435,6 @@ async def get_app_config(request: Request):
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
-                    'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
-                    'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
                     'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]

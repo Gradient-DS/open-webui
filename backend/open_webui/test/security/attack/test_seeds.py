@@ -587,7 +587,6 @@ def test_destructive_routes_have_reasons_exist_in_spec_and_never_become_ordinary
     required = {
         'POST /api/v1/auths/signout',
         'DELETE /api/v1/auths/api_key',
-        'POST /api/v1/auths/update/password',
         'DELETE /api/v1/auths/oauth/sessions/{provider}',
     }
     assert required <= seeds.DESTRUCTIVE.keys()

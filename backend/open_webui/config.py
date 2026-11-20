@@ -2356,12 +2356,6 @@ ENABLE_USER_ARCHIVAL = os.environ.get('ENABLE_USER_ARCHIVAL', 'True').lower() ==
 DEFAULT_ARCHIVE_RETENTION_DAYS = int(os.environ.get('DEFAULT_ARCHIVE_RETENTION_DAYS', '1095'))
 
 
-ENABLE_2FA = os.environ.get('ENABLE_2FA', 'False').lower() == 'true'
-
-REQUIRE_2FA = os.environ.get('REQUIRE_2FA', 'False').lower() == 'true'
-
-TWO_FA_GRACE_PERIOD_DAYS = int(os.environ.get('TWO_FA_GRACE_PERIOD_DAYS', '7'))
-
 ENABLE_DATA_WARNINGS = os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true'
 
 
@@ -2480,10 +2474,6 @@ INVITE_EXPIRY_HOURS = int(os.environ.get('INVITE_EXPIRY_HOURS', '168'))
 EMAIL_INVITE_SUBJECT = os.environ.get('EMAIL_INVITE_SUBJECT', '')
 
 EMAIL_INVITE_HEADING = os.environ.get('EMAIL_INVITE_HEADING', '')
-
-ENABLE_FORGOT_PASSWORD = os.environ.get('ENABLE_FORGOT_PASSWORD', 'False').lower() == 'true'
-
-PASSWORD_RESET_EXPIRY_MINUTES = int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTES', '30'))
 
 
 INTEGRATION_PROVIDERS = {}
@@ -2624,9 +2614,6 @@ DEFAULT_CONFIG = {
     'web.search.confirmation.enable': ENABLE_WEB_SEARCH_CONFIRMATION,
     'web.search.confirmation.content': WEB_SEARCH_CONFIRMATION_CONTENT,
     'webui.url': WEBUI_URL,
-    'ui.enable_signup': ENABLE_SIGNUP,
-    'ui.enable_login_form': ENABLE_LOGIN_FORM,
-    'ui.enable_password_change_form': ENABLE_PASSWORD_CHANGE_FORM,
     'ui.default_locale': DEFAULT_LOCALE,
     'ui.default_models': DEFAULT_MODELS,
     'ui.default_pinned_models': DEFAULT_PINNED_MODELS,
@@ -2737,39 +2724,17 @@ DEFAULT_CONFIG = {
     'oauth.update_name_on_login': OAUTH_UPDATE_NAME_ON_LOGIN,
     'oauth.update_email_on_login': OAUTH_UPDATE_EMAIL_ON_LOGIN,
     'oauth.audience': OAUTH_AUDIENCE,
-    'ldap.enable': ENABLE_LDAP,
-    'ldap.server.label': LDAP_SERVER_LABEL,
-    'ldap.server.host': LDAP_SERVER_HOST,
-    'ldap.server.port': LDAP_SERVER_PORT,
-    'ldap.server.attribute_for_mail': LDAP_ATTRIBUTE_FOR_MAIL,
-    'ldap.server.attribute_for_username': LDAP_ATTRIBUTE_FOR_USERNAME,
-    'ldap.server.app_dn': LDAP_APP_DN,
-    'ldap.server.app_password': LDAP_APP_PASSWORD,
-    'ldap.server.users_dn': LDAP_SEARCH_BASE,
-    'ldap.server.search_filter': LDAP_SEARCH_FILTERS,
-    'ldap.server.use_tls': LDAP_USE_TLS,
-    'ldap.server.ca_cert_file': LDAP_CA_CERT_FILE,
-    'ldap.server.validate_cert': LDAP_VALIDATE_CERT,
-    'ldap.server.ciphers': LDAP_CIPHERS,
-    'ldap.group.enable_management': ENABLE_LDAP_GROUP_MANAGEMENT,
-    'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
-    'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
     # ── Gradient-DS fork-custom persistent config ──
     'admin.default_archive_retention_days': DEFAULT_ARCHIVE_RETENTION_DAYS,
     'admin.enable_user_archival': ENABLE_USER_ARCHIVAL,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
-    'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
-    'auth.enable_2fa': ENABLE_2FA,
-    'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
-    'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,
     'email.from_address': EMAIL_FROM_ADDRESS,
     'email.from_name': EMAIL_FROM_NAME,
     'email.invite_expiry_hours': INVITE_EXPIRY_HOURS,
     'email.invite_heading': EMAIL_INVITE_HEADING,
     'email.invite_subject': EMAIL_INVITE_SUBJECT,
-    'email.password_reset_expiry_minutes': PASSWORD_RESET_EXPIRY_MINUTES,
     'evaluation.feedback.category_tags.enable': ENABLE_FEEDBACK_CATEGORY_TAGS,
     'evaluation.feedback.conversation.enable': ENABLE_CONVERSATION_FEEDBACK,
     'evaluation.feedback.conversation.header': CONVERSATION_FEEDBACK_HEADER,

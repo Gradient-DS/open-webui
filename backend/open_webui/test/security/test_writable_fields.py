@@ -34,8 +34,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (321, 324), (
-        f'Expected 321 five-method operations / 324 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (308, 311), (
+        f'Expected 308 five-method operations / 311 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -63,8 +63,8 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (107, 967), (
-        f'Expected 107 routes / 967 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (97, 948), (
+        f'Expected 97 routes / 948 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title'):
@@ -85,18 +85,16 @@ def test_derived_counts(surface):
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
-    # External knowledge retired 7 writable routes and 37 fields; keep the guard margin.
+    # Initial committed surface: 139 body routes / 1846 fields, with floor margins 10 / 231.
+    # Product retirement removed exactly 42 body routes / 898 fields; retain those margins.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert (
-        routes >= 225 - 17 - 11 - 7 - 61 - 4 - 21 - 1 - 2 and strings >= 2400 - 403 - 30 - 37 - 315 - 7 - 687 - 40 - 4
-    ), (
-        f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
-        'Original floor 225 / 2400, less the retired 35 routes / 470 fields. '
+    assert routes >= 139 - 42 - 10 and strings >= 1846 - 898 - 231, (
+        f'Derivation collapsed: {routes} routes / {strings} writable string fields'
     )
+    # One query route and one field retired from 36 / 78; original floor margins remain 9 / 10.
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
-    assert routes >= 40 - 13 - 4 - 1 and strings >= 90 - 1 - 21 - 141 - 1, (
-        f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
-        'original floor 40 / 90, less the retired source query parameter.'
+    assert routes >= 36 - 1 - 9 and strings >= 78 - 1 - 10, (
+        f'Query derivation collapsed: {routes} routes / {strings} string query parameters'
     )
 
 

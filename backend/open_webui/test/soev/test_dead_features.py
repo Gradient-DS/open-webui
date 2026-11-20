@@ -6,6 +6,19 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'POST /api/v1/auths/signin',
+    'POST /api/v1/auths/signup',
+    'POST /api/v1/auths/ldap',
+    'POST /api/v1/auths/update/password',
+    'POST /api/v1/auths/password/forgot',
+    'POST /api/v1/auths/password/reset',
+    'POST /api/v1/auths/2fa/verify',
+    'POST /api/v1/auths/2fa/totp/setup',
+    'POST /api/v1/auths/2fa/totp/enable',
+    'POST /api/v1/auths/2fa/totp/disable',
+    'POST /api/v1/auths/2fa/recovery/regenerate',
+    'GET /api/v1/auths/password/reset/{token}/validate',
+    'GET /api/v1/auths/2fa/status',
     'POST /api/chat/actions/{action_id}',
     'GET /oauth/clients/{client_id}/authorize',
     'GET /oauth/clients/{client_id}/callback',
@@ -69,7 +82,9 @@ async def _authenticated_config(monkeypatch):
     from unittest.mock import AsyncMock
 
     from fastapi import Request
-    from open_webui import main
+    from importlib import import_module
+
+    main = import_module('open_webui.main')
 
     user = SimpleNamespace(id='fictional-user', role='user')
     monkeypatch.setattr(main, 'decode_token', lambda _: {'id': user.id})
@@ -95,7 +110,9 @@ def test_personal_connector_settings_are_not_published(monkeypatch):
 
 
 def test_local_retention_workers_cannot_start():
-    from open_webui import main
+    from importlib import import_module
+
+    main = import_module('open_webui.main')
 
     assert not hasattr(main, 'periodic_archive_cleanup')
     assert not hasattr(main, 'periodic_data_retention_cleanup')
