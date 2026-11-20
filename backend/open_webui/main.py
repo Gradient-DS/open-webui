@@ -982,7 +982,9 @@ app.include_router(
 
 
 app.include_router(
-    product_router(tasks.router, exclude={'/image_prompt/completions'}), prefix='/api/v1/tasks', tags=['tasks']
+    product_router(tasks.router, exclude={'/image_prompt/completions', '/config'}),
+    prefix='/api/v1/tasks',
+    tags=['tasks'],
 )
 
 app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
@@ -1004,7 +1006,7 @@ app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives']
 app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
-app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
+app.include_router(product_router(chats.router, exclude={'/{id}/compact'}), prefix='/api/v1/chats', tags=['chats'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
@@ -2280,8 +2282,6 @@ async def get_app_config(request: Request):
         'calendar.enable',
         'automations.enable',
         'notes.enable',
-        'chat.context_compaction.enable',
-        'chat.tool_permissions.enable',
         'web.search.enable',
         'web.search.confirmation.enable',
         'web.search.confirmation.content',
@@ -2405,9 +2405,8 @@ async def get_app_config(request: Request):
                     'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
                     'enable_notes': config.get('notes.enable'),
-                    'enable_context_compaction': config.get('chat.context_compaction.enable')
-                    and not soev_threads.enabled(),
-                    'enable_tool_permissions': config.get('chat.tool_permissions.enable'),
+                    'enable_context_compaction': False,
+                    'enable_tool_permissions': False,
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
                     'web_search_confirmation_content': config.get('web.search.confirmation.content'),
@@ -3088,7 +3087,10 @@ async def check_db_health():
 
 
 # [Gradient] Local embedding dispatch has no product route.
-app.router.routes = product_router(app.router, exclude={'/api/embeddings', '/api/v1/embeddings'}).routes
+app.router.routes = product_router(
+    app.router,
+    exclude={'/api/embeddings', '/api/v1/embeddings', '/api/v1/chats/{id}/messages/{message_id}/resolve'},
+).routes
 
 
 # --- static assets & files ---

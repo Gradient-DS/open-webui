@@ -836,20 +836,6 @@ description = "routers/chats.py:create_new_chat answers 404 when folder_id is no
 json = { "folder_id" = "{folder}" }
 
 [[field]]
-route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
-description = "Legacy mode resolves the seeded pending function_call by call_id. Platform tool approvals are retired: drive this same request for every actor and assert the exact unavailable refusal."
-json = { "call_id" = "call_{token}", "action" = "reject" }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Tool approvals are retired by product decision (2026-11-03); no approval-producing platform tools exist. Refuse before thread or platform access for every authenticated actor, including owner and admin."
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
 description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
@@ -1236,15 +1222,6 @@ reason = "policy_jobs.py: automation execution requires a live owner request; th
 runtime_soev_backed = "drive"
 all_actors = true
 route = "POST /api/v1/chats/import"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/chats/{id}/compact"
 status = 409
 detail = "unavailable"
 json = { "state" = "unavailable" }
@@ -1918,9 +1895,12 @@ reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplet
 [retired_product]
 reason = "Product-owner removal of local runtime features (owui-dead-features)."
 routes = [
+  "GET /api/v1/tasks/config",
   "GET /ollama/",
   "HEAD /ollama/",
   "POST /api/embeddings",
+  "POST /api/v1/chats/{id}/compact",
+  "POST /api/v1/chats/{id}/messages/{message_id}/resolve",
   "POST /api/v1/embeddings",
   "POST /api/v1/retrieval/process/url",
   "POST /api/v1/retrieval/process/web",

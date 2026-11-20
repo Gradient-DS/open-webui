@@ -2560,23 +2560,6 @@
         "title": "CodeForm",
         "type": "object"
       },
-      "CompactChatForm": {
-        "properties": {
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          }
-        },
-        "title": "CompactChatForm",
-        "type": "object"
-      },
       "ConnectionForm": {
         "additionalProperties": false,
         "properties": {
@@ -7289,43 +7272,6 @@
           "new_password"
         ],
         "title": "ResetPasswordForm",
-        "type": "object"
-      },
-      "ResolveToolCallForm": {
-        "properties": {
-          "action": {
-            "enum": [
-              "approve",
-              "reject",
-              "answer"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "answers": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Answers"
-          },
-          "call_id": {
-            "title": "Call Id",
-            "type": "string"
-          },
-          "timed_out": {
-            "default": false,
-            "title": "Timed Out",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "call_id",
-          "action"
-        ],
-        "title": "ResolveToolCallForm",
         "type": "object"
       },
       "ScheduleForm": {
@@ -14831,68 +14777,6 @@
         ]
       }
     },
-    "/api/v1/chats/{id}/compact": {
-      "post": {
-        "operationId": "compact_chat_by_id_api_v1_chats__id__compact_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/CompactChatForm"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Form Data"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Compact Chat By Id",
-        "tags": [
-          "chats"
-        ]
-      }
-    },
     "/api/v1/chats/{id}/folder": {
       "post": {
         "operationId": "update_chat_folder_id_by_id_api_v1_chats__id__folder_post",
@@ -15238,67 +15122,6 @@
         "tags": [
           "chats"
         ]
-      }
-    },
-    "/api/v1/chats/{id}/messages/{message_id}/resolve": {
-      "post": {
-        "operationId": "resolve_chat_message_tool_call_api_v1_chats__id__messages__message_id__resolve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "message_id",
-            "required": true,
-            "schema": {
-              "title": "Message Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveToolCallForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Resolve Chat Message Tool Call"
       }
     },
     "/api/v1/chats/{id}/pin": {
@@ -25024,30 +24847,6 @@
           }
         ],
         "summary": "Generate Autocompletion",
-        "tags": [
-          "tasks"
-        ]
-      }
-    },
-    "/api/v1/tasks/config": {
-      "get": {
-        "operationId": "get_task_config_api_v1_tasks_config_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Task Config",
         "tags": [
           "tasks"
         ]

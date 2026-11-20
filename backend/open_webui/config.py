@@ -2707,7 +2707,6 @@ DEFAULT_CONFIG = {
     'task.autocomplete.prompt_template': AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     'task.voice.prompt_template': VOICE_MODE_PROMPT_TEMPLATE,
     'task.voice.prompt.enable': ENABLE_VOICE_MODE_PROMPT,
-    'task.tools.prompt_template': TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     'auth.enable_api_keys': ENABLE_API_KEYS,
     'auth.api_key.endpoint_restrictions': ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
     'auth.api_key.allowed_endpoints': API_KEYS_ALLOWED_ENDPOINTS,

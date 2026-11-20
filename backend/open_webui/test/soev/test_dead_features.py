@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'GET /api/v1/tasks/config',
+    'POST /api/v1/chats/{id}/compact',
+    'POST /api/v1/chats/{id}/messages/{message_id}/resolve',
     'POST /api/v1/tasks/image_prompt/completions',
     'POST /api/embeddings',
     'POST /api/v1/embeddings',

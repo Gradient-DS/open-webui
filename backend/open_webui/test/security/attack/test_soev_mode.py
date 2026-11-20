@@ -347,26 +347,14 @@ async def test_v2_legacy_share_access_update_refuses_every_logged_in_actor(monke
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
-def test_retired_approval_is_an_exact_all_actor_control_and_never_waived(monkeypatch, mode):
+def test_retired_approval_has_no_route_or_sweep_control(monkeypatch, mode):
     from . import crossuser
 
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     route = 'POST /api/v1/chats/{id}/messages/{message_id}/resolve'
-    assert route in plane.operations()
+    assert route not in plane.operations()
     assert route not in coverage.waivers()
-    assert not seeds.route_waived(route)
-    field = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == route)
-    assert field['json'] == {'call_id': 'call_{token}', 'action': 'reject'}
-    declaration = crossuser.expected_refusals().get(route)
-    if mode == 'waive':
-        assert declaration is None
-        return
-    assert declaration['all_actors'] is True
-    assert declaration['status'] == 409
-    assert declaration['json'] == {'state': 'unavailable'}
-    assert crossuser.refused_as_expected(declaration, 409, '{"state":"unavailable"}')
-    for status, body in [(200, '{}'), (404, '{"state":"unavailable"}'), (409, '{"state":"other"}')]:
-        assert not crossuser.refused_as_expected(declaration, status, body)
+    assert route not in crossuser.expected_refusals()
 
 
 def test_fanout_controls_require_the_platform_without_new_waivers():

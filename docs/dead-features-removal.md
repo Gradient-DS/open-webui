@@ -134,3 +134,28 @@ backend/open_webui/test/soev/test_dead_features.py
 backend/open_webui/test/soev/test_feature_capabilities.py
 backend/open_webui/test/soev/test_live_documents.py -q` passed (48 tests,
 16 dependency warnings). No frontend source changed.
+
+## Local orchestration and task settings
+
+Unmounted POST `/api/v1/chats/{id}/compact`, POST
+`/api/v1/chats/{id}/messages/{message_id}/resolve`, and GET `/api/v1/tasks/config`.
+Subagent/chat configuration writers were already removed. Existing compaction and
+approval UI gates are now false without reading dead settings. Removed unused
+`task.tools.prompt_template` default. Platform subagent progress presentation stays:
+it displays platform events, independently of OWUI's local orchestration.
+
+Retained defaults because retained upstream completion/turn paths still read them
+when not routed to v2: all seven `subagents.*` keys; all six
+`chat.context_compaction.*` keys; `chat.tool_permissions.enable`;
+`task.model.default`, `task.model.external`, `task.model.params`;
+`task.title.prompt_template`, `task.tags.prompt_template`,
+`task.follow_up.prompt_template`, `task.query.prompt_template`,
+`task.autocomplete.prompt_template`. The v2 branches bypass these reads, as
+`test_agent_compaction.py` and `test_task_turns.py` verify. Voice task settings and
+all task enable switches remain under the explicit exceptions.
+
+Inventory: 348 → 345 operations; 113 → 111 writable-body operations;
+1,112 → 1,108 writable strings. Validation: S plus
+`backend/open_webui/test/soev/test_agent_compaction.py` and
+`backend/open_webui/test/soev/test_task_turns.py` passed (498 tests,
+20 dependency warnings). No frontend source changed.

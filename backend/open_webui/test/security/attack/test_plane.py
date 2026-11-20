@@ -57,7 +57,7 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
 
 def test_body_builder_can_plant_each_derived_field():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (113, 1112)
+    assert (len(fields), sum(map(len, fields.values()))) == (111, 1108)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name
@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 348
+    assert len(plane.operations()) == 345
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -922,7 +922,7 @@ def test_conversation_mark_read_is_driven_as_a_bodyless_write(monkeypatch):
 
 
 def test_fanout_queries_extend_existing_reads_without_adding_routes():
-    assert len(plane.operations()) == 348
+    assert len(plane.operations()) == 345
     for path, name in [
         ('/api/v1/chats/', 'include_sidebar'),
         ('/api/v1/chats/list', 'include_sidebar'),
