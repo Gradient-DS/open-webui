@@ -23,7 +23,19 @@ vi.mock('$lib/apis/cloudSync', async (original) => ({
 	getConnection: vi.fn(),
 	grantAutoConnected: vi.fn()
 }));
-const popup = { close: vi.fn(), closed: false, location: { href: '' } };
+vi.mock('$lib/i18n', async () => ({
+	default: (await import('svelte/store')).readable({
+		language: 'en-US',
+		t: (key: string, options?: { provider?: string }) =>
+			key.replace('{{provider}}', options?.provider ?? '')
+	})
+}));
+const popup = {
+	close: vi.fn(),
+	closed: false,
+	location: { href: '' },
+	document: { open: vi.fn(), write: vi.fn(), close: vi.fn() }
+};
 let receive: (event: unknown) => void;
 beforeEach(() => {
 	vi.resetAllMocks();
@@ -40,7 +52,8 @@ beforeEach(() => {
 		addEventListener: vi.fn((_, listener) => {
 			receive = listener;
 		}),
-		removeEventListener: vi.fn()
+		removeEventListener: vi.fn(),
+		document: { documentElement: { classList: { contains: () => false } } }
 	});
 });
 afterEach(() => {
@@ -79,7 +92,11 @@ it('ignores forged completion and grants only after the owned connection is enab
 	});
 	await prefetchLiveConnections('session');
 	const pending = connectLiveSource('session');
+	expect(popup.document.write).toHaveBeenCalledWith(
+		expect.stringContaining('<title>Connecting to OneDrive…</title>')
+	);
 	await vi.advanceTimersByTimeAsync(0);
+	expect(popup.location.href).toBe('https://provider.invalid/auth');
 	receive({
 		origin: 'https://evil.invalid',
 		source: popup,

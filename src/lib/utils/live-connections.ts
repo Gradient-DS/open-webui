@@ -1,7 +1,7 @@
 import type { DocumentReference } from './onedrive-file-picker';
 import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
-import { centeredPopupFeatures } from './popup';
+import { openConnectPopup } from './popup';
 import type { LiveToolState } from './toolState';
 import { writable } from 'svelte/store';
 import {
@@ -25,6 +25,12 @@ export const consentLabels: Record<string, string> = {
 	outlook_mail: 'connect_provider_outlook_mail',
 	google_drive: 'connect_provider_google_drive',
 	confluence: 'connect_provider_confluence'
+};
+const PROVIDER_NAMES: Record<string, string> = {
+	onedrive: 'OneDrive',
+	outlook_mail: 'Outlook',
+	google_drive: 'Google Drive',
+	confluence: 'Confluence'
 };
 
 // soev-api refuses a subject without a proven identity link; a fresh Microsoft login creates it.
@@ -220,7 +226,7 @@ export async function connectLiveSource(
 			throw error;
 		}
 	}
-	const popup = window.open('about:blank', `soev-live-${family}`, centeredPopupFeatures(600, 720));
+	const popup = openConnectPopup(`soev-live-${family}`, PROVIDER_NAMES[provider]);
 	if (!popup) throw new Error('Allow popups to connect your account');
 	onConsentOpened?.();
 	try {
@@ -304,7 +310,7 @@ async function waitForConnection(token: string, id: string): Promise<void> {
 }
 
 export function openMailConsent(): Window | null {
-	return window.open('about:blank', 'soev-live-mail', centeredPopupFeatures(600, 720));
+	return openConnectPopup('soev-live-mail', PROVIDER_NAMES.outlook_mail);
 }
 
 export async function reauthorizeMail(

@@ -18,6 +18,7 @@
 		connectionOutcome
 	} from '$lib/components/workspace/Knowledge/utils/cloudSync';
 	import { relinkPrompt } from '$lib/utils/live-connections';
+	import { openConnectPopup } from '$lib/utils/popup';
 
 	const i18n = getContext<Writable<I18n>>('i18n');
 	let accounts: Connection[] = [];
@@ -67,7 +68,7 @@
 
 	function reconnect(account: Connection) {
 		if (busy) return;
-		const popup = window.open('about:blank', 'soev_connect', 'width=600,height=700,scrollbars=yes');
+		const popup = openConnectPopup('soev_connect', provider(account));
 		if (!popup) {
 			toast.error($i18n.t('Please allow popups to connect your account.'));
 			return;
