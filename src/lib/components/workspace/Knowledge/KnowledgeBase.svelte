@@ -41,6 +41,7 @@
 	import * as cloudSync from '$lib/apis/cloudSync';
 	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
 	import { relinkPrompt } from '$lib/utils/live-connections';
+	import { openConnectPopup } from '$lib/utils/popup';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
 	import { computeFileHash } from '$lib/utils/hash';
@@ -1079,7 +1080,7 @@
 		connectionId?: string
 	): Promise<Connection | null> => {
 		closeAuthorization?.();
-		const popup = window.open('about:blank', 'soev_connect', 'width=600,height=700,scrollbars=yes');
+		const popup = openConnectPopup('soev_connect', provider.label);
 		if (!popup) {
 			toast.error($i18n.t('Please allow popups to connect your account.'));
 			return Promise.resolve(null);

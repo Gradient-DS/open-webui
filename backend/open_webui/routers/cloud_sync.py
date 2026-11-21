@@ -1,13 +1,12 @@
 """Verified-user routes for soev-api connections, schedule state and popup completion."""
 
-import json
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from open_webui.config import CORS_ALLOW_ORIGIN
-from open_webui.soev import capabilities, identity, silent_connect
+from open_webui.soev import capabilities, connect_page, identity, silent_connect
 from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
@@ -159,17 +158,12 @@ async def connect_done(
             headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'},
         )
     # Not capability-gated: the page only relays the popup's result to its opener.
-    data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
     # The opener may live on another configured origin than this page (a dev
     # stack serves the frontend and the API on different ports); a message to
     # an origin the opener is not on is dropped by the browser, never seen.
-    origins = json.dumps(sorted(origin for origin in CORS_ALLOW_ORIGIN if origin != '*')).replace('<', '\\u003c')
+    origins = [origin for origin in CORS_ALLOW_ORIGIN if origin != '*']
     return HTMLResponse(
-        '<!DOCTYPE html><html><body><script>'
-        f'if (window.opener) {{ for (const origin of new Set([window.location.origin, ...{origins}])) '
-        f'window.opener.postMessage({data}, origin); }}'
-        # Keep the silent attempt's popup for the opener to continue interactive consent.
-        f'{"" if result == "interaction_required" else "window.close();"}</script></body></html>',
+        connect_page.render(connection, result, origins, request.headers.get('accept-language', 'en')),
         headers={'Cache-Control': 'no-store'},
     )
 

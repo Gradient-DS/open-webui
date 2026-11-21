@@ -120,3 +120,4 @@ def test_popup_completion_does_not_fetch_the_connection_value(boundary, value):
     answer = boundary.browser.get('/api/v1/cloud-sync/connect/done', params={'connection': value, 'result': 'error'})
     assert answer.status_code == 200
     assert not boundary.sent
+    assert value not in answer.text.split('</script>', 1)[1]

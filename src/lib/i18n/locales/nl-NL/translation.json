@@ -3534,6 +3534,7 @@
 	"The service is rate-limiting requests. Please try again shortly.": "De service beperkt het aantal verzoeken. Probeer het zo dadelijk opnieuw.",
 	"The service is temporarily unavailable. Please try again shortly.": "De service is tijdelijk niet beschikbaar. Probeer het zo dadelijk opnieuw.",
 	"The shared {{provider}} knowledge base and all its synced files will be removed. This cannot be undone.": "De gedeelde {{provider}}-kennisbank en alle gesynchroniseerde bestanden worden verwijderd. Dit kan niet ongedaan worden gemaakt.",
+	"The sign-in page opens in a moment.": "De aanmeldpagina opent zo.",
 	"The stream delta chunk size for the model. Increasing the chunk size will make the model respond with larger pieces of text at once.": "De stream delta chunk size voor het model. Een grotere chunk size laat het model reageren met grotere stukken tekst tegelijk.",
 	"The temperature of the model. Increasing the temperature will make the model answer more creatively.": "De temperatuur van het model. De temperatuur groter maken zal het model creatiever laten antwoorden.",
 	"The transcript and all outputs of this meeting are deleted. This cannot be undone.": "Het transcript en alle uitwerkingen van deze vergadering worden verwijderd. Dit kan niet ongedaan worden gemaakt.",

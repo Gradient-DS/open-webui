@@ -3534,6 +3534,7 @@
 	"The service is rate-limiting requests. Please try again shortly.": "",
 	"The service is temporarily unavailable. Please try again shortly.": "",
 	"The shared {{provider}} knowledge base and all its synced files will be removed. This cannot be undone.": "",
+	"The sign-in page opens in a moment.": "",
 	"The stream delta chunk size for the model. Increasing the chunk size will make the model respond with larger pieces of text at once.": "",
 	"The temperature of the model. Increasing the temperature will make the model answer more creatively.": "",
 	"The transcript and all outputs of this meeting are deleted. This cannot be undone.": "",
