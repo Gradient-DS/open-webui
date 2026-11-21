@@ -52,11 +52,11 @@ describe('isFeatureEnabled', () => {
 		expect(isFeatureEnabled('voice')).toBe(false);
 	});
 
-	it('returns true when voice feature is undefined (default)', () => {
+	it('hides voice when its effective flag is absent', () => {
 		vi.mocked(get).mockReturnValue({
 			features: {}
 		});
-		expect(isFeatureEnabled('voice')).toBe(true);
+		expect(isFeatureEnabled('voice')).toBe(false);
 	});
 
 	it('returns false when config is not loaded yet', () => {
@@ -277,3 +277,43 @@ describe('canContinueResponse', () => {
 		expect(canContinueResponse(agent, { role: 'admin' })).toBe(false);
 	});
 });
+
+describe('effective audio control visibility', () => {
+	it.each(['voice', 'read_aloud', 'voice_call'] as const)(
+		'%s requires an explicit feature and permission',
+		(feature) => {
+			const permission = feature === 'voice' ? 'stt' : feature === 'read_aloud' ? 'tts' : 'call';
+			for (const enabled of [false, true]) {
+				for (const allowed of [false, true]) {
+					vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: enabled } });
+					for (const role of ['admin', 'user']) {
+						const user = { role, permissions: { chat: { [permission]: allowed } } };
+						expect(hasFeatureAccess(feature, user, `chat.${permission}`)).toBe(enabled && allowed);
+					}
+				}
+			}
+			vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: true } });
+			expect(hasFeatureAccess(feature, { role: 'admin' }, `chat.${permission}`)).toBe(false);
+			vi.mocked(get).mockReturnValue({ features: {} });
+			expect(isFeatureEnabled(feature)).toBe(false);
+		}
+	);
+
+	it('offers read-aloud independently of dictation and keeps calls hidden', () => {
+		vi.mocked(get).mockReturnValue({
+			features: { feature_voice: false, feature_read_aloud: true, feature_voice_call: false }
+		});
+		const user = { permissions: { chat: { stt: true, tts: true, call: false } } };
+		expect(hasFeatureAccess('read_aloud', user, 'chat.tts')).toBe(true);
+		expect(hasFeatureAccess('voice', user, 'chat.stt')).toBe(false);
+		expect(hasFeatureAccess('voice_call', user, 'chat.call')).toBe(false);
+	});
+});
+
+it.each<Feature>(['tools', 'tool_servers', 'builtin_tools', 'browser_code_execution'])(
+	'never restores retired %s authoring from stale flags',
+	(feature) => {
+		vi.mocked(get).mockReturnValue({ features: { [`feature_${feature}`]: true } });
+		expect(isFeatureEnabled(feature)).toBe(false);
+	}
+);

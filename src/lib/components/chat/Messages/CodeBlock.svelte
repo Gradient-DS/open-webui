@@ -483,7 +483,7 @@
 						</div>
 					</button>
 
-					{#if ($config?.features?.enable_code_execution ?? true) && (lang.toLowerCase() === 'python' || lang.toLowerCase() === 'py' || (lang === '' && checkPythonCode(code)))}
+					{#if ($config?.features?.enable_code_execution ?? false) && (lang.toLowerCase() === 'python' || lang.toLowerCase() === 'py' || (lang === '' && checkPythonCode(code)))}
 						{#if executing}
 							<div
 								class="run-code-button bg-none border-none p-0.5 cursor-not-allowed bg-white dark:bg-black"

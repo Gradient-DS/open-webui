@@ -20,6 +20,8 @@ def source_operations():
         ):
             continue
         target = call.args[0]
+        if isinstance(target, ast.Call) and isinstance(target.func, ast.Name) and target.func.id == 'product_router':
+            target = target.args[0]
         if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)):
             continue
         prefix = next((ast.literal_eval(k.value) for k in call.keywords if k.arg == 'prefix'), '')

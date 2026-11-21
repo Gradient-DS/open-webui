@@ -29,7 +29,7 @@ async def admin_app(token_app, monkeypatch):
     from open_webui.models import user_archives
     from open_webui.models.config import Config
     from open_webui.models.users import User, UserModel, Users
-    from open_webui.routers import archives, scim, users
+    from open_webui.routers import scim, users
     from open_webui.services.archival import resources
     from open_webui.soev import acting, client
 
@@ -70,7 +70,6 @@ async def admin_app(token_app, monkeypatch):
         ctx.app.dependency_overrides[scim.get_scim_auth] = lambda: True
         ctx.app.add_exception_handler(client.SoevApiError, soev_api_error_handler)
         ctx.app.include_router(users.router, prefix='/api/v1/users')
-        ctx.app.include_router(archives.router, prefix='/api/v1/archives')
         ctx.app.include_router(scim.router, prefix='/scim/v2')
         # Observe the real resolver, including cross-user rejection, at every admission attempt.
         resolve = AsyncMock(wraps=acting.user_token)

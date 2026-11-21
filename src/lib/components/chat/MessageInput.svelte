@@ -90,7 +90,7 @@
 		getUserTimezone,
 		getWeekday
 	} from '$lib/utils';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { hasFeatureAccess, isFeatureEnabled } from '$lib/utils/features';
 	import { TOOL_OFF_DESCRIPTION, toolStateLabel, type LiveToolState } from '$lib/utils/toolState';
 	import { uploadFile } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
@@ -3019,7 +3019,7 @@
 									{:else}
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 											<!-- [Gradient] Tenant voice gate includes dictation. -->
-											{#if isFeatureEnabled('voice') && ($_user?.permissions?.chat?.stt ?? true)}
+											{#if hasFeatureAccess('voice', $_user, 'chat.stt')}
 												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
@@ -3060,7 +3060,7 @@
 											{/if}
 										{/if}
 
-										{#if isFeatureEnabled('voice_call') && !embedded && prompt === '' && files.length === 0 && ($_user?.permissions?.chat?.call ?? true)}
+										{#if hasFeatureAccess('voice_call', $_user, 'chat.call') && !embedded && prompt === '' && files.length === 0}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>

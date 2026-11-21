@@ -10,7 +10,15 @@ from fastapi import FastAPI
 from . import crossuser, seeds
 
 ROUTES = [
-    entry['route'] for entry in seeds.SURFACE['field'] if entry.get('json', {}).get('model') == '{upstream_model}'
+    'POST /ollama/api/chat/{url_idx}',
+    'POST /ollama/api/embed/{url_idx}',
+    'POST /ollama/api/embeddings/{url_idx}',
+    'POST /ollama/api/generate/{url_idx}',
+    'POST /ollama/v1/chat/completions/{url_idx}',
+    'POST /ollama/v1/completions/{url_idx}',
+    'POST /ollama/v1/embeddings/{url_idx}',
+    'POST /ollama/v1/messages/{url_idx}',
+    'POST /ollama/v1/responses/{url_idx}',
 ]
 
 
@@ -29,13 +37,16 @@ async def test_indexed_ollama_proxies_refuse_unregistered_models_for_all_actors(
     app.include_router(ollama.router, prefix='/ollama')
     method, path = route.split(' ', 1)
     path = path.replace('{url_idx}', '0')
-    declaration = crossuser.expected_refusals()[route]
-    assert declaration['all_actors'] and route in seeds.ordinary_targets()
-    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
-    context = seeds.SeedContext(None, None, seeds.SURFACE, values={'upstream_model': 'fictional-upstream-model'})
-    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
-    request = crossuser._benign(route, parameters, seeds.SPEC)
-    assert request['json']['model'] == 'fictional-upstream-model'
+    declaration = {'status': 403, 'detail': 'Model not found', 'json': {'detail': 'Model not found'}}
+    assert route not in seeds.ordinary_targets()
+    request = {
+        'json': {
+            'model': 'fictional-upstream-model',
+            'messages': [{'role': 'user', 'content': 'Fictional probe'}],
+            'input': 'Fictional input',
+            'prompt': 'Fictional prompt',
+        }
+    }
     required_inputs = {
         'POST /ollama/api/embed/{url_idx}': 'input',
         'POST /ollama/api/embeddings/{url_idx}': 'prompt',

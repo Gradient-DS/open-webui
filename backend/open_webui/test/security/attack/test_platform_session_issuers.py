@@ -18,13 +18,9 @@ def test_inventory_records_platform_session_issuer_refusals(monkeypatch, mode):
     waivers = coverage.waivers()
     for route in ROUTES:
         assert route not in waivers
-        assert route in seeds.ordinary_targets()
-        if mode == 'drive':
-            assert controls[route]['status'] == 403
-            assert controls[route]['detail'] == (
-                'You do not have permission to access this resource. Please contact your administrator for assistance.'
-            )
-            assert controls[route]['all_actors']
+        assert route not in seeds.ordinary_targets()
+        assert route not in controls
+        assert route in seeds.SURFACE['retired_product']['routes']
 
 
 @pytest.mark.parametrize('mode', ['waive', 'drive'])

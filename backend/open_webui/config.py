@@ -714,12 +714,8 @@ ENABLE_ONEDRIVE_INTEGRATION = os.getenv('ENABLE_ONEDRIVE_INTEGRATION', 'False').
 
 
 ONEDRIVE_CLIENT_ID = os.getenv('ONEDRIVE_CLIENT_ID', '')
-ONEDRIVE_CLIENT_ID_PERSONAL = os.getenv('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID)
 ONEDRIVE_CLIENT_ID_BUSINESS = os.getenv('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID)
 
-ENABLE_ONEDRIVE_PERSONAL = os.getenv('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true' and bool(
-    ONEDRIVE_CLIENT_ID_PERSONAL
-)
 ENABLE_ONEDRIVE_BUSINESS = os.getenv('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true' and bool(
     ONEDRIVE_CLIENT_ID_BUSINESS
 )
@@ -2359,29 +2355,6 @@ ENABLE_USER_ARCHIVAL = os.environ.get('ENABLE_USER_ARCHIVAL', 'True').lower() ==
 
 DEFAULT_ARCHIVE_RETENTION_DAYS = int(os.environ.get('DEFAULT_ARCHIVE_RETENTION_DAYS', '1095'))
 
-ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = os.environ.get('ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE', 'False').lower() == 'true'
-
-AUTO_ARCHIVE_RETENTION_DAYS = int(os.environ.get('AUTO_ARCHIVE_RETENTION_DAYS', '365'))
-
-ENABLE_2FA = os.environ.get('ENABLE_2FA', 'False').lower() == 'true'
-
-REQUIRE_2FA = os.environ.get('REQUIRE_2FA', 'False').lower() == 'true'
-
-TWO_FA_GRACE_PERIOD_DAYS = int(os.environ.get('TWO_FA_GRACE_PERIOD_DAYS', '7'))
-
-ENABLE_DATA_WARNINGS = os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true'
-
-DATA_RETENTION_TTL_DAYS = int(os.environ.get('DATA_RETENTION_TTL_DAYS', '0'))
-
-USER_INACTIVITY_TTL_DAYS = int(os.environ.get('USER_INACTIVITY_TTL_DAYS', '0'))
-
-CHAT_RETENTION_TTL_DAYS = int(os.environ.get('CHAT_RETENTION_TTL_DAYS', '0'))
-
-KNOWLEDGE_RETENTION_TTL_DAYS = int(os.environ.get('KNOWLEDGE_RETENTION_TTL_DAYS', '0'))
-
-DATA_RETENTION_WARNING_DAYS = int(os.environ.get('DATA_RETENTION_WARNING_DAYS', '30'))
-
-ENABLE_RETENTION_WARNING_EMAIL = os.environ.get('ENABLE_RETENTION_WARNING_EMAIL', 'False').lower() == 'true'
 
 FEATURE_CHAT_CONTROLS = os.environ.get('FEATURE_CHAT_CONTROLS', 'True').lower() == 'true'
 
@@ -2419,15 +2392,12 @@ FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true
 
 FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 
-FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 
 FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
 
 FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
 
 ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
-
-FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 
@@ -2441,13 +2411,11 @@ FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'tr
 
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
 
-FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'False').lower() == 'true'
 
 FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'False').lower() == 'true'
 
 FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False').lower() == 'true'
 
-FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 
 FEATURE_STRICT_DATA_SEPARATION = os.environ.get('FEATURE_STRICT_DATA_SEPARATION', 'False').lower() == 'true'
 
@@ -2502,11 +2470,6 @@ EMAIL_INVITE_SUBJECT = os.environ.get('EMAIL_INVITE_SUBJECT', '')
 
 EMAIL_INVITE_HEADING = os.environ.get('EMAIL_INVITE_HEADING', '')
 
-ENABLE_FORGOT_PASSWORD = os.environ.get('ENABLE_FORGOT_PASSWORD', 'False').lower() == 'true'
-
-PASSWORD_RESET_EXPIRY_MINUTES = int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTES', '30'))
-
-ENABLE_RAG_FILTER_UI = os.environ.get('ENABLE_RAG_FILTER_UI', 'False').lower() == 'true'
 
 INTEGRATION_PROVIDERS = {}
 
@@ -2560,7 +2523,6 @@ DEFAULT_CONFIG = {
     'ollama.api_configs': OLLAMA_API_CONFIGS,
     'models.base_models_cache': ENABLE_BASE_MODELS_CACHE,
     'tool_server.connections': TOOL_SERVER_CONNECTIONS,
-    'oauth.client.timeout': OAUTH_CLIENT_TIMEOUT,
     'terminal_server.connections': TERMINAL_SERVER_CONNECTIONS,
     'code_execution.enable': ENABLE_CODE_EXECUTION,
     'code_execution.engine': CODE_EXECUTION_ENGINE,
@@ -2642,94 +2604,11 @@ DEFAULT_CONFIG = {
     'rag.file.allowed_extensions': RAG_ALLOWED_FILE_EXTENSIONS,
     'rag.pdf_extract_images': PDF_EXTRACT_IMAGES,
     'rag.pdf_loader_mode': PDF_LOADER_MODE,
-    'rag.tokenizer_model': RAG_TOKENIZER_MODEL,
-    'rag.text_splitter': RAG_TEXT_SPLITTER,
-    'rag.enable_markdown_header_text_splitter': ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-    'rag.tiktoken_encoding_name': TIKTOKEN_ENCODING_NAME,
-    'rag.chunk_size': CHUNK_SIZE,
-    'rag.chunk_min_size_target': CHUNK_MIN_SIZE_TARGET,
-    'rag.chunk_overlap': CHUNK_OVERLAP,
     'rag.template': RAG_TEMPLATE,
-    'rag.youtube_loader_language': YOUTUBE_LOADER_LANGUAGE,
-    'rag.youtube_loader_proxy_url': YOUTUBE_LOADER_PROXY_URL,
     'web.search.enable': ENABLE_WEB_SEARCH,
     'web.search.confirmation.enable': ENABLE_WEB_SEARCH_CONFIRMATION,
     'web.search.confirmation.content': WEB_SEARCH_CONFIRMATION_CONTENT,
-    'web.search.engine': WEB_SEARCH_ENGINE,
-    'web.search.bypass_embedding_and_retrieval': BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-    'web.search.bypass_web_loader': BYPASS_WEB_SEARCH_WEB_LOADER,
-    'web.search.result_count': WEB_SEARCH_RESULT_COUNT,
-    'web.search.domain.filter_list': WEB_SEARCH_DOMAIN_FILTER_LIST,
-    'web.search.concurrent_requests': WEB_SEARCH_CONCURRENT_REQUESTS,
-    'web.fetch.max_content_length': WEB_FETCH_MAX_CONTENT_LENGTH,
-    'web.loader.engine': WEB_LOADER_ENGINE,
-    'web.loader.concurrent_requests': WEB_LOADER_CONCURRENT_REQUESTS,
-    'web.loader.timeout': WEB_LOADER_TIMEOUT,
-    'web.loader.ssl_verification': ENABLE_WEB_LOADER_SSL_VERIFICATION,
-    'web.search.trust_env': WEB_SEARCH_TRUST_ENV,
-    'web.search.ollama_cloud_api_key': OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-    'web.search.searxng_query_url': SEARXNG_QUERY_URL,
-    'web.search.openserp_base_url': OPENSERP_BASE_URL,
-    'web.search.searxng_language': SEARXNG_LANGUAGE,
-    'web.search.yacy_query_url': YACY_QUERY_URL,
-    'web.search.yacy_username': YACY_USERNAME,
-    'web.search.yacy_password': YACY_PASSWORD,
-    'web.search.google_pse_api_key': GOOGLE_PSE_API_KEY,
-    'web.search.google_pse_engine_id': GOOGLE_PSE_ENGINE_ID,
-    'web.search.brave_search_api_key': BRAVE_SEARCH_API_KEY,
-    'web.search.brave_search_context_tokens': BRAVE_SEARCH_CONTEXT_TOKENS,
-    'web.search.kagi_search_api_key': KAGI_SEARCH_API_KEY,
-    'web.search.mojeek_search_api_key': MOJEEK_SEARCH_API_KEY,
-    'web.search.bocha_search_api_key': BOCHA_SEARCH_API_KEY,
-    'web.search.serpstack_api_key': SERPSTACK_API_KEY,
-    'web.search.serpstack_https': SERPSTACK_HTTPS,
-    'web.search.serper_api_key': SERPER_API_KEY,
-    'web.search.serply_api_key': SERPLY_API_KEY,
-    'web.search.serphouse_api_key': SERPHOUSE_API_KEY,
-    'web.search.serphouse_domain': SERPHOUSE_DOMAIN,
-    'web.search.ddgs_backend': DDGS_BACKEND,
-    'web.search.jina_api_key': JINA_API_KEY,
-    'web.search.jina_api_base_url': JINA_API_BASE_URL,
-    'web.search.searchapi_api_key': SEARCHAPI_API_KEY,
-    'web.search.searchapi_engine': SEARCHAPI_ENGINE,
-    'web.search.serpapi_api_key': SERPAPI_API_KEY,
-    'web.search.serpapi_engine': SERPAPI_ENGINE,
-    'web.search.bing_search_v7_endpoint': BING_SEARCH_V7_ENDPOINT,
-    'web.search.bing_search_v7_subscription_key': BING_SEARCH_V7_SUBSCRIPTION_KEY,
-    'web.search.azure_ai_search_api_key': AZURE_AI_SEARCH_API_KEY,
-    'web.search.azure_ai_search_endpoint': AZURE_AI_SEARCH_ENDPOINT,
-    'web.search.azure_ai_search_index_name': AZURE_AI_SEARCH_INDEX_NAME,
-    'web.search.exa_api_key': EXA_API_KEY,
-    'web.search.perplexity_api_key': PERPLEXITY_API_KEY,
-    'web.search.perplexity_model': PERPLEXITY_MODEL,
-    'web.search.perplexity_search_context_usage': PERPLEXITY_SEARCH_CONTEXT_USAGE,
-    'web.search.perplexity_search_api_url': PERPLEXITY_SEARCH_API_URL,
-    'web.search.microsoft_web_iq_api_base_url': MICROSOFT_WEB_IQ_API_BASE_URL,
-    'web.search.microsoft_web_iq_api_key': MICROSOFT_WEB_IQ_API_KEY,
-    'web.search.microsoft_web_iq_language': MICROSOFT_WEB_IQ_LANGUAGE,
-    'web.search.sougou_api_sid': SOUGOU_API_SID,
-    'web.search.sougou_api_sk': SOUGOU_API_SK,
-    'web.search.tavily_api_key': TAVILY_API_KEY,
-    'web.search.tavily_extract_depth': TAVILY_EXTRACT_DEPTH,
-    'web.loader.playwright_ws_url': PLAYWRIGHT_WS_URL,
-    'web.loader.playwright_timeout': PLAYWRIGHT_TIMEOUT,
-    'web.loader.firecrawl_api_key': FIRECRAWL_API_KEY,
-    'web.loader.firecrawl_api_url': FIRECRAWL_API_BASE_URL,
-    'web.loader.firecrawl_timeout': FIRECRAWL_TIMEOUT,
-    'web.search.external_web_search_url': EXTERNAL_WEB_SEARCH_URL,
-    'web.search.external_web_search_api_key': EXTERNAL_WEB_SEARCH_API_KEY,
-    'web.loader.external_web_loader_url': EXTERNAL_WEB_LOADER_URL,
-    'web.loader.external_web_loader_api_key': EXTERNAL_WEB_LOADER_API_KEY,
-    'web.search.yandex_web_search_url': YANDEX_WEB_SEARCH_URL,
-    'web.search.yandex_web_search_api_key': YANDEX_WEB_SEARCH_API_KEY,
-    'web.search.yandex_web_search_config': YANDEX_WEB_SEARCH_CONFIG,
-    'web.search.youcom_api_key': YOUCOM_API_KEY,
-    'web.search.linkup_api_key': LINKUP_API_KEY,
-    'web.search.linkup_search_params': LINKUP_SEARCH_PARAMS,
     'webui.url': WEBUI_URL,
-    'ui.enable_signup': ENABLE_SIGNUP,
-    'ui.enable_login_form': ENABLE_LOGIN_FORM,
-    'ui.enable_password_change_form': ENABLE_PASSWORD_CHANGE_FORM,
     'ui.default_locale': DEFAULT_LOCALE,
     'ui.default_models': DEFAULT_MODELS,
     'ui.default_pinned_models': DEFAULT_PINNED_MODELS,
@@ -2780,7 +2659,6 @@ DEFAULT_CONFIG = {
     'chat.tool_permissions.enable': ENABLE_TOOL_PERMISSIONS,
     'task.title.prompt_template': TITLE_GENERATION_PROMPT_TEMPLATE,
     'task.tags.prompt_template': TAGS_GENERATION_PROMPT_TEMPLATE,
-    'task.image.prompt_template': IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
     'task.follow_up.prompt_template': FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
     'task.follow_up.enable': ENABLE_FOLLOW_UP_GENERATION,
     'task.tags.enable': ENABLE_TAGS_GENERATION,
@@ -2793,7 +2671,6 @@ DEFAULT_CONFIG = {
     'task.autocomplete.prompt_template': AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     'task.voice.prompt_template': VOICE_MODE_PROMPT_TEMPLATE,
     'task.voice.prompt.enable': ENABLE_VOICE_MODE_PROMPT,
-    'task.tools.prompt_template': TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     'auth.enable_api_keys': ENABLE_API_KEYS,
     'auth.api_key.endpoint_restrictions': ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
     'auth.api_key.allowed_endpoints': API_KEYS_ALLOWED_ENDPOINTS,
@@ -2842,47 +2719,17 @@ DEFAULT_CONFIG = {
     'oauth.update_name_on_login': OAUTH_UPDATE_NAME_ON_LOGIN,
     'oauth.update_email_on_login': OAUTH_UPDATE_EMAIL_ON_LOGIN,
     'oauth.audience': OAUTH_AUDIENCE,
-    'ldap.enable': ENABLE_LDAP,
-    'ldap.server.label': LDAP_SERVER_LABEL,
-    'ldap.server.host': LDAP_SERVER_HOST,
-    'ldap.server.port': LDAP_SERVER_PORT,
-    'ldap.server.attribute_for_mail': LDAP_ATTRIBUTE_FOR_MAIL,
-    'ldap.server.attribute_for_username': LDAP_ATTRIBUTE_FOR_USERNAME,
-    'ldap.server.app_dn': LDAP_APP_DN,
-    'ldap.server.app_password': LDAP_APP_PASSWORD,
-    'ldap.server.users_dn': LDAP_SEARCH_BASE,
-    'ldap.server.search_filter': LDAP_SEARCH_FILTERS,
-    'ldap.server.use_tls': LDAP_USE_TLS,
-    'ldap.server.ca_cert_file': LDAP_CA_CERT_FILE,
-    'ldap.server.validate_cert': LDAP_VALIDATE_CERT,
-    'ldap.server.ciphers': LDAP_CIPHERS,
-    'ldap.group.enable_management': ENABLE_LDAP_GROUP_MANAGEMENT,
-    'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
-    'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
     # ── Gradient-DS fork-custom persistent config ──
-    'admin.auto_archive_retention_days': AUTO_ARCHIVE_RETENTION_DAYS,
-    'admin.chat_retention_ttl_days': CHAT_RETENTION_TTL_DAYS,
-    'admin.data_retention_ttl_days': DATA_RETENTION_TTL_DAYS,
-    'admin.data_retention_warning_days': DATA_RETENTION_WARNING_DAYS,
     'admin.default_archive_retention_days': DEFAULT_ARCHIVE_RETENTION_DAYS,
-    'admin.enable_auto_archive_on_self_delete': ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
-    'admin.enable_retention_warning_email': ENABLE_RETENTION_WARNING_EMAIL,
     'admin.enable_user_archival': ENABLE_USER_ARCHIVAL,
-    'admin.knowledge_retention_ttl_days': KNOWLEDGE_RETENTION_TTL_DAYS,
-    'admin.user_inactivity_ttl_days': USER_INACTIVITY_TTL_DAYS,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
-    'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
-    'auth.enable_2fa': ENABLE_2FA,
-    'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
-    'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,
     'email.from_address': EMAIL_FROM_ADDRESS,
     'email.from_name': EMAIL_FROM_NAME,
     'email.invite_expiry_hours': INVITE_EXPIRY_HOURS,
     'email.invite_heading': EMAIL_INVITE_HEADING,
     'email.invite_subject': EMAIL_INVITE_SUBJECT,
-    'email.password_reset_expiry_minutes': PASSWORD_RESET_EXPIRY_MINUTES,
     'evaluation.feedback.category_tags.enable': ENABLE_FEEDBACK_CATEGORY_TAGS,
     'evaluation.feedback.conversation.enable': ENABLE_CONVERSATION_FEEDBACK,
     'evaluation.feedback.conversation.header': CONVERSATION_FEEDBACK_HEADER,
@@ -2893,14 +2740,10 @@ DEFAULT_CONFIG = {
     'evaluation.feedback.tags': [],
     'evaluation.feedback.layer3.enable': ENABLE_FEEDBACK_LAYER3,
     'evaluation.feedback.layer3.prompt': FEEDBACK_LAYER3_PROMPT,
-    'features.enable_data_warnings': ENABLE_DATA_WARNINGS,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
-    'onedrive.client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
     'onedrive.enable_business': ENABLE_ONEDRIVE_BUSINESS,
-    'onedrive.enable_personal': ENABLE_ONEDRIVE_PERSONAL,
-    'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

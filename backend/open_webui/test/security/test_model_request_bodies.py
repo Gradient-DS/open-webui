@@ -13,23 +13,14 @@ from fastapi.testclient import TestClient
 
 REPO = Path(__file__).resolve().parents[4]
 TASK_PATHS = [
-    f'/api/v1/tasks/{task}/completions'
-    for task in ('auto', 'emoji', 'follow_up', 'image_prompt', 'moa', 'queries', 'tags', 'title')
-]
-OLLAMA_PATHS = [
-    f'/ollama/{path}{suffix}'
-    for path in ('api/chat', 'v1/chat/completions', 'v1/completions', 'v1/messages')
-    for suffix in ('', '/{url_idx}')
+    f'/api/v1/tasks/{task}/completions' for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title')
 ]
 MAIN_PATHS = [
     '/api/chat/completions',
     '/api/v1/chat/completions',
     '/api/chat/completed',
-    '/api/chat/actions/{action_id}',
-    '/api/embeddings',
-    '/api/v1/embeddings',
 ]
-PATHS = TASK_PATHS + OLLAMA_PATHS + MAIN_PATHS
+PATHS = TASK_PATHS + MAIN_PATHS
 MODEL = 'vendor-model'
 TEXT = 'Explain the northern lights.'
 REPLY = {
@@ -51,31 +42,6 @@ def vendor_payload(path):
     }
     if path in TASK_PATHS:
         payload.update(prompt=TEXT, type='web_search', responses=['Solar wind.', 'Magnetic fields.'])
-    elif '/v1/completions' in path:
-        payload.pop('messages')
-        payload['prompt'] = TEXT
-        payload['suffix'] = 'Answer briefly.'
-    elif 'embeddings' in path:
-        payload.pop('messages')
-        payload['input'] = [TEXT, 'What causes auroras?']
-        payload['dimensions'] = 3
-    elif path.endswith('/message') or '/messages' in path:
-        payload.update(
-            max_tokens=128,
-            system=[{'type': 'text', 'text': 'Be concise.', 'cache_control': {'type': 'ephemeral'}}],
-            tools=[
-                {
-                    'name': 'weather',
-                    'description': 'Look up weather',
-                    'input_schema': {'type': 'object', 'properties': {'city': {'type': 'string'}}},
-                    'vendor_tool': True,
-                }
-            ],
-        )
-        payload['messages'][0]['content'] = [
-            {'type': 'text', 'text': TEXT, 'cache_control': {'type': 'ephemeral'}},
-            {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': 'aW1hZ2U='}},
-        ]
     else:
         payload['tools'] = [
             {
@@ -89,11 +55,10 @@ def vendor_payload(path):
                 'vendor_tool': True,
             }
         ]
-        if '/ollama/api/chat' not in path:
-            payload['messages'][0]['content'] = [
-                {'type': 'text', 'text': TEXT, 'vendor_block': 'extra'},
-                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,aW1hZ2U=', 'detail': 'low'}},
-            ]
+        payload['messages'][0]['content'] = [
+            {'type': 'text', 'text': TEXT, 'vendor_block': 'extra'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,aW1hZ2U=', 'detail': 'low'}},
+        ]
     return payload
 
 
@@ -110,7 +75,7 @@ def application():
 
 @pytest.fixture
 def harness(application, monkeypatch):
-    from open_webui.routers import ollama, tasks
+    from open_webui.routers import tasks
     from open_webui.utils.auth import get_verified_user
 
     # Mount the actual registered endpoints without app lifespan or unrelated middleware.
@@ -134,18 +99,13 @@ def harness(application, monkeypatch):
 
     monkeypatch.setattr(application.Config, 'get', config)
     monkeypatch.setattr(application.Models, 'get_model_by_id', AsyncMock(return_value=None))
-    for module in (application, ollama):
-        monkeypatch.setattr(module, 'check_model_access', AsyncMock())
+    monkeypatch.setattr(application, 'check_model_access', AsyncMock())
     monkeypatch.setattr(application, 'AGENT_API_ENABLED', False)
-    monkeypatch.setattr(ollama, 'get_ollama_url', AsyncMock(return_value=('http://provider.invalid', 0)))
     seen = []
 
     async def capture(request, form_data, user):
         seen.append(copy.deepcopy(form_data))
         return copy.deepcopy(REPLY)
-
-    async def pipeline(request, form_data, user, models):
-        return form_data
 
     async def process_payload(request, form_data, user, metadata, model):
         return form_data, metadata, []
@@ -153,23 +113,8 @@ def harness(application, monkeypatch):
     async def process_response(response, context):
         return response
 
-    async def action(request, action_id, form_data, user):
-        assert action_id == 'control-action'
-        return await capture(request, form_data, user)
-
-    async def send_request(url, payload, **kwargs):
-        seen.append(json.loads(payload))
-        return copy.deepcopy(REPLY)
-
-    async def provider_request(**kwargs):
-        seen.append(json.loads(kwargs['data']))
-        return SimpleNamespace(status=200, headers={}, json=AsyncMock(return_value=copy.deepcopy(REPLY)))
-
     monkeypatch.setattr(tasks, 'generate_chat_completion', capture)
-    monkeypatch.setattr(ollama, 'send_request', send_request)
-    monkeypatch.setattr(application, 'generate_embeddings', capture)
     monkeypatch.setattr(application, 'chat_completed_handler', capture)
-    monkeypatch.setattr(application, 'chat_action_handler', action)
     monkeypatch.setattr(application, 'process_chat_payload', process_payload)
     monkeypatch.setattr(application, 'chat_completion_handler', capture)
     monkeypatch.setattr(application, 'build_chat_response_context', AsyncMock(return_value=None))
@@ -182,48 +127,18 @@ def harness(application, monkeypatch):
 def test_vendor_payload_reaches_handler_unchanged(path, harness):
     client, seen = harness
     payload = vendor_payload(path)
-    response = client.post(path.replace('{url_idx}', '0').replace('{action_id}', 'control-action'), json=payload)
+    response = client.post(path, json=payload)
     assert response.status_code == 200, response.text
-    # v0.11.3 added an input-token count inside generate_messages, so the Anthropic
-    # paths now reach the captured handler twice with the same body. The property
-    # under test is that the payload arrives unchanged, not how many times the
-    # handler is called; assert on the LAST call, and keep the non-empty check,
-    # because a 200 with no downstream call proves nothing about compatibility.
     assert seen, 'A 200 without a downstream call is not a compatibility control'
-    if path not in ('/api/message', '/api/v1/messages'):
-        assert len(seen) == 1, f'{path} reached the handler {len(seen)} times, expected once'
+    assert len(seen) == 1, f'{path} reached the handler {len(seen)} times, expected once'
     forwarded = seen[-1]
     if path in TASK_PATHS:
         assert forwarded['metadata']['task_body'] == payload
         assert TEXT in forwarded['messages'][0]['content']
-    elif path in ('/api/message', '/api/v1/messages'):
-        # Existing Anthropic conversion intentionally selects fields; pin the converted shape.
-        assert forwarded['model'] == MODEL
-        assert forwarded['messages'][0] == {'role': 'system', 'content': payload['system']}
-        assert forwarded['messages'][1]['content'][0] == payload['messages'][0]['content'][0]
-        assert forwarded['tools'][0]['function']['name'] == 'weather'
-        assert response.json()['content'] == [{'type': 'text', 'text': 'Charged particles.'}]
     else:
         for key, value in payload.items():
             assert forwarded[key] == value, key
         assert response.json() == REPLY
-
-
-@pytest.mark.parametrize('path', ['/api/embeddings', '/api/v1/embeddings'])
-def test_generic_embeddings_refuse_catalog_models_without_provider_io(path, harness, application, monkeypatch):
-    from open_webui.soev.model_catalog import OWNER
-    from open_webui.utils import embeddings
-
-    client, seen = harness
-    client.app.state.MODELS = {MODEL: {'id': MODEL, 'owned_by': OWNER}}
-    monkeypatch.setattr(application, 'generate_embeddings', embeddings.generate_embeddings)
-    provider = AsyncMock(side_effect=AssertionError('Catalog models cannot use the direct Ollama backend'))
-    monkeypatch.setattr(embeddings, 'ollama_embed', provider)
-    response = client.post(path, json={'model': MODEL, 'input': 'Fictional embedding control.'})
-    assert response.status_code == 404, response.text
-    assert 'Model' in response.json()['detail']
-    provider.assert_not_awaited()
-    assert not seen
 
 
 @pytest.mark.parametrize('path', PATHS)
@@ -231,7 +146,7 @@ def test_generic_embeddings_refuse_catalog_models_without_provider_io(path, harn
 def test_non_object_body_is_rejected_before_handler(path, body, harness):
     client, seen = harness
     response = client.post(
-        path.replace('{url_idx}', '0').replace('{action_id}', 'control-action'),
+        path,
         content=json.dumps(body),
         headers={'Content-Type': 'application/json'},
     )
@@ -251,23 +166,18 @@ def derived_fields():
 def test_model_input_strings_are_visible(path, derived_fields):
     fields = set(derived_fields[f'POST {path}'])
     assert 'model' in fields
-    if 'embeddings' in path:
-        assert {'input', 'input[]'} <= fields
-    elif '/v1/completions' in path:
-        assert {'prompt', 'prompt[]', 'suffix'} <= fields
+    assert {
+        'messages[].role',
+        'messages[].content',
+        'messages[].content[].text',
+        'messages[].content[].image_url.url',
+        'messages[].content[].source.data',
+        'messages[].tool_calls[].function.arguments',
+    } <= fields
+    if path in TASK_PATHS:
+        assert {'prompt', 'responses[]'} <= fields
     else:
-        assert {
-            'messages[].role',
-            'messages[].content',
-            'messages[].content[].text',
-            'messages[].content[].image_url.url',
-            'messages[].content[].source.data',
-            'messages[].tool_calls[].function.arguments',
-        } <= fields
-        if path in TASK_PATHS:
-            assert {'prompt', 'responses[]'} <= fields
-        else:
-            assert {'tools[].function.description', 'tools[].description', 'system', 'system[].text'} <= fields
+        assert {'tools[].function.description', 'tools[].description', 'system', 'system[].text'} <= fields
 
 
 @pytest.mark.parametrize(
@@ -275,9 +185,6 @@ def test_model_input_strings_are_visible(path, derived_fields):
     [
         'chat_completion_body',
         'task_completion_body',
-        'completion_body',
-        'messages_body',
-        'embeddings_body',
     ],
 )
 def test_body_dependency_preserves_missing_null_and_vendor_values(dependency_name):

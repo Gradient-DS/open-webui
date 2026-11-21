@@ -22,7 +22,7 @@ def test_retired_inference_routes_are_absent():
     assert '/api/chat/completions' in paths
     assert not any(path.startswith('/api/v1/images') for path in paths)
     assert '/api/v1/audio/speech' in paths
-    assert '/api/v1/functions/' in paths
+    assert not any(path.startswith('/api/v1/functions') for path in paths)
 
 
 def test_retired_provider_configuration_has_no_runtime_defaults():

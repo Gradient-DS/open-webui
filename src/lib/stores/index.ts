@@ -453,7 +453,6 @@ type Config = {
 		enable_docx_export?: boolean;
 		enable_agent_trace_download?: boolean;
 		enable_code_execution?: boolean;
-		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;
 		websocket_heartbeat_interval?: number | null;
 	};

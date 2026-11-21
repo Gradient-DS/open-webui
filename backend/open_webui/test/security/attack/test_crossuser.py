@@ -817,3 +817,9 @@ def test_head_refusal_requires_exact_status_and_empty_body(status, body, expecte
 def test_terminal_get_still_requires_the_exact_detail(body, expected):
     declaration = crossuser.expected_refusals()['GET /api/v1/terminals/{server_id}/{path}']
     assert crossuser.refused_as_expected(declaration, 403, body) is expected
+
+
+def test_retired_product_routes_have_no_remaining_authorization_targets():
+    retired = set(seeds.SURFACE['retired_product']['routes'])
+    routes, admins = crossuser.targets()
+    assert not retired & (set(routes) | set(admins) | set(crossuser.expected_refusals()))

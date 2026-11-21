@@ -1,46 +1,27 @@
-"""Password re-verification must finish before changing a second factor."""
+"""Removed second-factor routes cannot mutate secrets, even with credentials."""
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
-from open_webui.routers import totp
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from importlib import import_module
+
+main = import_module('open_webui.main')
+from open_webui.models.auths import Auths
+from open_webui.models.recovery_codes import RecoveryCodes
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('operation', ['enable_totp', 'disable_totp', 'regenerate_recovery_codes'])
-async def test_invalid_password_cannot_change_totp_or_recovery_codes(monkeypatch, operation):
-    monkeypatch.setattr(totp.Config, 'get', AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        totp.Auths,
-        'get_auth_by_user_id',
-        AsyncMock(
-            return_value=SimpleNamespace(
-                password='fictional-hash',
-                totp_enabled=operation != 'enable_totp',
-            )
-        ),
-    )
-    verify = AsyncMock(return_value=False)
-    monkeypatch.setattr(totp, 'verify_password', verify)
+@pytest.mark.parametrize('operation', ['totp/enable', 'totp/disable', 'recovery/regenerate'])
+@pytest.mark.parametrize('password', ['wrong-password', 'Fictional-Valid-Password!'])
+def test_password_cannot_restore_second_factor_mutations(monkeypatch, operation, password):
     mutation = AsyncMock(side_effect=AssertionError('Second factor changed'))
-    monkeypatch.setattr(totp.Auths, 'update_totp', mutation)
-    monkeypatch.setattr(totp.RecoveryCodes, 'generate_codes', mutation)
-    monkeypatch.setattr(totp.RecoveryCodes, 'delete_all', mutation)
-    code = Mock(side_effect=AssertionError('TOTP checked before the password'))
-    monkeypatch.setattr(totp, 'verify_totp', code)
-    kwargs = {
-        'request': None,
-        'user': SimpleNamespace(id='fictional-fern', oauth=None),
-        'db': None,
-        'form_data': SimpleNamespace(password='wrong-password'),
-    }
-    if operation == 'enable_totp':
-        kwargs['response'] = None
-    with pytest.raises(HTTPException) as caught:
-        await getattr(totp, operation)(**kwargs)
-    assert (caught.value.status_code, caught.value.detail) == (403, 'Invalid password')
-    verify.assert_awaited_once_with('wrong-password', 'fictional-hash')
+    monkeypatch.setattr(Auths, 'update_totp', mutation)
+    monkeypatch.setattr(RecoveryCodes, 'generate_codes', mutation)
+    monkeypatch.setattr(RecoveryCodes, 'delete_all', mutation)
+    app = FastAPI()
+    app.router.routes = list(main.app.router.routes)
+    result = TestClient(app).post('/api/v1/auths/2fa/' + operation, json={'password': password})
+    assert (result.status_code, result.json()) == (404, {'detail': 'Not Found'})
+    assert 'set-cookie' not in result.headers
     mutation.assert_not_called()
-    code.assert_not_called()

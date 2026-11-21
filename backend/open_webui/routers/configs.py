@@ -73,15 +73,6 @@ MODELS_CONFIG_KEYS = {
     'DEFAULT_MODEL_METADATA': 'models.default_metadata',
     'DEFAULT_MODEL_PARAMS': 'models.default_params',
 }
-SUBAGENTS_CONFIG_KEYS = {
-    'ENABLE_SUBAGENTS': 'subagents.enable',
-    'SUBAGENTS_BACKGROUND_ENABLED': 'subagents.background_enabled',
-    'SUBAGENTS_MAX_CONCURRENT': 'subagents.max_concurrent',
-    'SUBAGENTS_MAX_ASYNC': 'subagents.max_async',
-    'SUBAGENTS_MAX_ITERATIONS': 'subagents.max_iterations',
-    'SUBAGENTS_MAX_OUTPUT': 'subagents.max_output',
-    'SUBAGENTS_SYSTEM_PROMPT': 'subagents.system_prompt',
-}
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
@@ -371,45 +362,8 @@ class ExternalAgentsConfigForm(BaseModel):
 
 
 ####################################
-# 2FA Config
-####################################
-
-
-TWO_FA_CONFIG_KEYS = {
-    'ENABLE_2FA': 'auth.enable_2fa',
-    'REQUIRE_2FA': 'auth.require_2fa',
-    'TWO_FA_GRACE_PERIOD_DAYS': 'auth.2fa_grace_period_days',
-}
-
-
-class TwoFAConfigForm(BaseModel):
-    ENABLE_2FA: bool
-    REQUIRE_2FA: bool
-    TWO_FA_GRACE_PERIOD_DAYS: int
-
-
-####################################
 # Data Retention Config
 ####################################
-
-
-DATA_RETENTION_CONFIG_KEYS = {
-    'DATA_RETENTION_TTL_DAYS': 'admin.data_retention_ttl_days',
-    'USER_INACTIVITY_TTL_DAYS': 'admin.user_inactivity_ttl_days',
-    'CHAT_RETENTION_TTL_DAYS': 'admin.chat_retention_ttl_days',
-    'KNOWLEDGE_RETENTION_TTL_DAYS': 'admin.knowledge_retention_ttl_days',
-    'DATA_RETENTION_WARNING_DAYS': 'admin.data_retention_warning_days',
-    'ENABLE_RETENTION_WARNING_EMAIL': 'admin.enable_retention_warning_email',
-}
-
-
-class DataRetentionConfigForm(BaseModel):
-    DATA_RETENTION_TTL_DAYS: int
-    USER_INACTIVITY_TTL_DAYS: int
-    CHAT_RETENTION_TTL_DAYS: int
-    KNOWLEDGE_RETENTION_TTL_DAYS: int
-    DATA_RETENTION_WARNING_DAYS: int
-    ENABLE_RETENTION_WARNING_EMAIL: bool
 
 
 class PlatformRetentionConfigForm(BaseModel):

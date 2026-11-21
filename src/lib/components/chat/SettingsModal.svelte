@@ -639,7 +639,7 @@
 		const personalSettings = allSettings.filter((tab) => {
 			if (tab.id === 'tools') {
 				return (
-					(isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) &&
+					isFeatureEnabled('tool_servers') &&
 					$user?.role === 'user' &&
 					$user?.permissions?.features?.direct_tool_servers
 				);
@@ -856,7 +856,7 @@
 						</button>
 					{:else if tabId === 'connections'}{:else if tabId === 'tools'}
 						<!-- [Gradient] Both integration types follow their tenant gates. -->
-						{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && $user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers}
+						{#if isFeatureEnabled('tool_servers') && $user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers}
 							<button
 								role="tab"
 								aria-controls="tab-tools"
@@ -995,7 +995,7 @@
 				<Notifications {saveSettings} />
 			{:else if selectedTab === 'shortcuts'}
 				<Shortcuts {saveSettings} />
-			{:else if selectedTab === 'tools'}
+			{:else if selectedTab === 'tools' && isFeatureEnabled('tool_servers')}
 				<Integrations
 					saveSettings={async (updated: Record<string, unknown>) => {
 						await saveSettings(updated);

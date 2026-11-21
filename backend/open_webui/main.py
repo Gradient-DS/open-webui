@@ -60,7 +60,6 @@ from open_webui.config import (
     ENV,
     # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
     FEATURE_ARTIFACTS,
-    FEATURE_BUILTIN_TOOLS,
     FEATURE_CAPTURE,
     FEATURE_CHANGELOG,
     FEATURE_CHAT_CONTROLS,
@@ -84,12 +83,9 @@ from open_webui.config import (
     FEATURE_SYSTEM_PROMPT,
     FEATURE_TEMPORARY_CHAT,
     FEATURE_TERMINAL_SERVERS,
-    FEATURE_TOOL_SERVERS,
-    FEATURE_TOOLS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
-    FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
     # [Gradient] typed-KB file limit
@@ -130,12 +126,9 @@ from open_webui.env import (
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
-    ENABLE_PLUGINS,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-    ENABLE_PYODIDE_FILE_PERSISTENCE,
     # SCIM
     ENABLE_SCIM,
-    ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
@@ -180,7 +173,6 @@ from open_webui.models.users import Users
 from open_webui.routers import (
     agent_threads,
     analytics,
-    archives,
     audio,
     auths,
     automations,
@@ -188,7 +180,6 @@ from open_webui.routers import (
     chats,
     cloud_sync,
     configs,
-    data_warnings,
     evaluations,
     export,
     feedback_report,
@@ -213,11 +204,9 @@ from open_webui.routers import (
     tasks,
     terminals,
     tools,
-    totp,
     users,
     utils,
 )
-from open_webui.services.email.auth import is_mail_configured  # [Gradient]
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body
 from open_webui.socket.main import (
     MODELS,
@@ -238,6 +227,7 @@ from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
 from open_webui.soev.login_attach import validate_login_config
 from open_webui.soev.thread_approvals import require_legacy_approval
+from open_webui.soev.product_surface import product_permissions, product_router
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.soev.thread_routes import NO_STORE, create_thread_router
 from open_webui.tasks import (
@@ -394,71 +384,6 @@ https://github.com/open-webui/open-webui
         print(f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui')
 
 
-async def periodic_archive_cleanup():
-    """Periodic task to delete expired archives (runs daily)"""
-    from open_webui.services.archival import ArchiveService
-
-    while True:
-        try:
-            # Wait 24 hours before first run and between runs
-            await asyncio.sleep(24 * 60 * 60)
-
-            stats = await ArchiveService.cleanup_expired_archives()
-            if stats['deleted'] > 0:
-                log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
-        except Exception as e:
-            log.error(f'Error in archive cleanup: {e}')
-
-
-async def periodic_data_retention_cleanup():
-    """Periodic task to enforce data retention TTL (runs daily)"""
-    from open_webui.services.retention.service import DataRetentionService
-
-    while True:
-        try:
-            # Wait 24 hours before first run and between runs
-            await asyncio.sleep(24 * 60 * 60)
-
-            retention_config = await Config.get_many(
-                'admin.data_retention_ttl_days',
-                'admin.user_inactivity_ttl_days',
-                'admin.chat_retention_ttl_days',
-                'admin.knowledge_retention_ttl_days',
-                'admin.data_retention_warning_days',
-                'admin.enable_retention_warning_email',
-                'admin.enable_user_archival',
-                'admin.default_archive_retention_days',
-            )
-            master_ttl = retention_config.get('admin.data_retention_ttl_days') or 0
-            if master_ttl <= 0:
-                continue  # Retention disabled, skip
-
-            report = await DataRetentionService.run_cleanup(
-                app=app,
-                master_ttl=master_ttl,
-                user_inactivity_ttl=retention_config.get('admin.user_inactivity_ttl_days'),
-                chat_ttl=retention_config.get('admin.chat_retention_ttl_days'),
-                knowledge_ttl=retention_config.get('admin.knowledge_retention_ttl_days'),
-                warning_days=retention_config.get('admin.data_retention_warning_days'),
-                enable_warning_email=retention_config.get('admin.enable_retention_warning_email'),
-                enable_archival=retention_config.get('admin.enable_user_archival'),
-                archive_retention_days=retention_config.get('admin.default_archive_retention_days'),
-            )
-
-            total = report.users_deleted + report.chats_deleted + report.knowledge_deleted + report.warnings_sent
-            if total > 0 or report.errors:
-                log.info(
-                    f'Data retention cleanup: {report.warnings_sent} warnings sent, '
-                    f'{report.users_deleted} users deleted '
-                    f'({report.users_archived} archived), '
-                    f'{report.chats_deleted} chats soft-deleted, '
-                    f'{report.knowledge_deleted} KBs soft-deleted, '
-                    f'{len(report.errors)} errors'
-                )
-        except Exception as e:
-            log.error(f'Error in data retention cleanup: {e}')
-
-
 async def periodic_export_cleanup():
     """Periodic task to delete expired data exports (runs every 6 hours)"""
     from open_webui.services.export.service import ExportService
@@ -542,8 +467,9 @@ async def lifespan(app: FastAPI):
 
     # This should be blocking (sync) so functions are not deactivated on first /get_models calls
     # when the first user lands on the / route.
-    log.info('Installing external dependencies of functions and tools...')
-    await install_tool_and_function_dependencies()
+    if await feature_enabled('tools'):
+        log.info('Installing external dependencies of functions and tools...')
+        await install_tool_and_function_dependencies()
 
     app.state.redis = get_redis_client(async_mode=True)
 
@@ -564,9 +490,7 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup = asyncio.create_task(periodic_usage_pool_cleanup())
     app.state.periodic_session_pool_cleanup = asyncio.create_task(periodic_session_pool_cleanup())
-    # [Gradient] GDPR archival / retention / export cleanup workers
-    asyncio.create_task(periodic_archive_cleanup())
-    asyncio.create_task(periodic_data_retention_cleanup())
+    # [Gradient] Platform policy owns retention; only disposable export files expire locally.
     asyncio.create_task(periodic_export_cleanup())
 
     await capabilities.refresh()
@@ -615,7 +539,7 @@ async def lifespan(app: FastAPI):
             log.warning(f'Failed to pre-fetch models at startup: {e}')
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
-    if len(await Config.get('tool_server.connections', []) or []) > 0:
+    if await feature_enabled('tool_servers') and len(await Config.get('tool_server.connections', []) or []) > 0:
         mock_request = Request(
             {
                 'type': 'http',
@@ -973,24 +897,54 @@ app.add_middleware(
 app.mount('/ws', socket_app)
 
 
-app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
+# [Gradient] Inference belongs to the platform; preserve the upstream router source.
+app.include_router(
+    product_router(ollama.router, exclude={route.path for route in ollama.router.routes}),
+    prefix='/ollama',
+    tags=['ollama'],
+)
 
 
-app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
+app.include_router(
+    product_router(tasks.router, exclude={'/image_prompt/completions', '/config'}),
+    prefix='/api/v1/tasks',
+    tags=['tasks'],
+)
 
 app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
-app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieval'])
+# [Gradient] File ingestion stays on the platform; OWUI web loaders/search are retired.
+app.include_router(
+    product_router(
+        retrieval.router, exclude={'/process/url', '/process/web', '/process/youtube', '/process/web/search'}
+    ),
+    prefix='/api/v1/retrieval',
+    tags=['retrieval'],
+)
 
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
-app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
-app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
+# [Gradient] Keycloak owns credentials and signup; retain session/profile/API-key handlers.
+app.include_router(
+    product_router(
+        auths.router,
+        exclude={
+            '/signin',
+            '/signup',
+            '/ldap',
+            '/update/password',
+            '/password/forgot',
+            '/password/reset',
+            '/password/reset/{token}/validate',
+        },
+    ),
+    prefix='/api/v1/auths',
+    tags=['auths'],
+)
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
-app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
 app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
-app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
+app.include_router(product_router(chats.router, exclude={'/{id}/compact'}), prefix='/api/v1/chats', tags=['chats'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
@@ -999,7 +953,11 @@ app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
-app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
+app.include_router(
+    product_router(tools.router, exclude={route.path for route in tools.router.routes}),
+    prefix='/api/v1/tools',
+    tags=['tools'],
+)
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
@@ -1007,7 +965,11 @@ app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories']
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
 app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
-app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
+app.include_router(
+    product_router(functions.router, exclude={route.path for route in functions.router.routes}),
+    prefix='/api/v1/functions',
+    tags=['functions'],
+)
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
@@ -1022,7 +984,6 @@ app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-
 
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
-app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
 # Bug report admission and delivery policy live in soev-api.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
@@ -1335,7 +1296,6 @@ async def chat_completion(
             'filter_ids': form_data.pop('filter_ids', []),
             'tool_ids': form_data.get('tool_ids', None),
             'tool_servers': tool_servers,
-            'rag_filter': form_data.pop('rag_filter', None),  # [Gradient] RAG filter passthrough
             'assistant_id': split_assistant_id,  # [Gradient] the assistant of an assistant/LLM split turn
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
@@ -2257,18 +2217,12 @@ async def get_app_config(request: Request):
     config = await Config.get_many(
         'oauth.enable',
         'oauth.auto_redirect',
-        'ldap.enable',
-        'ui.enable_signup',
-        'ui.enable_login_form',
         'auth.enable_api_keys',
-        'ui.enable_password_change_form',
         'folders.enable',
         'folders.max_file_count',
         'calendar.enable',
         'automations.enable',
         'notes.enable',
-        'chat.context_compaction.enable',
-        'chat.tool_permissions.enable',
         'web.search.enable',
         'web.search.confirmation.enable',
         'web.search.confirmation.content',
@@ -2299,20 +2253,15 @@ async def get_app_config(request: Request):
         'ui.pending_user_overlay_content',
         'ui.watermark',
         # --- [Gradient] fork feature flags & integration config ---
-        'auth.enable_2fa',
-        'auth.require_2fa',
-        'auth.2fa_grace_period_days',
-        'email.enable_forgot_password',
         'email.enable_invites',
         'email.invite_heading',
-        'rag.enable_filter_ui',
         'rag.file.allowed_extensions',
         'document_writer.enable',
         'ui.enable_citation_relevance',
         'ui.enable_citation_text_highlight',
         'evaluation.feedback.layer2.enable',
-        'evaluation.feedback.layer2.positive_tags',
-        'evaluation.feedback.layer2.negative_tags',
+        'evaluation.feedback.reasons',
+        'evaluation.feedback.tags',
         'evaluation.feedback.layer3.enable',
         'evaluation.feedback.layer3.prompt',
         'evaluation.feedback.category_tags.enable',
@@ -2323,14 +2272,10 @@ async def get_app_config(request: Request):
         'bug_reports.enabled',
         'google_drive.client_id',
         'google_drive.api_key',
-        'onedrive.enable_personal',
         'onedrive.enable_business',
-        'onedrive.client_id_personal',
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'features.enable_data_warnings',
-        'admin.data_retention_ttl_days',
         'ui.enable_welcome_message',
         'ui.greeting_template',
         'ui.enable_acceptance_modal',
@@ -2364,13 +2309,9 @@ async def get_app_config(request: Request):
             # --- Public: required by login/signup page pre-auth ---
             'auth': WEBUI_AUTH,
             'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
-            'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            'enable_ldap': config.get('ldap.enable'),
-            'enable_2fa': config.get('auth.enable_2fa'),  # [Gradient] TOTP 2FA
-            'enable_signup': config.get('ui.enable_signup'),
-            'enable_login_form': config.get('ui.enable_login_form'),
-            # [Gradient] Login page needs this pre-auth for the "forgot password" link.
-            'enable_forgot_password': bool(config.get('email.enable_forgot_password')) and is_mail_configured(),
+            'enable_ldap': False,
+            'enable_signup': False,
+            'enable_login_form': False,
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
             **(
                 {'websocket_heartbeat_interval': WEBSOCKET_HEARTBEAT_INTERVAL}
@@ -2381,31 +2322,31 @@ async def get_app_config(request: Request):
             **(
                 {
                     'enable_api_keys': config.get('auth.enable_api_keys'),
-                    'enable_password_change_form': config.get('ui.enable_password_change_form'),
+                    'enable_password_change_form': False,
                     'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
-                    'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
+                    'enable_pyodide_file_persistence': False,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     # [Gradient] v2 mode keeps the picker to the soev-api catalog.
-                    'enable_plugins': ENABLE_PLUGINS,
-                    'enable_functions': ENABLE_PLUGINS and not model_catalog.is_v2(),
+                    'enable_plugins': False,
+                    'enable_functions': False,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,  # [Gradient]
                     'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
                     'enable_notes': config.get('notes.enable'),
-                    'enable_context_compaction': config.get('chat.context_compaction.enable')
-                    and not soev_threads.enabled(),
-                    'enable_tool_permissions': config.get('chat.tool_permissions.enable'),
+                    'enable_context_compaction': False,
+                    'enable_tool_permissions': False,
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
                     'web_search_confirmation_content': config.get('web.search.confirmation.content'),
-                    'enable_rag_filter_ui': config.get('rag.enable_filter_ui'),  # [Gradient]
-                    'enable_code_execution': config.get('code_execution.enable'),
-                    'enable_code_interpreter': config.get('code_interpreter.enable'),
+                    'enable_code_execution': bool(config.get('code_execution.enable'))
+                    and config.get('code_execution.engine') == 'jupyter',
+                    'enable_code_interpreter': bool(config.get('code_interpreter.enable'))
+                    and config.get('code_interpreter.engine') == 'jupyter',
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
-                    'enable_image_generation': model_catalog.is_v2() and await capabilities.has(capabilities.IMAGES),
+                    'enable_image_generation': False,
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
                     'enable_community_sharing': config.get('ui.enable_community_sharing'),
                     'enable_citation_relevance': config.get('ui.enable_citation_relevance'),  # [Gradient]
@@ -2437,8 +2378,7 @@ async def get_app_config(request: Request):
                     'feature_voice': await feature_enabled('voice', FEATURE_VOICE),
                     'feature_voice_call': await feature_enabled('voice', FEATURE_VOICE)
                     and await feature_enabled('voice_call', FEATURE_VOICE_CALL),
-                    'feature_read_aloud': await feature_enabled('voice', FEATURE_VOICE)
-                    and await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
+                    'feature_read_aloud': await feature_enabled('read_aloud', FEATURE_READ_ALOUD),
                     'feature_changelog': await feature_enabled('changelog', FEATURE_CHANGELOG),
                     'feature_meetings': await feature_enabled('meetings', FEATURE_MEETINGS)
                     and await capabilities.has(capabilities.MEETINGS),
@@ -2447,14 +2387,14 @@ async def get_app_config(request: Request):
                     'feature_model_meters': await feature_enabled('model_meters', FEATURE_MODEL_METERS),
                     'feature_knowledge': await feature_enabled('knowledge', FEATURE_KNOWLEDGE),
                     'feature_prompts': await feature_enabled('prompts', FEATURE_PROMPTS),
-                    'feature_tools': await feature_enabled('tools', FEATURE_TOOLS),
+                    'feature_tools': False,
                     'feature_skills': await feature_enabled('skills', FEATURE_SKILLS),
                     'feature_skill_files': await feature_enabled('skill_files', FEATURE_SKILL_FILES),
                     'enable_skill_execution': ENABLE_SKILL_EXECUTION,
                     'feature_chat_controls_sections': await feature_enabled(
                         'chat_controls_sections', FEATURE_CHAT_CONTROLS_SECTIONS
                     ),
-                    'feature_webpage_url': await feature_enabled('webpage_url', FEATURE_WEBPAGE_URL),
+                    'feature_webpage_url': False,
                     'feature_reference_chats': await feature_enabled('reference_chats', FEATURE_REFERENCE_CHATS),
                     'feature_simple_assistant_builder': await feature_enabled(
                         'simple_assistant_builder', FEATURE_SIMPLE_ASSISTANT_BUILDER
@@ -2462,10 +2402,10 @@ async def get_app_config(request: Request):
                     'feature_input_menu': await feature_enabled('input_menu', FEATURE_INPUT_MENU),
                     'feature_temporary_chat': await feature_enabled('temporary_chat', FEATURE_TEMPORARY_CHAT)
                     and not soev_threads.enabled(),
-                    'feature_tool_servers': await feature_enabled('tool_servers', FEATURE_TOOL_SERVERS),
+                    'feature_tool_servers': False,
                     'feature_terminal_servers': await feature_enabled('terminal_servers', FEATURE_TERMINAL_SERVERS),
                     'feature_user_demographics': await feature_enabled('user_demographics', FEATURE_USER_DEMOGRAPHICS),
-                    'feature_builtin_tools': await feature_enabled('builtin_tools', FEATURE_BUILTIN_TOOLS),
+                    'feature_builtin_tools': False,
                     'feature_strict_data_separation': await feature_enabled(
                         'strict_data_separation', FEATURE_STRICT_DATA_SEPARATION
                     ),
@@ -2478,7 +2418,6 @@ async def get_app_config(request: Request):
                     'enable_memories': config.get('memories.enable'),
                     **(
                         {
-                            'enable_onedrive_personal': config.get('onedrive.enable_personal'),
                             'enable_onedrive_business': config.get('onedrive.enable_business')
                             and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                         }
@@ -2494,10 +2433,6 @@ async def get_app_config(request: Request):
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
-                    'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
-                    'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
-                    'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
-                    'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
                     'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }
@@ -2556,13 +2491,12 @@ async def get_app_config(request: Request):
                         'height': config.get('file.image_compression_height'),
                     },
                 },
-                'permissions': {**(config.get('user.permissions') or {})},
+                'permissions': product_permissions(config.get('user.permissions') or {}),
                 'google_drive': {
                     'client_id': config.get('google_drive.client_id'),
                     'api_key': config.get('google_drive.api_key'),
                 },
                 'onedrive': {
-                    'client_id_personal': config.get('onedrive.client_id_personal'),
                     'client_id_business': config.get('onedrive.client_id_business'),
                     'sharepoint_url': config.get('onedrive.sharepoint_url'),
                     'sharepoint_tenant_id': config.get('onedrive.sharepoint_tenant_id'),
@@ -3078,6 +3012,20 @@ async def check_db_health():
     """Verify database connectivity by issuing a lightweight ping."""
     await async_db_ping()
     return {'status': True}
+
+
+# [Gradient] Local embedding dispatch has no product route.
+app.router.routes = product_router(
+    app.router,
+    exclude={
+        '/api/embeddings',
+        '/api/v1/embeddings',
+        '/api/v1/chats/{id}/messages/{message_id}/resolve',
+        '/api/chat/actions/{action_id}',
+        '/oauth/clients/{client_id}/authorize',
+        '/oauth/clients/{client_id}/callback',
+    },
+).routes
 
 
 # --- static assets & files ---

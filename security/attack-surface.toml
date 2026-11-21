@@ -34,8 +34,7 @@ preserve_configuration = true
 # sub or unset; an unsafe batch refuses 403 without applying any other setting.
 
 # Required owner controls for sweep12's previously unentered operations.
-# The image-prompt operation has an exact all-actor refusal below; its supported
-# title-task control uses the same seeded chat, model and authenticated owner.
+# Retired image-prompt execution has no route or positive-control declaration.
 required_drive_routes = [
   "GET /api/v1/chats/",
   "GET /api/v1/chats/list",
@@ -46,7 +45,6 @@ required_drive_routes = [
   "POST /api/v1/knowledge/{id}/file/move",
   "POST /api/v1/knowledge/{id}/file/remove",
   "POST /api/v1/knowledge/{id}/file/update",
-  "POST /api/v1/tasks/image_prompt/completions"
 ]
 
 # Caller-index 404s return 403 no_access without content; individual chat 404s stay unavailable.
@@ -296,47 +294,6 @@ depends_on = []
 actor = "user"
 
 [[parameter]]
-key = "active_function"
-v2_refused_value = "attack_active_{token}"
-name = "id"
-prefix = "/api/v1/functions/id/{id}/valves/user"
-description = "routers/functions.py:update_function_user_valves_by_id answers 400 'Function is not active' for an inactive function, and FunctionForm has no is_active: a function is created off. seed_active_function creates an Action and turns it on with /toggle, which the passes drive against the shared {function} only, so this one stays active through every pass."
-seeded_by = "seed_refused_target"
-depends_on = []
-actor = "user"
-content = """
-from pydantic import BaseModel
-
-class Action:
-    class Valves(BaseModel):
-        label: str = "seed"
-    class UserValves(BaseModel):
-        label: str = "seed"
-    def __init__(self):
-        self.valves = self.Valves()
-    async def action(self, body: dict) -> dict:
-        return body
-"""
-
-[[parameter]]
-key = "action"
-name = "action_id"
-prefix = "/api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action resolves Functions.id and refuses 'Action not available' unless the function is an active Action the model surfaces (admins included without the bypass), so it takes the always-active one, which seed_active_function also makes global."
-same_as = "active_function"
-
-[[parameter]]
-key = "tool"
-v2_refused_value = "fictional-disabled-tool-{token}"
-name = "id"
-prefix = "/api/v1/tools/id/{id}"
-description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs. Admin satisfies workspace.tools/workspace.tools_import; no package installation or external import is needed."
-via = "POST /api/v1/tools/create"
-body = { "id" = "attack_tool_{token}", "name" = "Attack tool", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
-extract = "id"
-actor = "user"
-
-[[parameter]]
 key = "skill"
 v2_refused_value = "fictional-disabled-skill-{token}"
 name = "id"
@@ -401,17 +358,6 @@ depends_on = ["chat", "model", "chat_message"]
 actor = "user"
 
 [[parameter]]
-key = "ollama_index"
-name = "url_idx"
-prefix = "/ollama"
-description = "Read the sealed stack upstream catalogs at the explicitly configured OLLAMA_BASE_URLS; OWUI removed its administrative tags route. Indexed completion proxies still require the backend model id and matching connection index, independently of the platform picker catalog."
-seeded_by = "seed_ollama_connection"
-depends_on = []
-provides = ["upstream_model"]
-actor = "user"
-fresh = false
-
-[[parameter]]
 key = "terminal"
 name = "server_id"
 prefix = "/api/v1/terminals/{server_id}"
@@ -443,14 +389,6 @@ unseedable = "The only cache file the API creates is a data export, and services
 # and its seed no longer exist. Restore both together if the dev route is ever gated in.
 
 [[parameter]]
-key = "reset_token"
-v2_refused_value = "fictional-reset-{token}"
-name = "token"
-prefix = "/api/v1/auths/password/reset/{token}"
-description = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
-unseedable = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
-
-[[parameter]]
 key = "oauth_session_provider"
 name = "provider"
 prefix = "/api/v1/auths/oauth/sessions/{provider}"
@@ -471,13 +409,6 @@ name = "provider"
 prefix = "/oauth/{provider}"
 description = "utils/oauth.py registers login providers from environment configuration. With soev-api configured, callback account selection uses only the verified token sub. Startup refuses custom OAUTH_SUB_CLAIM or oauth.sub_claim settings. The login token's /v1/me person selects an unknown login's account by user.person_id and must agree with a known account's person_id before login. Null person bindings are written from /v1/me with uniqueness enforced; new accounts and credentials are inserted atomically with the verified person, and concurrent creation resolves by person_id. No platform OAuth session lacks a verified person; email never attaches. Another subject already bound to that provider or a person mismatch refuses 403; discovery failures refuse 503 before signup. Unit coverage: test/soev/test_login_attach.py and test/soev/test_login_subject.py. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
 unseedable = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
-
-[[parameter]]
-key = "oauth_client"
-name = "client_id"
-prefix = "/oauth/clients/{client_id}"
-description = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
-unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -640,15 +571,6 @@ prefix = "/api/v1/threads/{thread_id}/read"
 description = "Marks the authenticated caller's conversation watermark using server time after authorizing the current projection. Shared readers update only their own state; an unrelated caller receives the same 404 as a missing chat. Requires ENABLE_V2_THREADS and reuses the caller-owned meeting thread. No request body or writable fields."
 same_as = "meeting"
 
-[[parameter]]
-key = "disabled_oauth_client"
-name = "client_id"
-prefix = "/oauth/clients/{client_id}/authorize"
-backed_by = "soev-solutions"
-seeded_by = "seed_disabled_oauth_client"
-depends_on = []
-description = "Platform MCP authorization refuses before client lookup or registration. A fictional client id containing the fresh pass token drives this boundary for every authenticated actor without reusing a previous pass fixture."
-
 [[control]]
 runtime_soev_backed = "drive"
 route = "POST /api/tasks/chat/{chat_id}/stop"
@@ -697,10 +619,6 @@ reason = "Removes every shared chat of the caller, including per-chat share fixt
 [[destructive]]
 id = "DELETE /api/v1/auths/api_key"
 reason = "Deletes the caller API key and invalidates an API-key driving identity."
-
-[[destructive]]
-id = "POST /api/v1/auths/update/password"
-reason = "Changes the caller password, and since v0.11.3 revokes every token that identity holds (routers/auths.py:489). The driving bearer dies at once, not merely the old credential."
 
 [[destructive]]
 id = "POST /api/v1/knowledge/{id}/reset"
@@ -848,20 +766,6 @@ description = "routers/chats.py:create_new_chat answers 404 when folder_id is no
 json = { "folder_id" = "{folder}" }
 
 [[field]]
-route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
-description = "Legacy mode resolves the seeded pending function_call by call_id. Platform tool approvals are retired: drive this same request for every actor and assert the exact unavailable refusal."
-json = { "call_id" = "call_{token}", "action" = "reject" }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Tool approvals are retired by product decision (2026-11-03); no approval-producing platform tools exist. Refuse before thread or platform access for every authenticated actor, including owner and admin."
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
 description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
@@ -882,55 +786,12 @@ description = "routers/retrieval.py:_validate_collection_access answers 403 for 
 json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
-route = "POST /api/v1/auths/signin"
-v2 = { setup = [] }
-description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
-json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
-setup = [
-]
-
-[[field]]
 route = "GET /api/v1/models/model/profile/image"
 description = "routers/models.py:get_model_profile_image serves only a data:image URL inline; everything else, the seeded model's default included, is a 302 to a static image, and a redirect cannot vouch for coverage. Setup creates a model with a 1x1 PNG data URL."
 params = { "id" = "attack-image-{token}" }
 setup = [
     { via = "POST /api/v1/models/create", body = { "id" = "attack-image-{token}", "name" = "Attack image {token}", "base_model_id" = "{model}", "meta" = { "profile_image_url" = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" }, "params" = {} } },
 ]
-
-[[field]]
-route = "POST /api/embeddings"
-description = "The generic embedding dispatcher accepts Ollama models only; catalog models are refused rather than forwarded to a direct provider connection."
-json = { "model" = "{model}", "input" = "Attack embedding control {token}" }
-
-[[field]]
-route = "POST /api/v1/embeddings"
-description = "The same handler as POST /api/embeddings: catalog models are refused because only Ollama models can use this direct dispatcher."
-json = { "model" = "{model}", "input" = "Attack embedding control {token}" }
-
-[[field]]
-route = "POST /ollama/api/chat/{url_idx}"
-description = "routers/ollama.py:generate_chat_completion validates the body as GenerateChatCompletionForm (a model and role/content messages) and answers 400 otherwise, so no owner control succeeded. The stub's /api/tags lists the CI model."
-json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /ollama/v1/chat/completions/{url_idx}"
-description = "The OpenAI-compatible Ollama proxy resolves the model and forwards the messages; the schema-derived body carries neither."
-json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /ollama/v1/messages/{url_idx}"
-description = "The Anthropic-compatible Ollama proxy answers 400 without a model (PLANE-019); the stub's /api/tags lists the CI model."
-json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /ollama/v1/completions/{url_idx}"
-description = "The completions proxy needs a model the Ollama connection lists and a prompt."
-json = { "model" = "{upstream_model}", "prompt" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /ollama/v1/embeddings/{url_idx}"
-description = "The embeddings proxy needs a model the Ollama connection lists and an input."
-json = { "model" = "{upstream_model}", "input" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /api/v1/automations/{id}/update"
@@ -951,27 +812,6 @@ json = { "content" = "Attack memory update {token}" }
 route = "POST /api/v1/prompts/id/{prompt_id}/update/version"
 description = "update_prompt_version refuses a version_id that is not a history row of this prompt; the seeded one is."
 json = { "version_id" = "{prompt_history}" }
-
-[[field]]
-route = "POST /api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action answers 400 'Model not found' without a registered model and reads chat_id, id and session_id from the body for its event emitter; main.py:chat_action checks chat_id against the caller's chats. The seeded model, the caller's chat and a message id reach the Action."
-json = { "model" = "{model}", "chat_id" = "{chat}", "id" = "message_{token}", "session_id" = "attack-{token}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
-
-[[field]]
-route = "POST /api/v1/tools/id/{id}/update"
-description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Tools code updates it in place."
-json = { "id" = "{tool}", "name" = "Attack tool", "content" = '''from pydantic import BaseModel
-
-class Tools:
-    class Valves(BaseModel):
-        label: str = "seed"
-    class UserValves(BaseModel):
-        label: str = "seed"
-    def __init__(self):
-        self.valves = self.Valves()
-    def echo(self, text: str) -> str:
-        return text
-''' }
 
 [[field]]
 backed_by = "soev-solutions"
@@ -1004,12 +844,12 @@ files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack up
 
 [[field]]
 route = "POST /api/v1/audio/speech"
-description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. The platform product configuration disables read aloud and voice calls, so private drive mode requires the exact plan refusal. With these features enabled, the platform speech role reaches the stub. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
+description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. Read aloud requires its effective product feature and chat.tts permission; private drive mode enables both in the platform seed and requires a successful handler hit. Voice calls remain disabled. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
 json = { input = "Fictional speech probe {token}.", response_format = "mp3" }
 
 [[field]]
 route = "POST /api/v1/audio/transcriptions"
-description = "Multipart: an audio part. routers/audio.py:transcription refuses a content type outside audio.stt.supported_content_types, which defaults to audio/* and video/webm. CI runs speech-to-text on the stub (CI-005)."
+description = "Multipart: an audio part. routers/audio.py:transcription requires the effective dictation feature and chat.stt permission; primitives.transcribe validates bounded audio before forwarding it with the requesting person’s platform login. CI runs speech-to-text on the stub (CI-005)."
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
 
 [[shared]]
@@ -1028,53 +868,16 @@ allow = ["same-object"]
 reason = "A user's avatar, shown wherever the user appears to any verified user."
 
 [[shared]]
-runtime_soev_backed = "waive"
-route = "GET /api/v1/functions/id/{id}/valves/user/spec"
-allow = ["same-object"]
-reason = "routers/functions.py:get_function_user_valves_spec_by_id serves an active function's UserValves JSON schema to any verified user: the form the per-user settings dialog renders. It is the function's code, identical for every caller, and carries no user's values."
-
-[[shared]]
-runtime_soev_backed = "waive"
-route = "POST /api/v1/functions/id/{id}/valves/user/update"
-allow = ["same-object", "write"]
-reason = "routers/functions.py:update_function_user_valves_by_id writes the caller's own user.settings.functions.valves[id] (models/functions.py:update_user_valves_by_id_and_user_id), never the function or another user's settings; the answer echoes the caller's own values. Measured live: after both accounts wrote, each read back only its own label. Functions carry no access grants to check against, unlike tools (routers/tools.py checks read access before a user-valves write)."
-
-[[shared]]
 route = "GET /api/v1/groups/id/{id}/info"
 allow = ["owner-marker", "resource-id", "same-object"]
 reason = "routers/groups.py:get_group_info_by_id serves a group's name, description and member count to any verified user, for the access-control picker."
 
-[[shared]]
-route = "POST /ollama/api/chat/{url_idx}"
-allow = ["same-object", "write"]
-reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
-
-[[shared]]
-route = "POST /ollama/v1/chat/completions/{url_idx}"
-allow = ["same-object", "write"]
-reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
-
-[[shared]]
-route = "POST /ollama/v1/completions/{url_idx}"
-allow = ["same-object", "write"]
-reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
-
-[[shared]]
-route = "POST /ollama/v1/embeddings/{url_idx}"
-allow = ["same-object", "write"]
-reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
-
-[[shared]]
-route = "POST /ollama/v1/messages/{url_idx}"
-allow = ["same-object", "write"]
-reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
-
 [[control]]
+runtime_soev_backed = "waive"
 route = "POST /api/v1/audio/speech"
-v2 = { status = 403, detail = "Feature 'read_aloud' is not available in your plan", json = { detail = "Feature 'read_aloud' is not available in your plan" }, all_actors = true, reason = "soev/product_config_schema.json disables read_aloud and voice_call. routers/audio.py:speech refuses before permission checks or upstream I/O for every actor, including admins. The valid SpeechForm remains driven." }
 status = 401
 detail = "identity:platform_login"
-reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode has a separate exact plan refusal for the disabled read-aloud feature."
+reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 401 sign_in, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode requires successful speech under the requesting person’s platform login."
 
 [[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"
@@ -1087,43 +890,6 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves/user"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "GET /api/v1/functions/id/{id}/valves/user/spec"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-route = "POST /api/v1/functions/id/{id}/valves/user/update"
-status = 403
-detail = "Custom functions are disabled under v2"
-reason = "The private sweep observed functions/create returning 403 after #535; routers/functions.py applies require_custom_functions to every route, before any function lookup or code load. Closes if custom functions become available under v2."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/chat/actions/{action_id}"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "main.chat_action calls thread_content.refuse_local_content before verify_chat_ownership or action dispatch; threads.enabled() makes this an unconditional 409 unavailable for every authenticated actor in drive mode."
 
 [[control]]
 runtime_soev_backed = "drive"
@@ -1316,15 +1082,6 @@ reason = "Prepared threads deliberately refuse local content operations (chat_ro
 [[control]]
 runtime_soev_backed = "drive"
 all_actors = true
-route = "POST /api/v1/chats/{id}/compact"
-status = 409
-detail = "unavailable"
-json = { "state" = "unavailable" }
-reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
 route = "POST /api/v1/chats/{id}/messages/{message_id}"
 status = 409
 detail = "unavailable"
@@ -1358,20 +1115,6 @@ detail = "unavailable"
 json = { "state" = "unavailable" }
 reason = "Prepared threads deliberately refuse local content operations (chat_routes.py/thread_content.py). Drive the boundary for every authenticated actor, including admin; never fabricate a local row."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tasks/image_prompt/completions"
-status = 404
-detail = "Not Found"
-json = { "detail" = "Not Found" }
-reason = "tasks.generate_image_prompt explicitly refuses under v2; image prompt generation is not a soev.task/1 operation."
-
-[[field]]
-route = "POST /api/v1/tasks/image_prompt/completions"
-description = "task_completion_body requires a JSON object before generate_image_prompt can return its declared v2 404."
-v2 = { json = { model = "{model}", messages = [{ role = "user", content = "Fictional image prompt control" }] } }
-
 [[field]]
 route = "POST /api/v1/tasks/title/completions"
 description = "Supported typed task positive control for the image-prompt refusal, using the seeded owner's completed thread and catalog model."
@@ -1392,73 +1135,10 @@ route = "POST /api/v1/chats/{id}"
 description = "Prepared metadata writes accept title/tags/features, not the legacy history dictionary."
 v2 = { json = { title = "Fictional conversation {token}" } }
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/signin"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/password/forgot"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/password/reset"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/auths/password/reset/{token}/validate"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "SOEV_API_URL requires Keycloak login and recovery, regardless of AGENT_API_ENABLED. The platform guard refuses before account, password or reset-token lookup."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/ldap"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
-
 [[field]]
 route = "POST /api/v1/feedback/report"
 description = "Fictional report positive control; requires bug_reports.enabled and an explicitly configured disposable public HTTPS receiver in soev-api. Uses the owner login; delivery failure is a failed control."
 json = { category = "bug", description = "Fictional sweep delivery control", "context.route" = "/fictional", "context.trace_id" = "fictional-trace" }
-
-[[field]]
-route = "POST /api/v1/auths/signup"
-description = "Platform signup refuses before user creation or first-user promotion; identities come from the login provider."
-v2 = { json = { email = "fictional-signup-{token}@example.invalid", password = "Fictional-Signup-Passw0rd!", name = "Fictional signup" } }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /oauth/clients/{client_id}/authorize"
-status = 403
-detail = "The requested action has been restricted as a security measure."
-json = { detail = "The requested action has been restricted as a security measure." }
-reason = "Platform tool servers are disabled; refuse authorization before OAuth registration can persist product configuration."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/signup"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-json = { detail = "You do not have permission to access this resource. Please contact your administrator for assistance." }
-reason = "SOEV_API_URL requires Keycloak login. LDAP and local signup are refused before account lookup, password hashing or network bind, even without agent routing. Trusted-header and no-auth sign-in are covered by the signin refusal."
 
 [[fixture]]
 key = "model"
@@ -1534,24 +1214,8 @@ detail = "Feature is unavailable"
 all_actors = true
 reason = "Platform terminal servers are disabled; every actor must reach the feature refusal before any connection lookup."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/2fa/verify"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "Keycloak owns MFA in platform mode. Local TOTP and recovery-code login completion refuse before token/account lookup, code consumption or session issuance, including when agent routing is disabled."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/auths/2fa/totp/enable"
-status = 403
-detail = "You do not have permission to access this resource. Please contact your administrator for assistance."
-reason = "Keycloak owns MFA in platform mode. A partial setup token is refused by the dependency before account lookup, and a full session reaches the same refusal before local enrollment writes or session issuance. Standalone partial-token completion remains supported with revocation checks."
-
 [removed]
-reason = "Local administration moved to the management console."
+reason = "Local administration moved to the management console; retired product features are unmounted. The retired_product section records the product-removal subset."
 routes = [
   "DELETE /api/events/webhooks/{webhook_id}",
   "DELETE /api/v1/archives/{archive_id}",
@@ -1561,6 +1225,7 @@ routes = [
   "DELETE /api/v1/groups/id/{id}/delete",
   "DELETE /api/v1/invites/{id}",
   "DELETE /api/v1/models/delete/all",
+  "DELETE /api/v1/tools/id/{id}/delete",
   "DELETE /api/v1/users/{user_id}",
   "DELETE /ollama/api/delete",
   "DELETE /ollama/api/delete/{url_idx}",
@@ -1581,11 +1246,13 @@ routes = [
   "GET /api/v1/archives/admin/config",
   "GET /api/v1/archives/{archive_id}",
   "GET /api/v1/archives/{archive_id}/export",
+  "GET /api/v1/auths/2fa/status",
   "GET /api/v1/auths/admin/config",
   "GET /api/v1/auths/admin/config/ldap",
   "GET /api/v1/auths/admin/config/ldap/server",
   "GET /api/v1/auths/admin/config/oauth",
   "GET /api/v1/auths/admin/details",
+  "GET /api/v1/auths/password/reset/{token}/validate",
   "GET /api/v1/chats/config",
   "GET /api/v1/configs/2fa",
   "GET /api/v1/configs/code_execution",
@@ -1609,10 +1276,13 @@ routes = [
   "GET /api/v1/evaluations/leaderboard",
   "GET /api/v1/evaluations/leaderboard/{model_id}/history",
   "GET /api/v1/files/{id}/content/html",
+  "GET /api/v1/functions/",
   "GET /api/v1/functions/export",
   "GET /api/v1/functions/id/{id}",
   "GET /api/v1/functions/id/{id}/valves",
   "GET /api/v1/functions/id/{id}/valves/spec",
+  "GET /api/v1/functions/id/{id}/valves/user",
+  "GET /api/v1/functions/id/{id}/valves/user/spec",
   "GET /api/v1/functions/list",
   "GET /api/v1/groups/id/{id}",
   "GET /api/v1/groups/id/{id}/export",
@@ -1623,6 +1293,15 @@ routes = [
   "GET /api/v1/models/base",
   "GET /api/v1/models/base/tags",
   "GET /api/v1/retrieval/config",
+  "GET /api/v1/tasks/config",
+  "GET /api/v1/tools/",
+  "GET /api/v1/tools/export",
+  "GET /api/v1/tools/id/{id}",
+  "GET /api/v1/tools/id/{id}/valves",
+  "GET /api/v1/tools/id/{id}/valves/spec",
+  "GET /api/v1/tools/id/{id}/valves/user",
+  "GET /api/v1/tools/id/{id}/valves/user/spec",
+  "GET /api/v1/tools/list",
   "GET /api/v1/users/",
   "GET /api/v1/users/all",
   "GET /api/v1/users/default/permissions",
@@ -1633,6 +1312,9 @@ routes = [
   "GET /api/v1/users/{user_id}/oauth/sessions",
   "GET /api/v1/users/{user_id}/preview",
   "GET /api/v1/users/{user_id}/shared-data",
+  "GET /oauth/clients/{client_id}/authorize",
+  "GET /oauth/clients/{client_id}/callback",
+  "GET /ollama/",
   "GET /ollama/api/ps",
   "GET /ollama/api/tags",
   "GET /ollama/api/tags/{url_idx}",
@@ -1641,18 +1323,34 @@ routes = [
   "GET /ollama/config",
   "GET /ollama/v1/models",
   "GET /ollama/v1/models/{url_idx}",
+  "HEAD /ollama/",
   "PATCH /api/v1/archives/{archive_id}",
+  "POST /api/chat/actions/{action_id}",
+  "POST /api/embeddings",
   "POST /api/events/webhooks",
   "POST /api/models/unload",
   "POST /api/tasks/stop/{task_id}",
   "POST /api/v1/archives/admin/config",
   "POST /api/v1/archives/user/{user_id}",
+  "POST /api/v1/auths/2fa/recovery/regenerate",
+  "POST /api/v1/auths/2fa/totp/disable",
+  "POST /api/v1/auths/2fa/totp/enable",
+  "POST /api/v1/auths/2fa/totp/setup",
+  "POST /api/v1/auths/2fa/verify",
   "POST /api/v1/auths/add",
   "POST /api/v1/auths/admin/config",
   "POST /api/v1/auths/admin/config/ldap",
   "POST /api/v1/auths/admin/config/ldap/server",
   "POST /api/v1/auths/admin/config/oauth",
+  "POST /api/v1/auths/ldap",
+  "POST /api/v1/auths/password/forgot",
+  "POST /api/v1/auths/password/reset",
+  "POST /api/v1/auths/signin",
+  "POST /api/v1/auths/signup",
+  "POST /api/v1/auths/update/password",
   "POST /api/v1/chats/config",
+  "POST /api/v1/chats/{id}/compact",
+  "POST /api/v1/chats/{id}/messages/{message_id}/resolve",
   "POST /api/v1/configs/2fa",
   "POST /api/v1/configs/banners",
   "POST /api/v1/configs/code_execution",
@@ -1677,12 +1375,15 @@ routes = [
   "POST /api/v1/configs/terminal_servers/verify",
   "POST /api/v1/configs/tool_servers",
   "POST /api/v1/configs/tool_servers/verify",
+  "POST /api/v1/data-warnings/accept",
+  "POST /api/v1/embeddings",
   "POST /api/v1/evaluations/config",
   "POST /api/v1/functions/create",
   "POST /api/v1/functions/id/{id}/toggle",
   "POST /api/v1/functions/id/{id}/toggle/global",
   "POST /api/v1/functions/id/{id}/update",
   "POST /api/v1/functions/id/{id}/valves/update",
+  "POST /api/v1/functions/id/{id}/valves/user/update",
   "POST /api/v1/functions/load/url",
   "POST /api/v1/functions/sync",
   "POST /api/v1/groups/create",
@@ -1699,28 +1400,57 @@ routes = [
   "POST /api/v1/models/sync",
   "POST /api/v1/retrieval/config/update",
   "POST /api/v1/retrieval/delete",
+  "POST /api/v1/retrieval/process/url",
+  "POST /api/v1/retrieval/process/web",
+  "POST /api/v1/retrieval/process/web/search",
+  "POST /api/v1/retrieval/process/youtube",
   "POST /api/v1/retrieval/reset/db",
   "POST /api/v1/retrieval/reset/uploads",
   "POST /api/v1/tasks/config/update",
+  "POST /api/v1/tasks/image_prompt/completions",
+  "POST /api/v1/tools/create",
+  "POST /api/v1/tools/id/{id}/access/update",
+  "POST /api/v1/tools/id/{id}/update",
+  "POST /api/v1/tools/id/{id}/valves/update",
+  "POST /api/v1/tools/id/{id}/valves/user/update",
   "POST /api/v1/tools/load/url",
   "POST /api/v1/users/default/permissions",
   "POST /api/v1/users/{user_id}/2fa/disable",
   "POST /api/v1/users/{user_id}/update",
   "POST /api/v1/utils/code/format",
+  "POST /ollama/api/chat",
+  "POST /ollama/api/chat/{url_idx}",
   "POST /ollama/api/copy",
   "POST /ollama/api/copy/{url_idx}",
   "POST /ollama/api/create",
   "POST /ollama/api/create/{url_idx}",
+  "POST /ollama/api/embed",
+  "POST /ollama/api/embed/{url_idx}",
+  "POST /ollama/api/embeddings",
+  "POST /ollama/api/embeddings/{url_idx}",
+  "POST /ollama/api/generate",
+  "POST /ollama/api/generate/{url_idx}",
   "POST /ollama/api/pull",
   "POST /ollama/api/pull/{url_idx}",
+  "POST /ollama/api/show",
   "POST /ollama/api/unload",
   "POST /ollama/config/update",
   "POST /ollama/models/download",
   "POST /ollama/models/download/{url_idx}",
   "POST /ollama/models/upload",
   "POST /ollama/models/upload/{url_idx}",
+  "POST /ollama/v1/chat/completions",
+  "POST /ollama/v1/chat/completions/{url_idx}",
+  "POST /ollama/v1/completions",
+  "POST /ollama/v1/completions/{url_idx}",
+  "POST /ollama/v1/embeddings",
+  "POST /ollama/v1/embeddings/{url_idx}",
+  "POST /ollama/v1/messages",
+  "POST /ollama/v1/messages/{url_idx}",
+  "POST /ollama/v1/responses",
+  "POST /ollama/v1/responses/{url_idx}",
   "POST /ollama/verify",
-  "PUT /api/events/webhooks/{webhook_id}"
+  "PUT /api/events/webhooks/{webhook_id}",
 ]
 
 [[control]]
@@ -1858,177 +1588,6 @@ detail = "Feature is unavailable"
 json = { detail = "Feature is unavailable" }
 reason = "routers/skills.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
 
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/create"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/export"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/access/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "DELETE /api/v1/tools/id/{id}/delete"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/spec"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/valves/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/user"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/id/{id}/valves/user/spec"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /api/v1/tools/id/{id}/valves/user/update"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "GET /api/v1/tools/list"
-status = 403
-detail = "Feature is unavailable"
-json = { detail = "Feature is unavailable" }
-reason = "routers/tools.py applies require_platform_feature before resource lookup; the sealed platform product configuration disables this feature. Every actor must receive this exact refusal."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/api/chat/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/v1/chat/completions/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/v1/messages/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/v1/completions/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/v1/embeddings/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; utils/access_control/__init__.py:405 refuses an unregistered model for every ordinary actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its real upstream model and assert this authorization boundary."
-
 [[field]]
 route = "POST /api/v1/tasks/auto/completions"
 description = "A valid autocomplete request reaches the disabled task feature in the platform runtime."
@@ -2046,59 +1605,73 @@ reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplet
 
 
 
-[[field]]
-route = "POST /ollama/api/embed/{url_idx}"
-description = "A valid api/embed request uses the discovered upstream model to exercise OWUI model authorization before proxying."
-json = { model = "{upstream_model}", input = "Fictional embedding probe {token}" }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/api/embed/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
-
-[[field]]
-route = "POST /ollama/api/embeddings/{url_idx}"
-description = "A valid api/embeddings request uses the discovered upstream model to exercise OWUI model authorization before proxying."
-json = { model = "{upstream_model}", prompt = "Fictional embedding probe {token}" }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/api/embeddings/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
-
-[[field]]
-route = "POST /ollama/api/generate/{url_idx}"
-description = "A valid api/generate request uses the discovered upstream model to exercise OWUI model authorization before proxying."
-json = { model = "{upstream_model}", prompt = "Fictional generation probe {token}" }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/api/generate/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
-
-[[field]]
-route = "POST /ollama/v1/responses/{url_idx}"
-description = "A valid v1/responses request uses the discovered upstream model to exercise OWUI model authorization before proxying."
-json = { model = "{upstream_model}" }
-v2 = { json = { model = "{upstream_model}", input = "Fictional response probe {token}" } }
-
-[[control]]
-runtime_soev_backed = "drive"
-all_actors = true
-route = "POST /ollama/v1/responses/{url_idx}"
-status = 403
-detail = "Model not found"
-json = { detail = "Model not found" }
-reason = "The sealed backend serves an upstream model without an OWUI model row. routers/ollama.py calls check_model_access before proxying; an unregistered model is refused for every actor. The platform picker uses the separate soev catalog. Keep driving the indexed route with its discovered upstream model and assert this authorization boundary."
+[retired_product]
+reason = "Product-owner removal of local runtime features (owui-dead-features)."
+routes = [
+  "DELETE /api/v1/tools/id/{id}/delete",
+  "GET /api/v1/auths/2fa/status",
+  "GET /api/v1/auths/password/reset/{token}/validate",
+  "GET /api/v1/functions/",
+  "GET /api/v1/functions/id/{id}/valves/user",
+  "GET /api/v1/functions/id/{id}/valves/user/spec",
+  "GET /api/v1/tasks/config",
+  "GET /api/v1/tools/",
+  "GET /api/v1/tools/export",
+  "GET /api/v1/tools/id/{id}",
+  "GET /api/v1/tools/id/{id}/valves",
+  "GET /api/v1/tools/id/{id}/valves/spec",
+  "GET /api/v1/tools/id/{id}/valves/user",
+  "GET /api/v1/tools/id/{id}/valves/user/spec",
+  "GET /api/v1/tools/list",
+  "GET /oauth/clients/{client_id}/authorize",
+  "GET /oauth/clients/{client_id}/callback",
+  "GET /ollama/",
+  "HEAD /ollama/",
+  "POST /api/chat/actions/{action_id}",
+  "POST /api/embeddings",
+  "POST /api/v1/auths/2fa/recovery/regenerate",
+  "POST /api/v1/auths/2fa/totp/disable",
+  "POST /api/v1/auths/2fa/totp/enable",
+  "POST /api/v1/auths/2fa/totp/setup",
+  "POST /api/v1/auths/2fa/verify",
+  "POST /api/v1/auths/ldap",
+  "POST /api/v1/auths/password/forgot",
+  "POST /api/v1/auths/password/reset",
+  "POST /api/v1/auths/signin",
+  "POST /api/v1/auths/signup",
+  "POST /api/v1/auths/update/password",
+  "POST /api/v1/chats/{id}/compact",
+  "POST /api/v1/chats/{id}/messages/{message_id}/resolve",
+  "POST /api/v1/data-warnings/accept",
+  "POST /api/v1/embeddings",
+  "POST /api/v1/functions/id/{id}/valves/user/update",
+  "POST /api/v1/retrieval/process/url",
+  "POST /api/v1/retrieval/process/web",
+  "POST /api/v1/retrieval/process/web/search",
+  "POST /api/v1/retrieval/process/youtube",
+  "POST /api/v1/tasks/image_prompt/completions",
+  "POST /api/v1/tools/create",
+  "POST /api/v1/tools/id/{id}/access/update",
+  "POST /api/v1/tools/id/{id}/update",
+  "POST /api/v1/tools/id/{id}/valves/update",
+  "POST /api/v1/tools/id/{id}/valves/user/update",
+  "POST /ollama/api/chat",
+  "POST /ollama/api/chat/{url_idx}",
+  "POST /ollama/api/embed",
+  "POST /ollama/api/embed/{url_idx}",
+  "POST /ollama/api/embeddings",
+  "POST /ollama/api/embeddings/{url_idx}",
+  "POST /ollama/api/generate",
+  "POST /ollama/api/generate/{url_idx}",
+  "POST /ollama/api/show",
+  "POST /ollama/v1/chat/completions",
+  "POST /ollama/v1/chat/completions/{url_idx}",
+  "POST /ollama/v1/completions",
+  "POST /ollama/v1/completions/{url_idx}",
+  "POST /ollama/v1/embeddings",
+  "POST /ollama/v1/embeddings/{url_idx}",
+  "POST /ollama/v1/messages",
+  "POST /ollama/v1/messages/{url_idx}",
+  "POST /ollama/v1/responses",
+  "POST /ollama/v1/responses/{url_idx}",
+]

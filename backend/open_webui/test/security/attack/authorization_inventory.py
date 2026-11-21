@@ -42,6 +42,12 @@ def _mounts():
             ):
                 continue
             target = call.args[0]
+            if (
+                isinstance(target, ast.Call)
+                and isinstance(target.func, ast.Name)
+                and target.func.id == 'product_router'
+            ):
+                target = target.args[0]
             factory = None
             if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
                 module, name = imports[target.value.id]
