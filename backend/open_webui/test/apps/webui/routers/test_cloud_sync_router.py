@@ -127,6 +127,39 @@ def test_the_done_page_posts_the_result_and_closes(api, result, monkeypatch):
     payload = page.text.split('postMessage(', 1)[1].split(', origin)', 1)[0]
     assert json.loads(payload) == {'type': 'soev_connect', 'connection': connection, 'result': result}
     assert not api.requests
+    # The hostile value reaches the page only JSON-encoded inside the one script, never as markup.
+    assert connection not in page.text
+    assert page.text.count('<script>') == 1
+    assert 'alert(1)' not in page.text.split('</script>', 1)[1]
+    # The message goes out at once; only closing waits for the user to see the result.
+    assert page.text.index('postMessage(') < page.text.index('setTimeout(') < page.text.index('window.close();')
+    assert 'http' not in page.text.split('</script>', 1)[1]
+
+
+@pytest.mark.parametrize(
+    ('result', 'language', 'title', 'line'),
+    [
+        ('pending', 'en-US,en;q=0.9', 'Connected.', 'This window closes by itself.'),
+        ('pending', 'nl-NL,nl;q=0.9,en;q=0.8', 'Verbonden.', 'Dit venster sluit vanzelf.'),
+        ('error', 'en', 'Could not connect.', 'You can close this window.'),
+        ('invalid', 'nl', 'Verbinden is niet gelukt.', 'Je kunt dit venster sluiten.'),
+        ('interaction_required', 'en-GB', 'One more step…', 'The sign-in page opens in a moment.'),
+        ('interaction_required', 'nl-BE', 'Nog één stap…', 'De aanmeldpagina opent zo.'),
+        ('error', 'de-DE', 'Could not connect.', 'You can close this window.'),
+    ],
+)
+def test_the_done_page_shows_the_result_in_the_readers_language(api, result, language, title, line):
+    page = api.browser.get(
+        '/api/v1/cloud-sync/connect/done',
+        params={'connection': 'c', 'result': result},
+        headers={'Accept-Language': language},
+    )
+    assert page.status_code == 200
+    assert f'<title>{title}</title>' in page.text
+    assert f'<h1>{title}</h1><p>{line}</p>' in page.text
+    assert f'<html lang="{"nl" if language.startswith("nl") else "en"}">' in page.text
+    assert 'prefers-color-scheme:dark' in page.text
+    assert 'prefers-reduced-motion:reduce' in page.text
 
 
 @pytest.mark.parametrize('cadence', [None, 60])
@@ -893,3 +926,5 @@ def test_silent_interaction_keeps_the_popup_for_interactive_consent(api):
     assert page.status_code == 200
     assert 'window.close();' not in page.text
     assert '"result": "interaction_required"' in page.text
+    assert 'setTimeout(' not in page.text
+    assert '<h1>One more step…</h1>' in page.text
