@@ -25,7 +25,7 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (36, 78)
+    assert (len(targets), sum(map(len, targets.values()))) == (35, 77)
     assert targets['POST /api/v1/meetings/audio'] == ['name', 'thread_id']
     assert targets['GET /api/v1/models/model/sharing'] == ['id']
     assert targets['GET /api/v1/skills/id/{id}/files/content'] == ['path']

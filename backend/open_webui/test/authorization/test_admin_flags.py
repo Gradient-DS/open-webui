@@ -117,7 +117,7 @@ def test_feedback_content(seeded, bypass, monkeypatch, method, path, body):
         assert db.get(Feedback, 'feedback').snapshot['chat']['title'] == 'private'
 
 
-@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'tool', 'skill', 'knowledge'])
+@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'skill', 'knowledge'])
 def test_admin_reader_has_no_write_access(seeded, bypass, kind):
     from open_webui.models.access_grants import AccessGrants
 
@@ -197,7 +197,7 @@ def test_runtime_content_helpers(seeded, bypass, kind):
 
 
 @pytest.mark.parametrize('export_enabled', [False, True])
-@pytest.mark.parametrize('kind', ['model', 'tool', 'skill'])
+@pytest.mark.parametrize('kind', ['model', 'skill'])
 def test_workspace_bulk_exports_include_only_accessible_rows(seeded, bypass, monkeypatch, export_enabled, kind):
 
     monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', export_enabled, raising=False)
@@ -243,9 +243,7 @@ def test_chat_runtime_ownership(seeded, bypass, monkeypatch):
     seeded.run(check)
 
 
-@pytest.mark.parametrize(
-    'kind,suffix', [('prompt', '/history'), ('skill', '/files'), ('tool', '/valves'), ('tool', '/valves/spec')]
-)
+@pytest.mark.parametrize('kind,suffix', [('prompt', '/history'), ('skill', '/files')])
 def test_workspace_nested_content(seeded, bypass, kind, suffix):
     seeded.run(seed_resource, seeded, kind)
     response = seeded.client.get(f'/api/v1/{kind}s/id/target{suffix}', headers=seeded.headers('admin'))

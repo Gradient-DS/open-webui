@@ -19,7 +19,6 @@ ACCESS_PATHS = {
     'notes': '/api/v1/notes/{id}/access/update',
     'prompts': '/api/v1/prompts/id/{prompt_id}/access/update',
     'skills': '/api/v1/skills/id/{id}/access/update',
-    'tools': '/api/v1/tools/id/{id}/access/update',
 }
 GRANTS = [
     {
@@ -87,7 +86,6 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
         'notes': ('Notes', 'get_note_by_id'),
         'prompts': ('Prompts', 'get_prompt_by_id'),
         'skills': ('Skills', 'get_skill_by_id'),
-        'tools': ('Tools', 'get_tool_by_id'),
     }[module_name]
     table = getattr(module, table_name)
     monkeypatch.setattr(table, getter, AsyncMock(return_value=resource))

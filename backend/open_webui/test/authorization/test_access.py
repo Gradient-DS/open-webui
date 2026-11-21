@@ -26,7 +26,7 @@ def test_object_route_rejects_unverified_identity(seeded, principal):
     assert response.status_code in (401, 403), response.text
 
 
-@pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'knowledge'))
+@pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'knowledge'))
 def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, kind):
     from open_webui import config
 

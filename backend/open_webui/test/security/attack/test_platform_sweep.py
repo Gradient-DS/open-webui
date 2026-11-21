@@ -1,20 +1,28 @@
 """The platform sweep keeps refused operations in its HTTP coverage."""
 
 import re
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
 from . import crossuser, seeds
-from .authorization_inventory import source_operations
 from .test_seeds import LIVE_READS
 
 
 def test_retired_fixture_reads_have_proof_in_runtime_and_contract():
-    runtime = source_operations()
+    app = import_module('open_webui.main').app
+
+    runtime = {
+        f'{method} {re.sub(":path}", "}", route.path)}'
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for method in route.methods
+    }
     retired = set(seeds.SURFACE['removed']['routes'])
     for template in LIVE_READS:
         route = f'GET {template}'
@@ -26,9 +34,7 @@ def test_retired_fixture_reads_have_proof_in_runtime_and_contract():
 def test_disabled_fixture_ids_stay_fresh_and_do_not_call_creation_routes(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     parameters = [entry for entry in seeds.SURFACE['parameter'] if 'v2_refused_value' in entry]
-    assert {'tool', 'skill', 'skill_bundle', 'oauth_exchange_provider', 'reset_token'} <= {
-        entry['key'] for entry in parameters
-    }
+    assert {'skill', 'skill_bundle', 'oauth_exchange_provider'} <= {entry['key'] for entry in parameters}
     for parameter in parameters:
         values = {key: f'fictional-{key}' for key in seeds._dependencies(parameter)}
         ctx = seeds.SeedContext(None, None, seeds.SURFACE, values=values.copy())
@@ -42,7 +48,7 @@ def test_disabled_fixture_ids_stay_fresh_and_do_not_call_creation_routes(monkeyp
 DISABLED = [
     f'{method.upper()} {path}'
     for path, operations in seeds.SPEC['paths'].items()
-    if path.startswith(('/api/v1/tools/', '/api/v1/skills/'))
+    if path.startswith('/api/v1/skills/')
     for method in sorted(operations.keys() & seeds.METHODS)
 ]
 
@@ -52,7 +58,7 @@ DISABLED = [
 async def test_disabled_feature_routes_refuse_before_lookup_for_every_actor(monkeypatch, route):
     from open_webui import config, env
     from open_webui.internal.db import get_async_session
-    from open_webui.routers import skill_files, skills, tools
+    from open_webui.routers import skill_files, skills
     from open_webui.soev import product_config
     from open_webui.utils.auth import get_verified_user
 
@@ -62,11 +68,9 @@ async def test_disabled_feature_routes_refuse_before_lookup_for_every_actor(monk
     monkeypatch.setattr(product_config, 'get', AsyncMock(return_value=False))
     lookup = AsyncMock(side_effect=AssertionError('Disabled features must not read resources'))
     monkeypatch.setattr(skills.Skills, 'get_skill_by_id', lookup)
-    monkeypatch.setattr(tools.Tools, 'get_tool_by_id', lookup)
     app = FastAPI()
     app.include_router(skill_files.router, prefix='/api/v1/skills')
     app.include_router(skills.router, prefix='/api/v1/skills')
-    app.include_router(tools.router, prefix='/api/v1/tools')
     app.dependency_overrides[get_async_session] = lambda: None
     declaration = crossuser.expected_refusals()[route]
     assert declaration['all_actors'] and route in seeds.ordinary_targets()

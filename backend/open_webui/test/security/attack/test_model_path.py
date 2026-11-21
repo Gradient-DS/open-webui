@@ -49,7 +49,7 @@ def drive_one(offline, chunks, **kwargs):
 
 def test_committed_model_surface():
     routes = model_path.targets()
-    assert len(routes) == 9
+    assert len(routes) == 8
     assert CHAT in routes
     assert all(route.startswith('POST /api/v1/tasks/') for route in routes if route != CHAT)
 

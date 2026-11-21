@@ -1,13 +1,12 @@
 """Prepared boundaries refuse explicitly before touching retired content."""
 
-from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from open_webui import config, env
-from open_webui.routers import analytics, archives, automations, groups, users
+from open_webui.routers import automations
 from open_webui.soev import threads
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
@@ -43,8 +42,7 @@ def test_prepared_refusal_precedes_body_and_content_access(monkeypatch, role, mo
         )
 
     with TestClient(app) as client:
-        body = {'name': 'Fictional renamed group'} if module is groups and path.endswith('/update') else {}
-        response = client.request(method, path, json=body)
-    assert response.status_code == (409 if module in (archives, analytics) else 403), response.text
+        response = client.request(method, path, json={})
+    assert response.status_code == 403, response.text
     actual = response.json().get('detail', response.json())
     assert expected.items() <= actual.items()
