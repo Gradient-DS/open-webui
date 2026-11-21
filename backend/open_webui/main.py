@@ -2697,6 +2697,7 @@ async def get_app_config(request: Request):
         'onedrive.enable',
         'live_documents.enable',
         'live_mail.enable',
+        'council.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
@@ -2911,6 +2912,7 @@ async def get_app_config(request: Request):
                     'enable_live_documents': AGENT_API_ENABLED
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
+                    'enable_council': AGENT_API_ENABLED and bool(config.get('council.enable')),  # [Gradient]
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]

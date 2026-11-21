@@ -132,7 +132,8 @@ export const ADMIN_SETTINGS_TABS = [
 	'security',
 	'db',
 	'acceptance',
-	'external-agents'
+	'external-agents',
+	'council'
 ] as const;
 
 // [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
@@ -186,8 +187,8 @@ export function isAdminSettingsTabEnabled(tab: string): boolean {
 		return tabAllowed || allowedTabs.includes('models');
 	}
 
-	// External Agents tab requires AGENT_API_ENABLED on the backend.
-	if (tab === 'external-agents') {
+	// External Agents and council information (raadsinformatie) require AGENT_API_ENABLED on the backend.
+	if (tab === 'external-agents' || tab === 'council') {
 		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
 	}
 

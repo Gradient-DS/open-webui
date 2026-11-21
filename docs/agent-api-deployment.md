@@ -64,6 +64,21 @@ v2 mode is on when `AGENT_API_ENABLED=true` and `SOEV_API_URL` is set. soev-api 
 
 Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported` and the backend advertises `images`.
 
+## Council information (raadsinformatie)
+
+The agents' `search_council_documents` and `read_council_document` tools search public council
+meetings, documents and motions through Open Besluitvorming (formerly Open Raadsinformatie). An admin
+switches them on under Admin > Settings > Council Information (config `council.enable`, env default
+`ENABLE_COUNCIL=false`) and picks the organizations they cover (`council.organizations`, each a source
+key with its label); none searches every organization. Users toggle the tool in the composer; the
+`features.council` permission (default on, `USER_PERMISSIONS_FEATURES_COUNCIL`) can withhold it.
+
+Every turn sends the tool states and the admin's scope as `input.council`, built from config only, and
+only when the agents list both tools on `GET /v1/chat/tools` (the agents pod lists them where
+`SOEV_AGENTS_API_COUNCIL_ENDPOINT` is set). The admin's organization picker reads
+`COUNCIL_SOURCES_URL` (default `https://openbesluitvorming.nl`) from the Open WebUI pod; a turn never
+calls it.
+
 ## Turn transport and verification
 
 `utils/agent_v2.py` submits the new user input to platform-owned chat threads,
