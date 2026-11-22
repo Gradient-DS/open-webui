@@ -2,11 +2,87 @@
 
 import re
 from urllib.parse import quote
+from uuid import uuid4
 
 import pytest
 
 from . import seeds
 from .test_seeds import LIVE_READS, path_parameters
+
+
+def test_live_cloud_mutations_refuse_members_without_disclosing_existence(live_seeds):
+    from .crossuser import _benign
+
+    if seeds.runtime_soev_backed() != 'drive':
+        pytest.skip('Cloud mutation authority requires the platform CI stack')
+    identities, resolved = live_seeds
+    assert not resolved.failures, resolved.failures
+    missing = str(uuid4())
+
+    def refused_like_missing(actor, method, target, absent, **kwargs):
+        forbidden = actor.request(method, target, **kwargs)
+        unknown = actor.request(method, absent, **kwargs)
+        assert forbidden.status_code == unknown.status_code == 404, (target, forbidden.text, unknown.text)
+        assert forbidden.json() == unknown.json(), (target, forbidden.text, unknown.text)
+
+    for actor in (identities.user, identities.intruder):
+        refused_like_missing(
+            actor,
+            'DELETE',
+            f'/api/v1/cloud-sync/connections/{resolved.fixtures["cloud_connection"]}',
+            f'/api/v1/cloud-sync/connections/{missing}',
+        )
+        for template, item in seeds.SPEC['paths'].items():
+            if not template.startswith('/api/v1/cloud-sync/knowledge/') or '/schedules' not in template:
+                continue
+            for method in item.keys() & {'post', 'delete'}:
+                target = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe=''), template)
+                absent = re.sub(r'\{[^}]+\}', missing, template)
+                refused_like_missing(
+                    actor,
+                    method.upper(),
+                    target,
+                    absent,
+                    **_benign(f'{method.upper()} {template}', resolved, seeds.SPEC),
+                )
+
+    # Ownership alone grants neither connection deletion nor schedule creation to a Member.
+    member = identities.user
+    connection = resolved.fixtures['cloud_member_connection']
+    refused_like_missing(
+        member, 'DELETE', f'/api/v1/cloud-sync/connections/{connection}', f'/api/v1/cloud-sync/connections/{missing}'
+    )
+    knowledge = member.request(
+        'POST',
+        '/api/v1/knowledge/create',
+        json={
+            'name': f'attack-member-cloud-{uuid4().hex}',
+            'description': 'Member authority control',
+            'type': 'onedrive',
+        },
+    )
+    assert knowledge.status_code == 200, knowledge.text
+    knowledge_id = knowledge.json()['id']
+    try:
+        refused_like_missing(
+            member,
+            'POST',
+            f'/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules',
+            f'/api/v1/cloud-sync/knowledge/{missing}/schedules',
+            json={
+                'connection_id': connection,
+                'kind': 'content',
+                'scope': {
+                    'drive_id': 'ci-member-drive',
+                    'item_id': 'root',
+                    'include_descendants': True,
+                    'single_file': False,
+                },
+            },
+        )
+    finally:
+        removed = member.request('DELETE', f'/api/v1/knowledge/{knowledge_id}/delete')
+        assert removed.status_code == 200, removed.text
 
 
 @pytest.fixture(scope='module')

@@ -147,6 +147,24 @@ def test_schedule_control_keeps_the_declared_provider_scope():
     assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
 
 
+def test_cloud_mutation_positive_controls_use_the_seeded_platform_owner(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    routes, _ = crossuser.targets()
+    mutations = {
+        route
+        for route in seeds.ordinary_targets()
+        if route.startswith(('POST /api/v1/cloud-sync/knowledge/', 'DELETE /api/v1/cloud-sync/'))
+        and ('/schedules' in route or route == 'DELETE /api/v1/cloud-sync/connections/{connection_id}')
+    }
+    assert len(mutations) == 8
+    for route in mutations:
+        assert route in routes
+        assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
+        assert route not in crossuser.expected_refusals()
+        assert route not in crossuser._shared()
+    assert crossuser._field_owner_key('POST /api/v1/files/onedrive/attach', seeds.SURFACE) == 'user'
+
+
 def test_mailbox_control_uses_the_saved_address_and_the_matching_owner(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     route = 'POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes'

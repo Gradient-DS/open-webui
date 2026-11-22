@@ -566,7 +566,8 @@ def _seed_endpoint(ctx, p):
         ]
     if 'query' in p:
         kwargs['params'] = ctx.fill(p['query'], p)
-    body = ctx.request(method, path, actor=ctx.client, **kwargs)
+    actor = {'user': ctx.client, 'admin': ctx.admin}[p.get('actor', 'user')]
+    body = ctx.request(method, path, actor=actor, **kwargs)
     ctx.payloads[p['key']] = body
     return _extract(body, ctx.fill(p['extract'], p), name=p['key'], via=p['via'])
 

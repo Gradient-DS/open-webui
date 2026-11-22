@@ -330,12 +330,15 @@ def test_consent_fixture_failure_is_recorded_and_never_enables_a_grant(monkeypat
     client.request.assert_called_once()
 
 
-@pytest.mark.parametrize(('key', 'actor'), [('cloud_connection', 'user'), ('cloud_mail_connection', 'admin')])
+@pytest.mark.parametrize(
+    ('key', 'actor'),
+    [('cloud_connection', 'admin'), ('cloud_member_connection', 'user'), ('cloud_mail_connection', 'admin')],
+)
 def test_a_later_pass_reuses_the_consented_connection_without_new_consent(monkeypatch, key, actor):
     """One connection per owner and provider: the create returns the consented one, with no authorize URL."""
     client, admin = Mock(), Mock()
     ctx = seeds.SeedContext(client, admin, {'destructive': []})
-    parameter = next(item for item in seeds.SURFACE['parameter'] if item['key'] == key)
+    parameter = next(item for item in seeds.dependency_order(seeds.SURFACE) if item['key'] == key)
     owner, other = (client, admin) if actor == 'user' else (admin, client)
     owner.request.side_effect = [
         response(200, {'connection_id': 'connection', 'authorize_url': None}),
@@ -357,10 +360,12 @@ def test_starting_consent_cannot_suspend_the_connection_used_by_positive_control
     assert authorize['seeded_by'] == 'seed_cloud_authorize_connection'
     assert 'same_as' not in authorize
     assert live['seeded_by'] == 'seed_cloud_connection'
-    assert 'cloud_grant' in live['provides']
+    member = next(item for item in seeds.SURFACE['fixture'] if item['key'] == 'cloud_member_connection')
+    assert 'cloud_grant' in member['provides'] and member['actor'] == 'user'
+    assert 'cloud_grant' not in live.get('provides', [])
     mailbox = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/mailboxes', 'connection_id')
     assert mailbox['provider'] == 'outlook_mail' and mailbox['family'] == 'mail'
-    assert authorize['actor'] == live['actor'] == 'user' and mailbox['actor'] == 'admin'
+    assert authorize['actor'] == 'user' and live['actor'] == mailbox['actor'] == 'admin'
 
 
 def test_the_authorize_control_takes_a_separate_provider():
@@ -976,6 +981,61 @@ def test_connection_proxy_fields_are_retired():
     assert not any(entry['route'].startswith('POST /ollama/') for entry in seeds.SURFACE['field'])
 
 
+def test_schedule_seed_requests_use_owner_authority_for_the_whole_dependency_chain(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    keys = {'cloud_knowledge', 'cloud_schedule', 'retry_schedule'}
+    parameters = [p for p in seeds.SURFACE['parameter'] if p['key'] in keys]
+    owner, member = Mock(), Mock()
+    owner.request.side_effect = [
+        response(200, {'id': 'owner-knowledge'}),
+        response(200, {'id': 'owner-retry'}),
+        response(200, {'id': 'owner-schedule'}),
+    ]
+    ctx = seeds.SeedContext(member, owner, seeds.SURFACE, values={'cloud_connection': 'owner-connection'})
+    for parameter in parameters:
+        assert parameter['actor'] == 'admin'
+        ctx.values[parameter['key']] = seeds._seed_parameter(ctx, parameter)
+    member.request.assert_not_called()
+    assert len(owner.request.call_args_list) == 3
+    for call in owner.request.call_args_list[1:]:
+        assert call.args == ('POST', '/api/v1/cloud-sync/knowledge/owner-knowledge/schedules')
+        assert call.kwargs['json']['connection_id'] == 'owner-connection'
+
+
+@pytest.mark.parametrize('fault', [None, 'accepts-member', 'reveals-existence'])
+def test_live_cloud_authority_probe_requires_identical_refusals(monkeypatch, fault):
+    from .test_live_seeds import test_live_cloud_mutations_refuse_members_without_disclosing_existence as probe
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    actors = SimpleNamespace(user=Mock(), intruder=Mock())
+    calls = []
+
+    def request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/api/v1/knowledge/create':
+            return response(200, {'id': 'member-knowledge'})
+        if path.endswith('/delete'):
+            return response(200, True)
+        if fault and path.endswith('/owner-connection'):
+            return response(204 if fault == 'accepts-member' else 404, {'detail': 'Exists'})
+        return response(404, {'detail': 'Unavailable'})
+
+    actors.user.request.side_effect = actors.intruder.request.side_effect = request
+    resolved = seeds.Resolved(
+        fixtures={'cloud_connection': 'owner-connection', 'cloud_member_connection': 'member-connection'}
+    )
+    monkeypatch.setattr(seeds, 'SPEC', {'paths': {}})
+    if fault:
+        with pytest.raises(AssertionError):
+            probe((actors, resolved))
+    else:
+        probe((actors, resolved))
+        assert ('DELETE', '/api/v1/cloud-sync/connections/member-connection') in calls
+        assert ('POST', '/api/v1/cloud-sync/knowledge/member-knowledge/schedules') in calls
+        assert ('DELETE', '/api/v1/knowledge/member-knowledge/delete') in calls
+        actors.intruder.request.assert_called()
+
+
 LIVE_READS = [
     '/api/v1/meetings/{meeting_id}',
     '/api/v1/users/{user_id}',
@@ -1085,7 +1145,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
     seeded = {
         p['key'] for p in [*seeds.SURFACE['parameter'], *seeds.SURFACE.get('fixture', [])] if 'unseedable' not in p
     }
-    seeded |= {name for p in seeds.SURFACE['parameter'] for name in p.get('provides', [])}
+    seeded |= {name for p in seeds.dependency_order(seeds.SURFACE) for name in p.get('provides', [])}
     writable = writable_string_fields(SPEC)
     skeletons = body_skeletons(SPEC)
     assert len({entry['route'] for entry in seeds.SURFACE['field']}) == len(seeds.SURFACE['field'])

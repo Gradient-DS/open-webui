@@ -15,7 +15,9 @@
 # dependencies. {token} is fresh on EVERY resolve_parameters call, in bodies,
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
-# Product bootstrap supplies creation permissions. Resolution is serial.
+# Bootstrap supplies admin=platform Owner, user=Member and intruder=Member; all
+# three have OWUI role user. Only the Owner seeds schedule mutations and the
+# connection-delete positive control. Resolution is serial.
 #
 # Handler references below are relative to backend/open_webui. These describe
 # existence, not guaranteed authorization, body validity, or coverage. Machine
@@ -432,12 +434,10 @@ depends_on = []
 provides = ["update_file"]
 actor = "user"
 
-[[parameter]]
+[[fixture]]
 backed_by = "soev-solutions"
-key = "cloud_connection"
-name = "connection_id"
-prefix = "/api/v1/cloud-sync/connections/{connection_id}"
-description = "routers/cloud_sync.py resolves an owned connection through soev-api. soev-api keeps one connection per owner and provider, so every pass resolves the same consented OneDrive connection."
+key = "cloud_member_connection"
+description = "Keep the Member's own OneDrive live grant for picker attachment controls and the refusal to delete its own connection. The privileged schedule/delete fixtures use the Owner's separate connection."
 seeded_by = "seed_cloud_connection"
 provider = "onedrive"
 family = "live_documents"
@@ -445,6 +445,19 @@ depends_on = []
 provides = ["cloud_grant"]
 fresh = false
 actor = "user"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}"
+description = "The platform Owner owns the connection-delete positive control and schedule connection; a Member cannot delete even its own connection. soev-api keeps one connection per owner and provider, so every pass resolves the same consented OneDrive connection."
+seeded_by = "seed_cloud_connection"
+provider = "onedrive"
+family = "live_documents"
+depends_on = []
+fresh = false
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -466,7 +479,7 @@ description = "The family selects the live capability on the consented CI connec
 seeded_by = "seed_cloud_family"
 depends_on = ["cloud_connection"]
 fresh = false
-actor = "user"
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -501,7 +514,7 @@ description = "Use a separate KB, created as OneDrive: a KB's source kind is fix
 via = "POST /api/v1/knowledge/create"
 body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
-actor = "user"
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -513,7 +526,7 @@ via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
 body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-retry-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-retry-schedule-{token}" }
 extract = "id"
 depends_on = ["cloud_connection", "cloud_knowledge"]
-actor = "user"
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
@@ -525,7 +538,7 @@ via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
 body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-schedule-{token}" }
 extract = "id"
 depends_on = ["cloud_connection", "cloud_knowledge"]
-actor = "user"
+actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
