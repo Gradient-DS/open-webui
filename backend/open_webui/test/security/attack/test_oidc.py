@@ -238,8 +238,7 @@ def test_provision_and_form_login_capture_bearer_and_isolate_cookies(stack):
     assert not any(path == '/api/v1/auths/signin' for _, _, path, _ in stack.calls)
 
 
-def test_oidc_identities_survive_local_password_damage_and_revocation(stack, tmp_path):
-    path = tmp_path / 'identities.json'
+def test_oidc_identities_survive_local_password_damage_and_revocation(stack):
     with_clients = identities.ensure_identities('http://app')
     ids = [c.user_id for c in with_clients.clients]
     with_clients.close()
@@ -282,14 +281,19 @@ def test_disposable_and_seed_identities_use_oidc(stack, tmp_path):
         actors.close()
 
 
-def test_password_endpoint_negative_probe_remains_enabled_in_oidc_mode(stack, tmp_path):
+def test_wrong_password_live_probe_uses_the_identity_provider(stack):
     from .test_live_client import test_wrong_password_login_is_refused
 
     actors = identities.ensure_identities('http://app')
     try:
         test_wrong_password_login_is_refused(actors)
         assert oidc.enabled()
-        assert stack.identities.attempts == {identities.USER_EMAIL: 1}
+        assert stack.identities.attempts == {}
+        assert any(
+            host == 'keycloak' and method == 'POST' and '/login-actions/' in path
+            for host, method, path, _ in stack.calls
+        )
+        assert not any(path == '/api/v1/auths/signin' for _, _, path, _ in stack.calls)
         actors.user.verify_identity(email=identities.USER_EMAIL, role='user')
     finally:
         actors.close()

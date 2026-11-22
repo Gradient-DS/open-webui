@@ -1,10 +1,8 @@
 """Retired product routes stay absent without editing upstream routers."""
 
 import pytest
-
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
-
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
@@ -70,6 +68,10 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
     )
     assert not actual & RETIRED
     assert not committed & RETIRED
+    credential_paths = {
+        route.split(' ', 1)[1] for route in RETIRED if route.startswith(('POST /api/v1/auths/', 'GET /api/v1/auths/'))
+    }
+    assert not credential_paths & {route.split(' ', 1)[1] for route in actual | committed}
     assert {
         'POST /api/v1/retrieval/process/file',
         'POST /api/v1/retrieval/process/files/batch',
@@ -81,11 +83,11 @@ def test_retired_routes_are_absent_from_the_actual_app_and_committed_inventory()
 
 
 async def _authenticated_config(monkeypatch, saved=None):
+    from importlib import import_module
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from fastapi import Request
-    from importlib import import_module
 
     main = import_module('open_webui.main')
 
