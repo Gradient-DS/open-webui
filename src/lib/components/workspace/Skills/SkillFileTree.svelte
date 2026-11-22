@@ -8,7 +8,6 @@
 	import {
 		getSkillFileList,
 		getSkillFileContentBlob,
-		createSkillFile,
 		createSkillFileInline,
 		updateSkillFileContent,
 		moveSkillFile,
@@ -235,15 +234,16 @@
 		uploading = true;
 		for (const file of files) {
 			try {
-				const uploaded = await uploadFile(localStorage.token, file, { skill_id: skillId }, false);
+				const uploaded = await uploadFile(
+					localStorage.token,
+					file,
+					{ skill_id: skillId, skill_path: joinPath(folderPrefix, file.name) },
+					false
+				);
 				if (!uploaded) {
 					toast.error($i18n.t('Failed to upload file.'));
 					continue;
 				}
-				await createSkillFile(localStorage.token, skillId, {
-					path: joinPath(folderPrefix, file.name),
-					file_id: uploaded.id
-				});
 			} catch (e) {
 				toast.error(`${e}`);
 			}
@@ -272,14 +272,15 @@
 		if (!activePath) return;
 		uploading = true;
 		try {
-			const uploaded = await uploadFile(localStorage.token, file, { skill_id: skillId }, false);
+			const uploaded = await uploadFile(
+				localStorage.token,
+				file,
+				{ skill_id: skillId, skill_path: activePath, skill_replace: true },
+				false
+			);
 			if (!uploaded) {
 				toast.error($i18n.t('Failed to upload file.'));
 			} else {
-				await createSkillFile(localStorage.token, skillId, {
-					path: activePath,
-					file_id: uploaded.id
-				});
 				toast.success($i18n.t('Saved'));
 			}
 		} catch (e) {

@@ -145,6 +145,10 @@ class SoevApiError(Exception):
         self.path: str | None = None
 
 
+class StoreTransferError(SoevApiError):
+    """A rejection by the capability store, independent of the original source."""
+
+
 def _response_error(response: httpx.Response) -> SoevApiError:
     status = response.status_code
     fallback = SoevApiError(status, 'upstream_error', f'soev-api returned HTTP {status}')
@@ -565,7 +569,7 @@ class SoevClient:
     ) -> None:
         from open_webui.soev.transfers import put
 
-        await put(upload, chunks, size=size, sha256=sha256, timeout=self._timeout)
+        await put(upload, chunks, size=size, sha256=sha256, timeout=self._timeout, platform_url=self._base_url)
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items with fresh admission for every cursor request."""

@@ -14,7 +14,7 @@ from urllib.parse import quote
 from open_webui import config
 from open_webui.models.files import FileModel, Files
 from open_webui.soev import identity
-from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.client import SoevApiError, SoevClient, StoreTransferError
 from open_webui.soev.principal_refs import person_ref
 from open_webui.utils.content_types import content_type_for
 
@@ -168,14 +168,14 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
     return key
 
 
-async def submit(
+async def _submit(
     file: FileModel,
     *,
     collection_key: str,
     user_id: str,
     text: str | None = None,
     source: BinaryIO | None = None,
-    attempt: int = 1,
+    attempt: int | None = None,
     client: SoevClient | None = None,
 ) -> str:
     if (file.meta or {}).get('soev_job') is not None:
@@ -184,7 +184,9 @@ async def submit(
     if current is not None and (current.meta or {}).get('soev_job') is not None:
         raise IngestBusy(file.id)
     client = client if client is not None else identity.build_client()
-    meta = file.meta or {}
+    meta = (current or file).meta or {}
+    attempt = attempt if attempt is not None else int(meta.get('soev_attempt', 0)) + 1
+    await Files.update_file_metadata_by_id(file.id, {'soev_attempt': attempt})
     if text is None:
         size, digest = meta.get('size'), meta.get('file_hash')
         if not isinstance(size, int) or size < 1 or not isinstance(digest, str):
@@ -198,7 +200,14 @@ async def submit(
         'source_id': file.id,
         'filename': name,
         'title': name,
-        'content_type': 'text/plain' if text is not None else content_type_for(name, meta.get('content_type')),
+        'content_type': 'text/plain'
+        if text is not None
+        else meta.get('upload_content_type')
+        or (
+            meta.get('content_type')
+            if meta.get('local_kind') in ('image', 'video')
+            else content_type_for(name, meta.get('content_type'))
+        ),
     }
     if path:
         document['path'] = path
@@ -208,6 +217,12 @@ async def submit(
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
     ref = None if client.is_service else f'owui:user:{user_id}'
     body = {'collection_key': collection_key, 'documents': [document]}
+    if source is None and text is None and not meta.get('soev_read_collection'):
+        from open_webui.soev.originals import lookup, remember
+
+        origin = await lookup(file, client, as_user=ref)
+        if origin is not None:
+            await remember(file, origin)
 
     async def create():
         return await client.send('POST', '/v1/jobs', body, as_user=ref, idempotency_key=job_key)
@@ -220,15 +235,32 @@ async def submit(
             async for chunk in _source_chunks(source):
                 yield chunk
         else:
-            origin = meta.get('collection_name') or meta.get('soev_collection_key')
-            if not origin:
-                raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
-            original = f'/v1/collections/{quote(origin, safe="")}/documents/{quote(file.id, safe="")}/original'
-            async with client.stream_response(original, as_user=ref) as response:
+            from open_webui.soev.originals import open_original
+
+            async with open_original(file, client=client, as_user=ref) as response:
                 async for chunk in response.aiter_bytes():
                     yield chunk
 
-    response = await create()
+    # Persist the declaration before admission: a timed-out create can be replayed and cancelled.
+    await Files.update_file_metadata_by_id(
+        file.id,
+        {
+            'soev_job': {
+                'collection_key': collection_key,
+                'create_body': body,
+                'create_key': job_key,
+                'attempt': attempt,
+                'sha256': digest,
+                'submitted_at': int(time.time()),
+            }
+        },
+    )
+    try:
+        response = await create()
+    except SoevApiError as error:
+        if 400 <= error.status < 500 and error.status not in (408, 429):
+            await Files.update_file_metadata_by_id(file.id, {'soev_job': None})
+        raise
     job_id = response['job_id']
     job = {
         'job_id': job_id,
@@ -265,22 +297,46 @@ async def submit(
                     raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration') from None
                 try:
                     if expired:
-                        raise SoevApiError(403, 'upload_rejected', 'Upload rejected')
+                        raise StoreTransferError(403, 'upload_rejected', 'Upload rejected')
                     await client.put_transfer(upload, chunks, size=size, sha256=digest)
                     break
-                except SoevApiError as error:
+                except StoreTransferError as error:
                     if error.status != 403 or refresh:
                         raise
                     response = await create()
                     if response['job_id'] != job_id:
                         raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration') from None
         except SoevApiError as error:
-            await Files.set_status(file.id, 'failed', error=error.code)
-            await Files.update_file_metadata_by_id(file.id, {'soev_job': None})
             raise
         await client.send('POST', f'/v1/jobs/{job_id}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit')
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}})
     return job_id
+
+
+async def abort(file: FileModel, *, client=None, error: str = 'upload_failed') -> None:
+    await Files.set_status(file.id, 'failed', error=error)
+    current = await Files.get_file_by_id(file.id)
+    job = ((current or file).meta or {}).get('soev_job')
+    if not job:
+        return
+    await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'cancel_pending': True}})
+    try:
+        await cancel(current or file, client=client)
+        await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': job['collection_key']})
+    except Exception:
+        # Retry cancellation in the owner's next authenticated reconciliation.
+        pass
+
+
+async def submit(file: FileModel, **kwargs) -> str:
+    try:
+        return await _submit(file, **kwargs)
+    except IngestBusy:
+        raise
+    except BaseException as error:
+        code = error.code if isinstance(error, SoevApiError) else 'upload_failed'
+        await asyncio.shield(abort(file, client=kwargs.get('client'), error=code))
+        raise
 
 
 async def cancel(file: FileModel, *, client: SoevClient | None = None) -> None:
@@ -289,9 +345,21 @@ async def cancel(file: FileModel, *, client: SoevClient | None = None) -> None:
     if job is None:
         return
     client = client if client is not None else identity.build_client()
-    job_id = job['job_id']
+    ref = None if client.is_service else f'owui:user:{file.user_id}'
+    job_id = job.get('job_id')
+    if job_id is None:
+        response = await client.send(
+            'POST', '/v1/jobs', job['create_body'], as_user=ref, idempotency_key=job['create_key']
+        )
+        job_id = response['job_id']
     try:
-        await client.send('POST', f'/v1/jobs/{job_id}/cancel', None, idempotency_key=f'ingest:{job_id}:cancel')
+        await client.send(
+            'POST',
+            f'/v1/jobs/{quote(job_id, safe="")}/cancel',
+            None,
+            as_user=ref,
+            idempotency_key=f'ingest:{job_id}:cancel',
+        )
     except SoevApiError as error:
         if error.status != 404 and not (error.status == 409 and error.code == 'job_already_terminal'):
             raise

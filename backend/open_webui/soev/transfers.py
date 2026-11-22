@@ -32,7 +32,7 @@ for _name in (
     logging.getLogger(_name).addFilter(_filter)
 
 
-def validate(upload: dict, *, size: int, sha256: str) -> None:
+def validate(upload: dict, *, size: int, sha256: str, platform_url: str = 'https://platform.invalid') -> None:
     from open_webui.soev.client import SoevApiError
 
     try:
@@ -45,7 +45,7 @@ def validate(upload: dict, *, size: int, sha256: str) -> None:
         }
         if (
             upload['method'] != 'PUT'
-            or url.scheme not in ('http', 'https')
+            or not (url.scheme == 'https' or (url.scheme == 'http' and urlsplit(platform_url).scheme == 'http'))
             or not url.host
             or url.userinfo
             or urlsplit(upload['url']).username is not None
@@ -61,11 +61,17 @@ def validate(upload: dict, *, size: int, sha256: str) -> None:
 
 
 async def put(
-    upload: dict, chunks: Callable[[], AsyncIterator[bytes]], *, size: int, sha256: str, timeout: float
+    upload: dict,
+    chunks: Callable[[], AsyncIterator[bytes]],
+    *,
+    size: int,
+    sha256: str,
+    timeout: float,
+    platform_url: str,
 ) -> None:
-    from open_webui.soev.client import SoevApiError, _NoCookies
+    from open_webui.soev.client import StoreTransferError, _NoCookies
 
-    validate(upload, size=size, sha256=sha256)
+    validate(upload, size=size, sha256=sha256, platform_url=platform_url)
     token = _active.set(True)
     try:
         async with httpx.AsyncClient(
@@ -91,7 +97,7 @@ async def put(
                 if status in (200, 412):
                     return
                 if not 500 <= status <= 599 or attempt == 2:
-                    raise SoevApiError(status, 'upload_rejected', 'Upload rejected') from None
+                    raise StoreTransferError(status, 'upload_rejected', 'Upload rejected') from None
                 await asyncio.sleep(0.1 * 2**attempt)
     finally:
         _active.reset(token)

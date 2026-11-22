@@ -150,7 +150,7 @@ async def test_submit_replays_an_existing_job_without_uploading_again(env, monke
     file = await env.files.Files.get_file_by_id(file.id)
     env.api.requests.clear()
 
-    assert await submit(env, file, text=text) == job_id
+    assert await submit(env, file, text=text, attempt=1) == job_id
 
     assert [(request.method, request.url.path) for request in env.api.requests] == [
         ('POST', '/v1/jobs'),
@@ -295,7 +295,7 @@ async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monke
         job_id = await submit(env, file)
     row = await env.files.Files.get_file_by_id(file.id)
     job = row.meta['soev_job']
-    if failure == 'PUT':
+    if failure:
         assert job is None
         assert row.meta['status'] == row.data['status'] == 'failed'
         assert await env.files.Files.get_files_with_soev_jobs() == []
@@ -339,8 +339,9 @@ async def test_a_refused_job_leaves_the_row_untouched(env):
     with pytest.raises(env.module.SoevApiError) as error:
         await submit(env, file)
     assert error.value.status == 403 and error.value.code == 'scope_insufficient'
-    assert await env.files.Files.get_file_by_id(file.id) == file
-    assert 'soev_job' not in file.meta
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['status'] == 'failed'
+    assert row.meta['soev_job'] is None
     assert [(r.method, r.url.path) for r in env.api.requests] == [('POST', '/v1/jobs')]
     assert not env.api.jobs
 
@@ -839,8 +840,8 @@ async def test_resubmission_streams_the_platform_original_without_local_disk(env
     monkeypatch.setattr(env.client, 'stream_response', stream)
     await env.module.submit(file, collection_key='kb', user_id='alice', client=env.client)
     assert originals == [(f'/v1/collections/old/documents/{file.id}/original', 'owui:user:alice')]
-    assert env.api.requests[1].url.host == 'store.invalid'
-    assert env.api.requests[1].content == FILE_BYTES
+    store = next(r for r in env.api.requests if r.url.host == 'store.invalid')
+    assert store.content == FILE_BYTES
 
 
 @pytest.mark.asyncio
@@ -886,19 +887,20 @@ async def test_document_routes_redeem_public_download_links_and_preserve_denial(
 @pytest.mark.asyncio
 @pytest.mark.parametrize('named', [False, True])
 @pytest.mark.parametrize('content_type', ['application/pdf', 'audio/mpeg'])
-async def test_legacy_document_has_no_disk_or_extracted_text_fallback(env, monkeypatch, named, content_type):
-    from fastapi import HTTPException
+async def test_unknown_legacy_document_keeps_disk_access(env, monkeypatch, named, content_type):
+    from fastapi.responses import FileResponse
     from open_webui.routers import files
 
-    file = await new_file(env, content_type=content_type)
-    monkeypatch.setattr(files.Storage, 'get_file', Mock(side_effect=AssertionError('No document disk reads')))
+    file = await new_file(env, content_type=content_type, status='completed')
+    monkeypatch.setattr(files.Storage, 'get_file', Mock(return_value=file.path))
     user = SimpleNamespace(id='alice', role='user')
-    with pytest.raises(HTTPException) as caught:
-        if named:
-            await files.get_file_content_by_id(file.id, 'original.pdf', user=user, db=None)
-        else:
-            await files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
-    assert caught.value.status_code == 404
+    result = await (
+        files.get_file_content_by_id(file.id, 'original.pdf', user=user, db=None)
+        if named
+        else files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
+    )
+    assert isinstance(result, FileResponse)
+    assert str(result.path) == file.path
 
 
 @pytest.mark.asyncio
@@ -939,38 +941,24 @@ async def test_interactive_document_is_spooled_hashed_and_committed_without_stor
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('denied', [False, True])
-async def test_skill_upload_target_requires_write_access_and_keeps_local_bytes(env, monkeypatch, denied):
+async def test_skill_upload_without_a_path_is_rejected_before_storage(env, monkeypatch):
     from fastapi import HTTPException, UploadFile
-    from open_webui.routers import files, skill_files
+    from open_webui.routers import files
 
     monkeypatch.setattr(files.Config, 'get', AsyncMock(return_value=None))
-    monkeypatch.setattr(skill_files, 'require_skill_files', AsyncMock())
-    monkeypatch.setattr(skill_files, '_get_skill_or_404', AsyncMock(return_value=SimpleNamespace(id='skill')))
-    check = AsyncMock(side_effect=HTTPException(403) if denied else None)
-    monkeypatch.setattr(skill_files, '_assert_write_access', check)
-    write = Mock(return_value=(FILE_BYTES, '/uploads/skill.pdf'))
+    write = Mock(side_effect=AssertionError('Unlinked uploads must not exist'))
     monkeypatch.setattr(files.Storage, 'upload_file', write)
-    args = dict(
-        request=SimpleNamespace(),
-        file=UploadFile(file=BytesIO(FILE_BYTES), filename='skill.pdf', headers={'content-type': 'application/pdf'}),
-        metadata={'skill_id': 'skill'},
-        process=False,
-        user=SimpleNamespace(id='alice', email='alice@example.invalid', name='Alice', role='user'),
-        db=None,
-    )
-    if denied:
-        with pytest.raises(HTTPException) as caught:
-            await files.upload_file_handler(**args)
-        assert caught.value.status_code == 403
-        write.assert_not_called()
-    else:
-        result = await files.upload_file_handler(**args)
-        assert result.path == '/uploads/skill.pdf'
-        assert result.meta['local_blob']
-        assert not result.meta.get('soev_job')
-        write.assert_called_once()
-    check.assert_awaited_once()
+    with pytest.raises(HTTPException) as caught:
+        await files.upload_file_handler(
+            SimpleNamespace(),
+            UploadFile(file=BytesIO(FILE_BYTES), filename='skill.pdf'),
+            metadata={'skill_id': 'skill'},
+            process=False,
+            user=SimpleNamespace(id='alice', email='alice@invalid', name='Alice', role='user'),
+            db=None,
+        )
+    assert caught.value.status_code == 400
+    write.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1031,7 +1019,9 @@ async def test_processed_image_keeps_storage_and_uses_its_live_request_source(en
     from fastapi import UploadFile
     from open_webui.routers import files
 
-    image = b'\x89PNG\r\n\x1a\n' + b'\x00' * 32
+    image = __import__('base64').b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    )
     values = {'rag.content_extraction_engine': 'external'}
     monkeypatch.setattr(files.Config, 'get', AsyncMock(side_effect=lambda key: values.get(key)))
     monkeypatch.setattr(files, '_is_text_file', lambda path: False)

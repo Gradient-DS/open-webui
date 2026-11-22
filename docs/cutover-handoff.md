@@ -104,43 +104,67 @@ logged and retried; it does not indicate an empty feed. Check the platform route
 service credential's access, and any ingress path prefix against this contract.
 This is an investigation finding; polling behavior is unchanged.
 
-## Document originals cutover (owui-1)
+## Document originals: report and explicit retirement
 
-Before upgrading OWUI, run this **read-only PostgreSQL count in each tenant's OWUI
-DB** and record the result with the tenant in the rehearsal report. Run it before
-Alembic revision `f286d9b43a71`; the release intentionally discards these legacy
-documents instead of retaining a local download fallback.
+No Alembic revision, startup path or chart migration container retires document rows
+or bytes. The unshipped destructive revision `f286d9b43a71` is removed. A successful
+base-code ingest cleared `soev_collection_key`; an empty key is never evidence that
+the platform lacks a document. This command replaces the former SQL preflight.
 
-```sql
-SELECT count(*) AS legacy_documents_to_drop
-FROM file f
-WHERE COALESCE(f.meta->>'soev_collection_key', '') = ''
-  AND COALESCE(f.meta->>'source', 'null') IN ('null', '', '{}')
-  AND COALESCE(f.meta->>'content_type', '') NOT LIKE 'image/%'
-  AND NOT (COALESCE(f.meta->>'content_type', '') LIKE 'audio/%'
-           AND COALESCE(f.filename, '') LIKE 'generated-%')
-  AND COALESCE(f.meta->>'local_blob', 'false') <> 'true'
-  AND NOT EXISTS (SELECT 1 FROM skill_file sf WHERE sf.file_id = f.id);
+With the application stopped and its usual tenant database/platform configuration
+and uploads volume available, run **once per tenant** and retain its counts:
+
+```sh
+python -m open_webui.soev.retire_document_bytes
 ```
 
-The OWUI database is tenant-scoped, so this yields one count per tenant without
-printing user or file identifiers. Run against the pre-upgrade schema after the
-platform import finishes. Imported document Files must retain `soev_collection_key`
-and server-computed `size` and `file_hash` (lowercase SHA-256), and completed rows
-should carry `collection_name` for their published original. Provider references
-retain `source`. A legacy `collection_name` alone is not proof of platform ingest.
+The default only reports: `platform_held`, `unknown_with_bytes`,
+`unknown_without_bytes`, `protected`, `in_flight`, `unverified_storage`, and
+`platform_error`. Each file is looked up through public `GET /v1/documents?source_id`
+and an original is opened to verify publication before any byte retirement.
+“Unknown” means absent from that caller's readable collections, never proof of
+absence throughout the platform. Product authority may see fewer documents than an
+owner; it cannot delete unknown rows. Counts contain no file/user identifiers or URLs.
 
-Legacy generated audio is identified by its audio MIME type and the `generated-`
-filename used by `utils/files.upload_audio`; current internal blobs also carry
-`local_blob=true`. Ordinary uploaded audio is treated as a document.
+For a reviewed application, use the exact same predicate with explicit `--apply`:
 
-The Alembic revision drops the counted rows, removes the OWUI originals of retained
-ingested documents, and sets their paths to NULL. Images, generated audio, skill-backed files
-and internally generated local blobs remain. Exports use their existing separate
-storage path. Mount the existing uploads volume in the schema migration container;
-for remote OWUI storage, provide the existing provider credentials/settings to that
-container as well. Cleanup never downloads originals. Missing bytes are idempotent;
-other deletion failures refuse the migration with a fixed message. It prints counts
-only; `python -m open_webui.soev.migrate` collects those counts into its final JSON.
-Byte deletion cannot be rolled back by SQL: retain the coordinated pre-cutover DB
-and object backup already required above. Run with the app stopped.
+```sh
+python -m open_webui.soev.retire_document_bytes --apply
+```
+
+This removes **only local bytes** of positively verified published documents and
+sets their local paths to null. It never deletes a platform-held File row. To act
+on an owner's empty unknown rows, supply that owner's real current platform login
+token through stdin (never a command argument or file), verified against `/v1/me`:
+
+```sh
+python -m open_webui.soev.retire_document_bytes --owner-id USER_ID --login-token-stdin
+python -m open_webui.soev.retire_document_bytes --owner-id USER_ID --login-token-stdin --apply
+```
+
+Rows may be removed only when no bytes exist, the owner's platform lookup is empty,
+no chat/knowledge/skill link exists, and there is no historical success/source marker.
+Base-code completed rows remain even if their platform copy is unreadable. Jobs in
+flight, images detected from bytes (including missing/octet-stream MIME), videos,
+skill-linked files, generated audio, exports and internal local blobs are protected.
+Remote storage URLs, paths outside the uploads root, unreadable paths and shared
+paths are not unlinked. Platform errors cause no action on that file. Unknown files
+with bytes remain on disk until the operator imports or otherwise resolves them;
+this command never discards their bytes. Keep the coordinated database/object backup;
+byte retirement cannot be rolled back through SQL.
+
+Original reads first use `soev_read_collection`, set at the first successful
+publication. Later assistant/folder/knowledge copies never replace it. Base rows
+recover through source-id lookup **as the requesting person**, cache the collection,
+and redeem its public download link. If the first collection is gone, lookup runs
+again. A platform 403 never falls back to local bytes; an unknown legacy original
+with local bytes retains the existing owner/chat/knowledge checks. Images sent for
+extraction and videos continue to display from local bytes.
+
+Strict egress requires the public `soevApi.url` hostname and
+`soevApi.transferStoreHost` (the presigned store hostname, without scheme/path).
+The chart derives the first and allows both through its FQDN selectors. The platform
+must provide the store hostname; it cannot be inferred from the API URL. Explicit
+plain-http or internal-looking platform URLs have no deployment-environment heuristic
+in OWUI. Deployment configuration and strict egress enforce the chosen host; local
+http stacks remain supported. Store HTTP is accepted only with an HTTP platform URL.

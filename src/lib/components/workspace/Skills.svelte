@@ -18,7 +18,6 @@
 		getSkillItems,
 		exportSkills,
 		createNewSkill,
-		createSkillFile,
 		createSkillFileInline,
 		getSkillFileList,
 		getSkillFileContentBlob,
@@ -256,16 +255,12 @@
 					});
 				} else {
 					const filename = bf.path.split('/').pop() || bf.path;
-					const uploaded = await uploadFile(
+					await uploadFile(
 						localStorage.token,
 						new File([bf.blob], filename),
-						{ skill_id: created.id },
+						{ skill_id: created.id, skill_path: bf.path },
 						false
 					);
-					await createSkillFile(localStorage.token, created.id, {
-						path: bf.path,
-						file_id: uploaded.id
-					});
 				}
 			} catch {
 				toast.error($i18n.t('Failed to import file: {{path}}', { path: bf.path }));

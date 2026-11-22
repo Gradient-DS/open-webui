@@ -264,6 +264,11 @@ def _decide(mode: str, reason: str, sniffed: str, filename: str) -> GuardResult:
     return GuardResult(True, reason, sniffed)
 
 
+def sniff_content_type(contents: bytes) -> str:
+    """Classify bytes independently of the optional rejection policy."""
+    return _sniff(contents).lower()
+
+
 def check_upload(
     contents: bytes,
     filename: str,

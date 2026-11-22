@@ -166,6 +166,9 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
             await ingest.submit(file, collection_key=key, user_id=folder.user_id, client=client)
         except ingest.IngestBusy:
             waiting = True
-        except OSError as error:
+        except (OSError, SoevApiError) as error:
+            await Files.set_status(
+                file.id, 'failed', error=error.code if isinstance(error, SoevApiError) else 'upload_failed'
+            )
             log.warning('Folder file %s of %s not submitted (%s)', file.id, folder_id, type(error).__name__)
     return waiting

@@ -37,11 +37,15 @@ def _job_key(file: FileModel, job: dict) -> str:
 
 async def _finish(file: FileModel, job: dict, error: str | None = None) -> int:
     status = 'failed' if error is not None else 'completed'
-    if await Files.set_status(file.id, status, error=error) is None:
+    if error is None and await Files.set_status(file.id, status, error=error) is None:
         raise RuntimeError('File status write failed')
-    metadata = {'soev_job': None}
+    if error is not None:
+        await ingest.abort(file, error=error)
+    metadata = {} if error is not None else {'soev_job': None}
     if error is None:
-        metadata['collection_name'] = job['collection_key']
+        from open_webui.soev.originals import published
+
+        await published(file.id, job['collection_key'])
     if await Files.update_file_metadata_by_id(file.id, metadata) is None:
         raise RuntimeError('File metadata write failed')
     await emit_file_status(
@@ -111,11 +115,22 @@ async def _settle_file(
     )
     age = now - job['submitted_at']
     if status == 'AWAITING_UPLOAD':
+        if age > config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS:
+            return await _finish(file, job, 'upload_expired')
         return await _commit_upload(client, file, job) if age >= 60 else 0
     if status in {'QUEUED', 'RUNNING'}:
         cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
         return await _finish(file, job, f'did not complete within {cap}s') if age > cap else 0
     if status == 'SUCCEEDED':
+        if age > config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS and (
+            document is None
+            or (
+                job.get('kind') == 'reference'
+                and not document.get('content_type')
+                and not file.meta.get('content_type')
+            )
+        ):
+            return await _finish(file, job, 'original_unavailable')
         if document is None:
             return 0
         if job.get('kind') == 'reference':
@@ -133,6 +148,8 @@ async def _settle_file(
     if status in {'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED'}:
         item = next((item for item in result.get('items', []) if item.get('source_id') == file.id), {})
         return await _finish(file, job, _item_error(item, status))
+    if age > config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS:
+        return await _finish(file, job, 'job_status_unavailable')
     return 0
 
 
@@ -143,6 +160,23 @@ async def _claim_files(
         await Files.get_files_with_soev_jobs(user_id=owner_id) if candidates is None else candidates,
         key=lambda file: (file.meta.get('soev_job_polled_at', 0), file.id),
     )
+    if not candidates:
+        return [], {}
+    active = []
+    for file in candidates:
+        job = file.meta['soev_job']
+        if not job.get('job_id'):
+            if now - job['submitted_at'] >= 60:
+                await ingest.abort(file, error='upload_interrupted')
+            continue
+        if job.get('cancel_pending'):
+            try:
+                await ingest.cancel(file)
+            except Exception:
+                pass
+        else:
+            active.append(file)
+    candidates = active
     if not candidates:
         return [], {}
     anchor = min(candidates, key=lambda file: file.id)
@@ -193,6 +227,16 @@ def _status_reads(claimed: list[FileModel], collections: dict[str, list[str]]) -
     return reads
 
 
+async def _expire_after_read_failure(claimed: list[FileModel], now: int) -> int:
+    touched = 0
+    cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
+    for file in claimed:
+        job = file.meta['soev_job']
+        if now - job['submitted_at'] > cap:
+            touched += await _finish(file, job, f'did not complete within {cap}s')
+    return touched
+
+
 async def poll_once(client: SoevClient, *, now: int) -> int:
     ref = acting.requester_ref()
     if client.is_service or ref is None:
@@ -211,7 +255,7 @@ async def poll_once(client: SoevClient, *, now: int) -> int:
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job batch failed (%s)', code)
-        return 0
+        return await _expire_after_read_failure(claimed, now)
 
 
 async def _settle_batch(
@@ -236,7 +280,7 @@ async def _settle_batch(
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job batch failed (%s)', code)
-        return 0
+        return await _expire_after_read_failure(claimed, now)
     touched = 0
     for file in claimed:
         try:
@@ -267,7 +311,11 @@ def defer_owner_jobs(owner_id: str):
         if not claimed:
             return await fetch(reads)
         statuses = _status_reads(claimed, collections)
-        results = await fetch(reads + statuses)
+        try:
+            results = await fetch(reads + statuses)
+        except Exception:
+            await _expire_after_read_failure(claimed, now)
+            raise
         try:
             pages = SoevClient.batch_values(results[len(reads) :])
             await _settle_batch(identity.build_client(), claimed, collections, statuses, pages, now)

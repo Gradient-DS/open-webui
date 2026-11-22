@@ -13,10 +13,6 @@ from open_webui.models.users import UserModel
 from open_webui.utils.upload_guard import check_upload
 
 
-def is_document(content_type: str | None) -> bool:
-    return not (content_type or '').startswith('image/')
-
-
 async def upload(
     request: Request,
     file: UploadFile,
@@ -61,6 +57,7 @@ async def upload(
                 meta={
                     'name': name,
                     'content_type': content_type,
+                    'upload_content_type': content_type,
                     'size': size,
                     'file_hash': digest.hexdigest(),
                     'data': metadata,
@@ -81,17 +78,11 @@ async def upload(
                 knowledge_id=knowledge_id,
             )
         return {'status': True, **(await Files.get_file_by_id(row.id, db=db)).model_dump()}
+    except BaseException as error:
+        if 'row' in locals() and row is not None:
+            from open_webui.soev.ingest import abort
+
+            await asyncio.shield(abort(row, error=getattr(error, 'code', 'upload_failed')))
+        raise
     finally:
         spool.close()
-
-
-async def is_skill_upload(metadata: dict, user: UserModel, db: AsyncSession | None) -> bool:
-    skill_id = metadata.get('skill_id')
-    if not skill_id:
-        return False
-    from open_webui.routers.skill_files import _assert_write_access, _get_skill_or_404, require_skill_files
-
-    await require_skill_files()
-    skill = await _get_skill_or_404(skill_id, db)
-    await _assert_write_access(skill, user, db)
-    return True

@@ -1,128 +1,110 @@
-"""Document cutover deletes only original document holdings, on SQLite and PostgreSQL."""
+"""Retirement is explicit and preserves base-code rows and linked resources."""
 
 import importlib
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
 
+import httpx
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-migration = importlib.import_module('open_webui.migrations.versions.f286d9b43a71_retire_document_originals')
-
-
-@pytest.fixture(params=['sqlite', 'postgresql'])
-def engine(request):
-    if request.param == 'postgresql' and not os.getenv('BACKEND_TEST_DATABASE_URL'):
-        pytest.skip('BACKEND_TEST_DATABASE_URL is not configured')
-    url = request.getfixturevalue('postgres_database') if request.param == 'postgresql' else 'sqlite://'
-    engine = sa.create_engine(url)
-    yield engine
-    engine.dispose()
+from open_webui.models.files import File
+from open_webui.soev import retire_document_bytes as retirement
 
 
-def test_document_cleanup_preserves_non_documents_and_is_idempotent(engine, tmp_path):
-    metadata = sa.MetaData()
-    files = sa.Table(
-        'file',
-        metadata,
-        sa.Column('id', sa.Text, primary_key=True),
-        sa.Column('filename', sa.Text),
-        sa.Column('path', sa.Text),
-        sa.Column('meta', sa.JSON),
-    )
-    skills = sa.Table('skill_file', metadata, sa.Column('file_id', sa.Text))
-    metadata.create_all(engine)
-    rows = [
-        ('legacy', {'content_type': 'application/pdf'}),
-        ('old_collection_only', {'collection_name': 'file-old'}),
-        ('ingested', {'soev_collection_key': 'kb', 'content_type': 'application/pdf'}),
-        ('reference', {'source': {'provider': 'onedrive'}}),
-        ('image', {'content_type': 'image/png'}),
-        ('audio', {'content_type': 'audio/wav'}),
-        ('uploaded_audio', {'content_type': 'audio/mpeg'}),
-        ('skill', {'content_type': 'text/markdown'}),
-        ('generated', {'content_type': 'application/octet-stream', 'local_blob': True}),
-    ]
-    for key, _ in rows:
-        (tmp_path / key).write_bytes(b'original')
-    with engine.begin() as bind:
-        bind.execute(
-            files.insert(),
-            [
-                {
-                    'id': key,
-                    'filename': 'generated-.wav' if key == 'audio' else key,
-                    'path': str(tmp_path / key),
-                    'meta': meta,
-                }
-                for key, meta in rows
-            ],
-        )
-        bind.execute(skills.insert().values(file_id='skill'))
-        counts = migration.retire_documents(bind, tmp_path)
-        assert counts == {'legacy_documents_dropped': 3, 'document_paths_cleared': 2, 'document_objects_deleted': 5}
-        saved = {r.id: r.path for r in bind.execute(sa.select(files))}
-        assert set(saved) == {'ingested', 'reference', 'image', 'audio', 'skill', 'generated'}
-        assert saved['ingested'] is saved['reference'] is None
-        assert {p.name for p in tmp_path.iterdir()} == {'image', 'audio', 'skill', 'generated'}
-        assert not any(migration.retire_documents(bind, tmp_path).values())
-
-
-def test_cleanup_failure_does_not_clear_the_pointer(engine, tmp_path):
-    with engine.begin() as bind:
-        bind.execute(sa.text('CREATE TABLE file (id TEXT, filename TEXT, path TEXT, meta JSON)'))
-        bind.execute(sa.text("INSERT INTO file VALUES ('doc', 'doc.pdf', 'secret/path', '{}')"))
-        with pytest.raises(RuntimeError):
-            migration.retire_documents(bind, tmp_path, delete=Mock(side_effect=RuntimeError('refused')))
-        assert bind.execute(sa.text('SELECT path FROM file')).scalar() == 'secret/path'
-
-
-def test_missing_local_original_is_idempotent_and_errors_are_sanitized(tmp_path, monkeypatch):
-    from open_webui.soev.retire_document_bytes import delete_original
-
-    delete_original(str(tmp_path / 'gone.pdf'), tmp_path)
-    monkeypatch.setattr(Path, 'unlink', Mock(side_effect=PermissionError('secret/path')))
-    with pytest.raises(RuntimeError, match='Document byte cleanup failed') as caught:
-        delete_original(str(tmp_path / 'doc'), tmp_path)
-    assert 'secret' not in str(caught.value)
-
-
-def test_schema_command_includes_document_cleanup_counts(monkeypatch, capsys):
-    import json
+def test_no_automatic_document_retirement_revision():
+    versions = Path(__file__).resolve().parents[2] / 'migrations/versions'
+    assert not (versions / 'f286d9b43a71_retire_document_originals.py').exists()
     from open_webui.soev import migrate
 
-    def upgrade(*, document_counts):
-        document_counts.update(legacy_documents_dropped=7, document_paths_cleared=9, document_objects_deleted=16)
-        return 1
-
-    monkeypatch.setattr(migrate.logging, 'disable', Mock())
-    monkeypatch.setenv('VECTOR_DB', 'weaviate')
-    monkeypatch.setattr(migrate, 'upgrade_alembic', upgrade)
-    assert migrate.main() == 0
-    assert json.loads(capsys.readouterr().out) == {
-        'alembic_upgrades': 1,
-        'pgvector_tables': 0,
-        'pgvector_indexes': 0,
-        'legacy_documents_dropped': 7,
-        'document_paths_cleared': 9,
-        'document_objects_deleted': 16,
-    }
+    assert 'retire' not in __import__('inspect').getsource(migrate)
 
 
-def test_remote_cleanup_uses_the_declared_bucket_without_downloading(tmp_path, monkeypatch):
-    import boto3
-    from open_webui.soev.retire_document_bytes import delete_original
+@pytest.mark.parametrize('apply', [False, True])
+@pytest.mark.parametrize('database', ['sqlite', 'postgresql'])
+@pytest.mark.asyncio
+async def test_report_and_action_share_safe_per_file_decisions(tmp_path, request, monkeypatch, apply, database):
+    if database == 'postgresql':
+        if not os.getenv('BACKEND_TEST_DATABASE_URL'):
+            pytest.skip('PostgreSQL is not configured')
+        url = request.getfixturevalue('postgres_database').set(drivername='postgresql+psycopg')
+    else:
+        url = f'sqlite+aiosqlite:///{tmp_path}/files.db'
+    engine = create_async_engine(url)
+    async with engine.begin() as connection:
+        await connection.run_sync(File.__table__.create)
+        for table in ('chat_file', 'knowledge_file', 'skill_file'):
+            await connection.execute(sa.text(f'CREATE TABLE {table} (file_id TEXT)'))
+    monkeypatch.setattr(
+        retirement, 'sniff_content_type', lambda prefix: 'image/png' if prefix == b'image' else 'text/plain'
+    )
+    rows = [
+        ('base-held', {'status': 'completed', 'soev_collection_key': None}, b'original'),
+        ('unknown-local', {}, b'original'),
+        ('unknown-empty', {}, None),
+        ('held-empty', {}, None),
+        ('linked-chat', {}, None),
+        ('linked-kb', {}, None),
+        ('inflight', {'status': 'processing', 'soev_job': {'committed': False}}, b'original'),
+        ('image-no-mime', {}, b'image'),
+        ('image-octet', {'content_type': 'application/octet-stream'}, b'image'),
+        ('video', {'content_type': 'video/mp4'}, b'video'),
+        ('skill', {}, b'original'),
+        ('export', {'local_kind': 'export'}, b'original'),
+        ('base-hidden', {'status': 'completed'}, None),
+    ]
+    for key, _, data in rows:
+        if data is not None:
+            (tmp_path / key).write_bytes(data)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        for key, meta, data in rows:
+            session.add(
+                File(
+                    id=key,
+                    user_id='owner',
+                    filename=key,
+                    path=str(tmp_path / key) if data else None,
+                    meta=meta,
+                    data={},
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+        for table, key in [('chat_file', 'linked-chat'), ('knowledge_file', 'linked-kb'), ('skill_file', 'skill')]:
+            await session.execute(sa.text(f'INSERT INTO {table} VALUES (:key)'), {'key': key})
+        await session.commit()
 
-    client = Mock()
-    factory = Mock(return_value=client)
-    monkeypatch.setattr(boto3, 'client', factory)
-    monkeypatch.setenv('S3_BUCKET_NAME', 'tenant')
-    (tmp_path / 'document.pdf').write_bytes(b'cached')
-    delete_original('s3://tenant/prefix/document.pdf', tmp_path)
-    client.delete_object.assert_called_once_with(Bucket='tenant', Key='prefix/document.pdf')
-    assert not (tmp_path / 'document.pdf').exists()
-    client.get_object.assert_not_called()
-    with pytest.raises(RuntimeError, match='Document byte cleanup failed'):
-        delete_original('s3://another-tenant/document.pdf', tmp_path)
-    assert factory.call_count == 1
+        class Client:
+            async def pages(self, path, *, params, as_user):
+                if params['source_id'] in {'base-held', 'held-empty', 'inflight'}:
+                    yield {'source_id': params['source_id'], 'collection_key': 'published'}
+
+            @asynccontextmanager
+            async def stream_response(self, path, *, as_user):
+                yield httpx.Response(200)
+
+        counts = await retirement.retire(
+            session,
+            Client(),
+            upload_dir=tmp_path,
+            export_dir=tmp_path / 'exports',
+            apply=apply,
+            owner_id='owner',
+            as_user='owui:user:owner',
+        )
+        assert counts['platform_held'] == 2
+        assert counts['unknown_with_bytes'] == 1
+        assert counts['unknown_without_bytes'] == 4
+        assert counts['in_flight'] == 1 and counts['protected'] == 5
+        assert counts['bytes_removed'] == int(apply) and counts['rows_removed'] == int(apply)
+        assert bool(await session.get(File, 'unknown-empty')) is not apply
+        for key in ('base-held', 'held-empty', 'linked-chat', 'linked-kb', 'base-hidden'):
+            assert await session.get(File, key) is not None
+        for key in ('unknown-local', 'inflight', 'image-no-mime', 'image-octet', 'video', 'skill', 'export'):
+            assert (tmp_path / key).exists()
+        assert (tmp_path / 'base-held').exists() is not apply
+    await engine.dispose()

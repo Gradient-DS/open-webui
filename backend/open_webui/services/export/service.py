@@ -24,7 +24,6 @@ from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
 from open_webui.soev.availability import configured
 from open_webui.soev.thread_content import refuse_local_content
-from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
 
@@ -186,17 +185,8 @@ class ExportService:
         timestamp = int(time.time())
         zip_path = export_dir / f'export-{timestamp}-{secrets.token_urlsafe(24)}.zip'
 
-        local_file_ids = ExportService._get_local_file_ids(data)
-
-        # Pre-fetch local file records before opening the ZipFile (no async work
-        # while holding the zip writer is needed, but it keeps the async section
-        # tight and avoids holding the file open during awaits).
-        file_records: dict[str, Any] = {}
-        for file_id in local_file_ids:
-            try:
-                file_records[file_id] = await Files.get_file_by_id(file_id)
-            except Exception as e:
-                log.warning(f'Failed to fetch file record {file_id} for export: {e}')
+        # [Gradient] Every owned File has either original bytes or an explicit unavailable entry.
+        local_file_ids = [file['id'] for file in data.get('files', [])]
 
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             # Manifest
@@ -221,7 +211,6 @@ class ExportService:
                     'knowledge_bases': len(data.get('knowledge_bases', [])),
                 },
             }
-            zf.writestr('manifest.json', json.dumps(manifest, indent=2, default=str))
 
             # Individual data files
             for key in [
@@ -255,18 +244,13 @@ class ExportService:
                 json.dumps(data.get('knowledge_bases', []), indent=2, default=str, ensure_ascii=False),
             )
 
-            # Actual file contents for local (non-cloud) files
-            for file_id in local_file_ids:
-                try:
-                    file_record = file_records.get(file_id)
-                    if file_record and file_record.path:
-                        local_path = Storage.get_file(file_record.path)
-                        if local_path and Path(local_path).exists():
-                            meta = file_record.meta or {}
-                            original_name = meta.get('name', file_record.filename or file_id)
-                            zf.write(local_path, f'files/uploads/{file_id}_{original_name}')
-                except Exception as e:
-                    log.warning(f'Failed to include file {file_id} in export: {e}')
+            # [Gradient] Originals use the exporting person's platform authority.
+            from open_webui.soev.export_files import include
+
+            included, unavailable = await include(zf, local_file_ids, user_id=user_id)
+            manifest['contents']['files_included'] = included
+            manifest['contents']['files_unavailable'] = unavailable
+            zf.writestr('manifest.json', json.dumps(manifest, indent=2, default=str))
 
         return zip_path
 

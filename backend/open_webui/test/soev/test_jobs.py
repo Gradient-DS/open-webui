@@ -102,9 +102,7 @@ async def test_upload_recovery_uses_the_owner_login(env):
     env.api.uploads.pop((job['job_id'], file.id))
     assert await poll(env, now=job['submitted_at'] + 61) == 1
     assert any(request.url.path.endswith('/commit') for request in env.api.requests)
-    assert not any(
-        request.url.path.endswith('/cancel') or request.url.path == '/v1/jobs' for request in env.api.requests
-    )
+    assert not any(request.url.path == '/v1/jobs' for request in env.api.requests)
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
 
 
@@ -214,8 +212,8 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
         env.events.assert_not_awaited()
     assert await poll(env, now=job['submitted_at'] + 121) == 1
     await assert_terminal(env, file, error='did not complete within 120s')
-    assert env.api.jobs[job['job_id']]['status'] == status
-    assert all(r.method == 'POST' and r.url.path == '/v1/chat/reads' for r in env.api.requests)
+    assert env.api.jobs[job['job_id']]['status'] == ('RUNNING' if status == 'RUNNING' else 'CANCELLED')
+    assert any(r.url.path.endswith('/cancel') for r in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -223,20 +221,9 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
 @pytest.mark.parametrize('age', [60, 61])
 async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, committed, age):
     """An interrupted commit waits one minute before replaying the original key as the owner."""
-    file = await test_ingest.new_file(env)
-    send = env.client.send
-
-    async def interrupted(method, path, *args, **kwargs):
-        if path.endswith('/commit'):
-            raise RuntimeError('commit interrupted')
-        return await send(method, path, *args, **kwargs)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(env.client, 'send', interrupted)
-        with pytest.raises(RuntimeError, match='commit interrupted'):
-            await test_ingest.submit(env, file)
-    file = await env.files.Files.get_file_by_id(file.id)
-    job = {**file.meta['soev_job'], 'committed': committed}
+    file, original_job = await submitted(env)
+    env.api.advance(original_job['job_id'], 'AWAITING_UPLOAD')
+    job = {**original_job, 'committed': committed}
     file = await env.files.Files.update_file_metadata_by_id(file.id, {'soev_job': job})
     env.api.requests.clear()
     assert await poll(env, now=job['submitted_at'] + 55) == 0
@@ -409,3 +396,30 @@ async def test_other_request_cannot_complete_an_owners_job(env, owner):
     assert env.api.requests == []
     assert await env.files.Files.get_file_by_id(file.id) == file
     env.events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exhausted_status_reads_fail_old_row_and_retain_cancellation_retry(env, monkeypatch):
+    file, job = await submitted(env)
+    monkeypatch.setattr(env.jobs.config, 'SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', 120)
+    monkeypatch.setattr(
+        env.client, 'read_many', AsyncMock(side_effect=env.module.SoevApiError(503, 'upstream_error', 'failed'))
+    )
+    from open_webui.soev.client import SoevClient
+
+    original_send = SoevClient.send
+
+    async def broken_cancel(self, method, path, *args, **kwargs):
+        if path.endswith('/cancel'):
+            raise env.module.SoevApiError(503, 'upstream_error', 'failed')
+        return await original_send(self, method, path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(SoevClient, 'send', broken_cancel)
+        assert await poll(env, now=job['submitted_at'] + 121) == 1
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['status'] == 'failed'
+    assert row.meta['soev_job']['cancel_pending'] is True
+    await poll(env, now=job['submitted_at'] + 130)
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_job'] is None
+    assert env.api.jobs[job['job_id']]['status'] == 'CANCELLED'

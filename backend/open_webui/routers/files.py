@@ -43,7 +43,6 @@ from open_webui.services.files.events import emit_file_status
 from open_webui.soev import assistant_files, ingest, jobs
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
-from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
@@ -150,7 +149,9 @@ async def process_uploaded_file(
     async def _process_handler(db_session):
         try:
             # [Gradient]
-            content_type = content_type_for(file.filename, file.content_type)
+            content_type = (file_item.meta or {}).get('content_type') or content_type_for(
+                file.filename, file.content_type
+            )
 
             # Detect mis-labeled text files (e.g. .ts → video/mp2t)
             if file_path and content_type and content_type.startswith(('image/', 'video/')):
@@ -207,11 +208,7 @@ async def process_uploaded_file(
                     # extraction causes "Timeout reached while detecting
                     # encoding" errors.
                     log.info('Video file detected (%s), skipping text extraction', content_type)
-                    await Files.update_file_data_by_id(
-                        file_item.id,
-                        {'status': 'completed'},
-                        db=db_session,
-                    )
+                    await Files.set_status(file_item.id, 'completed', db=db_session)
                 else:
                     raise Exception(f'File type {content_type} is not supported for processing')
 
@@ -247,7 +244,10 @@ async def process_uploaded_file(
                 collection_name=collection_name,
             )
 
-        except SoevNotConfigured:
+        except (SoevNotConfigured, asyncio.CancelledError):
+            from open_webui.soev.ingest import abort
+
+            await asyncio.shield(abort(file_item))
             raise
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
@@ -267,8 +267,11 @@ async def process_uploaded_file(
             async with get_async_db_context() as db_session:
                 await _process_handler(db_session)
     finally:
-        if file_path:  # [Gradient] Documents have no retained storage path.
-            _cleanup_local_cache(file_path)
+        if file_path and not (file_item.meta or {}).get('local_kind'):
+            current = await Files.get_file_by_id(file_item.id)
+            job = ((current.meta or {}).get('soev_job') or {}) if current else {}
+            if job.get('committed'):
+                _cleanup_local_cache(file_path)
 
 
 @router.post('/', response_model=FileModelResponse)
@@ -402,6 +405,18 @@ async def upload_file_handler(
         filename = os.path.basename(unsanitized_filename)
         # [Gradient]
         content_type = content_type_for(filename, file.content_type)
+        # [Gradient] Retaining an image requires image bytes, independently of declared MIME/extension.
+        from open_webui.utils.upload_guard import sniff_content_type
+
+        detected_type = ''
+        if sniff_guard:
+            prefix = await file.read(64 * 1024)
+            await file.seek(0)
+            detected_type = sniff_content_type(prefix)
+            if detected_type.startswith('image/') or content_type.startswith('image/'):
+                content_type = detected_type or 'application/octet-stream'
+        local_image = detected_type.startswith('image/')
+        local_video = detected_type.startswith('video/') or content_type.startswith('video/')
 
         file_extension = os.path.splitext(filename)[1]
         # Remove the leading dot from the file extension and lowercase it
@@ -414,12 +429,12 @@ async def upload_file_handler(
         # trip the allow-list and pre-empt sniffing. Skip derivation in that case
         # so the file stays extensionless and the magic-byte guard (branch 2)
         # decides from the real content instead.
-        if not file_extension and file.content_type:
+        if not file_extension and content_type:
             import mimetypes
 
-            base_content_type = file.content_type.split(';', 1)[0].strip().lower()
+            base_content_type = content_type.split(';', 1)[0].strip().lower()
             if base_content_type != 'application/octet-stream':
-                ext = mimetypes.guess_extension(file.content_type)
+                ext = mimetypes.guess_extension(content_type)
                 if ext:
                     file_extension = ext[1:]  # Remove leading dot
 
@@ -467,10 +482,25 @@ async def upload_file_handler(
         id = str(uuid.uuid4())
         name = filename
         # [Gradient] Interactive documents use a temporary source and platform originals.
-        from open_webui.soev.document_uploads import is_document, is_skill_upload, upload as upload_document
+        from open_webui.soev.document_uploads import upload as upload_document
 
-        local_skill = not process and await is_skill_upload(file_metadata, user, db)
-        if sniff_guard and is_document(content_type) and not local_skill:
+        if file_metadata.get('skill_id'):
+            if process:
+                raise HTTPException(400, detail=ERROR_MESSAGES.DEFAULT('Error uploading file'))
+            from open_webui.soev.skill_uploads import upload as upload_skill
+
+            return await upload_skill(
+                file,
+                file_id=id,
+                metadata=file_metadata,
+                user=user,
+                db=db,
+                extension=file_extension,
+                allowed_extensions=allowed_file_extensions,
+                max_size=await Config.get('rag.file.max_size'),
+                content_type=content_type,
+            )
+        if sniff_guard and configured() and not local_image and not local_video:
             return await upload_document(
                 request,
                 file,
@@ -545,10 +575,8 @@ async def upload_file_handler(
                 )
 
         # SHA-256 of raw uploaded bytes for incremental sync diffing.
-        # If the client pre-computed and sent file_hash, use that.
-        file_hash = file_metadata.get('file_hash') or await asyncio.to_thread(
-            lambda: hashlib.sha256(contents).hexdigest()
-        )
+        # [Gradient] Use the bytes the server received for transfer declarations.
+        file_hash = await asyncio.to_thread(lambda: hashlib.sha256(contents).hexdigest())
 
         file_item = await Files.insert_new_file(
             user.id,
@@ -562,7 +590,10 @@ async def upload_file_handler(
                     },
                     'meta': {
                         'name': name,
-                        **({'local_blob': True} if not sniff_guard or local_skill else {}),  # [Gradient]
+                        **({'local_blob': True} if not sniff_guard else {}),
+                        **(
+                            {'local_kind': 'image'} if local_image else {'local_kind': 'video'} if local_video else {}
+                        ),  # [Gradient]
                         'content_type': content_type,  # [Gradient]
                         'size': len(contents),
                         'file_hash': file_hash,
@@ -576,7 +607,7 @@ async def upload_file_handler(
 
         if process:
             # [Gradient] Retained images still relay from the live request, never a detached source.
-            if background_tasks and process_in_background and is_document(content_type):
+            if background_tasks and process_in_background and not sniff_guard:
                 background_tasks.add_task(
                     process_uploaded_file,
                     request,
@@ -950,20 +981,12 @@ async def get_file_content_by_id_inline(
         )
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
-        if (file.meta or {}).get('source') or (file.meta or {}).get('soev_collection_key'):
-            return await stream_original(file, user, attachment=attachment, range_header=range_header)
-        # [Gradient] Legacy documents have no local read fallback.
-        from open_webui.soev.document_uploads import is_document
+        # [Gradient] Recover base-code documents as the reader; retain unknown local originals.
+        from open_webui.soev.originals import proxy_original
 
-        if (
-            is_document((file.meta or {}).get('content_type'))
-            and not (file.meta or {}).get('local_blob')
-            and not (
-                ((file.meta or {}).get('content_type') or '').startswith('audio/')
-                and file.filename.startswith('generated-')
-            )
-        ):
-            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        original = await proxy_original(file, user, attachment=attachment, range_header=range_header)
+        if original is not None:
+            return original
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -1037,20 +1060,12 @@ async def get_file_content_by_id(
         )
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
-        if (file.meta or {}).get('source') or (file.meta or {}).get('soev_collection_key'):
-            return await stream_original(file, user, attachment=True, range_header=range_header)
-        # [Gradient] Legacy documents have no local read fallback.
-        from open_webui.soev.document_uploads import is_document
+        # [Gradient] Both content routes resolve originals under the same access checks.
+        from open_webui.soev.originals import proxy_original
 
-        if (
-            is_document((file.meta or {}).get('content_type'))
-            and not (file.meta or {}).get('local_blob')
-            and not (
-                ((file.meta or {}).get('content_type') or '').startswith('audio/')
-                and file.filename.startswith('generated-')
-            )
-        ):
-            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        original = await proxy_original(file, user, attachment=True, range_header=range_header)
+        if original is not None:
+            return original
         file_path = file.path
 
         # Handle Unicode filenames

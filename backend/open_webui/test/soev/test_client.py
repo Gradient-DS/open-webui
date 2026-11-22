@@ -878,3 +878,27 @@ async def test_transfer_transport_errors_never_expose_the_capability(recorded_ht
     assert caught.value.code == 'upload_rejected'
     assert url not in str(caught.value) and 'bearer-secret' not in repr(caught.value)
     assert 'store.invalid' not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'base,store,allowed',
+    [
+        ('https://public.invalid', 'http://store.invalid/object', False),
+        ('https://public.invalid', 'https://store.invalid/object', True),
+        ('http://api.stack.localhost', 'http://store.stack.localhost/object', True),
+        ('http://api.stack.localhost', 'https://store.invalid/object', True),
+    ],
+)
+async def test_transfer_http_is_only_allowed_with_http_platform(recorded_http, base, store, allowed):
+    requests, responses = recorded_http
+    responses.append(httpx.Response(200))
+    client = SoevClient(base, 'fictional-key')
+    if allowed:
+        await put(client, transfer(url=store))
+        assert len(requests) == 1
+    else:
+        with pytest.raises(SoevApiError) as caught:
+            await put(client, transfer(url=store))
+        assert caught.value.code == 'upload_declaration_invalid'
+        assert not requests
