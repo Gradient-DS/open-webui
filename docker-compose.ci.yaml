@@ -192,6 +192,7 @@ services:
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: "searxng"
       SEARXNG_QUERY_URL: "http://stub:8000/search"
+      COUNCIL_SOURCES_URL: "http://stub:8000"
       CONTENT_EXTRACTION_ENGINE: "external"
       EXTERNAL_DOCUMENT_LOADER_URL: "http://stub:8000"
       EXTERNAL_DOCUMENT_LOADER_API_KEY: "ci-stub-key"

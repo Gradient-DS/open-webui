@@ -105,6 +105,12 @@ def test_ollama_uses_its_own_protocol(stub, path, field, stream):
         assert (result[field]['content'] if field == 'message' else result[field]) == 'stub response'
 
 
+def test_council_sources_list_an_organization_the_picker_accepts(stub):
+    assert get_json(stub, '/api/sources?implemented=true') == {
+        'sources': [{'key': 'ci-gemeente', 'label': 'CI gemeente', 'organizationType': 'gemeente'}]
+    }
+
+
 def test_search_is_nonempty_parser_compatible_and_asymmetrically_hostile(stub):
     results = get_json(stub, '/search', payload={'query': 'CI probe', 'count': 1})
     assert isinstance(results, list) and len(results) == 1
