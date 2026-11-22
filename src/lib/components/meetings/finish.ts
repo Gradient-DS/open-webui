@@ -12,7 +12,7 @@ export const finishMeeting = async (token: string, meetingId: string, recordings
 	const audio_refs: AudioRef[] = [];
 	for (const [index, blob] of recordings.entries()) {
 		const name = `meeting-${index + 1}.${audioExtension(blob.type)}`;
-		audio_refs.push((await uploadMeetingAudio(token, blob, name)) as AudioRef);
+		audio_refs.push((await uploadMeetingAudio(token, blob, name, meetingId)) as AudioRef);
 	}
 	await sendWhenIdle(() => sendMeetingInput(token, meetingId, { type: 'finish', audio_refs }));
 	await partStore().remove(meetingId);
