@@ -343,3 +343,70 @@ def test_text_only_row_is_never_eligible_for_deletion_even_without_history():
     )
     assert decision.category == 'unknown_without_bytes'
     assert decision.remove_row is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('holding', ['path', 'journal'])
+async def test_retirement_retry_preserves_another_rows_storage_holding(tmp_path, holding):
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/shared.db')
+    async with engine.begin() as connection:
+        await connection.run_sync(File.__table__.create)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    content = b'%PDF-1.7 shared original'
+    local = tmp_path / 'shared.pdf'
+    local.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+
+    class Client:
+        async def pages(self, path, *, params, as_user):
+            if params['source_id'] == 'a':
+                yield {
+                    'source_id': 'a',
+                    'collection_key': 'owui-attachments-owner',
+                    'sha256': digest,
+                    'byte_size': len(content),
+                }
+
+        @asynccontextmanager
+        async def stream_response(self, path, *, as_user):
+            yield httpx.Response(200)
+
+    async with sessions() as session:
+        session.add_all(
+            [
+                File(
+                    id='a',
+                    user_id='owner',
+                    filename='a.pdf',
+                    path=None,
+                    meta={
+                        'status': 'completed',
+                        'file_hash': digest,
+                        'size': len(content),
+                        'soev_retire_path': str(local),
+                    },
+                    data={},
+                    created_at=1,
+                    updated_at=1,
+                ),
+                File(
+                    id='b',
+                    user_id='other',
+                    filename='b.pdf',
+                    path=str(local) if holding == 'path' else None,
+                    meta={'local_blob': True, **({'soev_retire_path': str(local)} if holding == 'journal' else {})},
+                    data={},
+                    created_at=1,
+                    updated_at=1,
+                ),
+            ]
+        )
+        await session.commit()
+        counts = await retirement.retire(
+            session, Client(), upload_dir=tmp_path, export_dir=tmp_path / 'exports', apply=True, owner_id='owner'
+        )
+        assert counts['platform_held'] == 1 and counts['bytes_removed'] == 0
+        assert local.read_bytes() == content
+        other = await session.get(File, 'b')
+        assert other.path == (str(local) if holding == 'path' else None)
+    await engine.dispose()

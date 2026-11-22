@@ -110,7 +110,10 @@ async def retire(
     if owner_id is not None:
         query = query.where(File.user_id == owner_id)
     ids = list(await session.scalars(query))
-    paths = list(await session.scalars(sa.select(File.path).where(File.path.is_not(None))))
+    holdings = await session.execute(sa.select(File.id, File.path, File.meta))
+    paths = [
+        (key, path) for key, path, meta in holdings for path in (path, (meta or {}).get('soev_retire_path')) if path
+    ]
     await session.rollback()
     for file_id in ids:
         unlink = None
@@ -179,7 +182,11 @@ async def retire(
             if not apply:
                 await session.rollback()
                 continue
-            if decision.remove_bytes and local and paths.count(stored_path) <= 1:
+            if (
+                decision.remove_bytes
+                and local
+                and not any(key != file.id and path == stored_path for key, path in paths)
+            ):
                 row.path = None
                 row.meta = {**(row.meta or {}), 'soev_retire_path': stored_path}
                 unlink = local

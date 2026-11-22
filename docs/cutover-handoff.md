@@ -159,7 +159,7 @@ Base-code completed rows remain even if their platform copy is unreadable. Jobs 
 flight, images detected from bytes (including missing/octet-stream MIME), videos,
 skill-linked files, generated audio, exports and internal local blobs are protected.
 Remote storage URLs, paths outside the uploads root, unreadable paths and shared
-paths are not unlinked. Platform errors cause no action on that file. Unknown files
+paths are not unlinked (including another row’s retirement journal). Platform errors cause no action on that file. Unknown files
 with bytes remain on disk until the operator imports or otherwise resolves them;
 this command never discards their bytes. Keep the coordinated database/object backup;
 byte retirement cannot be rolled back through SQL.
