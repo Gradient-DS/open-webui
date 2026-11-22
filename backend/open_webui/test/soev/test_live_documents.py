@@ -188,12 +188,10 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
 
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(
-        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
-    )
-    result = await agent_v2._sent(
-        turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
-    )
+    metadata = {'user_id': 'alice', 'features': {'live_documents': 'auto'}}
+    turn = agent_v2.AgentTurn(env.client, metadata, 'owui:user:alice')
+    turn.run = Mock(return_value='stream')
+    result = await agent_v2._sent(turn, 'hello', metadata, agent=None, model=None)
     assert result == 'stream'
     body = turn.run.call_args.args[0]['input']
     assert body['attachment_collection'] == 'owui-attachments-alice'
@@ -248,15 +246,10 @@ async def test_unavailable_reference_does_not_block_next_turn(env, monkeypatch, 
         await env.files.Files.set_status(row.id, status)
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(
-        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
-    )
-    assert (
-        await agent_v2._sent(
-            turn, 'next', {'user_id': 'alice', 'files': [live_documents.chat_file(row)]}, agent=None, model=None
-        )
-        == 'stream'
-    )
+    metadata = {'user_id': 'alice', 'files': [live_documents.chat_file(row)]}
+    turn = agent_v2.AgentTurn(env.client, metadata, 'owui:user:alice')
+    turn.run = Mock(return_value='stream')
+    assert await agent_v2._sent(turn, 'next', metadata, agent=None, model=None) == 'stream'
     sent = turn.run.call_args.args[0]['input']
     assert 'attachments' not in sent
     assert ('still processing: Quarterly plan.pdf' in sent['text']) == (status == 'processing')
@@ -277,12 +270,10 @@ async def test_collection_cache_and_setup_failure(env, monkeypatch):  # noqa: F8
     setup.side_effect = RuntimeError('unavailable')
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(
-        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
-    )
-    await agent_v2._sent(
-        turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
-    )
+    metadata = {'user_id': 'alice', 'features': {'live_documents': 'auto'}}
+    turn = agent_v2.AgentTurn(env.client, metadata, 'owui:user:alice')
+    turn.run = Mock(return_value='stream')
+    await agent_v2._sent(turn, 'hello', metadata, agent=None, model=None)
     sent = turn.run.call_args.args[0]['input']
     assert 'live documents unavailable this turn' in sent['text']
     assert sent['tools']['attach_live_document'] == 'off'
@@ -343,15 +334,10 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     assert row.meta['content_type'] == document['content_type']
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    next_turn = SimpleNamespace(
-        client=env.client, as_user='owui:user:alice', organizations=None, run=Mock(return_value='stream')
-    )
-    assert (
-        await agent_v2._sent(
-            next_turn, 'Read it', {'user_id': 'alice', 'files': message['files']}, agent=None, model=None
-        )
-        == 'stream'
-    )
+    metadata = {'user_id': 'alice', 'files': message['files']}
+    next_turn = agent_v2.AgentTurn(env.client, metadata, 'owui:user:alice')
+    next_turn.run = Mock(return_value='stream')
+    assert await agent_v2._sent(next_turn, 'Read it', metadata, agent=None, model=None) == 'stream'
     sent = next_turn.run.call_args.args[0]['input']
     assert 'attachments' not in sent
     assert 'still processing: ' + document['filename'] in sent['text']

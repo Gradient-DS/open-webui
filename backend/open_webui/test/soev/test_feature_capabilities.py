@@ -31,13 +31,15 @@ async def test_images_refused_without_platform_calls(monkeypatch, platform_capab
     platform_capabilities.discard('images')
     client = Mock()
     monkeypatch.setattr(agent_v2.identity, 'build_client', client)
-    assert await agent_v2._images({}, 'owui:user:alice') == []
+    monkeypatch.setattr(agent_v2.threads, 'build_client', client)
+    transport = Mock()
+    turn = agent_v2.AgentTurn(transport, {}, 'owui:user:alice')
+    assert await agent_v2._images(turn, 'test') == []
+    turn.metadata = {'user_message': {'files': [{'type': 'image', 'url': 'data:image/png;base64,aW1hZ2U='}]}}
     with pytest.raises(agent_v2.ImagesUnavailable):
-        await agent_v2._images(
-            {'user_message': {'files': [{'type': 'image', 'url': 'data:image/png;base64,aW1hZ2U='}]}},
-            'owui:user:alice',
-        )
+        await agent_v2._images(turn, 'test')
     client.assert_not_called()
+    assert transport.mock_calls == []
 
 
 @pytest.mark.asyncio
