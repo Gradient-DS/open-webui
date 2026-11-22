@@ -241,6 +241,16 @@ which continues with the next connection or lands on `/auth`. User settings key 
 records every tried connection (never tried again) and the one in flight (consumed on return, 300 s), so
 popups keep their postMessage page. A failure leaves the manual reconnect; the login never fails on it.
 
+### Council information
+
+`soev/council.py` holds the admin's council search switch (`council.enable`) and organizations
+(`council.organizations`, `{key, label}` stored at save time) behind `/api/v1/configs/council`, and lists
+organizations for the admin picker from `COUNCIL_SOURCES_URL` (`/configs/council/sources`, cached an hour,
+502 when unreachable). `agent_v2._council` sends `search_council_documents`/`read_council_document` and
+`input.council` only when the admin allows it, the user has `features.council` (admins always) and the
+agents list both tools; otherwise neither the names nor the scope are sent. The composer toggle is
+`features.council` (`councilEnabled`, off until the user switches it on, or an assistant names it). Council hits are snippet citations.
+
 ### Live mail
 
 `ENABLE_LIVE_MAIL=true` enables the server gate (`live_mail.enable`, default false),

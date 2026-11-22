@@ -133,6 +133,7 @@
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import Document from '../icons/Document.svelte';
+	import BuildingLibrary from '../icons/BuildingLibrary.svelte';
 	// [Gradient] Icons for items pinned from the "+" menu.
 	import Clip from '../icons/Clip.svelte';
 	import Camera from '../icons/Camera.svelte';
@@ -255,6 +256,7 @@
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
+	export let councilEnabled = false;
 	export let workspaceEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
@@ -315,6 +317,7 @@
 		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		councilEnabled,
 		workspaceEnabled,
 		toolApprovalMode
 	};
@@ -914,6 +917,11 @@
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
 
+	// [Gradient] Council information search (raadsinformatie): the admin's switch and the user's permission.
+	$: showCouncilButton =
+		Boolean($config?.features?.enable_council) &&
+		($_user.role === 'admin' || Boolean($_user?.permissions?.features?.council));
+
 	$: showWorkspaceButton =
 		selectedModelIds.length > 0 &&
 		selectedModelIds.length === workspaceCapableModels.length &&
@@ -983,6 +991,7 @@
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
 		document_writer: itemState(documentWriterEnabled),
+		council: itemState(showCouncilButton && councilEnabled),
 		workspace: itemState(workspaceEnabled),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
@@ -1027,6 +1036,15 @@
 			documentWriterEnabled ? 'The model decides whether to write a document' : TOOL_OFF_DESCRIPTION
 		)
 	);
+	$: councilTooltip = pinnedStateTooltip(
+		$i18n.t('Council information'),
+		councilEnabled,
+		$i18n.t(
+			councilEnabled
+				? 'The model decides whether to search council information'
+				: TOOL_OFF_DESCRIPTION
+		)
+	);
 	$: webSearchTooltip = pinnedStateTooltip(
 		$i18n.t('Web Search'),
 		webSearchEnabled,
@@ -1041,7 +1059,12 @@
 				toggleLiveDocuments: () => Promise<void>;
 				toggleLiveMail: () => Promise<void>;
 				toggleFeature: (
-					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
+					tool:
+						| 'image_generation'
+						| 'code_interpreter'
+						| 'document_writer'
+						| 'council'
+						| 'workspace'
 				) => void;
 		  }
 		| undefined;
@@ -2561,6 +2584,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
+											{showCouncilButton}
 											{showWorkspaceButton}
 											{agentRouted}
 											bind:selectedToolIds
@@ -2570,6 +2594,7 @@
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
+											bind:councilEnabled
 											bind:workspaceEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
@@ -2878,6 +2903,18 @@
 															class={pinnedToggleClass(documentWriterEnabled)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'council' && showCouncilButton}
+													<Tooltip content={councilTooltip} placement="top">
+														<button
+															type="button"
+															aria-label={councilTooltip}
+															aria-pressed={councilEnabled}
+															on:click|preventDefault={() => inputMenuRef?.toggleFeature('council')}
+															class={pinnedToggleClass(councilEnabled)}
+														>
+															<BuildingLibrary className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'workspace' && showWorkspaceButton}

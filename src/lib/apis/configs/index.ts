@@ -1466,3 +1466,51 @@ export const setSystemPrompt = async (
 	if (!res.ok) throw (await res.json()).detail;
 	return res.json();
 };
+
+// [Gradient] Council information search (raadsinformatie): the admin's switch and organizations.
+export type CouncilOrganization = { key: string; label: string };
+export type CouncilSource = CouncilOrganization & { kind: string };
+export type CouncilConfig = {
+	AGENT_API_ENABLED: boolean;
+	ENABLE_COUNCIL: boolean;
+	COUNCIL_ORGANIZATIONS: CouncilOrganization[];
+};
+
+const councilRequest = async (token: string, path: string, body?: object) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/council${path}`, {
+		method: body ? 'POST' : 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		...(body ? { body: JSON.stringify(body) } : {})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getCouncilConfig = async (token: string): Promise<CouncilConfig> =>
+	councilRequest(token, '');
+
+export const setCouncilConfig = async (
+	token: string,
+	config: Pick<CouncilConfig, 'ENABLE_COUNCIL' | 'COUNCIL_ORGANIZATIONS'>
+): Promise<CouncilConfig> => councilRequest(token, '', config);
+
+export const getCouncilSources = async (token: string): Promise<{ sources: CouncilSource[] }> =>
+	councilRequest(token, '/sources');

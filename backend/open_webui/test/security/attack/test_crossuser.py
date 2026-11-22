@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 206
+    assert len(admin_gated_operations()) == 209
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -28,6 +28,17 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
+
+
+@pytest.mark.parametrize(
+    'route',
+    ['GET /api/v1/configs/council', 'POST /api/v1/configs/council', 'GET /api/v1/configs/council/sources'],
+)
+def test_council_configuration_is_admin_only(route):
+    """[Gradient] The council search switch, its organizations and the organization list are tenant settings."""
+    routes, admins = crossuser.targets()
+    assert route in admin_gated_operations()
+    assert route in admins
 
 
 def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():

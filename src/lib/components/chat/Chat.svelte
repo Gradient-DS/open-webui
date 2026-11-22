@@ -441,6 +441,8 @@
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = true;
+	// [Gradient] Council information search (raadsinformatie), where the admin switched it on.
+	let councilEnabled = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
@@ -462,6 +464,7 @@
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		councilEnabled,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -476,6 +479,7 @@
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled,
+			councilEnabled,
 			selectedToolIds,
 			selectedSkillIds,
 			selectedFilterIds
@@ -1102,6 +1106,7 @@
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		councilEnabled,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -1230,6 +1235,8 @@
 					webSearchAllowed && (assistantFeatureIds ? starts('web_search') : always || !strict)
 				);
 				documentWriterEnabled = starts('document_writer');
+				// Council search starts off; only an assistant that names it switches it on.
+				councilEnabled = Boolean(assistantFeatureIds?.includes('council'));
 				// OneDrive and mail search start on only with a grant; without one the composer
 				// offers to connect instead. A grant still loading is applied when it arrives.
 				const documentsOffered =
@@ -4051,6 +4058,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
+				// [Gradient] The server checks the admin switch and the permission again.
+				council:
+					$config?.features?.enable_council &&
+					($user?.role === 'admin' || $user?.permissions?.features?.council)
+						? councilEnabled
+						: false,
 				workspace:
 					isFeatureEnabled('workspace') &&
 					$config?.features?.enable_workspace &&
@@ -5213,6 +5226,7 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:councilEnabled
 										bind:workspaceEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
@@ -5312,6 +5326,7 @@
 										bind:workspaceEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
+										bind:councilEnabled
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
@@ -5374,6 +5389,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:councilEnabled
 									bind:liveDocumentsState
 									bind:liveMailState
 									bind:workspaceEnabled

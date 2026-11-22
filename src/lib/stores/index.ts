@@ -476,6 +476,7 @@ type Config = {
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
 		enable_document_writer?: boolean;
+		enable_council?: boolean;
 		enable_docx_export?: boolean;
 		enable_agent_trace_download?: boolean;
 		enable_code_execution?: boolean;

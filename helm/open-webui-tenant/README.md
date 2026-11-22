@@ -95,6 +95,9 @@ Strict mode refuses `extraEgressNamespaces`. In namespace scope the policy also
 selects the `agent-stack` pods, so their shared-services ports (SearXNG,
 Crawl4AI) must be in `allow` too.
 
+The council information admin picker reads `openbesluitvorming.nl` over 443 from the Open WebUI pod;
+with `fqdn.enforce`, add it to `networkPolicy.egress.fqdn.extraNames` where the tenant uses it.
+
 `networkPolicy.egress.fqdn.enabled` adds a CiliumNetworkPolicy allowing TCP 443
 to the hostnames the enabled integrations need (OIDC provider, Microsoft login
 and Graph, `*.sharepoint.com`, Google Drive, Confluence, the S3 endpoint, the

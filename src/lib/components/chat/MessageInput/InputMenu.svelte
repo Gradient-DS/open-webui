@@ -35,6 +35,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
 	import Camera from '$lib/components/icons/Camera.svelte';
+	import BuildingLibrary from '$lib/components/icons/BuildingLibrary.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
@@ -179,10 +180,13 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
+	// [Gradient] Council information search (raadsinformatie), where the admin switched it on.
+	export let showCouncilButton = false;
 	// [Gradient] The Workspace switch: on/off, editing follows creation.
 	export let showWorkspaceButton = false;
 	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
+	export let councilEnabled = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
@@ -319,6 +323,7 @@
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
+	$: showCouncil = itemAllowed('council') && showCouncilButton;
 	$: showWorkspace = itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
@@ -342,6 +347,7 @@
 		showImageGeneration ||
 		showCodeInterpreter ||
 		showDocumentWriter ||
+		showCouncil ||
 		showToolPermissions;
 	// Tools and skills load when the menu opens; keep the section visible meanwhile.
 	$: toolsLoading =
@@ -585,7 +591,7 @@
 
 	// [Gradient] Exported for the pinned composer buttons.
 	export const toggleFeature = (
-		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'council' | 'workspace'
 	) => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled = !imageGenerationEnabled;
@@ -599,6 +605,8 @@
 			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else if (tool === 'workspace') {
 			workspaceEnabled = !workspaceEnabled;
+		} else if (tool === 'council') {
+			councilEnabled = !councilEnabled;
 		} else {
 			documentWriterEnabled = !documentWriterEnabled;
 		}
@@ -1070,6 +1078,32 @@
 							onClick={() => showDocumentWriterButton && toggleFeature('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if showCouncil}
+						<MenuItem
+							label={$i18n.t('Council information')}
+							pinId="council"
+							toggle={councilEnabled}
+							tooltipPlacement="top-start"
+							tooltip={$i18n.t(
+								councilEnabled
+									? 'The model decides whether to search council information'
+									: TOOL_OFF_DESCRIPTION
+							)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Council information'),
+								councilEnabled,
+								$i18n.t(
+									councilEnabled
+										? 'The model decides whether to search council information'
+										: TOOL_OFF_DESCRIPTION
+								)
+							)}
+							onClick={() => toggleFeature('council')}
+						>
+							<BuildingLibrary slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
 					{/if}
 

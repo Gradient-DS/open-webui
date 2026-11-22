@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import { readable } from 'svelte/store';
 import SearchSnippetNote from './SearchSnippetNote.svelte';
-import { searchResultPage } from './searchSnippet';
+import { searchResultPage, snippetSegments } from './searchSnippet';
 import type { CitationDocument } from './citationDocuments';
 
 const URL = 'https://www.example.com/products/widgets/alpha';
@@ -18,7 +18,9 @@ describe('search result snippets', () => {
 			title: 'Alpha widgets',
 			url: URL,
 			address: 'example.com/products/widgets/alpha',
-			file: false
+			kind: 'web',
+			file: false,
+			preview: null
 		});
 	});
 
@@ -58,7 +60,9 @@ describe('search result snippets', () => {
 			title: 'Q3 plan.pptx',
 			url,
 			address: 'tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3 plan.pptx',
-			file: true
+			kind: 'file',
+			file: true,
+			preview: null
 		});
 		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 		const html = render(SearchSnippetNote, { props: { document }, context }).body;
@@ -73,5 +77,43 @@ describe('search result snippets', () => {
 		expect(render(SearchSnippetNote, { props: { document }, context }).body).not.toContain(
 			'snippet only'
 		);
+	});
+
+	const council = (metadata: Record<string, unknown>, url?: string): CitationDocument => ({
+		source: { id: 'document:1', name: 'Raadsvoorstel', ...(url ? { url } : {}) },
+		document: 'woningbouw in het Middengebied',
+		metadata: {
+			source: 'document:1',
+			name: 'Raadsvoorstel',
+			granularity: 'council-snippet',
+			highlights: [[0, 10]],
+			preview_url: 'https://pages.example/26.jpg',
+			...metadata
+		}
+	});
+
+	it('shows a council result with its matched words, page image and a link to the page', () => {
+		const url = 'https://files.example/1.pdf#page=26';
+		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
+		const html = render(SearchSnippetNote, { props: { document: council({}, url) }, context }).body;
+		expect(html).toContain('Council search result — fragment only, the document was not opened');
+		expect(html).toContain('woningbouw</mark>');
+		expect(html).toContain('src="https://pages.example/26.jpg"');
+		expect(html).toContain(`href="${url}"`);
+		expect(html).toContain('Open original document');
+	});
+
+	it('shows a council meeting without a link or image, and only an https page image', () => {
+		const page = searchResultPage(council({ preview_url: 'http://pages.example/1.jpg' }));
+		expect(page).toMatchObject({ kind: 'council', url: null, preview: null });
+	});
+
+	it('marks only well-formed ranges inside the text, in order', () => {
+		expect(snippetSegments('abcdef', [[4, 6], [0, 2], [1, 3], [5, 99], 'x', [3, 3]])).toEqual([
+			{ text: 'ab', marked: true },
+			{ text: 'cd', marked: false },
+			{ text: 'ef', marked: true }
+		]);
+		expect(snippetSegments('abc', undefined)).toEqual([{ text: 'abc', marked: false }]);
 	});
 });
