@@ -1111,6 +1111,11 @@ description = "routers/memories.py answers 400 'No memory update provided' to a 
 json = { "content" = "Attack memory update {token}" }
 
 [[field]]
+route = "POST /api/v1/configs/council"
+description = "routers/configs.py:set_council_config answers 422 to the placeholder: an organization key must match the source's key pattern and a label is at least one character. The key is the one the stub's organization list serves."
+json = { "COUNCIL_ORGANIZATIONS[].key" = "ci-gemeente", "COUNCIL_ORGANIZATIONS[].label" = "CI gemeente" }
+
+[[field]]
 route = "POST /api/v1/prompts/id/{prompt_id}/update/version"
 description = "update_prompt_version refuses a version_id that is not a history row of this prompt; the seeded one is."
 json = { "version_id" = "{prompt_history}" }
