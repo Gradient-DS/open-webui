@@ -50,9 +50,11 @@ from open_webui.utils.access_control.files import get_owner_accessible_folder_fi
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.features import feature_enabled
+from open_webui.utils.feedback_report import get_current_trace_id
 from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
+from open_webui.utils.turn_error import TurnErrorDetails
 from starlette.responses import JSONResponse, StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -1182,12 +1184,13 @@ def _error(
     model: str | None = None,
     detail: str | None = None,
     language: str | None = None,
+    diagnostics: TurnErrorDetails | None = None,
 ) -> dict[str, Any]:
     dutch = (language or '').lower().startswith('nl')
     message = _ERRORS['nl' if dutch else 'en'].get(code) or _ERRORS['nl' if dutch else 'en']['']
     if code == 'invalid_field' and constraint is not None:
         message = _refusal(constraint, model=model, detail=detail, language=language) or message
-    return {'error': {'code': code, 'message': message}}
+    return {'error': {'code': code, 'message': message, **(diagnostics or {})}}
 
 
 # [Claude] What the user sees when a turn fails, by error code; '' for any other code. Never upstream text.
@@ -1490,9 +1493,17 @@ class AgentTurn:
         # [Claude] Token counts summed over every model call of the turn, sent once as the stream's usage chunk.
         self.usage: dict[str, int] | None = None
 
-    def fail(self, status: int, code: str, *, upstream: int | None = None, constraint: str | None = None) -> None:
-        """[Claude] Keep the failure's HTTP status and log it once: ids and codes only, never content (GRA-219)."""
+    def fail(
+        self, status: int, code: str, *, upstream: int | None = None, constraint: str | None = None
+    ) -> TurnErrorDetails:
+        """Capture the logging trace context with the failure's HTTP diagnostics."""
         self.status = status
+        diagnostics: TurnErrorDetails = {'status': status}
+        if upstream is not None:
+            diagnostics['upstream_status'] = upstream
+        trace_id = get_current_trace_id()
+        if trace_id is not None:
+            diagnostics['trace_id'] = trace_id
         log.log(
             logging.ERROR if status == 500 else logging.WARNING,
             'v2 agent turn failed: chat=%s message=%s thread=%s status=%s upstream=%s code=%s constraint=%s',
@@ -1503,18 +1514,18 @@ class AgentTurn:
             upstream,
             code,
             constraint,
+            extra={'trace_id': trace_id},
         )
+        return diagnostics
 
     def failed(self, error: Exception) -> dict[str, Any]:
         """[Claude] The error chunk for a turn that raised; soev-api's detail reaches a refusal only on a 4xx."""
         language = self.metadata.get('user_language')
         if isinstance(error, threads.ThreadError):
-            self.fail(error.status, error.state)
-            return _error(error.state, language=language)
+            return _error(error.state, language=language, diagnostics=self.fail(error.status, error.state))
         if not isinstance(error, SoevApiError):
-            self.fail(500, type(error).__name__)
-            return _error('service_unavailable', language=language)
-        self.fail(
+            return _error('service_unavailable', language=language, diagnostics=self.fail(500, type(error).__name__))
+        diagnostics = self.fail(
             _http_status(error.code, error.status), error.code, upstream=error.status, constraint=error.constraint
         )
         return _error(
@@ -1523,6 +1534,7 @@ class AgentTurn:
             model=self.model,
             detail=error.detail if error.status < 500 else None,
             language=language,
+            diagnostics=diagnostics,
         )
 
     def left_out(self, skipped: list[Skipped]) -> None:
@@ -2094,7 +2106,7 @@ class AgentTurn:
         language = self.metadata.get('user_language')
         if event.event == 'error':
             code, constraint = event.data.get('code', 'service_unavailable'), event.data.get('constraint')
-            self.fail(_http_status(code), code, constraint=constraint)
+            diagnostics = self.fail(_http_status(code), code, constraint=constraint)
             detail = event.data.get('detail')
             chunks.append(
                 _error(
@@ -2103,11 +2115,12 @@ class AgentTurn:
                     model=self.model,
                     detail=detail if isinstance(detail, str) else None,
                     language=language,
+                    diagnostics=diagnostics,
                 )
             )
         elif state not in {*_ENDED, 'waiting'}:
-            self.fail(_http_status(state or 'service_unavailable'), state or 'service_unavailable')
-            chunks.append(_error(state or 'service_unavailable', language=language))
+            code = state or 'service_unavailable'
+            chunks.append(_error(code, language=language, diagnostics=self.fail(_http_status(code), code)))
         if self.usage:
             # [Claude] The OpenAI terminal usage chunk, which the middleware stores on the message as v1 does.
             chunks.append({'object': 'chat.completion.chunk', 'choices': [], 'usage': self.usage})
@@ -2298,8 +2311,8 @@ async def _sent(
             if (metadata.get('user_language') or '').lower().startswith('nl')
             else 'Attach at most 10 notes or chats.'
         )
-        turn.fail(422, 'attachments_unavailable')
-        return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
+        diagnostics = turn.fail(422, 'attachments_unavailable')
+        return _refused({'error': {'code': 'attachments_unavailable', 'message': message, **diagnostics}})
     try:
         chats: list[dict[str, str]] = []
         folder, skipped_folders = await _folder_items(metadata)
@@ -2311,8 +2324,10 @@ async def _sent(
         )
         images = await _images(turn, agent)
     except ImagesUnavailable as unavailable:
-        turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
-        return _refused(_unimaged(unavailable, metadata.get('user_language')))
+        diagnostics = turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
+        error = _unimaged(unavailable, metadata.get('user_language'))
+        error['error'].update(diagnostics)
+        return _refused(error)
     texts += more_texts
     skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_more_texts
     if skipped:
