@@ -23,6 +23,8 @@ services:
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY='
+      # [Gradient] Explicit public platform host; standalone mode leaves this empty.
+      - 'SOEV_API_URL=${SOEV_API_URL:-}'
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped

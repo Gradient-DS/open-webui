@@ -3,7 +3,7 @@ tenant:
   name: strict
   domain: strict.soev.ai
 soevApi:
-  url: http://soev-api:8020
+  url: https://api.tenant.example.invalid
 agentApi:
   runtime: v2
 openWebui:
