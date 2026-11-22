@@ -249,7 +249,7 @@ organizations for the admin picker from `COUNCIL_SOURCES_URL` (`/configs/council
 502 when unreachable). `agent_v2._council` sends `search_council_documents`/`read_council_document` and
 `input.council` only when the admin allows it, the user has `features.council` (admins always) and the
 agents list both tools; otherwise neither the names nor the scope are sent. The composer toggle is
-`features.council` (`councilEnabled`, on by default where offered). Council hits are snippet citations.
+`features.council` (`councilEnabled`, off until the user switches it on, or an assistant names it). Council hits are snippet citations.
 
 ### Live mail
 

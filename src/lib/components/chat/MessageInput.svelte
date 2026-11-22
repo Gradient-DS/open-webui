@@ -256,7 +256,7 @@
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
-	export let councilEnabled = true;
+	export let councilEnabled = false;
 	export let workspaceEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};

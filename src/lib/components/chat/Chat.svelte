@@ -442,7 +442,7 @@
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = true;
 	// [Gradient] Council information search (raadsinformatie), where the admin switched it on.
-	let councilEnabled = true;
+	let councilEnabled = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
@@ -1235,7 +1235,8 @@
 					webSearchAllowed && (assistantFeatureIds ? starts('web_search') : always || !strict)
 				);
 				documentWriterEnabled = starts('document_writer');
-				councilEnabled = starts('council');
+				// Council search starts off; only an assistant that names it switches it on.
+				councilEnabled = Boolean(assistantFeatureIds?.includes('council'));
 				// OneDrive and mail search start on only with a grant; without one the composer
 				// offers to connect instead. A grant still loading is applied when it arrives.
 				const documentsOffered =

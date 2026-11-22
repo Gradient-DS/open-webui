@@ -186,7 +186,7 @@
 	export let showWorkspaceButton = false;
 	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
-	export let councilEnabled = true;
+	export let councilEnabled = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
