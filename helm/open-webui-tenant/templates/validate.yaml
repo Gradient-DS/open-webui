@@ -1,3 +1,6 @@
+{{- if and .Values.networkPolicy.egress.strict .Values.soevApi.url (not .Values.soevApi.transferStoreHost) -}}
+{{- fail "soevApi.transferStoreHost is required with strict egress and a configured platform URL" -}}
+{{- end -}}
 {{- if eq .Values.openWebui.config.vectorDb "pgvector" -}}
 {{- if .Values.weaviate.enabled -}}
 {{- fail "set weaviate.enabled=false when vectorDb is pgvector" -}}

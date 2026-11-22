@@ -529,7 +529,7 @@ openWebui:
 # In a shared soev-<client> namespace, set networkPolicy.scope: release and
 # secretStoreRef to the platform's existing SecretStore/ClusterSecretStore.
 soevApi:
-  # Presigned upload store hostname (without scheme or path), for strict FQDN egress.
+  # Required with strict egress and a configured platform URL: presigned upload store hostname, without scheme/path.
   transferStoreHost: ""
   # Required public platform base URL when enabled, e.g. https://api.<tenant>.soev.ai.
   # No in-cluster service default; all backend platform traffic uses this host.

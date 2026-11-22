@@ -233,3 +233,17 @@ def test_strict_egress_allows_public_platform_and_transfer_store():
     assert '8020' not in result.stdout
     pod, _ = objects(values='strict-egress-values.yaml')
     assert all('retire_document_bytes' not in str(c) for c in pod['initContainers'])
+
+
+@pytest.mark.parametrize('fqdn', ['true', 'false'])
+def test_strict_egress_requires_transfer_store_hostname(fqdn):
+    result = render(
+        {
+            'soevApi.url': 'https://api.public.invalid',
+            'soevApi.transferStoreHost': '',
+            'networkPolicy.egress.strict': 'true',
+            'networkPolicy.egress.fqdn.enabled': fqdn,
+        }
+    )
+    assert result.returncode != 0
+    assert 'soevApi.transferStoreHost is required' in result.stderr
