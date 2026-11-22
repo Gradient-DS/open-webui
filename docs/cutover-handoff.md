@@ -118,7 +118,8 @@ and uploads volume available, run **once per tenant** and retain its counts:
 python -m open_webui.soev.retire_document_bytes
 ```
 
-The default only reports: `platform_held`, `unknown_with_bytes`,
+The command disables schema migrations before loading application config, including
+when the inherited environment enables them. The default only reports: `platform_held`, `unknown_with_bytes`,
 `unknown_without_bytes`, `protected`, `in_flight`, `unverified_storage`, and
 `platform_error`. Each file is looked up through public `GET /v1/documents?source_id`
 and an original is opened to verify publication before any byte retirement.

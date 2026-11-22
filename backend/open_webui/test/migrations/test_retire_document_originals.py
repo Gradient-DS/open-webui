@@ -108,3 +108,30 @@ async def test_report_and_action_share_safe_per_file_decisions(tmp_path, request
             assert (tmp_path / key).exists()
         assert (tmp_path / 'base-held').exists() is not apply
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_operator_report_disables_schema_migrations(monkeypatch, tmp_path):
+    from open_webui import config, env
+    from open_webui.internal import db
+    from open_webui.soev import client
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.invalid')
+    monkeypatch.setattr(env, 'ENABLE_DB_MIGRATIONS', True)
+    monkeypatch.setenv('ENABLE_DB_MIGRATIONS', 'true')
+
+    @asynccontextmanager
+    async def context():
+        yield object()
+
+    monkeypatch.setattr(db, 'get_async_db_context', context)
+    monkeypatch.setattr(client, 'build_service_client', lambda: object())
+    monkeypatch.setattr(client, 'close_client', AsyncMock())
+    report = AsyncMock(return_value={'platform_held': 1})
+    monkeypatch.setattr(retirement, 'retire', report)
+    assert await retirement.run(SimpleNamespace(owner_id=None, apply=False)) == {'platform_held': 1}
+    assert env.ENABLE_DB_MIGRATIONS is False
+    assert os.environ['ENABLE_DB_MIGRATIONS'] == 'false'
+    assert report.call_args.kwargs['apply'] is False

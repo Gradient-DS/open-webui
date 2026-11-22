@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -157,6 +158,11 @@ async def retire(
 
 
 async def run(args) -> dict[str, int]:
+    # Config import normally runs Alembic. An inventory/retirement command never does.
+    os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
+    from open_webui import env
+
+    env.ENABLE_DB_MIGRATIONS = False
     from open_webui import config
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.users import Users
