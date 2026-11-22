@@ -18,6 +18,7 @@ removed — any-extension uploads are accepted.)
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -424,7 +425,7 @@ def test_edit_empty_content_returns_400(monkeypatch):
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
     monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=_make_file()))
-    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', update_data_mock)
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_by_id', update_data_mock)
     monkeypatch.setattr(skill_files_router_module.Files, 'update_file_path_by_id', update_path_mock)
 
     app = _make_app()
@@ -456,13 +457,15 @@ def test_edit_updates_backing_file(monkeypatch, tmp_path):
     update_data = {}
 
     async def _capture_update(file_id, data, db=None):
-        update_data['content'] = data.get('content')
+        update_data['content'] = data.data.get('content')
+        update_data['hash'] = data.hash
+        update_data['size'] = data.meta['size']
         return existing_file
 
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
     monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=existing_file))
-    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', _capture_update)
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_by_id', _capture_update)
     monkeypatch.setattr(
         skill_files_router_module.Files, 'update_file_path_by_id', AsyncMock(return_value=existing_file)
     )
@@ -479,6 +482,8 @@ def test_edit_updates_backing_file(monkeypatch, tmp_path):
     assert res.status_code == 200
     assert uploaded['contents'] == b'# Updated'
     assert update_data['content'] == '# Updated'
+    assert update_data['hash'] == hashlib.sha256(b'# Updated').hexdigest()
+    assert update_data['size'] == len(b'# Updated')
 
 
 def test_edit_unknown_path_returns_404(monkeypatch):
@@ -507,13 +512,15 @@ def test_edit_any_extension_path_accepted_v3(monkeypatch, tmp_path):
     update_data = {}
 
     async def _capture_update(file_id, data, db=None):
-        update_data['content'] = data.get('content')
+        update_data['content'] = data.data.get('content')
+        update_data['hash'] = data.hash
+        update_data['size'] = data.meta['size']
         return existing_file
 
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
     monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=existing_file))
-    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', _capture_update)
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_by_id', _capture_update)
     monkeypatch.setattr(
         skill_files_router_module.Files, 'update_file_path_by_id', AsyncMock(return_value=existing_file)
     )

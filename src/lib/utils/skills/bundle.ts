@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { parse } from 'yaml';
 
 const SKILL_MD = 'SKILL.md';
 
@@ -7,10 +8,50 @@ const SKILL_MD = 'SKILL.md';
 // (backend/open_webui/utils/skill_bundles.py); when unsure, treat as binary
 // (reading binary as UTF-8 would corrupt it; storing text as a File is harmless).
 const TEXT_EXTENSIONS = new Set([
-	'md', 'markdown', 'txt', 'py', 'js', 'ts', 'jsx', 'tsx', 'json', 'yaml', 'yml',
-	'toml', 'ini', 'cfg', 'conf', 'sh', 'bash', 'zsh', 'html', 'htm', 'css', 'scss',
-	'sass', 'xml', 'csv', 'rst', 'tex', 'sql', 'r', 'rb', 'java', 'c', 'cpp', 'h',
-	'hpp', 'cs', 'go', 'rs', 'swift', 'kt', 'php', 'lua', 'tf', 'hcl'
+	'md',
+	'markdown',
+	'txt',
+	'py',
+	'js',
+	'ts',
+	'jsx',
+	'tsx',
+	'json',
+	'yaml',
+	'yml',
+	'toml',
+	'ini',
+	'cfg',
+	'conf',
+	'sh',
+	'bash',
+	'zsh',
+	'html',
+	'htm',
+	'css',
+	'scss',
+	'sass',
+	'xml',
+	'csv',
+	'rst',
+	'tex',
+	'sql',
+	'r',
+	'rb',
+	'java',
+	'c',
+	'cpp',
+	'h',
+	'hpp',
+	'cs',
+	'go',
+	'rs',
+	'swift',
+	'kt',
+	'php',
+	'lua',
+	'tf',
+	'hcl'
 ]);
 
 export interface SkillBundleFile {
@@ -59,24 +100,20 @@ export const parseSkillBundle = async (file: File | Blob): Promise<ParsedSkillBu
 	// Read the input into an ArrayBuffer before handing it to JSZip. JSZip's Blob
 	// input path relies on FileReader, which doesn't exist outside the browser
 	// (breaks unit tests); Blob.arrayBuffer() is universally available and avoids it.
+	if (file.size > 25 * 1024 * 1024) throw new Error('BUNDLE_TOO_LARGE');
 	const zip = await JSZip.loadAsync(await file.arrayBuffer());
+	const entries = Object.values(zip.files).filter((entry) => !entry.dir && !isMacJunk(entry.name));
 
-	// Anthropic .skill bundles wrap their contents in a top-level <skill-name>/
-	// directory, so SKILL.md is usually nested (e.g. "intermax-docx/SKILL.md")
-	// rather than at the zip root. Find SKILL.md anywhere, prefer the shallowest
-	// match, and treat its directory as the bundle root.
-	const isSkillMd = (name: string) => name === SKILL_MD || name.endsWith(`/${SKILL_MD}`);
-	const skillMdEntry = Object.values(zip.files)
-		.filter((e) => !e.dir && !isMacJunk(e.name) && isSkillMd(e.name))
-		.sort((a, b) => a.name.length - b.name.length)[0];
-	if (!skillMdEntry) {
-		throw new Error('NO_SKILL_MD');
+	// [Gradient] Accept a flat bundle or exactly one wrapping folder; never discard unrelated files.
+	const roots = new Set(entries.map((entry) => entry.name.split('/')[0]));
+	const prefix = zip.files[SKILL_MD] ? '' : roots.size === 1 ? `${[...roots][0]}/` : '';
+	const skillMdEntry = zip.files[`${prefix}${SKILL_MD}`];
+	if (!skillMdEntry || skillMdEntry.dir) throw new Error('NO_SKILL_MD');
+	for (const entry of entries) {
+		const original = (entry as typeof entry & { unsafeOriginalName?: string }).unsafeOriginalName;
+		if (original && original !== entry.name) throw new Error('INVALID_PATH');
 	}
 	const skillMd = await skillMdEntry.async('string');
-
-	// Strip the SKILL.md's directory prefix so paths are relative to the skill root
-	// (matching what buildSkillBundle writes). "" for a flat bundle.
-	const prefix = skillMdEntry.name.slice(0, skillMdEntry.name.length - SKILL_MD.length);
 
 	const files: SkillBundleFile[] = [];
 	for (const entry of Object.values(zip.files)) {
@@ -105,4 +142,28 @@ export const buildSkillBundle = async (
 	// Blob inputs via FileReader, which is browser-only.
 	for (const f of files) zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer());
 	return zip.generateAsync({ type: 'blob' });
+};
+
+// [Gradient] One create request carries the normalized zip, including raw binary files.
+export const encodeSkillBundle = async (
+	skillMd: string,
+	files: SkillBundleFile[]
+): Promise<string> => {
+	const zip = new JSZip();
+	zip.file(SKILL_MD, skillMd);
+	for (const file of files) zip.file(file.path, await file.blob.arrayBuffer());
+	return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+};
+
+// [Gradient] Claude descriptions can be folded or multiline YAML scalars.
+export const parseSkillMetadata = (content: string): { name?: string; description?: string } => {
+	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(?:\r?\n|$)/);
+	if (!match) return {};
+	const metadata: unknown = parse(match[1]);
+	if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+	const values = metadata as Record<string, unknown>;
+	return {
+		name: typeof values.name === 'string' ? values.name : undefined,
+		description: typeof values.description === 'string' ? values.description : undefined
+	};
 };

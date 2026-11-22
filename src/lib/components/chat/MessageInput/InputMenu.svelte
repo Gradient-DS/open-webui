@@ -35,6 +35,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
 	import Camera from '$lib/components/icons/Camera.svelte';
+	import BuildingLibrary from '$lib/components/icons/BuildingLibrary.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
@@ -92,6 +93,8 @@
 
 	export let files = [];
 
+	// [Gradient] Agent skills are automatic whenever the workspace is on.
+	export let agentRouted = false;
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
 
@@ -177,10 +180,13 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
+	// [Gradient] Council information search (raadsinformatie), where the admin switched it on.
+	export let showCouncilButton = false;
 	// [Gradient] The Workspace switch: on/off, editing follows creation.
 	export let showWorkspaceButton = false;
 	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
+	export let councilEnabled = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
@@ -225,6 +231,10 @@
 		void prepareBusinessDocumentPicker().catch(() => {});
 	}
 	let tab = '';
+	$: if (agentRouted && tab === 'skills') {
+		tab = '';
+		directTab = false;
+	}
 	// Opened straight into a submenu from a pinned composer button: no back row.
 	let directTab = false;
 
@@ -296,7 +306,10 @@
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
 	$: showSkills =
-		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
+		!agentRouted &&
+		itemAllowed('skills') &&
+		isFeatureEnabled('skills') &&
+		Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
 	$: showLiveMail =
 		itemAllowed('live_mail') && (!!$config?.features?.enable_live_mail || liveMailState !== 'off');
@@ -310,6 +323,7 @@
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
+	$: showCouncil = itemAllowed('council') && showCouncilButton;
 	$: showWorkspace = itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
@@ -333,6 +347,7 @@
 		showImageGeneration ||
 		showCodeInterpreter ||
 		showDocumentWriter ||
+		showCouncil ||
 		showToolPermissions;
 	// Tools and skills load when the menu opens; keep the section visible meanwhile.
 	$: toolsLoading =
@@ -445,7 +460,7 @@
 		tools = items;
 	};
 
-	const setSkills = (skillItems: IntegrationItem[] | null, query = '') => {
+	const setSkills = (skillItems: IntegrationItem[] | null) => {
 		skills = (skillItems ?? [])
 			.filter((skill) => skill.is_active)
 			.reduce<Record<string, IntegrationItem>>((a, skill) => {
@@ -485,7 +500,7 @@
 		if (q) {
 			const skillItems = await getSkills(localStorage.token, q).catch(() => []);
 			if (requestId !== skillRequestId) return;
-			setSkills(skillItems, q);
+			setSkills(skillItems);
 			return;
 		}
 
@@ -493,7 +508,7 @@
 			await _skills.set(await getSkills(localStorage.token));
 		}
 		if (requestId !== skillRequestId) return;
-		setSkills($_skills, q);
+		setSkills($_skills);
 	};
 
 	const scheduleToolSearch = () => {
@@ -576,7 +591,7 @@
 
 	// [Gradient] Exported for the pinned composer buttons.
 	export const toggleFeature = (
-		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'council' | 'workspace'
 	) => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled = !imageGenerationEnabled;
@@ -590,6 +605,8 @@
 			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else if (tool === 'workspace') {
 			workspaceEnabled = !workspaceEnabled;
+		} else if (tool === 'council') {
+			councilEnabled = !councilEnabled;
 		} else {
 			documentWriterEnabled = !documentWriterEnabled;
 		}
@@ -1064,6 +1081,32 @@
 						</MenuItem>
 					{/if}
 
+					{#if showCouncil}
+						<MenuItem
+							label={$i18n.t('Council information')}
+							pinId="council"
+							toggle={councilEnabled}
+							tooltipPlacement="top-start"
+							tooltip={$i18n.t(
+								councilEnabled
+									? 'The model decides whether to search council information'
+									: TOOL_OFF_DESCRIPTION
+							)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Council information'),
+								councilEnabled,
+								$i18n.t(
+									councilEnabled
+										? 'The model decides whether to search council information'
+										: TOOL_OFF_DESCRIPTION
+								)
+							)}
+							onClick={() => toggleFeature('council')}
+						>
+							<BuildingLibrary slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
 					{#if showWorkspace}
 						<MenuItem
 							label={$i18n.t('Workspace')}
@@ -1232,7 +1275,7 @@
 									{:else if tab === 'tools'}
 										{$i18n.t('Tools')}
 										<span class="ml-0.5 text-gray-500">{toolIds.length}</span>
-									{:else if tab === 'skills'}
+									{:else if tab === 'skills' && !agentRouted}
 										{$i18n.t('Skills')}
 										<span class="ml-0.5 text-gray-500">{skillIds.length}</span>
 									{/if}
@@ -1392,7 +1435,7 @@
 								</div>
 							{/if}
 						</div>
-					{:else if tab === 'skills'}
+					{:else if tab === 'skills' && !agentRouted}
 						<SearchInput bind:value={skillQuery} placeholder={$i18n.t('Search skills')} />
 
 						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">

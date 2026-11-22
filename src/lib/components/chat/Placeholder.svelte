@@ -59,6 +59,7 @@
 	export let liveMailState: LiveToolState = 'off';
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
+	export let councilEnabled = false;
 	export let workspaceEnabled = false;
 	export let webSearchEnabled = false;
 	export let toolApprovalMode = 'full';
@@ -272,6 +273,7 @@
 						bind:liveMailState
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
+						bind:councilEnabled
 						bind:workspaceEnabled
 						bind:webSearchEnabled
 						bind:atSelectedModel

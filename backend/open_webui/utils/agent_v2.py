@@ -29,7 +29,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev import acting, agent_threads, assistant_files, council, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -173,6 +173,16 @@ _GENERIC = {
     'attach_live_document': ('Opening documents...', 'Opened documents', 'Could not open document'),
     'search_mail': ('Searching your mail...', 'Searched your mail', 'Could not search your mail'),
     'read_mail': ('Reading email...', 'Read email', 'Could not read email'),
+    'search_council_documents': (
+        'Searching council information...',
+        'Searched council information',
+        'Could not search council information',
+    ),
+    'read_council_document': (
+        'Reading council document...',
+        'Read council document',
+        'Could not read council document',
+    ),
     _COMPACTION: (
         'Summarising the earlier conversation...',
         'Summarised the earlier conversation',
@@ -838,6 +848,20 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
     return images
 
 
+async def _skills(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
+    # [Gradient] Use the same already-gated workspace state as tools.workspace_task.
+    from open_webui.soev import capabilities
+    from open_webui.utils.agent_skills import skill_references
+
+    if (
+        not (metadata.get('features') or {}).get('workspace')
+        or not is_feature_enabled('skills')
+        or not await capabilities.has(capabilities.SKILLS)
+    ):
+        return [], []
+    return await skill_references(metadata, user)
+
+
 def _unimaged(error: ImagesUnavailable, language: str | None) -> dict[str, Any]:
     dutch = (language or '').lower().startswith('nl')
     if error.reason == 'limit':
@@ -945,6 +969,32 @@ async def _web_search_allowed(user_id: str) -> bool:
     return user.role == 'admin' or await has_permission(
         user.id, 'features.web_search', await Config.get('user.permissions')
     )
+
+
+async def _council_allowed(user_id: str) -> bool:
+    """[Gradient] `features` is client-supplied: council search must be on for the tenant and the user's to use."""
+    from open_webui.env import AGENT_API_ENABLED
+
+    if not AGENT_API_ENABLED or not await Config.get(council.ENABLE):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.council', await Config.get('user.permissions')
+    )
+
+
+async def _council(metadata: dict[str, Any], client: SoevClient) -> dict[str, Any]:
+    """[Gradient] The council tools' states and the admin's `council` scope, or nothing: they are sent only where the
+    admin allows them and the agents list them, so agents without them never read their names."""
+    if not await _council_allowed(metadata['user_id']):
+        return {}
+    listed = await _tool_statuses(client)
+    if not all(name in listed for name in council.TOOLS):
+        return {}
+    state = 'auto' if (metadata.get('features') or {}).get('council') else 'off'
+    return {'tools': dict.fromkeys(council.TOOLS, state), 'council': await council.scope()}
 
 
 async def _documents_allowed(user_id: str) -> bool:
@@ -1276,7 +1326,12 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-_GRANULARITY = {'document-text': 'document', 'search-result': 'snippet', 'live-document': 'file-snippet'}
+_GRANULARITY = {
+    'document-text': 'document',
+    'search-result': 'snippet',
+    'live-document': 'file-snippet',
+    'council-result': 'council-snippet',
+}
 
 
 async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
@@ -1292,6 +1347,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
         'granularity': _GRANULARITY.get(element.get('type')),
+        **_council_preview(element),
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:
@@ -1308,6 +1364,26 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'text': element.get('text') or '',
         **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
+    }
+
+
+def _council_preview(element: dict[str, Any]) -> dict[str, Any]:
+    """[Gradient] A council hit's image of its matched PDF page and the matched words in its fragment, as
+    `[start, end)` ranges of its text; only well-formed ranges, for the citation panel to mark."""
+    if element.get('type') != 'council-result':
+        return {}
+    text = element.get('text') or ''
+    highlights = [
+        [start, end]
+        for start, end in (
+            span for span in element.get('highlights') or () if isinstance(span, (list, tuple)) and len(span) == 2
+        )
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text)
+    ]
+    preview = element.get('preview_url')
+    return {
+        **({'preview_url': preview} if isinstance(preview, str) and preview.startswith('https://') else {}),
+        **({'highlights': highlights} if highlights else {}),
     }
 
 
@@ -1892,6 +1968,32 @@ class AgentTurn:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
+        from open_webui.utils.agent_skills import forget_references
+
+        for attempt in range(3):
+            try:
+                stream = self.send(body)
+                async with aclosing(stream):
+                    async for event in stream:
+                        yield event
+                return
+            except SoevApiError as error:
+                skills = body['input'].get('skills')
+                if error.code != 'skill_not_found' or not skills:
+                    raise
+                notices = forget_references(self.as_user, skills, self.metadata.get('user_language'))
+                if attempt == 0:
+                    skills, notices = await _skills(self.metadata, self.as_user)
+                else:
+                    skills = []
+                if skills:
+                    body['input']['skills'] = skills
+                else:
+                    body['input'].pop('skills', None)
+                self.notices.extend(notices)
+                await self.notify()
+
+    async def send(self, body: dict) -> AsyncIterator[ChatEvent]:
         path = self.path('inputs') if self.thread_id else _ROOT
         try:
             stream = self.client.chat_stream(
@@ -2233,6 +2335,7 @@ async def _sent(
         texts, skipped_texts = await _texts(entries, metadata['user_id'])
         more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)
         images = await _images(metadata, turn.as_user)
+        skills, skill_notices = await _skills(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
@@ -2240,12 +2343,16 @@ async def _sent(
     skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_more_texts
     if skipped:
         turn.left_out(skipped)
+    if skill_notices:
+        turn.notices.extend(skill_notices)
     tools = _tools(
         metadata,
         await _web_search_allowed(metadata['user_id']),
         await _live_documents_allowed(),
         await _live_mail_allowed(),
     )
+    councils = await _council(metadata, turn.client)
+    tools['tools'].update(councils.pop('tools', {}))
     notes = attachments.pop('attachment_notes', []) + _skipped_notes(skipped)
     collection = {}
     references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])
@@ -2275,9 +2382,12 @@ async def _sent(
             **_instructions(metadata),
             **_zone(metadata),
             **tools,
+            **councils,
             'documents': documents,
         }
     }
+    if skills:
+        body['input']['skills'] = skills
     if images:
         body['input']['images'] = images
     if texts:

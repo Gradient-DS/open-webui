@@ -22,7 +22,7 @@ class Skill(Base):
 
     id = Column(String, primary_key=True, unique=True)
     user_id = Column(String)
-    name = Column(Text, unique=True)
+    name = Column(Text)  # [Gradient] not unique: two users may hold the same skill
     description = Column(Text, nullable=True)
     content = Column(Text)
     meta = Column(JSON)

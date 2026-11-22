@@ -112,6 +112,9 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == '/api/version':
             self._send({'version': '0.0.0-ci'})
+        elif path == '/api/sources':
+            # The council source's organization list (COUNCIL_SOURCES_URL).
+            self._send({'sources': [{'key': 'ci-gemeente', 'label': 'CI gemeente', 'organizationType': 'gemeente'}]})
         elif path == '/search':
             # SearXNG asks for format=json; external search uses a bare list.
             if parse_qs(urlsplit(self.path).query).get('format') == ['json']:

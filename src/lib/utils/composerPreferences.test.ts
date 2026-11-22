@@ -10,6 +10,7 @@ const chosen = composerPreferences({
 	imageGenerationEnabled: true,
 	codeInterpreterEnabled: true,
 	documentWriterEnabled: true,
+	councilEnabled: true,
 	selectedToolIds: ['tool'],
 	selectedSkillIds: ['skill'],
 	selectedFilterIds: ['filter']

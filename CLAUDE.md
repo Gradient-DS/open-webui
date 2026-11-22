@@ -241,6 +241,16 @@ which continues with the next connection or lands on `/auth`. User settings key 
 records every tried connection (never tried again) and the one in flight (consumed on return, 300 s), so
 popups keep their postMessage page. A failure leaves the manual reconnect; the login never fails on it.
 
+### Council information
+
+`soev/council.py` holds the admin's council search switch (`council.enable`) and organizations
+(`council.organizations`, `{key, label}` stored at save time) behind `/api/v1/configs/council`, and lists
+organizations for the admin picker from `COUNCIL_SOURCES_URL` (`/configs/council/sources`, cached an hour,
+502 when unreachable). `agent_v2._council` sends `search_council_documents`/`read_council_document` and
+`input.council` only when the admin allows it, the user has `features.council` (admins always) and the
+agents list both tools; otherwise neither the names nor the scope are sent. The composer toggle is
+`features.council` (`councilEnabled`, off until the user switches it on, or an assistant names it). Council hits are snippet citations.
+
 ### Live mail
 
 `ENABLE_LIVE_MAIL=true` enables the server gate (`live_mail.enable`, default false),
@@ -273,6 +283,16 @@ ui.composerTools user settings for new chats. Model defaults seed only unsaved c
 loading a chat or changing models never overwrites explicit preferences. Feature gates
 control request availability without rewriting saved choices; unavailable selected
 features remain disabled in the + menu. Tool/skill/filter selections use the same snapshot.
+
+An assistant sets the starting state of every new chat with it (`setDefaults` in `Chat.svelte`): the
+functionalities in its `defaultFeatureIds` and its tools, skills and default filters are on, everything else off,
+whatever the user's own `ui.composerTools` says. Picking or removing an assistant before the first message sets the
+state again. After that the user switches anything as usual; choices made with an assistant active are stored on the
+chat only and never written to `ui.composerTools`.
+
+An assistant that uses tools (a tool functionality in `defaultFeatureIds`, `toolIds` or knowledge) runs only on a
+model that can call them (`pickableLLMs` in `utils/assistants.ts`): the picker leaves out catalog models whose
+`meta.soev.capabilities.tools` is `unsupported`, and a selected one makes way for the default model that can.
 
 Mail shares ui.composerTools/chat.features persistence with every composer feature,
 including the initial message. Search statuses retain structured order/from/to/cc

@@ -9,6 +9,8 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+# [Gradient] Match the sealed CI surface, including local skill bundle routes.
+os.environ.setdefault('FEATURE_SKILL_FILES', 'true')
 os.environ.setdefault('STATIC_DIR', tempfile.mkdtemp(prefix='owui-test-static-'))
 # The image sets these; without them unstructured (>=0.26) pings its telemetry
 # endpoint on import, which the SSRF tests' HTTP boundary records.
