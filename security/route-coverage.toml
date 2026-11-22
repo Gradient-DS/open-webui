@@ -70,24 +70,6 @@ reason = "Standalone mode only: every owner pass skips it because `provider` is 
 id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_session_provider). auths.py:delete_oauth_session_by_provider needs an OAuthSessions row for the caller, which only a completed external authorization-code exchange creates. Closes with an OIDC issuer stub."
 
-# --- Pipelines: creation is delegated to an external Pipelines server --------
-
-[[waived]]
-id = "PUT /api/v1/notifications/targets/{target_id}"
-reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
-
-[[waived]]
-id = "DELETE /api/v1/notifications/targets/{target_id}"
-reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
-
-[[waived]]
-id = "PUT /api/v1/notifications/targets/{target_id}/default"
-reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
-
-[[waived]]
-id = "POST /api/v1/notifications/targets/{target_id}/test"
-reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
-
 # --- Catalog-only v2 registry ----------------------------------------------------
 # These waivers affect the coverage gate only: the passes still attempt both
 # routes, and a hit makes the stale-waiver gate fail. The public Ollama registry

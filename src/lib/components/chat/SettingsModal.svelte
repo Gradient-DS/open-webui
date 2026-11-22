@@ -318,11 +318,7 @@
 				'chat failed',
 				'chat finished',
 				'notification sound',
-				'notifications',
-				'notify',
-				'webhook',
-				'webhook notifications',
-				'webhooks'
+				'notifications'
 			]
 		},
 		{

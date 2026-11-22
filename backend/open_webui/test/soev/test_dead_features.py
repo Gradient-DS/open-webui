@@ -6,6 +6,13 @@ from fastapi.testclient import TestClient
 from open_webui.soev.product_surface import product_router
 
 RETIRED = {
+    'GET /api/v1/notifications/events',
+    'GET /api/v1/notifications/targets',
+    'POST /api/v1/notifications/targets',
+    'PUT /api/v1/notifications/targets/{target_id}',
+    'DELETE /api/v1/notifications/targets/{target_id}',
+    'PUT /api/v1/notifications/targets/{target_id}/default',
+    'POST /api/v1/notifications/targets/{target_id}/test',
     'POST /api/v1/data-warnings/accept',
     'POST /api/v1/auths/signin',
     'POST /api/v1/auths/signup',
@@ -34,6 +41,35 @@ RETIRED = {
     'POST /api/v1/retrieval/process/youtube',
     'POST /api/v1/retrieval/process/web/search',
 }
+
+
+def test_notification_routes_stay_retired_even_with_saved_flags(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from open_webui.main import app
+    from open_webui.routers import notifications
+
+    monkeypatch.setattr(notifications.Config, 'get', AsyncMock(return_value=True))
+    monkeypatch.setattr(notifications, 'has_permission', AsyncMock(return_value=True))
+    client = TestClient(app, raise_server_exceptions=True)
+    try:
+        for authorization in (None, 'Bearer fictional-member', 'Bearer fictional-owner'):
+            headers = {'Authorization': authorization} if authorization else {}
+            for operation in RETIRED:
+                if '/notifications/' not in operation:
+                    continue
+                _, path = operation.split(' ', 1)
+                path = path.replace('{target_id}', 'fictional-target')
+                for method in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE'):
+                    response = client.request(
+                        method, path, headers=headers, json={'config': {'url': 'https://example.com'}}
+                    )
+                    assert response.status_code == 404, (method, path, response.text)
+                    if method != 'HEAD':
+                        assert response.json() == {'detail': 'Not Found'}
+
+    finally:
+        client.close()
 
 
 def test_selective_mount_preserves_the_source_router_and_live_dependencies():

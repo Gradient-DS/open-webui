@@ -2,8 +2,8 @@
 
 The product owner's explicit exceptions override the read-only platform registry:
 voice/audio, scheduled automations/calendar, skills, workspace/sandboxes,
-transcription, notes, memories, folders, API keys, task switches, arena and webhooks
-remain. Browser execution is removed despite its live registry classification.
+transcription, notes, memories, folders, API keys, task switches and arena
+remain. User webhooks were subsequently retired on the platform line (see below). Browser execution is removed despite its live registry classification.
 Upstream implementations stay in place; `soev/product_surface.py` makes filtered
 copies at the fork's mount boundary, preserving source routers and dependencies.
 The security source inventory resolves those copies to their original handlers.
@@ -544,3 +544,16 @@ stored true flags to prove all nine retired leaves disappear, voice/automations/
 API keys/skills remain, and the stored authorization object is unchanged. Fresh
 OpenAPI equals the committed specification; inventory classification and counts
 remain unchanged. Ruff: zero new findings. No frontend source changed.
+
+## User webhook notification retirement
+
+The platform retired `ui.enable_user_webhooks` and `features.webhooks`; its product
+line no longer offers webhook targets. Remove all seven `/api/v1/notifications`
+operations at the fork mount boundary, preserving the upstream router source.
+Saved flags cannot remount them. Remove the target configuration UI, settings
+search keywords and built-in notify-tool entry; browser notifications and sound
+retain their independent controls. No new user-facing strings are introduced.
+
+The OpenAPI contract, target seed and four obsolete coverage waivers are removed
+together. Both retired-route inventories retain exact tombstones. SSRF validation
+and delivery helpers remain unchanged for their retained internal callers.

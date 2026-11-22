@@ -10,7 +10,7 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# The product exposes 307 five-method operations and 310 across all HTTP methods.
+# The product exposes 300 five-method operations and 303 across all HTTP methods.
 # Derive all methods; GET/HEAD/OPTIONS bodies are deliberately excluded from string writes.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
 OPENAPI_METHODS = FIVE_METHODS | {'head', 'options', 'trace'}
@@ -31,8 +31,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (307, 310), (
-        f'Expected 307 five-method operations / 310 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (300, 303), (
+        f'Expected 300 five-method operations / 303 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -60,8 +60,8 @@ def test_derived_counts(surface):
     operations, fields, queries = surface
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
-    assert body_counts == (96, 944), (
-        f'Expected 96 routes / 944 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+    assert body_counts == (94, 936), (
+        f'Expected 94 routes / 936 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     )
     # TaskTurnRequest validates language; message_id only feeds the retry hash.
     for task in ('auto', 'emoji', 'follow_up', 'moa', 'queries', 'tags', 'title'):
@@ -83,9 +83,9 @@ def test_derived_counts(surface):
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
     # Initial committed surface: 139 body routes / 1846 fields, with floor margins 10 / 231.
-    # Product retirement removed exactly 43 body routes / 902 fields; retain those margins.
+    # Product retirement removed exactly 45 body routes / 910 fields; retain those margins.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 139 - 43 - 10 and strings >= 1846 - 902 - 231, (
+    assert routes >= 139 - 45 - 10 and strings >= 1846 - 910 - 231, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields'
     )
     # Query retirement: 1 routes / 1 fields; original margins remain 9 / 10.
