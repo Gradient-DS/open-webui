@@ -37,11 +37,11 @@ WORKDIR /app
 # to store git revision in build
 RUN apk add --no-cache git
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 # [Gradient] onnxruntime-node's install script downloads CUDA binaries from a GitHub release on
 # linux/x64. This stage only builds the static frontend and never runs a model, and the download
 # makes every amd64 build depend on that release being reachable.
-ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
+# Keep the skip policy in .npmrc so local npm ci uses it too.
 RUN npm ci --force
 
 COPY . .
