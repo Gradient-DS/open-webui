@@ -1,6 +1,7 @@
 """Recover base-code originals without changing local or platform readership."""
 
 import asyncio
+import hashlib
 import json
 import zipfile
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ async def test_base_completed_row_resolves_as_reader_and_caches_collection(env, 
     from open_webui.routers import files
 
     file = await new_file(env, status='completed', content_type='application/pdf', soev_collection_key=None)
-    env.api.add_document('kb', file.id)
+    env.api.add_document('kb', file.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
     calls = []
     handle = env.api.handle
 
@@ -58,7 +59,7 @@ async def test_first_publication_is_pinned_and_deleted_collection_uses_lookup(en
     await jobs._finish(file, {'collection_key': 'copy'})
     saved = await env.files.Files.get_file_by_id(file.id)
     assert saved.meta['soev_read_collection'] == 'first'
-    env.api.add_document('kb', file.id)
+    env.api.add_document('kb', file.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
     calls = []
 
     @asynccontextmanager
@@ -71,22 +72,23 @@ async def test_first_publication_is_pinned_and_deleted_collection_uses_lookup(en
     monkeypatch.setattr(env.client, 'stream_response', stream)
     async with originals.open_original(saved, client=env.client, as_user='owui:user:alice') as response:
         assert await response.aread() == FILE_BYTES
-    assert calls == [originals.path_for('first', file.id), originals.path_for('kb', file.id)]
-    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'kb'
+    assert calls == [originals.path_for('kb', file.id)]
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'first'
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('filename', ['document.pdf', 'document.png', 'document'])
-async def test_pdf_declared_image_is_relayed_as_document(env, monkeypatch, filename):
+@pytest.mark.parametrize('filename', ['document.pdf', 'document.png', 'document.mp4', 'document'])
+@pytest.mark.parametrize('declared', ['image/png', 'video/mp4'])
+async def test_pdf_declared_image_is_relayed_as_document(env, monkeypatch, filename, declared):
     from open_webui.routers import files
 
-    values = {'rag.file.allowed_extensions': ['pdf', 'png'], 'rag.file.max_size': 1}
+    values = {'rag.file.allowed_extensions': ['pdf', 'png', 'mp4'], 'rag.file.max_size': 1}
     monkeypatch.setattr(files.Config, 'get', AsyncMock(side_effect=lambda key: values.get(key)))
     monkeypatch.setattr(files.Storage, 'upload_file', Mock(side_effect=AssertionError('PDF must not be retained')))
     monkeypatch.setattr(files, 'emit_file_status', AsyncMock())
     result = await files.upload_file_handler(
         SimpleNamespace(),
-        UploadFile(file=BytesIO(FILE_BYTES), filename=filename, headers={'content-type': 'image/png'}),
+        UploadFile(file=BytesIO(FILE_BYTES), filename=filename, headers={'content-type': declared}),
         metadata={},
         process=True,
         db=None,
@@ -140,7 +142,8 @@ async def test_failed_attempt_is_terminal_cancelled_and_retry_gets_new_key(env, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('stage', ['admission', 'streaming'])
 async def test_original_source_403_is_not_a_store_refresh(env, monkeypatch, stage):
-    file = await new_file(env, soev_read_collection='kb')
+    file = await new_file(env, status='completed', soev_read_collection='kb')
+    env.api.add_document('kb', file.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
 
     class Original(httpx.AsyncByteStream):
         async def __aiter__(self):
@@ -158,7 +161,7 @@ async def test_original_source_403_is_not_a_store_refresh(env, monkeypatch, stag
         await env.module.submit(file, collection_key='kb', user_id='alice', client=env.client)
     assert caught.value.code == 'scope_insufficient'
     assert sum(r.url.path == '/v1/jobs' for r in env.api.requests) == 1
-    assert (await env.files.Files.get_file_by_id(file.id)).meta['status'] == 'failed'
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['status'] == 'completed'
 
 
 @pytest.mark.asyncio
@@ -167,7 +170,9 @@ async def test_export_contains_platform_original_and_unavailable_manifest(env, m
     from open_webui.test.soev.test_jobs import owner_login
 
     first = await new_file(env, status='completed', soev_read_collection='kb', content_type='application/pdf')
-    second = await new_file(env, status='completed', soev_read_collection='denied', content_type='application/pdf')
+    second = await new_file(env, status='completed', soev_read_collection='kb', content_type='application/pdf')
+
+    env.api.add_document('kb', first.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
 
     @asynccontextmanager
     async def stream(path, **kwargs):
@@ -175,6 +180,14 @@ async def test_export_contains_platform_original_and_unavailable_manifest(env, m
             raise env.module.SoevApiError(403, 'forbidden', 'denied')
         yield httpx.Response(200, content=FILE_BYTES)
 
+    get = env.client.get
+
+    async def guarded_get(path, **kwargs):
+        if path.endswith('/' + second.id):
+            raise env.module.SoevApiError(403, 'forbidden', 'denied')
+        return await get(path, **kwargs)
+
+    monkeypatch.setattr(env.client, 'get', guarded_get)
     monkeypatch.setattr(env.client, 'stream_response', stream)
     monkeypatch.setattr(env.identity, 'build_client', lambda: env.client)
     from open_webui.services.export.service import ExportService
@@ -271,6 +284,7 @@ async def test_later_completion_with_a_stale_row_cannot_replace_first_source(env
 
     monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
     file = await new_file(env, content_type='application/pdf')
-    await jobs._finish(file, {'collection_key': 'first'})
-    await jobs._finish(file, {'collection_key': 'copy'})
-    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'first'
+    document = {'byte_size': len(FILE_BYTES), 'sha256': hashlib.sha256(FILE_BYTES).hexdigest()}
+    await jobs._finish(file, {'collection_key': 'kb'}, document=document)
+    await jobs._finish(file, {'collection_key': 'copy'}, document=document)
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'kb'

@@ -133,15 +133,21 @@ async def sync(model_id: str, *, client: SoevClient | None = None) -> bool:
             # [Claude] One File row holds one job: one landing elsewhere is waited for, one landing here is enough.
             waiting = waiting or job.get('collection_key') != key
             continue
-        if file.id in documents or (meta.get('status') == 'failed' and meta.get('soev_collection_key') == key):
+        from open_webui.soev import copy_state
+
+        if (
+            file.id in documents
+            or copy_state.outcome(file, key).get('status') == 'failed'
+            or (meta.get('status') == 'failed' and meta.get('soev_collection_key') == key)
+        ):
             continue
         try:
             await ingest.submit(file, collection_key=key, user_id=model.user_id, client=client)
         except ingest.IngestBusy:
             waiting = True
         except (OSError, SoevApiError) as error:
-            await Files.set_status(
-                file.id, 'failed', error=error.code if isinstance(error, SoevApiError) else 'upload_failed'
+            await copy_state.record(
+                file, key, 'failed', error=error.code if isinstance(error, SoevApiError) else 'upload_failed'
             )
             log.warning('Assistant file %s of %s not submitted (%s)', file.id, model_id, type(error).__name__)
     return waiting

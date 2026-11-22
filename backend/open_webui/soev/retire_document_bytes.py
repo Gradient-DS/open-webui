@@ -1,6 +1,7 @@
 """Explicit, report-first retirement of verified local document copies."""
 
 import argparse
+import hashlib
 import asyncio
 import json
 import os
@@ -20,8 +21,19 @@ class Decision:
     remove_row: bool = False
 
 
-def decide(file, *, held: bool, local_bytes: bool, protected: bool, linked: bool, uncertain: bool = False) -> Decision:
+def decide(
+    file,
+    *,
+    held: bool,
+    local_bytes: bool,
+    protected: bool,
+    linked: bool,
+    uncertain: bool = False,
+    differs: bool = False,
+) -> Decision:
     meta = file.meta or {}
+    if differs:
+        return Decision('platform_differs')
     if protected:
         return Decision('protected')
     if meta.get('soev_job') or meta.get('status') in ('pending', 'processing'):
@@ -43,7 +55,9 @@ def decide(file, *, held: bool, local_bytes: bool, protected: bool, linked: bool
             'collection_name',
         )
     )
-    return Decision('unknown_without_bytes', remove_row=not linked and not historical)
+    return Decision(
+        'unknown_without_bytes', remove_row=not linked and not historical and not (file.data or {}).get('content')
+    )
 
 
 def protected_file(file, prefix: bytes, *, skill: bool, export: bool) -> bool:
@@ -54,16 +68,10 @@ def protected_file(file, prefix: bytes, *, skill: bool, export: bool) -> bool:
         skill
         or export
         or meta.get('local_blob')
-        or meta.get('local_kind')
+        or meta.get('local_kind') in ('skill', 'generated', 'export')
         or meta.get('source')
         or detected.startswith(('image/', 'video/'))
-        or content_type.startswith(('image/', 'video/'))
         or (content_type.startswith('audio/') and file.filename.startswith('generated-'))
-        or (
-            not prefix
-            and Path(file.filename).suffix.lower()
-            in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.mp4', '.mov', '.webm'}
-        )
     )
 
 
@@ -85,6 +93,7 @@ async def retire(
         key: 0
         for key in (
             'platform_held',
+            'platform_differs',
             'unknown_with_bytes',
             'unknown_without_bytes',
             'protected',
@@ -97,63 +106,94 @@ async def retire(
     }
     connection = await session.connection()
     tables = await connection.run_sync(lambda bind: set(sa.inspect(bind).get_table_names()))
-    query = sa.select(File).order_by(File.id)
+    query = sa.select(File.id).order_by(File.id)
     if owner_id is not None:
         query = query.where(File.user_id == owner_id)
-    if apply:
-        query = query.with_for_update()
-    rows = list((await session.scalars(query)).all())
-    # Do not unlink an object also referenced by a retained File.
-    paths = [row.path for row in (await session.scalars(sa.select(File))).all() if row.path]
-    for row in rows:
-        file = FileModel.model_validate(row)
-        linked, skill = False, False
-        for table_name in ('chat_file', 'knowledge_file', 'skill_file'):
-            if table_name in tables:
-                table = sa.table(table_name, sa.column('file_id', sa.Text))
-                exists = await session.scalar(sa.select(table.c.file_id).where(table.c.file_id == file.id).limit(1))
-                linked = linked or exists is not None
-                skill = skill or (table_name == 'skill_file' and exists is not None)
-        local = Path(file.path) if file.path and '://' not in file.path else None
-        export = bool(local and local.resolve().is_relative_to(export_dir.resolve()))
-        uncertain = bool(file.path and (local is None or not local.resolve().is_relative_to(upload_dir.resolve())))
-        prefix, present = b'', False
-        if local and not uncertain:
-            try:
-                with local.open('rb') as source:
-                    prefix = source.read(64 * 1024)
-                present = True
-            except FileNotFoundError:
-                pass
-            except OSError:
-                uncertain = True
-        protected = protected_file(file, prefix, skill=skill, export=export)
-        held = False
+    ids = list(await session.scalars(query))
+    paths = list(await session.scalars(sa.select(File.path).where(File.path.is_not(None))))
+    await session.rollback()
+    for file_id in ids:
+        unlink = None
         try:
-            collection = await originals.lookup(file, client, as_user=as_user)
-            if collection:
-                # A published original, not just a declaration or a locally stored job id.
-                async with client.stream_response(originals.path_for(collection, file.id), as_user=as_user):
-                    held = True
-        except SoevApiError:
-            counts['platform_error'] += 1
-            continue
-        decision = decide(file, held=held, local_bytes=present, protected=protected, linked=linked, uncertain=uncertain)
-        counts[decision.category] += 1
-        if not apply:
-            continue
-        if decision.remove_bytes and local and paths.count(file.path) == 1:
-            local.unlink(missing_ok=True)
-            row.path = None
-            counts['bytes_removed'] += 1
-        # Only an authenticated owner may act on scoped absence; product-only reporting cannot prove it.
-        if decision.remove_row and as_user == f'owui:user:{file.user_id}':
-            await session.delete(row)
-            counts['rows_removed'] += 1
-    if apply:
-        await session.commit()
-    else:
-        await session.rollback()
+            query = sa.select(File).where(File.id == file_id).execution_options(populate_existing=True)
+            if apply:
+                query = query.with_for_update()
+            row = await session.scalar(query)
+            if row is None:
+                await session.rollback()
+                continue
+            file = FileModel.model_validate(row)
+            linked, skill = False, False
+            for table_name in ('chat_file', 'knowledge_file', 'skill_file'):
+                if table_name in tables:
+                    table = sa.table(table_name, sa.column('file_id', sa.Text))
+                    exists = await session.scalar(sa.select(table.c.file_id).where(table.c.file_id == file.id).limit(1))
+                    linked = linked or exists is not None
+                    skill = skill or (table_name == 'skill_file' and exists is not None)
+            from open_webui.soev.file_collections import collections_for
+
+            linked = linked or len(await collections_for(file, session=session)) > 1
+            stored_path = file.path or (file.meta or {}).get('soev_retire_path')
+            local = Path(stored_path) if stored_path and '://' not in stored_path else None
+            export = bool(local and local.resolve().is_relative_to(export_dir.resolve()))
+            uncertain = bool(
+                stored_path and (local is None or not local.resolve().is_relative_to(upload_dir.resolve()))
+            )
+            prefix, present, local_info = b'', False, None
+            if local and not uncertain:
+                try:
+                    digest, size = hashlib.sha256(), 0
+                    with local.open('rb') as source:
+                        while chunk := source.read(64 * 1024):
+                            if not prefix:
+                                prefix = chunk
+                            digest.update(chunk)
+                            size += len(chunk)
+                    local_info, present = (size, digest.hexdigest()), True
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    uncertain = True
+            protected = protected_file(file, prefix, skill=skill, export=export)
+            held, differs = False, False
+            try:
+                keys, seen = await originals.candidates(file, client, as_user=as_user, session=session)
+                differs = seen and (not keys or (present and local_info != originals.fingerprint(file)))
+                if keys and not differs:
+                    async with client.stream_response(originals.path_for(keys[0], file.id), as_user=as_user):
+                        held = True
+            except SoevApiError:
+                counts['platform_error'] += 1
+                await session.rollback()
+                continue
+            decision = decide(
+                file,
+                held=held,
+                local_bytes=present,
+                protected=protected,
+                linked=linked,
+                uncertain=uncertain,
+                differs=differs,
+            )
+            counts[decision.category] += 1
+            if not apply:
+                await session.rollback()
+                continue
+            if decision.remove_bytes and local and paths.count(stored_path) <= 1:
+                row.path = None
+                row.meta = {**(row.meta or {}), 'soev_retire_path': stored_path}
+                unlink = local
+            if decision.remove_row and as_user == f'owui:user:{file.user_id}':
+                await session.delete(row)
+                counts['rows_removed'] += 1
+            # Commit this row before touching bytes, independently of all later files.
+            await session.commit()
+            if unlink is not None:
+                unlink.unlink(missing_ok=True)
+                counts['bytes_removed'] += 1
+        except BaseException:
+            await session.rollback()
+            raise
     return counts
 
 

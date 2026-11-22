@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from open_webui.test.soev import test_ingest
 from open_webui.test.soev.fake_api import person_ref
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -32,6 +33,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.execute(sql_text('CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)'))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
@@ -96,13 +98,11 @@ async def submitted(env, **meta):
 
 
 @pytest.mark.asyncio
-async def test_upload_recovery_uses_the_owner_login(env):
+async def test_upload_recovery_waits_for_the_job_upload_window(env):
     file, job = await submitted(env)
     env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
-    env.api.uploads.pop((job['job_id'], file.id))
-    assert await poll(env, now=job['submitted_at'] + 61) == 1
-    assert any(request.url.path.endswith('/commit') for request in env.api.requests)
-    assert not any(request.url.path == '/v1/jobs' for request in env.api.requests)
+    assert await poll(env, now=job['submitted_at'] + 61) == 0
+    assert not any(request.url.path.endswith(('/commit', '/cancel')) for request in env.api.requests)
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
 
 
@@ -218,36 +218,17 @@ async def test_a_running_job_keeps_processing_until_the_wall_clock(env, monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('committed', [False, True])
-@pytest.mark.parametrize('age', [60, 61])
-async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, committed, age):
-    """An interrupted commit waits one minute before replaying the original key as the owner."""
+@pytest.mark.parametrize('age', [60, 61, 899])
+async def test_a_stuck_upload_waits_until_its_own_expiry(env, committed, age):
     file, original_job = await submitted(env)
     env.api.advance(original_job['job_id'], 'AWAITING_UPLOAD')
-    job = {**original_job, 'committed': committed}
-    file = await env.files.Files.update_file_metadata_by_id(file.id, {'soev_job': job})
-    env.api.requests.clear()
-    assert await poll(env, now=job['submitted_at'] + 55) == 0
-    assert (await env.files.Files.get_file_by_id(file.id)).data == file.data
-    assert await poll(env, now=job['submitted_at'] + age) == 1
-    assert env.api.jobs[job['job_id']]['status'] == 'QUEUED'
-    row = await env.files.Files.get_file_by_id(file.id)
-    assert row.meta['soev_job']['committed'] is True
-    assert row.data['status'] == 'processing'
-    commit = env.api.requests[-1]
-    assert commit.headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{job["sha256"]}:1:commit'
-    assert 'X-Soev-' + 'Subject' not in commit.headers
-    env.events.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_missing_upload_fails_without_resubmission(env):
-    file, job = await submitted(env)
-    env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
-    env.api.uploads.pop((job['job_id'], file.id))
-    assert await poll(env, now=job['submitted_at'] + 61) == 1
-    assert len(env.api.jobs) == 1
-    assert not any(r.method == 'PUT' or r.url.path == '/v1/jobs' for r in env.api.requests)
-    await assert_terminal(env, file, error='upload_missing')
+    job = {**original_job, 'committed': committed, 'expires_at': original_job['submitted_at'] + 900}
+    await env.files.Files.update_file_metadata_by_id(file.id, {'soev_job': job})
+    assert await poll(env, now=job['submitted_at'] + age) == 0
+    assert not any(r.url.path.endswith(('/commit', '/cancel')) for r in env.api.requests)
+    assert await poll(env, now=job['submitted_at'] + 906) == 1
+    await assert_terminal(env, file, error='upload_expired')
+    assert env.api.jobs[job['job_id']]['status'] == 'CANCELLED'
 
 
 @pytest.mark.asyncio
@@ -301,11 +282,11 @@ async def test_service_only_poll_never_reads_or_completes_owner_jobs(env, in_req
 async def test_owner_reads_and_moves_use_the_login_token(env):
     file, job = await submitted(env, relative_path='a/b/report.pdf')
     env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
-    assert await poll(env, now=job['submitted_at'] + 61) == 1
+    assert await poll(env, now=job['submitted_at'] + 61) == 0
     env.api.advance(job['job_id'], 'SUCCEEDED')
     env.api.documents['kb', file.id]['path'] = None
     assert await poll(env, now=job['submitted_at'] + 66) == 1
-    assert len(env.api.requests) == 4
+    assert len(env.api.requests) == 3
     assert all('X-Soev-' + 'Subject' not in r.headers for r in env.api.requests)
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
     await assert_terminal(env, file)

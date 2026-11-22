@@ -526,8 +526,10 @@ async def process_file(
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
-            async with get_async_db() as session:
-                await Files.set_status(file.id, 'failed', error=str(e), db=session)
+            # [Gradient] A failed destination copy never changes the original's status.
+            if not ingest.copying(file, text=form_data.content, source=ingest.source_for(file.id)):
+                async with get_async_db() as session:
+                    await Files.set_status(file.id, 'failed', error=str(e), db=session)
                 # Clear the hash so the file can be re-uploaded after fixing the issue
                 await Files.update_file_hash_by_id(file.id, None, db=session)
 

@@ -3,6 +3,10 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('original_immutable', None): (
+        'The extracted text of a platform document cannot be edited.',
+        'De geëxtraheerde tekst van een platformdocument kan niet worden bewerkt.',
+    ),
     ('upload_declaration_invalid', None): ('Invalid upload declaration', 'Ongeldige uploadgegevens'),
     ('upload_rejected', None): ('Upload rejected', 'Upload geweigerd'),
     ('file_not_found', 'upload:original'): ('Original unavailable', 'Origineel niet beschikbaar'),

@@ -413,10 +413,10 @@ async def upload_file_handler(
             prefix = await file.read(64 * 1024)
             await file.seek(0)
             detected_type = sniff_content_type(prefix)
-            if detected_type.startswith('image/') or content_type.startswith('image/'):
+            if detected_type.startswith(('image/', 'video/')) or content_type.startswith(('image/', 'video/')):
                 content_type = detected_type or 'application/octet-stream'
         local_image = detected_type.startswith('image/')
-        local_video = detected_type.startswith('video/') or content_type.startswith('video/')
+        local_video = detected_type.startswith('video/')
 
         file_extension = os.path.splitext(filename)[1]
         # Remove the leading dot from the file extension and lowercase it
@@ -897,6 +897,10 @@ async def update_file_data_content_by_id(
         )
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
+        # [Gradient] Text resubmission replaces the platform original; preserve its only copy.
+        from open_webui.soev.originals import refuse_original_replacement
+
+        await refuse_original_replacement(file, request)
         max_size = await Config.get('rag.file.max_size')
         if max_size and len(form_data.content.encode('utf-8')) > int(max_size) * 1024 * 1024:
             raise HTTPException(

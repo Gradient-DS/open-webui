@@ -172,7 +172,9 @@ async def test_one_platform_file_failure_does_not_abort_folder_sync(folder, monk
 
     status = AsyncMock()
     monkeypatch.setattr(ingest, 'submit', submit)
-    monkeypatch.setattr(folder_files.Files, 'set_status', status)
+    from open_webui.soev import copy_state
+
+    monkeypatch.setattr(copy_state, 'record', status)
     await folder_files.sync('project')
     assert submitted == ['bad', 'good']
-    status.assert_awaited_once_with('bad', 'failed', error='scope_insufficient')
+    status.assert_awaited_once_with(folder.files['bad'], KEY, 'failed', error='scope_insufficient')

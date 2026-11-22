@@ -3496,6 +3496,7 @@
 	"The connection is still pending. Please try again.": "The connection is still pending. Please try again.",
 	"The developers behind this plugin are passionate volunteers from the community. If you find this plugin helpful, please consider contributing to its development.": "",
 	"The evaluation leaderboard is based on the Elo rating system and is updated in real-time.": "",
+	"The extracted text of a platform document cannot be edited.": "",
 	"The file could not be processed. It is retried on every sync, or use Retry failed files.": "",
 	"The file could not be processed. It is retried on the next sync.": "The file could not be processed. It is retried on the next sync.",
 	"The file has not been synced yet, so its permissions could not be updated.": "The file has not been synced yet, so its permissions could not be updated.",

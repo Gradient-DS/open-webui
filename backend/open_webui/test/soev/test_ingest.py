@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from open_webui.test.soev.fake_api import person_ref
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 FILE_BYTES = b'%PDF-1.7 stored file content'
@@ -41,6 +42,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.execute(sql_text('CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)'))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
@@ -68,6 +70,10 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     await engine.dispose()
 
 
+def files_context(env):
+    return env.files.get_async_db_context()
+
+
 async def new_file(env, **meta):
     source_id = str(uuid4())
     path = env.tmp_path / source_id
@@ -79,7 +85,7 @@ async def new_file(env, **meta):
             filename='original.pdf',
             path=str(path),
             hash='client-checksum',
-            data={'status': 'pending', 'content': 'preserved content'},
+            data={'status': meta.get('status', 'pending'), 'content': 'preserved content'},
             meta={
                 'status': 'pending',
                 'size': len(FILE_BYTES),
@@ -89,6 +95,11 @@ async def new_file(env, **meta):
         ),
     )
     assert row is not None
+    async with files_context(env) as session:
+        await session.execute(
+            sql_text('INSERT INTO knowledge_file VALUES (:file_id, :key)'), {'file_id': row.id, 'key': 'kb'}
+        )
+        await session.commit()
     return row
 
 
@@ -308,6 +319,8 @@ async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monke
         'attempt': 1,
         'submitted_at': job['submitted_at'],
         'committed': failure is None,
+        'copy': False,
+        'expires_at': job['expires_at'],
     }
     assert isinstance(job['submitted_at'], int) and before <= job['submitted_at'] <= int(time.time())
     for saved in [*snapshots, row]:
@@ -517,14 +530,17 @@ async def test_cancel_clears_the_row_even_when_terminal(env, status):
     env.api.requests.clear()
     await env.module.cancel(file, client=env.client)
     row = await env.files.Files.get_file_by_id(file.id)
-    assert row.meta['soev_job'] is None and row.meta['soev_collection_key'] is None
-    assert row.meta['status'] == row.data['status'] == 'processing'
+    assert row.meta['soev_job'] is None
+    assert row.meta['soev_collection_key'] == ('kb' if status == 'SUCCEEDED' else None)
+    assert row.meta['status'] == row.data['status'] == ('completed' if status == 'SUCCEEDED' else 'processing')
     assert row.data['content'] == 'preserved content'
-    assert [(r.method, r.url.path) for r in env.api.requests] == [('POST', f'/v1/jobs/{job_id}/cancel')]
+    assert (env.api.requests[0].method, env.api.requests[0].url.path) == ('POST', f'/v1/jobs/{job_id}/cancel')
     assert await env.files.Files.get_files_with_soev_jobs() == []
     assert await env.files.Files.get_unlanded_files_for_collection('kb') == []
     await env.module.cancel(row, client=env.client)
-    assert len(env.api.requests) == 1
+    assert len(env.api.requests) == (
+        3 if status == 'SUCCEEDED' else 2 if status in ('FAILED', 'CANCELLED', 'EXPIRED') else 1
+    )
 
 
 @pytest.mark.asyncio
@@ -828,7 +844,8 @@ async def test_repeated_store_refusal_is_bounded_and_never_commits(env, monkeypa
 
 @pytest.mark.asyncio
 async def test_resubmission_streams_the_platform_original_without_local_disk(env, monkeypatch):
-    file = await new_file(env, soev_collection_key='old')
+    file = await new_file(env, soev_collection_key='legacy-untrusted')
+    env.api.add_document('kb', file.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
     Path(file.path).unlink()
     originals = []
 
@@ -839,7 +856,7 @@ async def test_resubmission_streams_the_platform_original_without_local_disk(env
 
     monkeypatch.setattr(env.client, 'stream_response', stream)
     await env.module.submit(file, collection_key='kb', user_id='alice', client=env.client)
-    assert originals == [(f'/v1/collections/old/documents/{file.id}/original', 'owui:user:alice')]
+    assert originals == [(f'/v1/collections/kb/documents/{file.id}/original', 'owui:user:alice')]
     store = next(r for r in env.api.requests if r.url.host == 'store.invalid')
     assert store.content == FILE_BYTES
 
@@ -851,13 +868,17 @@ async def test_document_routes_redeem_public_download_links_and_preserve_denial(
     from fastapi import HTTPException
     from open_webui.routers import files
 
-    file = await new_file(env, soev_collection_key='kb', content_type='application/pdf')
+    file = await new_file(env, soev_read_collection='kb', content_type='application/pdf')
     calls = []
 
     def respond(request):
         calls.append(request)
         assert request.url.host == 'soev.invalid'
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+        if request.url.path == f'/v1/collections/kb/documents/{file.id}':
+            return httpx.Response(
+                200, json={'byte_size': len(FILE_BYTES), 'sha256': hashlib.sha256(FILE_BYTES).hexdigest()}
+            )
         if request.url.path.endswith('/original'):
             if denied:
                 return httpx.Response(403)
@@ -866,7 +887,7 @@ async def test_document_routes_redeem_public_download_links_and_preserve_denial(
         return httpx.Response(200, content=FILE_BYTES)
 
     monkeypatch.setattr(env.api, 'handle', respond)
-    monkeypatch.setattr(files.Storage, 'get_file', Mock(side_effect=AssertionError('No document disk reads')))
+    monkeypatch.setattr(files.Storage, 'get_file', Mock(return_value=file.path))
     user = SimpleNamespace(id='alice', role='user')
     response = (
         files.get_file_content_by_id(file.id, 'original.pdf', user=user, db=None)
@@ -877,11 +898,11 @@ async def test_document_routes_redeem_public_download_links_and_preserve_denial(
         with pytest.raises(HTTPException) as caught:
             await response
         assert caught.value.status_code == 403
-        assert len(calls) == 1
+        assert len(calls) == 2
     else:
         result = await response
         assert b''.join([chunk async for chunk in result.body_iterator]) == FILE_BYTES
-        assert len(calls) == 2
+        assert len(calls) == 3
 
 
 @pytest.mark.asyncio

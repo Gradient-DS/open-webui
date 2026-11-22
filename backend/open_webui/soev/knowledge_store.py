@@ -558,7 +558,7 @@ class SoevKnowledgeTable:
         return await Files.get_file_metadatas_by_ids(ids) if ids else []
 
     async def _unlanded_files_by_collection(self, keys):
-        from sqlalchemy import select
+        from sqlalchemy import select, func
 
         from open_webui.internal.db import get_async_db_context
         from open_webui.models.files import File, FileModel
@@ -572,7 +572,10 @@ class SoevKnowledgeTable:
                 stored_keys.setdefault(value, []).append(key)
         async with get_async_db_context() as db:
             result = await db.execute(
-                select(File).filter(File.meta['soev_collection_key'].as_string().in_(stored_keys))
+                select(File).filter(
+                    File.meta['soev_collection_key'].as_string().in_(stored_keys),
+                    func.coalesce(File.meta['status'].as_string(), '') != 'completed',
+                )
             )
             for row in result.scalars().all():
                 file = FileModel.model_validate(row)
@@ -733,11 +736,17 @@ class SoevKnowledgeTable:
         meta = (file.meta or {}) if file else {}
         if (meta.get('soev_job') or {}).get('collection_key') == knowledge_id:
             await ingest.cancel(file, client=self._client)
+            from open_webui.soev.file_collections import knowledge_link
+
+            await knowledge_link(file_id, knowledge_id, remove=True)
             return True
         if meta.get('soev_collection_key') == knowledge_id:
             landed = any(doc['source_id'] == file_id for doc in await self._documents(knowledge_id))
             if not landed:
                 await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
+                from open_webui.soev.file_collections import knowledge_link
+
+                await knowledge_link(file_id, knowledge_id, remove=True)
                 return True
         document, _ = (await self._members(knowledge_id)).get(file_id, (None, None))
         if document and document.get('schedule_ids'):
@@ -750,6 +759,9 @@ class SoevKnowledgeTable:
         )
         if meta.get('soev_collection_key') == knowledge_id:
             await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
+        from open_webui.soev.file_collections import knowledge_link
+
+        await knowledge_link(file_id, knowledge_id, remove=True)
         return True
 
     async def reset_knowledge_by_id(self, id, include_directories=True, db=None):
@@ -1206,7 +1218,11 @@ class SoevKnowledgeTable:
             if file is None:
                 return None
             job = (file.meta or {}).get('soev_job') or {}
-            if not job:
+            if (
+                not job
+                and (file.meta or {}).get('status') != 'completed'
+                and not (file.meta or {}).get('soev_read_collection')
+            ):
                 await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': knowledge_id})
             elif job.get('collection_key') == knowledge_id and path is not None:
                 job = {**job, 'path': '/'.join(path) or None}
@@ -1216,6 +1232,9 @@ class SoevKnowledgeTable:
                 'path': job.get('path') if job.get('collection_key') == knowledge_id else None,
                 'ingested_at': dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat(),
             }
+        from open_webui.soev.file_collections import knowledge_link
+
+        await knowledge_link(file_id, knowledge_id)
         return self._projection.knowledge_link_of(collection, document, service_principal=self._service_principal)
 
     async def set_path_fields_by_file_id(self, file_id, meta, db=None):

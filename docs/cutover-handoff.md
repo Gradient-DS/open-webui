@@ -119,13 +119,18 @@ python -m open_webui.soev.retire_document_bytes
 ```
 
 The command disables schema migrations before loading application config, including
-when the inherited environment enables them. The default only reports: `platform_held`, `unknown_with_bytes`,
+when the inherited environment enables them. The default only reports: `platform_held`, `platform_differs`, `unknown_with_bytes`,
 `unknown_without_bytes`, `protected`, `in_flight`, `unverified_storage`, and
 `platform_error`. Each file is looked up through public `GET /v1/documents?source_id`
-and an original is opened to verify publication before any byte retirement.
+and an original is opened to verify publication before any byte retirement. A held
+document must have the row’s recorded SHA256 and byte size (platform `byte_size`);
+if local bytes exist, their computed SHA256 and size must match too. A different
+platform version or local mismatch is `platform_differs` and is never touched.
 “Unknown” means absent from that caller's readable collections, never proof of
 absence throughout the platform. Product authority may see fewer documents than an
-owner; it cannot delete unknown rows. Counts contain no file/user identifiers or URLs.
+owner; the default uses the existing product/service API credential, without a
+person token, and may hold **nothing** (empty visibility or 403). No new credential
+is introduced. It cannot delete unknown rows. Counts contain no file/user identifiers or URLs.
 
 For a reviewed application, use the exact same predicate with explicit `--apply`:
 
@@ -134,7 +139,11 @@ python -m open_webui.soev.retire_document_bytes --apply
 ```
 
 This removes **only local bytes** of positively verified published documents and
-sets their local paths to null. It never deletes a platform-held File row. To act
+sets their local paths to null. Each row update commits in its own transaction
+**before** unlinking bytes. A private `soev_retire_path` journal lets an explicit
+repeat recover an unlink failure or ambiguous commit; no startup worker processes
+it. A later row failure cannot roll back earlier committed path updates. It never
+deletes a platform-held File row. To act
 on an owner's empty unknown rows, supply that owner's real current platform login
 token through stdin (never a command argument or file), verified against `/v1/me`:
 
@@ -144,7 +153,8 @@ python -m open_webui.soev.retire_document_bytes --owner-id USER_ID --login-token
 ```
 
 Rows may be removed only when no bytes exist, the owner's platform lookup is empty,
-no chat/knowledge/skill link exists, and there is no historical success/source marker.
+no chat/knowledge/skill/assistant/folder link exists, no extracted `data.content`
+would be lost, and there is no historical success/source marker.
 Base-code completed rows remain even if their platform copy is unreadable. Jobs in
 flight, images detected from bytes (including missing/octet-stream MIME), videos,
 skill-linked files, generated audio, exports and internal local blobs are protected.
@@ -156,16 +166,40 @@ byte retirement cannot be rolled back through SQL.
 
 Original reads first use `soev_read_collection`, set at the first successful
 publication. Later assistant/folder/knowledge copies never replace it. Base rows
-recover through source-id lookup **as the requesting person**, cache the collection,
-and redeem its public download link. If the first collection is gone, lookup runs
-again. A platform 403 never falls back to local bytes; an unknown legacy original
+recover through source-id lookup **as the requesting person**, restricted to the
+owner’s attachments collection and locally recorded knowledge/assistant/folder
+links. Both recorded SHA256 and size must match; a missing recorded hash disables
+platform resolution without any remote hashing. Legacy `collection_name` is not
+a platform key. Only a verified, locally derived first source is pinned. If that
+collection returns 404, a verified alternative may serve that request, but a
+reader’s 404 never changes an existing pin. A platform 403 never falls back to local bytes; an unknown legacy original
 with local bytes retains the existing owner/chat/knowledge checks. Images sent for
 extraction and videos continue to display from local bytes.
 
 Strict egress requires the public `soevApi.url` hostname and
 `soevApi.transferStoreHost` (the presigned store hostname, without scheme/path).
-The chart derives the first and allows both through its FQDN selectors. The platform
+The chart derives the first and allows both through its FQDN selectors. With a
+platform URL and strict egress, an empty store hostname fails chart rendering. The platform
 must provide the store hostname; it cannot be inferred from the API URL. Explicit
 plain-http or internal-looking platform URLs have no deployment-environment heuristic
 in OWUI. Deployment configuration and strict egress enforce the chosen host; local
 http stacks remain supported. Store HTTP is accepted only with an HTTP platform URL.
+
+Transfer reconciliation skips transfers active in this process and waits for the
+job’s `expires_at` (15 minutes), not its upload capability’s 60-second expiry.
+Only the relay that finished uploading commits. An abandoned upload fails and
+cancels at the job deadline; polling never guesses whether an upload is complete.
+Failed copies record their destination outcome in server-owned
+`File.meta.soev_copies`, preserving the completed original’s status and read source.
+Platform KB memberships are locally recorded in `soev_kb_links` after authorized
+association or accepted ingest; legacy `knowledge_file` links also count.
+
+The extracted-text update route refuses platform documents with a translated 409,
+because resubmitting their source id replaces their only original. Local-only
+files and sniffed image/video media keep the existing behavior.
+
+Skill replacement/deletion unlinks and removes an otherwise unused File in one
+database transaction. Physical bytes are purged only after commit and a fresh
+check that neither its link, File nor another File holding its path survives. An
+exception after a successful commit therefore never deletes linked bytes. Files
+with another chat, knowledge, assistant, folder or skill holding remain.

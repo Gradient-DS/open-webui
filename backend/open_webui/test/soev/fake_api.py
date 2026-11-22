@@ -660,7 +660,7 @@ class FakeSoevApi:
             for document in documents
         ]
         job['progress'].update(total=len(documents), pending=len(documents))
-        job['expires_at'] = self.now
+        job['expires_at'] = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=15)).isoformat().replace('+00:00', 'Z')
         expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=60)).isoformat().replace('+00:00', 'Z')
         uploads = [
             {
