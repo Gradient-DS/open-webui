@@ -24,7 +24,12 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     # Operations whose id the surface records as unseedable are out of scope: an
     # ownership check needs a resource that exists, and counting them would make the
     # pass look as though it left ownership unverified rather than unseedable.
-    expected = admins | {r for r in plane.operations() if '{' in r} | set(platform_operations())
+    expected = (
+        admins
+        | {r for r in plane.operations() if '{' in r}
+        | set(platform_operations())
+        | {e['route'] for e in seeds.SURFACE.get('body_target', [])}
+    )
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
@@ -823,3 +828,39 @@ def test_retired_product_routes_have_no_remaining_authorization_targets():
     retired = set(seeds.SURFACE['retired_product']['routes'])
     routes, admins = crossuser.targets()
     assert not retired & (set(routes) | set(admins) | set(crossuser.expected_refusals()))
+
+
+def test_upload_body_targets_another_users_skill_with_no_exemption():
+    route = 'POST /api/v1/files/'
+    routes, admins = crossuser.targets()
+    assert route in routes and route not in admins
+    assert route not in crossuser.expected_refusals() and route not in crossuser._shared()
+    parameters = seeds.Resolved(fixtures={'skill_bundle': 'owners-private-skill'})
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    import json
+
+    metadata = json.loads(request['data']['metadata'])
+    assert metadata['skill_id'] == 'owners-private-skill'
+    assert metadata['skill_path'].endswith('.pdf')
+    assert request['params'] == {'process': 'false'}
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(401, True, 'unauthorized'),
+        plane.Outcome(200, True, '{"id":"new-file"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls[route] == 200 and not result.violations
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"id":"other-file"}'),
+        plane.Outcome(200, True, '{"id":"new-file"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.violations

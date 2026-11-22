@@ -211,10 +211,10 @@ actor = "user"
 key = "file"
 name = "id"
 prefix = "/api/v1/files/{id}"
-description = "routers/files.py:upload_file/upload_file_handler stores bytes and inserts File.id. process=false avoids an asynchronous ingestion race. Admin avoids the cumulative rag.file.max_count_per_user quota on repeated passes. Tiny genuine text still passes size and sniff guards."
+description = "routers/files.py authenticates the upload owner. Genuine SVG bytes remain local even with platform mode; documents relay synchronously to the platform. Skill retention requires write authority and an atomic skill_file link. No process=false document bypass."
 via = "POST /api/v1/files/"
 extract = "id"
-files = [{ "field" = "file", "filename" = "attack-{token}.txt", "content" = "Attack file {token}", "content_type" = "text/plain" }]
+files = [{ "field" = "file", "filename" = "attack-{token}.svg", "content" = "<svg xmlns='http://www.w3.org/2000/svg'><text>Attack file {token}</text></svg>", "content_type" = "image/svg+xml" }]
 query = { "process" = false }
 actor = "user"
 
@@ -222,7 +222,7 @@ actor = "user"
 key = "filename"
 name = "file_name"
 prefix = "/api/v1/files/{id}/content/{file_name}"
-description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the ordinary file owner."
+description = "Both content routes retain local owner/chat/knowledge access checks. Documents resolve the first published collection or source id with the requesting person’s token and redeem same-origin download links; a platform 403 never falls back to disk. Unknown legacy originals remain local. Images, videos and skill files keep local reads. Use the actual filename for the named route."
 via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
@@ -839,8 +839,9 @@ json = { "[].file_id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/files/"
-description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
-files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
+description = "A genuine SVG upload exercises authenticated image admission without a platform service. The crossuser body target separately tests another owner’s skill, with an atomic link as positive control."
+files = [{ field = "file", filename = "attack-{token}.svg", content = "<svg xmlns='http://www.w3.org/2000/svg'><text>Attack upload {token}</text></svg>", content_type = "image/svg+xml" }]
+params = { process = false }
 
 [[field]]
 route = "POST /api/v1/audio/speech"
@@ -1675,3 +1676,12 @@ routes = [
   "POST /ollama/v1/responses",
   "POST /ollama/v1/responses/{url_idx}",
 ]
+
+
+[[body_target]]
+route = "POST /api/v1/files/"
+owner = "skill_bundle"
+description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and a non-bypassing administrator must be refused before storage. Owner positive control requires skills and skill_files enabled. No exemption."
+params = { process = false }
+form = { metadata = '{"skill_id":"{skill_bundle}","skill_path":"attack-upload-{token}.pdf"}' }
+files = [{ field = "file", filename = "attack-{token}.pdf", content = "%PDF-1.7 attack skill {token}", content_type = "application/pdf" }]

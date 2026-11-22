@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from uuid import uuid4
+from types import SimpleNamespace
 
 import requests
 from hostile_corpus import fetch_payloads
@@ -157,10 +158,12 @@ def _is_seedable(route, surface):
 def targets(spec=seeds.SPEC, *, surface=None):
     admins = set(admin_gated_operations(spec))
     platform = set(platform_operations(spec))
+    body_targets = {entry['route'] for entry in (surface or seeds.SURFACE).get('body_target', [])}
     routes = [
         route
         for route in plane.operations(spec)
-        if ('{' in route or route in admins or route in platform) and _is_seedable(route, surface or seeds.SURFACE)
+        if ('{' in route or route in admins or route in platform or route in body_targets)
+        and _is_seedable(route, surface or seeds.SURFACE)
     ]
     return routes, admins
 
@@ -176,6 +179,9 @@ def _owner_key(path, surface):
 
 
 def _field_owner_key(route, surface):
+    body = next((entry for entry in surface.get('body_target', []) if entry['route'] == route), None)
+    if body:
+        return next(entry.get('actor', 'user') for entry in surface['parameter'] if entry['key'] == body['owner'])
     entries = [*surface.get('parameter', []), *surface.get('fixture', [])]
     by_key = {key: entry for entry in entries for key in [entry['key'], *entry.get('provides', [])]}
     owners = set()
@@ -331,6 +337,11 @@ def _benign(route, parameters, spec):
     Without them a route that needs a real id in a request field answers 404 to
     the owner too, and an owner control that fails proves nothing about isolation.
     """
+    body = next((entry for entry in seeds.SURFACE.get('body_target', []) if entry['route'] == route), None)
+    if body:
+        context = SimpleNamespace(values=parameters.fixtures, token=uuid4().hex, surface={'field': [body]})
+        resolved = seeds.resolve_fields(context)[route]
+        return {'files': resolved['files'], 'data': resolved['form'], 'params': resolved['params']}
     request = benign_request(route, parameters, spec)
     declared = plane._declared(parameters, route)
     if declared.get('json'):

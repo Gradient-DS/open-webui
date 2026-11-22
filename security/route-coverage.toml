@@ -1,3 +1,6 @@
+# File upload and both original-content routes remain driven, with no exemption.
+# POST /api/v1/files/ has a writable-skill body target in attack-surface.toml;
+# genuine SVG controls cover local images. Document platform reads have unit transport tests.
 # owui-dead-features: the data-warning acceptance route is deleted, not waived.
 # owui-dead-features: local credential and MFA issuers are removed; no new waivers.
 # owui-dead-features: tool/function execution and tool OAuth are unmounted, not waived.

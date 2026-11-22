@@ -1203,3 +1203,14 @@ def test_retired_product_routes_have_no_remaining_seeds_or_controls():
     assert not retired & set(seeds.ordinary_targets())
     for kind in ('field', 'control', 'destructive', 'shared'):
         assert not retired & {entry.get('route', entry.get('id')) for entry in seeds.SURFACE.get(kind, [])}
+
+
+def test_file_seed_retains_genuine_image_bytes_without_document_bypass():
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    file = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'file')
+    part = file['files'][0]
+    assert sniff_content_type(part['content'].encode()).startswith('image/')
+    field = next(p for p in seeds.SURFACE['field'] if p['route'] == 'POST /api/v1/files/')
+    assert sniff_content_type(field['files'][0]['content'].encode()).startswith('image/')
+    assert field['params']['process'] is False

@@ -208,3 +208,13 @@ def test_shared_mailbox_surface_keeps_all_methods_and_the_address_field(surface)
     assert fields[f'POST {path}'] == ['address']
     assert not fields.get(f'GET {path}')
     assert not fields.get(f'DELETE {path}/{{address}}')
+
+
+def test_file_upload_metadata_authority_is_explicit(surface):
+    operations, _, _ = surface
+    description = operations['POST /api/v1/files/']['description']
+    assert all(
+        field in description for field in ('metadata.skill_id', 'metadata.skill_path', 'write authority', 'atomic')
+    )
+    for route in ('GET /api/v1/files/{id}/content', 'GET /api/v1/files/{id}/content/{file_name}'):
+        assert 'description' in operations[route]

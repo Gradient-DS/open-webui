@@ -933,3 +933,20 @@ def test_fanout_queries_extend_existing_reads_without_adding_routes():
         parameter = next(item for item in parameters if item['name'] == name)
         assert parameter['in'] == 'query' and parameter['schema']['type'] == 'boolean'
         assert parameter['schema']['default'] is False
+
+
+def test_changed_file_routes_keep_the_same_plane_and_no_exemption():
+    routes = set(plane.operations())
+    assert len(routes) == 310
+    assert {
+        'POST /api/v1/files/',
+        'GET /api/v1/files/{id}/content',
+        'HEAD /api/v1/files/{id}/content',
+        'GET /api/v1/files/{id}/content/{file_name}',
+    } <= routes
+    assert not any(
+        seeds.route_waived(route)
+        for route in routes
+        if route
+        in {'POST /api/v1/files/', 'GET /api/v1/files/{id}/content', 'GET /api/v1/files/{id}/content/{file_name}'}
+    )

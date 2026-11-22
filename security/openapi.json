@@ -16120,7 +16120,8 @@
         "summary": "Upload File",
         "tags": [
           "files"
-        ]
+        ],
+        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path."
       }
     },
     "/api/v1/files/count": {
@@ -16447,7 +16448,8 @@
         "summary": "Get File Content By Id",
         "tags": [
           "files"
-        ]
+        ],
+        "description": "Apply existing owner/chat/knowledge access rules. Documents read the first published platform collection, recovering base-code rows by source_id as the requester. Redeem same-origin download links. A platform 403 never uses local bytes. Unknown legacy files with bytes keep local reads; images, videos and skill files remain local."
       },
       "head": {
         "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
@@ -16554,7 +16556,8 @@
         "summary": "Get File Content By Id",
         "tags": [
           "files"
-        ]
+        ],
+        "description": "Apply the same document recovery, platform readership and local-media rules as the inline content route. Filename does not grant access."
       }
     },
     "/api/v1/files/{id}/data/content": {
