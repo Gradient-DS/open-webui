@@ -10,12 +10,12 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.models import files as file_models
 from open_webui.models.files import File, FileModel
 from open_webui.models.skill_files import SkillFile
 from open_webui.models.skills import Skill
 from open_webui.storage.provider import Storage, GCSStorageProvider, AzureStorageProvider
 from open_webui.utils.upload_guard import check_upload
+from open_webui.soev import skill_storage
 
 
 async def upload(
@@ -44,8 +44,9 @@ async def upload(
     _validate_skill_path(path)
     await require_skill_files()
     stored_path = None
-    committed = False
-    async with file_models.get_async_db_context(db) as session:
+    removed = []
+    result = None
+    async with skill_storage.session_for(db) as session:
         try:
             # Serialize path selection/replacement and protect the skill against deletion.
             skill = await session.scalar(select(Skill).where(Skill.id == metadata['skill_id']).with_for_update())
@@ -116,6 +117,7 @@ async def upload(
             )
             session.add(record)
             await session.flush()
+            previous = existing.file_id if existing else None
             if existing:
                 existing.file_id, existing.updated_at = file_id, now
             else:
@@ -130,17 +132,25 @@ async def upload(
                         updated_at=now,
                     )
                 )
+            if previous:
+                removed = await skill_storage.remove_unused(session, [previous])
+            result = FileModel.model_validate(record)
             commit = asyncio.create_task(session.commit())
             try:
                 await asyncio.shield(commit)
             except asyncio.CancelledError:
                 await commit
-                committed = True
                 raise
-            committed = True
-            return FileModel.model_validate(record)
-        except BaseException:
+            await skill_storage.purge_unreferenced(removed, db=session)
+            return result
+        except BaseException as error:
             await session.rollback()
-            if stored_path and not committed:
-                await asyncio.to_thread(Storage.delete_file, stored_path)
+            if stored_path:
+                linked = await skill_storage.upload_linked(file_id, db=session)
+                if linked:
+                    await skill_storage.purge_unreferenced(removed, db=session)
+                    if not isinstance(error, asyncio.CancelledError) and result is not None:
+                        return result
+                else:
+                    await skill_storage.purge_unreferenced([(file_id, stored_path)], db=session)
             raise
