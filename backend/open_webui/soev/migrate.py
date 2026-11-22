@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 _FIXED_SENTENCE_MODULES = frozenset({'open_webui.soev.db_schema', 'open_webui.soev.pgvector_config'})
 
 
-def upgrade_alembic() -> int:
+def upgrade_alembic(*, document_counts: dict | None = None) -> int:
     from alembic import command
     from alembic.config import Config
 
@@ -29,6 +29,8 @@ def upgrade_alembic() -> int:
     config.attributes['skip_model_imports'] = True
     config.attributes['on_version_apply'] = applied
     command.upgrade(config, 'head')
+    if document_counts is not None:
+        document_counts.update(config.attributes.get('document_cleanup_counts', {}))
     return count
 
 
@@ -57,7 +59,8 @@ def main() -> int:
         # Legacy revisions print row identifiers. Discard them rather than retaining data in logs.
         with open(os.devnull, 'w') as sink, redirect_stdout(sink), warnings.catch_warnings():
             warnings.simplefilter('ignore')
-            counts = {'alembic_upgrades': upgrade_alembic(), 'pgvector_tables': 0, 'pgvector_indexes': 0}
+            counts = {'pgvector_tables': 0, 'pgvector_indexes': 0}
+            counts['alembic_upgrades'] = upgrade_alembic(document_counts=counts)
             if os.getenv('VECTOR_DB', 'chroma') == 'pgvector':
                 step = 'pgvector schema'
                 from open_webui.retrieval.vector.dbs.pgvector import PGVECTOR_PGCRYPTO, PgvectorClient

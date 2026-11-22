@@ -103,3 +103,44 @@ seconds while v2 is enabled and platform thread storage is disabled. A 404 is
 logged and retried; it does not indicate an empty feed. Check the platform route,
 service credential's access, and any ingress path prefix against this contract.
 This is an investigation finding; polling behavior is unchanged.
+
+## Document originals cutover (owui-1)
+
+Before upgrading OWUI, run this **read-only PostgreSQL count in each tenant's OWUI
+DB** and record the result with the tenant in the rehearsal report. Run it before
+Alembic revision `f286d9b43a71`; the release intentionally discards these legacy
+documents instead of retaining a local download fallback.
+
+```sql
+SELECT count(*) AS legacy_documents_to_drop
+FROM file f
+WHERE COALESCE(f.meta->>'soev_collection_key', '') = ''
+  AND COALESCE(f.meta->>'source', 'null') IN ('null', '', '{}')
+  AND COALESCE(f.meta->>'content_type', '') NOT LIKE 'image/%'
+  AND NOT (COALESCE(f.meta->>'content_type', '') LIKE 'audio/%'
+           AND COALESCE(f.filename, '') LIKE 'generated-%')
+  AND COALESCE(f.meta->>'local_blob', 'false') <> 'true'
+  AND NOT EXISTS (SELECT 1 FROM skill_file sf WHERE sf.file_id = f.id);
+```
+
+The OWUI database is tenant-scoped, so this yields one count per tenant without
+printing user or file identifiers. Run against the pre-upgrade schema after the
+platform import finishes. Imported document Files must retain `soev_collection_key`
+and server-computed `size` and `file_hash` (lowercase SHA-256), and completed rows
+should carry `collection_name` for their published original. Provider references
+retain `source`. A legacy `collection_name` alone is not proof of platform ingest.
+
+Legacy generated audio is identified by its audio MIME type and the `generated-`
+filename used by `utils/files.upload_audio`; current internal blobs also carry
+`local_blob=true`. Ordinary uploaded audio is treated as a document.
+
+The Alembic revision drops the counted rows, removes the OWUI originals of retained
+ingested documents, and sets their paths to NULL. Images, generated audio, skill-backed files
+and internally generated local blobs remain. Exports use their existing separate
+storage path. Mount the existing uploads volume in the schema migration container;
+for remote OWUI storage, provide the existing provider credentials/settings to that
+container as well. Cleanup never downloads originals. Missing bytes are idempotent;
+other deletion failures refuse the migration with a fixed message. It prints counts
+only; `python -m open_webui.soev.migrate` collects those counts into its final JSON.
+Byte deletion cannot be rolled back by SQL: retain the coordinated pre-cutover DB
+and object backup already required above. Run with the app stopped.
