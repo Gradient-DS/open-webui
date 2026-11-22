@@ -73,6 +73,8 @@ def inventory() -> list[str]:
 
 
 def test_every_legacy_content_access_is_in_the_reviewed_inventory():
+    # [Gradient] AgentTurn.bookmark holds the legacy parent-message Chats read formerly in prepare.
+    # Both prepare and image_thread bypass it with v2 threads enabled, using platform thread IDs instead.
     expected = json.loads(MANIFEST.read_text())
     actual = inventory()
     assert actual == expected, {

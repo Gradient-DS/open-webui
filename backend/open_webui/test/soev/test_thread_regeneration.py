@@ -5,8 +5,46 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from open_webui.soev import threads
+from open_webui.soev import identity, threads
+from open_webui.test.soev import test_agent_v2
 from open_webui.utils import agent_v2
+
+chat = test_agent_v2.chat
+image_actor = test_agent_v2.image_actor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['regenerate_from', 'edit_from'])
+async def test_owner_replays_durable_image_reference_on_child_thread(chat, image_actor, monkeypatch, operation):
+    await chat.turn(
+        'describe',
+        'a1',
+        user_message={'content': 'describe', 'files': [{'type': 'image', 'url': test_agent_v2.IMAGE_URL}]},
+    )
+    client = identity.build_client()
+    child = await client.chat_post('/v1/chat/threads/thr-1/fork', {'at': 1}, as_user='owui:user:alice')
+    original = chat.api.chat.threads['thr-1']['events'][1]['payload']['payload']['images']
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=True))
+    organizations = SimpleNamespace(list=AsyncMock(return_value=[]))
+    response = await agent_v2.call_agent_v2(
+        {'stream': False},
+        {
+            'user_id': 'alice',
+            'chat_id': child['thread_id'],
+            'message_id': 'new-answer',
+            'user_message': {'content': 'edited description', operation: {'thread_id': 'thr-1', 'position': 2}},
+        },
+        agent='test',
+        model='llm',
+        organizations=organizations,
+    )
+    assert isinstance(response, dict), response
+    path, body = chat.mutations()[-1]
+    assert path == f'/v1/chat/threads/{child["thread_id"]}/inputs'
+    assert body['input']['images'] == original
+    assert body['input']['text'] == ('edited description' if operation == 'edit_from' else 'describe')
+    assert len([r for r in chat.api.requests if r.url.path == '/v1/chat/images']) == 1
 
 
 @pytest.mark.asyncio

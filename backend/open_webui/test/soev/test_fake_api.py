@@ -64,6 +64,62 @@ def seed(client, key='kb', user='owui:user:alice'):
     return body, response.json()
 
 
+@pytest.mark.parametrize('thread_id', [None, '', 'undefined', 'other-thread'])
+def test_chat_image_upload_requires_an_existing_owned_thread(api, thread_id):
+    fake, client = api
+    query = {'name': 'fictional.png'}
+    if thread_id is not None:
+        query['thread_id'] = thread_id
+    response = client.post(
+        '/v1/chat/images',
+        params=query,
+        content=b'\x89PNG\r\n\x1a\nfictional',
+        headers={
+            'Authorization': 'Bearer soev_test_cred-runtime_test-secret',
+            'X-Soev-User-Token': 'fictional-login:owui:user:alice',
+        },
+    )
+    assert response.status_code == (422 if not thread_id else 404)
+    assert fake.images == {}
+
+
+def test_chat_images_require_access_to_both_target_and_origin_threads(api):
+    fake, client = api
+    origin = send(client, 'POST', '/v1/chat/threads:reserve', {'agent': 'test'}, user='owui:user:alice').json()[
+        'thread_id'
+    ]
+    target = send(client, 'POST', '/v1/chat/threads:reserve', {'agent': 'test'}, user='owui:user:alice').json()[
+        'thread_id'
+    ]
+    headers = {
+        'Authorization': 'Bearer soev_test_cred-runtime_test-secret',
+        'X-Soev-User-Token': 'fictional-login:owui:user:alice',
+    }
+    upload = client.post(
+        '/v1/chat/images',
+        params={'name': 'fictional.png', 'thread_id': origin},
+        content=b'\x89PNG\r\n\x1a\nfictional',
+        headers=headers,
+    )
+    assert upload.status_code == 201
+    reference = upload.json()
+    body = {'agent': 'test', 'thread_id': target, 'input': {'text': 'describe', 'images': [reference]}}
+    assert send(client, 'POST', '/v1/chat/threads', body, user='owui:user:bob').status_code == 404
+    other_upload = client.post(
+        '/v1/chat/images',
+        params={'name': 'fictional.png', 'thread_id': origin},
+        content=b'\x89PNG\r\n\x1a\nfictional',
+        headers={**headers, 'X-Soev-User-Token': 'fictional-login:owui:user:bob'},
+    )
+    assert other_upload.status_code == 404
+    assert send(client, 'POST', '/v1/chat/threads', body, user='owui:user:alice').status_code == 201
+    assert send(client, 'DELETE', f'/v1/chat/threads/{origin}', user='owui:user:alice').status_code == 204
+    refused = send(
+        client, 'POST', f'/v1/chat/threads/{target}/inputs', body={'input': body['input']}, user='owui:user:alice'
+    )
+    assert refused.status_code == 404 and refused.json()['code'] == 'image_not_found'
+
+
 def test_collection_replays_and_read_write_decisions(api):
     """Collection creation is replayable, while unreadable rows stay 404 and read does not imply write."""
     fake, client = api

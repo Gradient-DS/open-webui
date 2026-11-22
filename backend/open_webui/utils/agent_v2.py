@@ -853,9 +853,10 @@ async def _image_bytes(entry: dict, user: str) -> tuple[bytes, FileModel | None,
     return body, file, name
 
 
-async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
+async def _images(turn: 'AgentTurn', agent: str | None) -> list[dict]:
     from open_webui.soev import capabilities
 
+    metadata, user = turn.metadata, turn.as_user
     entries = [
         entry
         for entry in (metadata.get('user_message') or {}).get('files') or []
@@ -865,28 +866,37 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
         raise ImagesUnavailable('limit')
     if entries and not await capabilities.has(capabilities.IMAGES):
         raise ImagesUnavailable('gone', entries[0].get('name') or 'image')
+    # [Gradient] Validate access and bytes before reserving anything. Browser preflight only
+    # validates: /chats/new reserves next, and the follow request uploads under that thread.
+    uploads = [await _image_bytes(entry, user) for entry in entries]
+    if not uploads or metadata.get('prepare_thread'):
+        return []
+    thread_id = await turn.image_thread(agent)
     images = []
-    client = identity.build_client() if entries else None
-    for entry in entries:
-        body, file, name = await _image_bytes(entry, user)
+    for body, file, name in uploads:
         meta = (file.meta or {}) if file is not None else {}
         cached = meta.get('soev_image')
-        # A shared OWUI file can have an image reference owned by a different caller.
+        # [Gradient] Another thread's binding can disappear when its origin thread is deleted.
         if (
             isinstance(cached, dict)
             and cached.get('sha256') == hashlib.sha256(body).hexdigest()
             and meta.get('soev_image_user') == user
+            and meta.get('soev_image_thread') == thread_id
         ):
             images.append(cached)
             continue
         try:
-            uploaded = await client.post_bytes('/v1/chat/images', body, as_user=user, params={'name': name})
+            uploaded = await turn.client.post_bytes(
+                '/v1/chat/images', body, as_user=user, params={'name': name, 'thread_id': thread_id}
+            )
         except SoevApiError as error:
             if error.status in (413, 415):
                 raise ImagesUnavailable('size' if error.status == 413 else 'type', name) from None
             raise
         if file is not None:
-            await Files.update_file_metadata_by_id(file.id, {'soev_image': uploaded, 'soev_image_user': user})
+            await Files.update_file_metadata_by_id(
+                file.id, {'soev_image': uploaded, 'soev_image_user': user, 'soev_image_thread': thread_id}
+            )
         images.append(uploaded)
     return images
 
@@ -1433,6 +1443,7 @@ class AgentTurn:
         self.client, self.metadata, self.as_user = client, metadata, as_user
         self.organizations = organizations
         self.thread_id: str | None = None
+        self.reserved = False
         self.position = 0
         self.input_position: int | None = None
         self.terminal = False
@@ -1535,7 +1546,45 @@ class AgentTurn:
     def path(self, operation: str = '') -> str:
         return f'{_ROOT}/{quote(self.thread_id or "", safe="")}' + (f'/{operation}' if operation else '')
 
+    async def image_thread(self, agent: str | None) -> str:
+        if threads.enabled():
+            if self.organizations is None:
+                raise threads.ThreadError(503, 'reconnect')
+            records = await self.organizations.list(self.metadata['user_id'])
+            record = next((r for r in records if r.id == self.metadata.get('chat_id')), None)
+            if record is not None:
+                return record.thread_id
+            if not self.metadata.get('new_thread'):
+                return threads._identifier(self.metadata.get('chat_id', ''))
+        elif bookmark := await self.bookmark():
+            # [Gradient] A branch created during streaming may read its owner's source objects.
+            return bookmark['thread_id']
+        await self.reserve(agent)
+        return self.thread_id
+
+    async def reserve(self, agent: str | None) -> None:
+        # [Gradient] A reserved native thread opens at /threads with agent and thread_id.
+        self.thread_id = await threads.build_client().reserve(
+            agent, temporary=is_temporary_chat_id(self.metadata.get('chat_id', ''))
+        )
+        self.reserved = True
+        self.metadata['follow_thread'] = True
+        await self.remember_thread()
+
+    async def remember_thread(self) -> None:
+        if threads.enabled() and self.metadata.get('new_thread'):
+            record = threads.Organization(
+                id=self.metadata.get('chat_id') or self.thread_id,
+                thread_id=self.thread_id,
+                folder_id=self.metadata.get('folder_id'),
+            )
+            await self.organizations.put(self.metadata['user_id'], record)
+            self.metadata['chat_id'] = record.id
+            self.metadata['new_thread'] = False
+
     async def prepare(self) -> None:
+        if self.reserved:
+            return
         if threads.enabled():
             if self.organizations is None:
                 raise threads.ThreadError(503, 'reconnect')
@@ -1551,16 +1600,7 @@ class AgentTurn:
             self.position = thread['status']['position']
             await self._seed_sources(thread['events'], self.position)
             return
-        parent_id = self.metadata.get('parent_message_id')
-        chat_id = self.metadata.get('chat_id')
-        if not parent_id or not chat_id:
-            return
-        if is_temporary_chat_id(chat_id):
-            bookmark = agent_threads.temporary_bookmark(chat_id, parent_id)
-        else:
-            parent = await Chats.get_message_by_id_and_message_id(chat_id, parent_id)
-            bookmark = ((parent or {}).get('meta') or {}).get('agent_v2')
-        if not bookmark:
+        if not (bookmark := await self.bookmark()):
             return
         self.thread_id, self.position = bookmark['thread_id'], bookmark['position']
         thread = await self.client.get(self.path(), as_user=self.as_user)
@@ -1568,6 +1608,15 @@ class AgentTurn:
         if thread['status']['position'] != self.position:
             branch = await self.client.chat_post(self.path('fork'), {'at': self.position}, as_user=self.as_user)
             self.thread_id = branch['thread_id']
+
+    async def bookmark(self) -> dict | None:
+        parent_id, chat_id = self.metadata.get('parent_message_id'), self.metadata.get('chat_id')
+        if not parent_id or not chat_id:
+            return None
+        if is_temporary_chat_id(chat_id):
+            return agent_threads.temporary_bookmark(chat_id, parent_id)
+        parent = await Chats.get_message_by_id_and_message_id(chat_id, parent_id)
+        return ((parent or {}).get('meta') or {}).get('agent_v2')
 
     async def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
@@ -1911,15 +1960,7 @@ class AgentTurn:
     async def render(self, event: ChatEvent) -> list[dict[str, Any]]:
         if event.event == 'connection':
             self.thread_id = event.data['thread_id']
-            if threads.enabled() and self.metadata.get('new_thread'):
-                record = threads.Organization(
-                    id=self.metadata.get('chat_id') or self.thread_id,
-                    thread_id=self.thread_id,
-                    folder_id=self.metadata.get('folder_id'),
-                )
-                await self.organizations.put(self.metadata['user_id'], record)
-                self.metadata['chat_id'] = record.id
-                self.metadata['new_thread'] = False
+            await self.remember_thread()
             return []
         position = event.position or event.data.get('position')
         if event.event != 'status' and position is not None:
@@ -2092,7 +2133,11 @@ class AgentTurn:
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.keep_attachments(body['input'].get('attachments') or [])
-            if not threads.enabled() and not self.thread_id and (earlier := await _earlier(self.metadata)):
+            if (
+                not threads.enabled()
+                and (not self.thread_id or self.reserved)
+                and (earlier := await _earlier(self.metadata))
+            ):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             self.keep_texts(body['input'].get('texts') or [])
             # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
@@ -2264,7 +2309,7 @@ async def _sent(
         more_texts, skipped_more_texts = await _more_texts(
             folder, entries, metadata, chats=chats, organizations=turn.organizations
         )
-        images = await _images(metadata, turn.as_user)
+        images = await _images(turn, agent)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
         return _refused(_unimaged(unavailable, metadata.get('user_language')))

@@ -67,6 +67,7 @@ class FakeSoevApi:
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
+        self.images = {}
         self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
@@ -97,8 +98,13 @@ class FakeSoevApi:
         if request.method == 'GET' and request.url.path == '/v1/products/owui/config':
             assert subject is None
             return httpx.Response(200, json=self.product_config)
-        if request.method == 'PUT' and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path):
-            return self._upload(request, credential)
+        if (
+            request.method == 'PUT'
+            and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path)
+            or request.method == 'POST'
+            and request.url.path == '/v1/chat/images'
+        ):
+            return self._binary_upload(request, credential, subject)
         body = json.loads(request.content) if request.content else None
         if (
             request.method == 'GET'
@@ -130,6 +136,42 @@ class FakeSoevApi:
         response = self._route(request, body, credential, subject)
         self.replays[key] = (copy.deepcopy(fingerprint), response.status_code, response.content)
         return response
+
+    def _binary_upload(self, request, credential, subject):
+        if request.url.path == '/v1/chat/images':
+            return self._image_upload(request, (credential, subject))
+        return self._upload(request, credential)
+
+    def _image_upload(self, request, owner):
+        # [Gradient] Binary uploads require a valid, caller-owned thread before the first turn.
+        thread_id, name = request.url.params.get('thread_id'), request.url.params.get('name')
+        if not thread_id or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', thread_id) or not name:
+            raise Problem(422, 'invalid_field')
+        thread = self.chat.threads.get(thread_id)
+        if owner[1] is None or thread is None or thread['owner'] != owner:
+            raise Problem(404, 'not_found')
+        data = request.content
+        if len(data) > 10 * 1024 * 1024:
+            raise Problem(413, 'upload_size_exceeded')
+        if data.startswith(b'\x89PNG\r\n\x1a\n'):
+            media_type = 'image/png'
+        elif data.startswith(b'\xff\xd8\xff'):
+            media_type = 'image/jpeg'
+        elif data.startswith((b'GIF87a', b'GIF89a')):
+            media_type = 'image/gif'
+        elif data.startswith(b'RIFF') and data[8:12] == b'WEBP':
+            media_type = 'image/webp'
+        else:
+            raise Problem(415, 'content_type_rejected')
+        reference = {
+            'id': uuid4().hex,
+            'sha256': hashlib.sha256(data).hexdigest(),
+            'size': len(data),
+            'media_type': media_type,
+            'name': name,
+        }
+        self.images[reference['id']] = {'thread_id': thread_id, 'owner': owner, 'reference': reference}
+        return httpx.Response(201, json=reference)
 
     def _subject(self, request):
         subject = None
@@ -262,7 +304,7 @@ class FakeSoevApi:
         if request.url.path == '/v1/chat/reads' and request.method == 'POST':
             return self._reads(request, body, credential, subject)
         if request.url.path.startswith('/v1/chat/threads'):
-            return self.chat.handle(request, body, (credential, subject))
+            return self._chat(request, body, (credential, subject))
         if request.url.path == '/v1/connections' and request.method == 'GET':
             return self._page([row for row in self.connections.values() if row['owner'] == subject], request)
         parts = request.url.path.strip('/').split('/')
@@ -280,6 +322,30 @@ class FakeSoevApi:
         if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
             return self._cloud_create(request.url.path.rpartition('/')[2], body, subject)
         return self._catalog_route(request, body, credential, subject)
+
+    def _chat(self, request, body, owner):
+        if request.method == 'POST' and isinstance(body, dict) and isinstance(body.get('input'), dict):
+            self._chat_images(request, body, owner)
+        return self.chat.handle(request, body, owner)
+
+    def _chat_images(self, request, body, owner):
+        # [Gradient] Like object.read, authorize the target and the object's own thread separately.
+        images = body['input'].get('images', [])
+        if not isinstance(images, list) or len(images) > 4:
+            raise Problem(422, 'invalid_field')
+        if not images:
+            return
+        thread_id = body.get('thread_id') if request.url.path == '/v1/chat/threads' else request.url.path.split('/')[4]
+        target = self.chat.threads.get(thread_id)
+        if target is None or target['owner'] != owner:
+            raise Problem(404, 'not_found')
+        for reference in images:
+            image = self.images.get(reference.get('id')) if isinstance(reference, dict) else None
+            origin = self.chat.threads.get(image['thread_id']) if image else None
+            if origin is None or origin['owner'] != owner or image['owner'] != owner:
+                raise Problem(404, 'image_not_found')
+            if any(reference.get(key) != image['reference'][key] for key in ('sha256', 'size', 'media_type')):
+                raise Problem(404, 'image_not_found')
 
     def _connection_read_or_delete(self, request, identifier, subject):
         if request.method == 'DELETE':

@@ -294,6 +294,20 @@ above and enforced by the no-gateway-key assertion.
 
 New chats reserve an id via `POST /v1/chat/threads:reserve` without running input; the followed first turn streams `POST /v1/chat/threads` with that `thread_id`, and later turns use `/inputs`.
 
+Chat image uploads send both `name` and `thread_id`. Browser preflight checks local
+image access and bytes without uploading; `/chats/new` then reserves the thread,
+and the follow request uploads before opening with both `agent` and `thread_id`.
+A direct first image turn reserves and records the thread before uploading too.
+If admission refuses the turn, the reservation, uploaded objects and organisational
+record remain; there is no automatic rollback. The reservation can be retried with
+the native opening request or explicitly deleted by its owner.
+
+File image caches require the same user, upload thread and byte digest. A new chat
+uploads again, so deleting an earlier chat cannot invalidate its cached image.
+An in-turn branch may upload under its owned source thread before the child exists;
+regenerate/edit replays retain their authorised durable image references. ACL checks
+the target thread's ownership and access to each object's own thread separately.
+
 `ENABLE_V2_THREADS` is a server-only switch, false by default. The authenticated
 configuration exposes `features.enable_v2_threads` only when that switch,
 `AGENT_API_ENABLED`, and `SOEV_API_URL` are set. This preparation does not mount

@@ -54,6 +54,7 @@ class FakeChatApi:
         self.tails: list[Tail] = []
         self.tail_closes = False
         self.terminal_state = 'finished'
+        self.next_thread = 0
 
     def handle(self, request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
         self.requests.append(request)
@@ -108,7 +109,8 @@ class FakeChatApi:
         return httpx.Response(200, json=current, headers=headers())
 
     def _new(self, owner: tuple[str, str | None], events: list[dict]) -> dict[str, Any]:
-        thread_id = f'thr-{len(self.threads) + 1}'
+        self.next_thread += 1
+        thread_id = f'thr-{self.next_thread}'
         thread = {'thread_id': thread_id, 'owner': owner, 'events': events, 'state': 'finished'}
         self.threads[thread_id] = thread
         return thread
@@ -189,11 +191,23 @@ class FakeChatApi:
         if (
             not isinstance(turn, dict)
             or set(turn)
-            - {'text', 'knowledge', 'tools', 'context', 'attachments', 'attachment_collection', 'documents', 'chats'}
+            - {
+                'text',
+                'knowledge',
+                'tools',
+                'context',
+                'attachments',
+                'attachment_collection',
+                'documents',
+                'chats',
+                'images',
+            }
             or not isinstance(turn.get('text'), str)
             or turn.get('documents', 'off') not in ('off', 'auto', 'required')
             or not all(isinstance(entry, dict) and entry.get('key') for entry in turn.get('knowledge', []))
             or not isinstance(turn.get('chats', []), list)
+            or not isinstance(turn.get('images', []), list)
+            or len(turn.get('images', [])) > 4
             or len(turn.get('chats', [])) > 10
             or any(
                 not isinstance(entry, dict) or set(entry) != {'thread_id'} or not isinstance(entry['thread_id'], str)
