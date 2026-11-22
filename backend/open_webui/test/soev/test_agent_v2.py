@@ -21,7 +21,7 @@ import pytest
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket import main as socket_main
-from open_webui.soev import agent_threads, ingest
+from open_webui.soev import acting, agent_threads, identity, ingest, threads
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 from open_webui.utils import agent, agent_v2
@@ -724,8 +724,6 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
     access: str,
     bypass: bool,
 ) -> None:
-    from open_webui import config
-
     monkeypatch.setenv('BYPASS_ADMIN_ACCESS_CONTROL', str(bypass).lower())
     item = stored_texts[item_id]
     if access != 'owner':
@@ -3731,8 +3729,26 @@ IMAGE_REFERENCE = {
 
 
 @pytest.fixture
-def image_upload(monkeypatch):
-    upload = AsyncMock(return_value=IMAGE_REFERENCE)
+def image_actor():
+    requester = acting._requester_ref.set('owui:user:alice')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login:owui:user:alice'))
+    try:
+        yield
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
+
+
+@pytest.fixture
+def image_upload(monkeypatch, image_actor, chat):
+    async def stored(path, body, *, as_user, params):
+        thread_id = params['thread_id']
+        owner = ('soev_test_cred-runtime_test-secret', as_user)
+        assert chat.api.chat.threads[thread_id]['owner'] == owner
+        chat.api.images[IMAGE_REFERENCE['id']] = {'thread_id': thread_id, 'owner': owner, 'reference': IMAGE_REFERENCE}
+        return IMAGE_REFERENCE
+
+    upload = AsyncMock(side_effect=stored)
     monkeypatch.setattr(SoevClient, 'post_bytes', upload)
     return upload
 
@@ -3766,18 +3782,19 @@ def saved_image(tmp_path, monkeypatch):
 async def test_saved_image_upload_is_reused_after_access_check_on_retry(chat, image_upload, saved_image, entry):
     metadata = {'user_message': {'content': 'describe', 'files': [entry]}}
     for index in range(2):
-        await chat.turn('describe', f'a{index}', **metadata)
+        await chat.turn('describe', f'a{index}', 'a0' if index else None, **metadata)
         assert chat.mutations()[-1][1]['input']['images'] == [IMAGE_REFERENCE]
     image_upload.assert_awaited_once_with(
-        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png'}
+        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png', 'thread_id': 'thr-1'}
     )
     assert saved_image.meta['soev_image'] == IMAGE_REFERENCE
+    assert saved_image.meta['soev_image_thread'] == 'thr-1'
     assert saved_image.lookup.await_count == 2
     assert saved_image.update.await_count == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('change', ['bytes', 'caller'])
+@pytest.mark.parametrize('change', ['bytes', 'caller', 'thread', 'unscoped'])
 async def test_image_cache_does_not_reuse_changed_bytes_or_another_callers_reference(
     chat, image_upload, saved_image, change
 ):
@@ -3785,10 +3802,160 @@ async def test_image_cache_does_not_reuse_changed_bytes_or_another_callers_refer
     await chat.turn('describe', 'a1', **metadata)
     if change == 'bytes':
         Path(saved_image.path).write_bytes(IMAGE_BYTES + b'changed')
-    else:
+    elif change == 'caller':
         saved_image.meta['soev_image_user'] = 'owui:user:bob'
-    await chat.turn('describe', 'a2', **metadata)
+    elif change == 'thread':
+        saved_image.meta['soev_image_thread'] = 'another-thread'
+    else:
+        saved_image.meta.pop('soev_image_thread')
+    await chat.turn('describe', 'a2', 'a1', **metadata)
     assert image_upload.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_image_upload_uses_existing_thread_without_reservation(chat, image_actor):
+    await chat.turn('earlier', 'a1')
+    chunks = await chat.turn(
+        'describe', 'a2', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]}
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    upload = next(r for r in chat.api.requests if r.url.path == '/v1/chat/images')
+    assert dict(upload.url.params) == {'name': 'image', 'thread_id': 'thr-1'}
+    assert [path for path, _ in chat.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    reference = chat.mutations()[-1][1]['input']['images'][0]
+    assert chat.api.images[reference['id']]['thread_id'] == 'thr-1'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('selected_version', [False, True])
+async def test_platform_image_upload_uses_mapped_thread_or_selected_version(
+    chat, image_actor, saved_image, monkeypatch, selected_version
+):
+    message = {'content': 'describe', 'files': [{'type': 'image', 'id': saved_image.id}]}
+    await chat.turn('describe', 'a1', user_message=message)
+    original = copy.deepcopy(saved_image.meta['soev_image'])
+    child = await identity.build_client().chat_post('/v1/chat/threads/thr-1/fork', {'at': 1}, as_user='owui:user:alice')
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    organizations = SimpleNamespace(
+        list=AsyncMock(return_value=[threads.Organization(id='conversation', thread_id='thr-1')])
+    )
+    target = child['thread_id'] if selected_version else 'thr-1'
+    response = await agent_v2.call_agent_v2(
+        {'stream': False},
+        {
+            'user_id': 'alice',
+            'chat_id': target if selected_version else 'conversation',
+            'message_id': 'next-answer',
+            'user_message': message,
+        },
+        agent='test',
+        model='llm',
+        organizations=organizations,
+    )
+    assert isinstance(response, dict), response
+    assert saved_image.meta['soev_image_thread'] == target
+    uploads = [r for r in chat.api.requests if r.url.path == '/v1/chat/images']
+    assert len(uploads) == 1 + int(selected_version)
+    assert uploads[-1].url.params['thread_id'] == target
+    assert (saved_image.meta['soev_image'] == original) is (not selected_version)
+    assert chat.mutations()[-1][0] == f'/v1/chat/threads/{target}/inputs'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('platform_threads', [False, True])
+async def test_first_image_reserves_then_uploads_then_opens_with_agent_and_thread(
+    chat, image_actor, monkeypatch, platform_threads
+):
+    monkeypatch.setattr(threads, 'enabled', lambda: platform_threads)
+    organizations = SimpleNamespace(list=AsyncMock(return_value=[]), put=AsyncMock())
+    metadata = {
+        'user_id': 'alice',
+        'chat_id': 'new-chat',
+        'message_id': 'answer',
+        'new_thread': True,
+        'folder_id': 'folder',
+        'user_message': {'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]},
+    }
+    response = await agent_v2.call_agent_v2(
+        {'stream': False}, metadata, agent='test', model='llm', organizations=organizations
+    )
+    assert isinstance(response, dict), response
+    assert response['choices'][0]['message']['content'] == 'Answer: describe'
+    requests = [r for r in chat.api.requests if r.method == 'POST' and r.url.path.startswith('/v1/chat/')]
+    assert [r.url.path for r in requests] == ['/v1/chat/threads:reserve', '/v1/chat/images', '/v1/chat/threads']
+    assert json.loads(requests[0].content) == {'agent': 'test', 'title': None, 'temporary': False}
+    assert requests[1].url.params['thread_id'] == 'thr-1'
+    opening = json.loads(requests[2].content)
+    assert opening['agent'] == 'test' and opening['thread_id'] == 'thr-1'
+    assert chat.api.images[opening['input']['images'][0]['id']]['thread_id'] == 'thr-1'
+    if platform_threads:
+        organizations.put.assert_awaited_once_with(
+            'alice', threads.Organization(id='new-chat', thread_id='thr-1', folder_id='folder')
+        )
+
+
+@pytest.mark.asyncio
+async def test_image_cache_is_uploaded_again_in_another_chat_after_origin_is_deleted(chat, image_actor, saved_image):
+    metadata = {'user_message': {'content': 'describe', 'files': [{'type': 'image', 'id': saved_image.id}]}}
+    await chat.turn('describe', 'a1', **metadata)
+    first = copy.deepcopy(saved_image.meta)
+    await identity.build_client().chat_delete('/v1/chat/threads/thr-1', as_user='owui:user:alice')
+    chunks = await chat.turn('describe', 'a2', chat_id='another-chat', **metadata)
+    assert not any('error' in chunk for chunk in chunks)
+    assert first['soev_image_thread'] == 'thr-1'
+    assert saved_image.meta['soev_image_thread'] == 'thr-2'
+    assert saved_image.meta['soev_image']['id'] != first['soev_image']['id']
+    assert [r.url.params['thread_id'] for r in chat.api.requests if r.url.path == '/v1/chat/images'] == [
+        'thr-1',
+        'thr-2',
+    ]
+    assert chat.mutations()[-1][1]['input']['images'] == [saved_image.meta['soev_image']]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['regenerate', 'edit', 'copy'])
+async def test_image_uses_owned_source_when_branch_is_created_during_turn(chat, image_actor, saved_image, operation):
+    await chat.turn('first', 'a1')
+    await chat.turn('second', 'a2', 'a1')
+    chat_id = 'copy' if operation == 'copy' else 'chat'
+    if operation == 'copy':
+        chat.messages['copy', 'a1'] = copy.deepcopy(chat.messages['chat', 'a1'])
+    chunks = await chat.turn(
+        'changed',
+        'new-answer',
+        'a1',
+        chat_id=chat_id,
+        user_message={'content': 'changed', 'files': [{'type': 'image', 'id': saved_image.id}]},
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert saved_image.meta['soev_image_thread'] == 'thr-1'
+    assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
+    assert chat.mutations()[-1][0] == '/v1/chat/threads/thr-2/inputs'
+    assert len([r for r in chat.api.chat.requests if r.url.path.endswith('/fork')]) == 1
+
+
+@pytest.mark.asyncio
+async def test_refused_first_turn_retains_reservation_upload_and_organization(chat, image_actor, monkeypatch):
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    organizations = SimpleNamespace(list=AsyncMock(return_value=[]), put=AsyncMock())
+    monkeypatch.setattr(chat.api.chat, '_refusal', lambda *args, **kwargs: chat.api.chat.problem(422, 'invalid_field'))
+    response = await agent_v2.call_agent_v2(
+        {'stream': False},
+        {
+            'user_id': 'alice',
+            'chat_id': 'new-chat',
+            'new_thread': True,
+            'user_message': {'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]},
+        },
+        agent='test',
+        model='llm',
+        organizations=organizations,
+    )
+    assert isinstance(response, JSONResponse) and response.status_code == 422
+    assert chat.api.chat.threads['thr-1']['state'] == 'reserved'
+    assert chat.api.chat.threads['thr-1']['events'] == []
+    assert len(chat.api.images) == 1
+    organizations.put.assert_awaited_once_with('alice', threads.Organization(id='new-chat', thread_id='thr-1'))
 
 
 @pytest.mark.asyncio
@@ -3832,7 +3999,7 @@ async def test_temporary_chat_images_come_only_from_current_user_message(chat, i
         'images': [IMAGE_REFERENCE],
     }
     image_upload.assert_awaited_once_with(
-        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png'}
+        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png', 'thread_id': 'thr-1'}
     )
     update.assert_not_awaited()
 
@@ -3898,7 +4065,7 @@ async def test_image_upload_validation_errors_name_the_file(chat, image_upload, 
     assert error['code'] == 'images_unavailable'
     assert 'bad.png' in error['message'] and reason in error['message']
     assert ('Verwijder' if language == 'nl-NL' else 'Remove') in error['message']
-    assert chat.mutations() == []
+    assert chat.mutations() == [('/v1/chat/threads:reserve', {'agent': 'test', 'title': None, 'temporary': False})]
 
 
 @pytest.mark.asyncio
@@ -3909,7 +4076,7 @@ async def test_other_image_upload_errors_refuse_the_turn_as_unavailable(chat, im
     )
     assert chunks == [agent_v2._error('service_unavailable')]
     assert chat.status == 503
-    assert chat.mutations() == []
+    assert chat.mutations() == [('/v1/chat/threads:reserve', {'agent': 'test', 'title': None, 'temporary': False})]
 
 
 @pytest.mark.asyncio

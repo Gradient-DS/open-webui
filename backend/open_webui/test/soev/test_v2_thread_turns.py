@@ -8,12 +8,24 @@ import pytest
 from fastapi import FastAPI, Request
 from open_webui.models.config import Config
 from open_webui.models.users import UserModel
-from open_webui.soev import threads
+from open_webui.soev import acting, threads
 from open_webui.test.soev import test_thread_organizations
+from open_webui.test.soev.test_agent_v2 import IMAGE_URL
 from starlette.responses import StreamingResponse
 
 main = importlib.import_module('open_webui.main')
 organization_store = test_thread_organizations.organization_store
+
+
+@pytest.fixture
+def turn_actor():
+    requester = acting._requester_ref.set('owui:user:fictional-fern')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login:owui:user:fictional-fern'))
+    try:
+        yield
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
 
 
 async def browser_stream(response):
@@ -27,11 +39,28 @@ async def browser_stream(response):
     return ''.join(parts)
 
 
+def assert_image_upload(chat_http, opening, chat_id, with_image):
+    uploads = [r for r in chat_http.requests if r.url.path == '/v1/chat/images']
+    assert len(uploads) == 2 * int(with_image)
+    if with_image:
+        assert [upload.url.params['thread_id'] for upload in uploads] == [chat_id, chat_id]
+        reference = opening['input']['images'][0]
+        assert chat_http.images[reference['id']]['thread_id'] == chat_id
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('metadata_tasks', [False, True])
 @pytest.mark.parametrize('browser_create', [False, True])
+@pytest.mark.parametrize('with_image', [False, True])
 async def test_full_v2_turn_streams_without_local_content(
-    chat_http, organization_store, monkeypatch, metadata_tasks, browser_create
+    chat_http,
+    organization_store,
+    monkeypatch,
+    metadata_tasks,
+    browser_create,
+    with_image,
+    turn_actor,
+    platform_capabilities,
 ):
     from open_webui.soev import thread_metadata
     from open_webui.utils import agent_v2
@@ -91,6 +120,9 @@ async def test_full_v2_turn_streams_without_local_content(
             'session_id': 'fictional-session',
             'background_tasks': {'title_generation': metadata_tasks, 'tags_generation': metadata_tasks},
         }
+        form['user_message']['files'] = (
+            [{'type': 'image', 'url': IMAGE_URL, 'name': 'fictional.png'}] if with_image else []
+        )
         if index == 0 and browser_create:
             from open_webui.soev.chat_paths import ChatPaths
             from open_webui.soev.chat_routes import chat_write
@@ -146,19 +178,22 @@ async def test_full_v2_turn_streams_without_local_content(
         assert len(records) == 1
         chat_id = records[0].id
     mutations = [r for r in chat_http.chat.requests if r.method == 'POST']
-    assert [r.url.path for r in mutations] == (['/v1/chat/threads:reserve'] if browser_create else []) + [
+    reserved = browser_create or with_image
+    assert [r.url.path for r in mutations] == (['/v1/chat/threads:reserve'] if reserved else []) + [
         '/v1/chat/threads',
         '/v1/chat/threads/thr-1/inputs',
     ]
-    turns = mutations[1:] if browser_create else mutations
+    turns = mutations[1:] if reserved else mutations
     assert [json.loads(r.content)['input']['text'] for r in turns] == ['Fictional turn 0', 'Fictional turn 1']
     opening = json.loads(turns[0].content)
     assert opening['agent'] == 'test'
     assert opening['model'] == model['id']
     assert turns[0].headers['Accept'] == 'text/event-stream'
-    assert opening.get('thread_id') == (chat_id if browser_create else None)
+    thread_id = records[0].thread_id
+    assert opening.get('thread_id') == (thread_id if reserved else None)
+    assert_image_upload(chat_http, opening, thread_id, with_image)
     if browser_create:
-        assert opening['input'] == payload['input']
+        assert {key: value for key, value in opening['input'].items() if key != 'images'} == payload['input']
     assert not [r for r in chat_http.chat.requests if r.url.path.endswith('/events')]
     assert complete.await_count == (2 if metadata_tasks else 0)
     if metadata_tasks:

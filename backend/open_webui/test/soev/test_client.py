@@ -358,7 +358,12 @@ async def test_as_user_without_a_token_is_refused(recorded_http, method, monkeyp
         elif method == 'send':
             await client.send('POST', '/v1/collections', {}, as_user='owui:user:alice', idempotency_key='operation-1')
         elif method == 'post_bytes':
-            await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
+            await client.post_bytes(
+                '/v1/chat/images',
+                b'image',
+                as_user='owui:user:alice',
+                params={'name': 'photo.png', 'thread_id': 'thr-1'},
+            )
         else:
             await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
     assert (caught.value.status, caught.value.code) == (401, 'sign_in')
@@ -428,7 +433,12 @@ async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, ca
                 'job', 'source', chunks(), size=6, content_type='text/plain', as_user='owui:user:alice'
             )
         elif method == 'post_bytes':
-            await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
+            await client.post_bytes(
+                '/v1/chat/images',
+                b'image',
+                as_user='owui:user:alice',
+                params={'name': 'photo.png', 'thread_id': 'thr-1'},
+            )
         else:
             await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
     assert caught.value.status == status
@@ -701,13 +711,16 @@ async def test_post_bytes_uploads_as_user_without_content_type(recorded_http):
     client = SoevClient('https://soev.invalid', 'test-api-key')
     assert (
         await client.post_bytes(
-            '/v1/chat/images', b'image', as_user='owui:user:alice', params={'name': reference['name']}
+            '/v1/chat/images',
+            b'image',
+            as_user='owui:user:alice',
+            params={'name': reference['name'], 'thread_id': 'thr-1'},
         )
         == reference
     )
     (request,) = requests
     assert request.method == 'POST' and request.url.path == '/v1/chat/images'
-    assert request.url.params['name'] == reference['name']
+    assert dict(request.url.params) == {'name': reference['name'], 'thread_id': 'thr-1'}
     assert request.content == b'image'
     assert request.headers['Authorization'] == 'Bearer test-api-key'
     assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
@@ -728,7 +741,9 @@ async def test_post_bytes_uses_shared_problem_handling(recorded_http, status):
     )
     client = SoevClient('https://soev.invalid', 'test-api-key')
     with pytest.raises(SoevApiError) as caught:
-        await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
+        await client.post_bytes(
+            '/v1/chat/images', b'image', as_user='owui:user:alice', params={'name': 'photo.png', 'thread_id': 'thr-1'}
+        )
     assert caught.value.status == status
     assert caught.value.code == 'image_error'
     assert len(requests) == 1
