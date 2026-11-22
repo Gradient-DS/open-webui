@@ -1972,6 +1972,9 @@ USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
     os.getenv('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
 )
 
+# [Gradient] Council information search (raadsinformatie); the admin switch is the real gate.
+USER_PERMISSIONS_FEATURES_COUNCIL = os.getenv('USER_PERMISSIONS_FEATURES_COUNCIL', 'True').lower() == 'true'
+
 
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
@@ -2057,6 +2060,7 @@ DEFAULT_USER_PERMISSIONS = {
         'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
         'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
         'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
+        'council': USER_PERMISSIONS_FEATURES_COUNCIL,
     },
     'settings': {
         'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
@@ -2986,6 +2990,16 @@ FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true
 # [Gradient] Vergadering (meeting assistant) page; also needs the meeting agent in the soev-api catalog.
 FEATURE_MEETINGS = os.environ.get('FEATURE_MEETINGS', 'True').lower() == 'true'
 
+# [Gradient] The language the meeting start form preselects: auto (the transcription model
+# detects it), nl or en. Any other value falls back to auto.
+MEETING_DEFAULT_LANGUAGE = os.environ.get('MEETING_DEFAULT_LANGUAGE', 'auto').strip().lower()
+
+# [Gradient] The longest one meeting recording runs, in minutes; the recorder stops and finishes
+# it there. Keep it within what the tenant's transcription model takes in one call.
+MEETING_MAX_MINUTES = int(os.environ.get('MEETING_MAX_MINUTES', '120'))
+if MEETING_MAX_MINUTES < 1:
+    raise ValueError(f'MEETING_MAX_MINUTES must be at least 1, got {MEETING_MAX_MINUTES}')
+
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 
 FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'
@@ -3161,6 +3175,10 @@ DEFAULT_CONFIG = {
     'google_drive.api_key': GOOGLE_DRIVE_API_KEY,
     'live_mail.enable': os.getenv('ENABLE_LIVE_MAIL', 'False').lower() == 'true',
     'live_documents.enable': os.getenv('ENABLE_LIVE_DOCUMENTS', 'False').lower() == 'true',
+    # [Gradient] Council information search: the admin's switch, and the organization keys it searches
+    # (Open Besluitvorming source keys; empty searches every organization).
+    'council.enable': os.getenv('ENABLE_COUNCIL', 'False').lower() == 'true',
+    'council.organizations': [],
     'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
     'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
     'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,

@@ -37,9 +37,13 @@ class MeetingInput(BaseModel):
 
 
 def _http_error(error: SoevApiError) -> HTTPException:
+    detail = {'code': error.code, 'detail': error.detail}
+    if error.constraint is not None:
+        # Why the agent refused (`chat:<reason>`): the page words it in the user's language.
+        detail['constraint'] = error.constraint
     return HTTPException(
         status_code=error.status,
-        detail={'code': error.code, 'detail': error.detail},
+        detail=detail,
         headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,
     )
 
@@ -118,7 +122,15 @@ async def start_meeting(body: MeetingInput, soev: Soev):
 
 
 @router.post('/audio', status_code=201)
-async def upload_audio(request: Request, soev: Soev, name: Annotated[str, Query(min_length=1, max_length=255)]):
+async def upload_audio(
+    request: Request,
+    soev: Soev,
+    name: Annotated[str, Query(min_length=1, max_length=255)],
+    continues: Annotated[str | None, Query(pattern=r'^[0-9a-f]{32}$')] = None,
+):
+    """Forward one upload; `continues` names the upload whose bytes follow on in this one,
+    for a recording larger than the 64 MiB a single upload may carry.
+    """
     declared = request.headers.get('content-length')
     if declared is not None and declared.isdigit() and int(declared) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail='Audio exceeds 64 MiB')
@@ -130,7 +142,8 @@ async def upload_audio(request: Request, soev: Soev, name: Annotated[str, Query(
     if not body:
         raise HTTPException(status_code=400, detail='No audio received')
     try:
-        return await soev.client.post_bytes('/v1/audio', bytes(body), as_user=soev.ref, params={'name': name})
+        params = {'name': name} if continues is None else {'name': name, 'continues': continues}
+        return await soev.client.post_bytes('/v1/audio', bytes(body), as_user=soev.ref, params=params)
     except SoevApiError as error:
         raise _http_error(error) from None
 

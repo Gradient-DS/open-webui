@@ -5,6 +5,8 @@ import {
 	effectiveModel,
 	isAssistant,
 	isLLM,
+	pickableLLMId,
+	pickableLLMs,
 	resolveAssistant,
 	splitSelection
 } from './assistants';
@@ -179,5 +181,46 @@ describe('resolveAssistant', () => {
 	});
 	it('refuses an LLM name', () => {
 		expect(resolveAssistant('GPU', models)).toBeUndefined();
+	});
+});
+
+describe('models for an assistant that uses tools', () => {
+	const catalog = (id: string, tools: string) => ({
+		id,
+		owned_by: 'soev',
+		info: { meta: { soev: { capabilities: { tools } } } }
+	});
+	const plain = catalog('plain', 'unsupported');
+	const capable = catalog('capable', 'supported');
+	const unmeasured = catalog('unmeasured', 'unknown');
+	const helper = (meta: object) => ({ id: 'helper', info: { base_model_id: 'plain', meta } });
+	const all = [plain, capable, unmeasured];
+
+	it.each([
+		{ defaultFeatureIds: ['workspace'] },
+		{ defaultFeatureIds: ['web_search'] },
+		{ toolIds: ['server:mcp:files'] },
+		{ knowledge: [{ id: 'kb' }] }
+	])('leaves out a model without tool support for %o', (meta) => {
+		expect(pickableLLMs(all, helper(meta)).map((model) => model.id)).toEqual([
+			'capable',
+			'unmeasured'
+		]);
+	});
+
+	it.each([null, helper({}), helper({ defaultFeatureIds: ['image_generation'] })])(
+		'offers every model without a tool-using assistant',
+		(assistant) => {
+			expect(pickableLLMs(all, assistant)).toEqual(all);
+		}
+	);
+
+	it('replaces a selected model that cannot call tools with the preferred one that can', () => {
+		const tooled = helper({ defaultFeatureIds: ['workspace'] });
+		expect(pickableLLMId('plain', all, tooled, ['plain', 'unmeasured'])).toBe('unmeasured');
+		expect(pickableLLMId('plain', all, tooled)).toBe('capable');
+		expect(pickableLLMId('capable', all, tooled)).toBe('capable');
+		expect(pickableLLMId('plain', all, null)).toBe('plain');
+		expect(pickableLLMId('plain', [plain], tooled)).toBe('plain');
 	});
 });

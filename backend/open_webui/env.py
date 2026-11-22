@@ -1113,6 +1113,9 @@ AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'tru
 # (or no selection), the payload omits ``agent`` and the agents service
 # falls back to its configured ``default_agent``.
 AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
+# [Gradient] Where the admin's council organization picker lists organizations: the Open Besluitvorming API
+# the agents search (their SOEV_AGENTS_API_COUNCIL_ENDPOINT).
+COUNCIL_SOURCES_URL = os.environ.get('COUNCIL_SOURCES_URL', 'https://openbesluitvorming.nl')
 
 
 ####################################

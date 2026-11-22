@@ -447,6 +447,10 @@ type Config = {
 		feature_notes_ai_controls?: boolean;
 		feature_voice?: boolean;
 		feature_changelog?: boolean;
+		// [Gradient] Vergadering: the language the start form preselects (auto, nl or en).
+		meeting_default_language?: string;
+		// [Gradient] Vergadering: the longest a recording may run, in minutes.
+		meeting_max_minutes?: number;
 		feature_system_prompt?: boolean;
 		feature_models?: boolean;
 		feature_model_meters?: boolean;
@@ -472,6 +476,7 @@ type Config = {
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
 		enable_document_writer?: boolean;
+		enable_council?: boolean;
 		enable_docx_export?: boolean;
 		enable_agent_trace_download?: boolean;
 		enable_code_execution?: boolean;

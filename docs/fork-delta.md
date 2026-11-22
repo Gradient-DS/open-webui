@@ -424,6 +424,17 @@ redirects to `/`. No sharing UI: transcripts stay private, users share by
 downloading Markdown, .docx (built in the browser with jszip) or PDF (browser
 print via `utils/documentPrint.ts`).
 
+The start form asks the spoken language: detect automatically, Nederlands or
+English (`AUTO_LANGUAGE` and `MEETING_LANGUAGES` in `meeting.ts`), and sends it
+with `start` (`auto`, `nl` or `en`). It preselects `MEETING_DEFAULT_LANGUAGE`
+(`config.py`, default `auto`; Helm `meetingDefaultLanguage`; `/api/config`
+`meeting_default_language`); the UI language plays no part, so a UI in any
+language never sends its own code. With `auto` the transcription model detects
+the language of each recording it gets, and the meeting keeps no language of
+its own. A start the agent refuses for its language (soev-api constraint
+`chat:language_unsupported`, which the router passes on) shows a translated
+message.
+
 `backend/open_webui/routers/meetings.py` (mounted at `/api/v1/meetings` in
 `main.py`, since no fork router has a matching prefix) only forwards as the
 caller via `identity.build_client()`: audio bytes (64 MiB cap, held in memory,
@@ -432,6 +443,20 @@ never written to disk) to `POST /v1/audio`, inputs to the thread routes, and
 event payload. Inputs return once soev-api accepts them; the turn runs on and the
 page polls. Every route refuses with 403 when the flag is off (admins too) and 503
 without `SOEV_API_URL`.
+
+A recording larger than one upload goes up in pieces (`pieces.ts`, 32 MiB each):
+the first as a file of its own, every later one with `?continues=<id of the
+first>`, which the router passes on. `finish` lists the pieces in order and the
+meeting agent joins them before transcription, so the speech model gets the one
+recording and speakers stay the same throughout. A recording resumed after an
+interruption is still a recording of its own, with its own speaker numbers.
+
+One recording runs for at most `MEETING_MAX_MINUTES` (`config.py`, default
+`120`; Helm `meetingMaxMinutes`; `/api/config` `meeting_max_minutes`). The
+recorder warns five minutes before (`limitState` in `recorder.ts`) and at the
+limit stops as the stop button does: the recording is sent and transcribed.
+Set it within what the tenant's transcription model takes in one call: at the
+recorder's 96 kbit/s, 120 minutes are about 86 MB.
 
 Frontend, all fork-owned: `src/routes/(app)/meetings/`,
 `src/lib/components/meetings/` (consent and source choice, recorder, view, list,

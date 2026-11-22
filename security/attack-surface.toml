@@ -446,9 +446,9 @@ actor = "admin"
 key = "skill"
 name = "id"
 prefix = "/api/v1/skills/id/{id}"
-description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token."
+description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token. The base64 zip exercises atomic bundle import and single-folder stripping; files are new and private to the creator."
 via = "POST /api/v1/skills/create"
-body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content" }
+body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content", "bundle" = "UEsDBBQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAb3V0bGluZS9TS0lMTC5tZHMsKUlMzlYozs7MyVFIzs8rSc0rAQBQSwMEFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAABvdXRsaW5lL3JlZmVyZW5jZXMvaW1wb3J0ZWQudHh088wrS80rSU1RyMwtyC8qUUjLrCgpLUoFAFBLAQIUAxQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAAAAAAAAAAACAAQAAAABvdXRsaW5lL1NLSUxMLm1kUEsBAhQDFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAAAAAAAAAAAAAIABRAAAAG91dGxpbmUvcmVmZXJlbmNlcy9pbXBvcnRlZC50eHRQSwUGAAAAAAIAAgCLAAAAmgAAAAAA" }
 extract = "id"
 actor = "admin"
 
@@ -1111,6 +1111,11 @@ description = "routers/memories.py answers 400 'No memory update provided' to a 
 json = { "content" = "Attack memory update {token}" }
 
 [[field]]
+route = "POST /api/v1/configs/council"
+description = "routers/configs.py:set_council_config answers 422 to the placeholder: an organization key must match the source's key pattern and a label is at least one character. The key is the one the stub's organization list serves."
+json = { "COUNCIL_ORGANIZATIONS[].key" = "ci-gemeente", "COUNCIL_ORGANIZATIONS[].label" = "CI gemeente" }
+
+[[field]]
 route = "POST /api/v1/prompts/id/{prompt_id}/update/version"
 description = "update_prompt_version refuses a version_id that is not a history row of this prompt; the seeded one is."
 json = { "version_id" = "{prompt_history}" }
@@ -1384,3 +1389,29 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
+
+# [Gradient] Imported bundles seed real paths; no private platform service is needed.
+[[field]]
+route = "GET /api/v1/skills/id/{id}/files/content"
+description = "The skill seed imports this raw file. The same skill read-access check protects stored and empty file content."
+params = { "path" = "references/imported.txt" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files"
+description = "Create a new inline path on the seeded, owned skill, without borrowing another user's File."
+json = { "path" = "references/created.txt", "content" = "Invented inline file {token}" }
+
+[[field]]
+route = "PUT /api/v1/skills/id/{id}/files"
+description = "Edit the imported text file where the move control left it: writes run in route order, so the move and remove controls come first."
+json = { "path" = "moved/imported.txt", "content" = "Invented edited file {token}" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/move"
+description = "Move the directory seeded by the imported bundle; the remove control follows it."
+json = { "from_path" = "references/", "to_path" = "moved/" }
+
+[[field]]
+route = "POST /api/v1/skills/id/{id}/files/remove"
+description = "Remove the file the create control added, after the move control, as its owner; the imported file stays for the edit control."
+json = { "path" = "moved/created.txt" }

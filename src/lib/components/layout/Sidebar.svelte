@@ -14,7 +14,6 @@
 	import {
 		user,
 		chats,
-		settings,
 		chatId,
 		tags,
 		folders as _folders,
@@ -53,8 +52,6 @@
 		getChatById,
 		updateChatFolderIdById,
 		importChats,
-		deleteAllChats,
-		getChatListBySearchText,
 		markChatsRead
 	} from '$lib/apis/chats';
 	import {
@@ -63,8 +60,7 @@
 		getSharedFolders,
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
-	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
-	import { updateUserSettings } from '$lib/apis/users';
+	import { getPinnedNoteList } from '$lib/apis/notes';
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
@@ -76,7 +72,6 @@
 	import SidebarSection from './Sidebar/Section.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
-	import SharedFolderItem from './Sidebar/SharedFolderItem.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
@@ -84,8 +79,6 @@
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
-	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
-	import ClockIcon from './Sidebar/icons/Clock.svelte';
 	import CodeIcon from './Sidebar/icons/Code.svelte';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
 	import NotesIcon from './Sidebar/icons/Notes.svelte';
@@ -94,15 +87,12 @@
 	import { checkMeetingsAvailable, meetingsAvailable } from '$lib/components/meetings/availability';
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
-	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import DropdownMenu from '../common/DropdownMenu.svelte';
 	import CheckIcon from '../icons/Check.svelte';
 	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
 	import MobileSwipePanel from '../common/MobileSwipePanel.svelte';
-
-	const BREAKPOINT = 768;
 
 	let scrollTop = 0;
 
@@ -132,7 +122,6 @@
 	let showPinnedNotes = false;
 	let showChannels = false;
 	let showFolders = false;
-	let showSharedFolders = false;
 	let showChatsMenu = false;
 
 	let folders = {};
@@ -150,7 +139,16 @@
 
 	let newFolderId = null;
 
-	let sharedFolders: any[] = [];
+	// [Gradient] Keep local folder-tree state typed while pruning unused sidebar code.
+	type SidebarFolder = {
+		id: string;
+		parent_id?: string | null;
+		updated_at: number;
+		childrenIds?: string[];
+		new?: boolean;
+		shared?: boolean;
+	};
+	let sharedFolders: SidebarFolder[] = [];
 
 	const initSelectedFolderChats = (folder: SelectedSidebarFolder) => {
 		if (!folder?.id) {
@@ -168,17 +166,17 @@
 		}
 
 		const [folderList, sharedFolderList] = await Promise.all([
-			getFolders(localStorage.token).catch((error) => {
+			getFolders(localStorage.token).catch(() => {
 				return [];
 			}),
-			getSharedFolders(localStorage.token).catch((error) => {
+			getSharedFolders(localStorage.token).catch(() => {
 				return [];
 			})
 		]);
 		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
 
 		sharedFolders = sharedFolderList;
-		const folderMap: Record<string, any> = {};
+		const folderMap: Record<string, Partial<SidebarFolder>> = {};
 
 		// First pass: Initialize all folder entries
 		for (const folder of folderList) {
@@ -206,7 +204,7 @@
 
 				// Sort the children by updated_at field
 				folderMap[folder.parent_id].childrenIds.sort((a, b) => {
-					return folderMap[b].updated_at - folderMap[a].updated_at;
+					return folderMap[b].updated_at! - folderMap[a].updated_at!;
 				});
 			}
 		}
@@ -281,7 +279,7 @@
 
 	const initChannels = async () => {
 		// default (none), group, dm type
-		const res = await getChannels(localStorage.token).catch((error) => {
+		const res = await getChannels(localStorage.token).catch(() => {
 			return null;
 		});
 
@@ -466,22 +464,11 @@
 		}
 	};
 
-	let draggedOver = false;
-
-	const onDragOver = (e) => {
+	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
-
-		// Check if a file is being draggedOver.
-		if (e.dataTransfer?.types?.includes('Files')) {
-			draggedOver = true;
-		} else {
-			draggedOver = false;
-		}
 	};
 
-	const onDragLeave = () => {
-		draggedOver = false;
-	};
+	const onDragLeave = () => {};
 
 	const onDrop = async (e) => {
 		e.preventDefault();
@@ -496,8 +483,6 @@
 				inputFilesHandler(inputFiles); // Handle the dropped files
 			}
 		}
-
-		draggedOver = false; // Reset draggedOver status after drop
 	};
 
 	const onKeyDown = (e) => {
@@ -586,7 +571,9 @@
 			if (!Number.isNaN(width) && width >= MIN_WIDTH && width <= MAX_WIDTH) {
 				sidebarWidth.set(width);
 			}
-		} catch {}
+		} catch {
+			// Browser storage can be unavailable; retain the current sidebar width.
+		}
 
 		document.documentElement.style.setProperty('--sidebar-width', `${$sidebarWidth}px`);
 		sidebarWidth.subscribe((w) => {
@@ -763,7 +750,7 @@
 
 <ChannelModal
 	bind:show={showCreateChannel}
-	onSubmit={async (payload: any) => {
+	onSubmit={async (payload: Parameters<typeof createNewChannel>[1]) => {
 		let { type, name, is_private, access_grants, group_ids, user_ids } = payload ?? {};
 		name = name?.trim();
 
@@ -857,12 +844,13 @@
 
 	<button
 		id="sidebar-new-chat-button"
+		aria-label={$i18n.t('New Chat')}
 		class="hidden"
 		on:click={() => {
 			goto('/');
 			newChatHandler();
 		}}
-	/>
+	></button>
 
 	{#if !$mobile && !$showSidebar}
 		<div
@@ -1090,7 +1078,8 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+					<!-- [Gradient] Skills settings require the same workspace eligibility as the composer toggle. -->
+					{#if isFeatureEnabled('skills') && isFeatureEnabled('workspace') && $config?.features?.enable_workspace && $user?.permissions?.features?.workspace && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 						<div class="">
 							<Tooltip content={$i18n.t('Skills')} placement="right">
 								<a
@@ -1145,9 +1134,7 @@
 											<div class="absolute -bottom-0.5 -right-0.5">
 												<span class="relative flex size-2.5">
 													<span
-														class="relative inline-flex size-2.5 rounded-full {true
-															? 'bg-green-500'
-															: 'bg-gray-300 dark:bg-gray-700'} border-2 border-white dark:border-gray-900"
+														class="relative inline-flex size-2.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900"
 													></span>
 												</span>
 											</div>
@@ -1432,7 +1419,8 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+							<!-- [Gradient] Skills settings require the same workspace eligibility as the composer toggle. -->
+							{#if isFeatureEnabled('skills') && isFeatureEnabled('workspace') && $config?.features?.enable_workspace && $user?.permissions?.features?.workspace && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-skills-button"
@@ -1619,7 +1607,7 @@
 							}}
 							onAddLabel={$i18n.t('New Folder')}
 							on:drop={async (e) => {
-								const { type, id, item } = e.detail;
+								const { type, id } = e.detail;
 
 								if (type === 'folder') {
 									if (folders[id].parent_id === null) {
@@ -1644,7 +1632,7 @@
 								{folders}
 								{shiftKey}
 								onFolderUnreadCounts={applyFolderUnreadCounts}
-								onDelete={(folderId) => {
+								onDelete={() => {
 									selectedFolder.set(null);
 									initChatList();
 								}}
@@ -1666,7 +1654,7 @@
 						id="sidebar-chats"
 						collapsible={false}
 						name={$i18n.t('Chats')}
-						on:change={async (e) => {
+						on:change={async () => {
 							selectedFolder.set(null);
 						}}
 						on:import={(e) => {
@@ -1676,7 +1664,7 @@
 							const { type, id, item } = e.detail;
 
 							if (type === 'chat') {
-								let chat = await getChatById(localStorage.token, id).catch((error) => {
+								let chat = await getChatById(localStorage.token, id).catch(() => {
 									return null;
 								});
 								if (!chat && item) {
@@ -1704,20 +1692,18 @@
 									}
 
 									if (chat.folder_id) {
-										const res = await updateChatFolderIdById(
-											localStorage.token,
-											chat.id,
-											null
-										).catch((error) => {
-											toast.error(`${error}`);
-											return null;
-										});
+										await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
+											(error) => {
+												toast.error(`${error}`);
+												return null;
+											}
+										);
 
 										folderRegistry[chat.folder_id]?.setFolderItems();
 									}
 
 									if (chat.pinned) {
-										const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
+										await toggleChatPinnedStatusById(localStorage.token, chat.id);
 									}
 
 									initChatList();
@@ -1779,7 +1765,7 @@
 											const { type, id, item } = e.detail;
 
 											if (type === 'chat') {
-												let chat = await getChatById(localStorage.token, id).catch((error) => {
+												let chat = await getChatById(localStorage.token, id).catch(() => {
 													return null;
 												});
 												if (!chat && item) {
@@ -1803,21 +1789,16 @@
 												if (chat) {
 													console.log(chat);
 													if (chat.folder_id) {
-														const res = await updateChatFolderIdById(
-															localStorage.token,
-															chat.id,
-															null
-														).catch((error) => {
-															toast.error(`${error}`);
-															return null;
-														});
+														await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
+															(error) => {
+																toast.error(`${error}`);
+																return null;
+															}
+														);
 													}
 
 													if (!chat.pinned) {
-														const res = await toggleChatPinnedStatusById(
-															localStorage.token,
-															chat.id
-														);
+														await toggleChatPinnedStatusById(localStorage.token, chat.id);
 													}
 
 													initChatList();
@@ -1924,7 +1905,7 @@
 
 									{#if chatListReady && !allChatsLoaded}
 										<Loader
-											on:visible={(e) => {
+											on:visible={() => {
 												if (!chatListLoading) {
 													loadMoreChats();
 												}
@@ -1981,9 +1962,7 @@
 											<div class="absolute -bottom-0.5 -right-0.5">
 												<span class="relative flex size-2.5">
 													<span
-														class="relative inline-flex size-2.5 rounded-full {true
-															? 'bg-green-500'
-															: 'bg-gray-300 dark:bg-gray-700'} border-2 border-white dark:border-gray-900"
+														class="relative inline-flex size-2.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900"
 													></span>
 												</span>
 											</div>

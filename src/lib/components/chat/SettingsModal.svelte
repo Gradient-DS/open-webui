@@ -72,6 +72,7 @@
 
 	// [Gradient] Fork admin tab migrated from the route host.
 	import AdminExternalAgents from '$lib/components/admin/Settings/ExternalAgents.svelte';
+	import AdminCouncil from '$lib/components/admin/Settings/Council.svelte';
 
 	const i18n: Writable<I18n> = getContext('i18n');
 
@@ -191,6 +192,7 @@
 		'admin:documents': 'Tools',
 		'admin:web': 'Tools',
 		'admin:code-execution': 'Tools',
+		'admin:council': 'Tools',
 		'admin:pipelines': 'Tools',
 		'admin:db': 'Data'
 	};
@@ -820,6 +822,18 @@
 			keywords: ['code execution', 'python', 'sandbox', 'compiler', 'jupyter', 'interpreter']
 		},
 		{
+			id: 'admin:council',
+			title: 'Council Information',
+			keywords: [
+				'council',
+				'raadsinformatie',
+				'gemeente',
+				'municipality',
+				'openraadsinformatie',
+				'meetings'
+			]
+		},
+		{
 			id: 'admin:pipelines',
 			title: 'Pipelines',
 			keywords: ['pipelines', 'workflows', 'filters', 'valves', 'middleware']
@@ -1349,6 +1363,15 @@
 				/>
 			{:else if selectedTab === 'admin:acceptance'}
 				<AdminAcceptance
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:council'}
+				<AdminCouncil
 					saveHandler={async () => {
 						toast.success($i18n.t('Settings saved successfully!'));
 

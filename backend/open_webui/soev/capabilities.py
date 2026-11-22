@@ -18,6 +18,8 @@ CLOUD_SYNC = 'cloud_sync'
 MEETINGS = 'meetings'
 GROUPS_PUSH = 'groups_push'
 IMAGES = 'images'
+# [Gradient] Caller-owned skill bundles for the offline workspace.
+SKILLS = 'skills'
 
 TTL_SECONDS = 60
 RETRY_SECONDS = 10

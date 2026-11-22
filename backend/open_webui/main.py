@@ -100,6 +100,8 @@ from open_webui.config import (
     FEATURE_VOICE_CALL,
     FEATURE_READ_ALOUD,
     FEATURE_MEETINGS,
+    MEETING_DEFAULT_LANGUAGE,
+    MEETING_MAX_MINUTES,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -2695,6 +2697,7 @@ async def get_app_config(request: Request):
         'onedrive.enable',
         'live_documents.enable',
         'live_mail.enable',
+        'council.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
@@ -2860,6 +2863,8 @@ async def get_app_config(request: Request):
                     'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
                     'feature_changelog': FEATURE_CHANGELOG,
                     'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
+                    'meeting_default_language': MEETING_DEFAULT_LANGUAGE,  # [Gradient]
+                    'meeting_max_minutes': MEETING_MAX_MINUTES,  # [Gradient]
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,
@@ -2907,6 +2912,7 @@ async def get_app_config(request: Request):
                     'enable_live_documents': AGENT_API_ENABLED
                     and config.get('live_documents.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
+                    'enable_council': AGENT_API_ENABLED and bool(config.get('council.enable')),  # [Gradient]
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]

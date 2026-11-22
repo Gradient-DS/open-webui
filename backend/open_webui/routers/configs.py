@@ -16,6 +16,7 @@ from open_webui.env import (
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
+from open_webui.soev import council
 from open_webui.soev.system_prompt import KEY as SYSTEM_PROMPT_KEY
 from open_webui.services.remaining_request_bodies import integrations_config_body
 from open_webui.models.oauth_sessions import OAuthSessions
@@ -41,7 +42,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
 
@@ -1157,6 +1158,58 @@ async def set_external_agents_config(
     await Config.upsert({'agent_api.selected_agent': selected})
 
     return {'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent')}
+
+
+####################################
+# [Gradient] Council information (raadsinformatie)
+####################################
+
+
+class CouncilOrganization(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    key: str = Field(pattern=council.KEY.pattern)
+    label: str = Field(min_length=1, max_length=200)
+
+
+class CouncilConfigForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    ENABLE_COUNCIL: bool
+    COUNCIL_ORGANIZATIONS: list[CouncilOrganization] = Field(default=[], max_length=council.MAX_ORGANIZATIONS)
+
+
+async def _council_config() -> dict:
+    return {
+        'AGENT_API_ENABLED': AGENT_API_ENABLED,
+        'ENABLE_COUNCIL': bool(await Config.get(council.ENABLE)),
+        'COUNCIL_ORGANIZATIONS': (await council.scope())['organizations'],
+    }
+
+
+@router.get('/council')
+async def get_council_config(request: Request, user=Depends(get_admin_user)):
+    return await _council_config()
+
+
+@router.post('/council')
+async def set_council_config(request: Request, form_data: CouncilConfigForm, user=Depends(get_admin_user)):
+    """The admin's switch and organizations; none searches every organization. Keys are checked for form only:
+    one the source no longer knows is skipped by the agents and reported to the model."""
+    if not AGENT_API_ENABLED:
+        raise HTTPException(status_code=403, detail='Agent API is disabled')
+    organizations = {entry.key: {'key': entry.key, 'label': entry.label} for entry in form_data.COUNCIL_ORGANIZATIONS}
+    await Config.upsert({council.ENABLE: form_data.ENABLE_COUNCIL, council.ORGANIZATIONS: list(organizations.values())})
+    return await _council_config()
+
+
+@router.get('/council/sources')
+async def get_council_sources(request: Request, user=Depends(get_admin_user)):
+    """Every organization the admin can choose from, read from the source the agents search."""
+    try:
+        return {'sources': await council.sources()}
+    except council.SourcesUnavailable:
+        raise HTTPException(status_code=502, detail='Council organizations are unavailable')
 
 
 ####################################

@@ -278,6 +278,18 @@ class SkillFilesTable:
             )
             return {row[0]: row[1] for row in result.all()}
 
+    async def get_files_by_skill_ids(
+        self, skill_ids: list[str], db: AsyncSession | None = None
+    ) -> dict[str, list[SkillFileModel]]:
+        files: dict[str, list[SkillFileModel]] = {skill_id: [] for skill_id in skill_ids}
+        if not skill_ids:
+            return files
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(SkillFile).filter(SkillFile.skill_id.in_(skill_ids)))
+            for row in result.scalars().all():
+                files[row.skill_id].append(SkillFileModel.model_validate(row))
+        return files
+
     async def search_files_by_id(
         self,
         skill_id: str,
