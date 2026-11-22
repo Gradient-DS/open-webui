@@ -36,7 +36,6 @@ TEMPLATES = {
         '/console/api/consents/{agent_id}/{workspace_id}',
         '/v1/collections/{collection_key}/documents/{source_id}',
         '/v1/connections/{connection_id}/live-grants/{grant_id}',
-        '/v1/jobs/{job_id}/uploads/{source_id}',
         '/v1/schemas/{schema_key}/fields/{field_name}',
         '/console/api/audit/events',
         '/console/api/people/invitations',

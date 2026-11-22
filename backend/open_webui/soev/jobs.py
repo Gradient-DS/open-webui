@@ -41,7 +41,7 @@ async def _finish(file: FileModel, job: dict, error: str | None = None) -> int:
         raise RuntimeError('File status write failed')
     metadata = {'soev_job': None}
     if error is None:
-        metadata['soev_collection_key'] = None
+        metadata['collection_name'] = job['collection_key']
     if await Files.update_file_metadata_by_id(file.id, metadata) is None:
         raise RuntimeError('File metadata write failed')
     await emit_file_status(
@@ -65,20 +65,7 @@ async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
     except SoevApiError as error:
         if error.status != 409 or error.code != 'upload_missing':
             raise
-        if job['attempt'] >= 3:
-            return await _finish(file, job, 'upload could not be completed')
-        await ingest.cancel(file, client=client)
-        file = await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': job['collection_key']})
-        if file is None:
-            raise RuntimeError('File metadata write failed')
-        await ingest.submit(
-            file,
-            collection_key=job['collection_key'],
-            user_id=file.user_id,
-            attempt=job['attempt'] + 1,
-            client=client,
-        )
-        return 1
+        return await _finish(file, job, 'upload_missing')
     if await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}}) is None:
         raise RuntimeError('File metadata write failed')
     return 1

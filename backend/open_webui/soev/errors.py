@@ -3,6 +3,9 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('upload_declaration_invalid', None): ('Invalid upload declaration', 'Ongeldige uploadgegevens'),
+    ('upload_rejected', None): ('Upload rejected', 'Upload geweigerd'),
+    ('file_not_found', 'upload:original'): ('Original unavailable', 'Origineel niet beschikbaar'),
     ('service_unavailable', 'oauth:person_discovery'): (
         'Sign-in is temporarily unavailable. Please try again.',
         'Inloggen is tijdelijk niet beschikbaar. Probeer het opnieuw.',

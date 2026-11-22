@@ -497,12 +497,20 @@ async def process_file(
                     user.id, identity.build_client()
                 )
                 job_id = await ingest.submit(
-                    file, collection_key=collection_key, user_id=user.id, text=form_data.content
+                    file,
+                    collection_key=collection_key,
+                    user_id=user.id,
+                    text=form_data.content,
+                    source=ingest.source_for(file.id),  # [Gradient] Request-owned document bytes only.
                 )
             except SoevNotConfigured:
                 raise
             except SoevApiError as e:
-                raise ValueError(f'{e.code}: {e.detail}') from e
+                # [Gradient] File status errors use fixed English/Dutch messages, never upstream details.
+                from open_webui.soev.errors import problem_message
+
+                language = getattr(request, 'headers', {}).get('accept-language', 'en-US')
+                raise ValueError(problem_message(e, language)) from e
             return {
                 'status': True,
                 'collection_name': form_data.collection_name,

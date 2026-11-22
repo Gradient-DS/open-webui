@@ -151,7 +151,7 @@ class FileForm(BaseModel):
     id: str
     hash: str | None = None
     filename: str
-    path: str
+    path: str | None = None  # [Gradient] Document originals live on the platform.
     data: dict = {}
     meta: dict = {}
 
@@ -552,7 +552,9 @@ class FilesTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(
                 select(File).filter(
-                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)])
+                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)]),
+                    # [Gradient] Completed originals retain their platform collection for downloads.
+                    func.coalesce(File.meta['status'].as_string(), '') != 'completed',
                 )
             )
             return [FileModel.model_validate(file) for file in result.scalars().all()]

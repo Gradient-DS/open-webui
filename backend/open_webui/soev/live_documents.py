@@ -96,7 +96,7 @@ ORIGINAL_PROCESSING = 'original_processing'
 async def stream_original(file: FileModel, user, *, attachment: bool, range_header: str | None = None):
     client = identity.build_client()
     ref = identity.external_ref(user)
-    collection = quote(file.meta['collection_name'], safe='')
+    collection = quote(file.meta.get('collection_name') or file.meta['soev_collection_key'], safe='')
     path = f'/v1/collections/{collection}/documents/{quote(file.id, safe="")}/original'
     try:
         return await proxy_download(

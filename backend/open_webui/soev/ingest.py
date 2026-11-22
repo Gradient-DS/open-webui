@@ -6,7 +6,9 @@ import hashlib
 import posixpath
 import time
 from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import BinaryIO
 from urllib.parse import quote
 
 from open_webui import config
@@ -14,7 +16,6 @@ from open_webui.models.files import FileModel, Files
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.principal_refs import person_ref
-from open_webui.storage.provider import Storage
 from open_webui.utils.content_types import content_type_for
 
 ATTACHMENTS_PREFIX = 'owui-attachments-'
@@ -22,6 +23,22 @@ ASSISTANT_PREFIX = 'owui-assistant-'
 FOLDER_PREFIX = 'owui-folder-'
 ATTACHMENTS_TAG = 'chat-attachments'
 UPLOAD_CHUNK_BYTES = 64 * 1024
+
+_request_source: ContextVar[tuple[str, BinaryIO] | None] = ContextVar('document_upload_source', default=None)
+
+
+@contextmanager
+def uploading(file_id: str, source: BinaryIO) -> Iterator[None]:
+    token = _request_source.set((file_id, source))
+    try:
+        yield
+    finally:
+        _request_source.reset(token)
+
+
+def source_for(file_id: str) -> BinaryIO | None:
+    current = _request_source.get()
+    return current[1] if current is not None and current[0] == file_id else None
 
 
 class IngestBusy(Exception):
@@ -90,23 +107,10 @@ async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | No
         raise
 
 
-def _file_info(file_path: str) -> tuple[Path, int, str]:
-    path = Path(Storage.get_file(file_path))
-    digest, size = hashlib.sha256(), 0
-    with path.open('rb') as source:
-        while chunk := source.read(UPLOAD_CHUNK_BYTES):
-            digest.update(chunk)
-            size += len(chunk)
-    return path, size, digest.hexdigest()
-
-
-async def _file_chunks(path: Path) -> AsyncIterator[bytes]:
-    source = await asyncio.to_thread(path.open, 'rb')
-    try:
-        while chunk := await asyncio.to_thread(source.read, UPLOAD_CHUNK_BYTES):
-            yield chunk
-    finally:
-        await asyncio.to_thread(source.close)
+async def _source_chunks(source: BinaryIO) -> AsyncIterator[bytes]:
+    await asyncio.to_thread(source.seek, 0)
+    while chunk := await asyncio.to_thread(source.read, UPLOAD_CHUNK_BYTES):
+        yield chunk
 
 
 def _encoded_text(text: str) -> Iterator[bytes]:
@@ -170,6 +174,7 @@ async def submit(
     collection_key: str,
     user_id: str,
     text: str | None = None,
+    source: BinaryIO | None = None,
     attempt: int = 1,
     client: SoevClient | None = None,
 ) -> str:
@@ -179,12 +184,14 @@ async def submit(
     if current is not None and (current.meta or {}).get('soev_job') is not None:
         raise IngestBusy(file.id)
     client = client if client is not None else identity.build_client()
+    meta = file.meta or {}
     if text is None:
-        file_path, size, digest = await asyncio.to_thread(_file_info, file.path)
+        size, digest = meta.get('size'), meta.get('file_hash')
+        if not isinstance(size, int) or size < 1 or not isinstance(digest, str):
+            raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration')
     else:
         size, digest = await asyncio.to_thread(_text_info, text)
     inline = text is not None and size <= config.SOEV_API_INLINE_DOCUMENT_BYTES
-    meta = file.meta or {}
     name = meta.get('name') or file.filename
     path = posixpath.dirname(meta.get('relative_path') or '') or None
     document = {
@@ -200,13 +207,28 @@ async def submit(
     document.update({'text': text} if inline else {'size': size, 'sha256': digest})
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
     ref = None if client.is_service else f'owui:user:{user_id}'
-    response = await client.send(
-        'POST',
-        '/v1/jobs',
-        {'collection_key': collection_key, 'documents': [document]},
-        as_user=ref,
-        idempotency_key=job_key,
-    )
+    body = {'collection_key': collection_key, 'documents': [document]}
+
+    async def create():
+        return await client.send('POST', '/v1/jobs', body, as_user=ref, idempotency_key=job_key)
+
+    async def chunks():
+        if text is not None:
+            async for chunk in _text_chunks(text):
+                yield chunk
+        elif source is not None:
+            async for chunk in _source_chunks(source):
+                yield chunk
+        else:
+            origin = meta.get('collection_name') or meta.get('soev_collection_key')
+            if not origin:
+                raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
+            original = f'/v1/collections/{quote(origin, safe="")}/documents/{quote(file.id, safe="")}/original'
+            async with client.stream_response(original, as_user=ref) as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+
+    response = await create()
     job_id = response['job_id']
     job = {
         'job_id': job_id,
@@ -217,18 +239,45 @@ async def submit(
         'submitted_at': int(time.time()),
         'committed': inline,
     }
-    await Files.update_file_metadata_by_id(file.id, {'soev_job': job, 'soev_collection_key': collection_key})
+    metadata = {'soev_job': job, 'soev_collection_key': collection_key}
+    if meta.get('soev_collection_key') and not meta.get('collection_name'):
+        metadata['collection_name'] = meta['soev_collection_key']
+    await Files.update_file_metadata_by_id(file.id, metadata)
     await Files.set_status(file.id, 'processing')
     if not inline:
-        if response['status'] == 'AWAITING_UPLOAD':
-            await client.upload_document(
-                job_id,
-                file.id,
-                _file_chunks(file_path) if text is None else _text_chunks(text),
-                size=size,
-                content_type=document['content_type'],
-                as_user=ref,
-            )
+        try:
+            for refresh in range(2):
+                if response['status'] != 'AWAITING_UPLOAD':
+                    break
+                uploads = response.get('uploads', [])
+                if (
+                    not isinstance(uploads, list)
+                    or len(uploads) != 1
+                    or not isinstance(uploads[0], dict)
+                    or uploads[0].get('source_id') != file.id
+                ):
+                    raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration')
+                upload = uploads[0]
+                try:
+                    expires = dt.datetime.fromisoformat(upload['expires_at'].replace('Z', '+00:00'))
+                    expired = expires <= dt.datetime.now(dt.UTC)
+                except (KeyError, ValueError, TypeError, AttributeError):
+                    raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration') from None
+                try:
+                    if expired:
+                        raise SoevApiError(403, 'upload_rejected', 'Upload rejected')
+                    await client.put_transfer(upload, chunks, size=size, sha256=digest)
+                    break
+                except SoevApiError as error:
+                    if error.status != 403 or refresh:
+                        raise
+                    response = await create()
+                    if response['job_id'] != job_id:
+                        raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration') from None
+        except SoevApiError as error:
+            await Files.set_status(file.id, 'failed', error=error.code)
+            await Files.update_file_metadata_by_id(file.id, {'soev_job': None})
+            raise
         await client.send('POST', f'/v1/jobs/{job_id}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit')
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}})
     return job_id

@@ -22,8 +22,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     ingest = importlib.import_module('open_webui.soev.ingest')
     jobs = importlib.import_module('open_webui.soev.jobs')
     files = importlib.import_module('open_webui.models.files')
-    storage = importlib.import_module('open_webui.storage.provider')
-    monkeypatch.setattr(ingest, 'Storage', storage.LocalStorageProvider())
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
@@ -104,8 +102,9 @@ async def test_upload_recovery_uses_the_owner_login(env):
     env.api.uploads.pop((job['job_id'], file.id))
     assert await poll(env, now=job['submitted_at'] + 61) == 1
     assert any(request.url.path.endswith('/commit') for request in env.api.requests)
-    assert any(request.url.path.endswith('/cancel') for request in env.api.requests)
-    assert any(request.url.path == '/v1/jobs' for request in env.api.requests)
+    assert not any(
+        request.url.path.endswith('/cancel') or request.url.path == '/v1/jobs' for request in env.api.requests
+    )
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in env.api.requests)
 
 
@@ -115,7 +114,7 @@ async def assert_terminal(env, file, *, error=None):
     assert row.meta['status'] == row.data['status'] == status
     assert row.meta['error'] == row.data['error'] == error
     assert row.meta['soev_job'] is None
-    assert row.meta['soev_collection_key'] == ('kb' if error is not None else None)
+    assert row.meta['soev_collection_key'] == 'kb'
     assert row.data['content'] == 'preserved content'
     assert await env.files.Files.get_files_with_soev_jobs() == []
     assert [r.id for r in await env.files.Files.get_unlanded_files_for_collection('kb')] == (
@@ -254,28 +253,14 @@ async def test_a_stuck_upload_is_committed_after_a_minute(env, monkeypatch, comm
 
 
 @pytest.mark.asyncio
-async def test_a_missing_upload_is_resubmitted_at_most_three_times(env):
-    """Missing uploads retry with increasing durable attempts and fail before creating a fourth job."""
+async def test_a_missing_upload_fails_without_resubmission(env):
     file, job = await submitted(env)
-    for attempt in (1, 2, 3):
-        assert job['attempt'] == attempt
-        env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
-        env.api.uploads.pop((job['job_id'], file.id))
-        env.api.requests.clear()
-        assert await poll(env, now=job['submitted_at'] + 61 + attempt * 5) == 1
-        row = await env.files.Files.get_file_by_id(file.id)
-        if attempt < 3:
-            assert env.api.jobs[job['job_id']]['status'] == 'CANCELLED'
-            job = row.meta['soev_job']
-            assert job['attempt'] == attempt + 1
-            assert row.meta['soev_collection_key'] == 'kb'
-            assert env.api.jobs[job['job_id']]['status'] == 'QUEUED'
-            creates = [r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/jobs']
-            assert len(creates) == 1
-            assert creates[0].headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{job["sha256"]}:{attempt + 1}'
-            env.events.assert_not_awaited()
-    assert len(env.api.jobs) == 3
-    await assert_terminal(env, file, error='upload could not be completed')
+    env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
+    env.api.uploads.pop((job['job_id'], file.id))
+    assert await poll(env, now=job['submitted_at'] + 61) == 1
+    assert len(env.api.jobs) == 1
+    assert not any(r.method == 'PUT' or r.url.path == '/v1/jobs' for r in env.api.requests)
+    await assert_terminal(env, file, error='upload_missing')
 
 
 @pytest.mark.asyncio
