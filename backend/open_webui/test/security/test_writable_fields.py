@@ -218,3 +218,10 @@ def test_file_upload_metadata_authority_is_explicit(surface):
     )
     for route in ('GET /api/v1/files/{id}/content', 'GET /api/v1/files/{id}/content/{file_name}'):
         assert 'description' in operations[route]
+
+
+def test_platform_text_edit_refusal_is_explicit_without_a_field_exemption(surface):
+    operations, fields, _ = surface
+    route = 'POST /api/v1/files/{id}/data/content/update'
+    assert '409' in operations[route]['description']
+    assert 'content' in fields[route]

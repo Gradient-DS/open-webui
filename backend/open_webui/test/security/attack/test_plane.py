@@ -950,3 +950,13 @@ def test_changed_file_routes_keep_the_same_plane_and_no_exemption():
         if route
         in {'POST /api/v1/files/', 'GET /api/v1/files/{id}/content', 'GET /api/v1/files/{id}/content/{file_name}'}
     )
+
+
+def test_original_recovery_edit_refusal_and_skill_cleanup_do_not_remove_operations():
+    routes = set(plane.operations())
+    assert len(routes) == 310
+    assert {
+        'POST /api/v1/files/{id}/data/content/update',
+        'GET /api/v1/files/{id}/content',
+        'DELETE /api/v1/skills/id/{id}/delete',
+    } <= routes

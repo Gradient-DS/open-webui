@@ -864,3 +864,32 @@ def test_upload_body_targets_another_users_skill_with_no_exemption():
         control=True,
     )
     assert result.violations
+
+
+@pytest.mark.parametrize('owner_status,stranger_status,leak', [(200, 403, False), (200, 200, True), (403, 403, True)])
+def test_platform_original_variant_is_in_addition_to_svg_control(monkeypatch, owner_status, stranger_status, leak):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'GET /api/v1/files/{id}/content'
+    result = crossuser.Authorization(plane.Seeding())
+    result.controls[route] = 200  # The SVG owner control already ran.
+    identities = SimpleNamespace(admin=Mock(), user=Mock(), intruder=Mock())
+    calls = []
+
+    def request(admin, actor, actual_route, target, tally, kwargs):
+        calls.append((actor, actual_route, target))
+        return plane.Outcome(
+            owner_status if actor is identities.user else stranger_status,
+            True,
+            'private-document-marker' if actor is identities.user or stranger_status == 200 else 'forbidden',
+        )
+
+    monkeypatch.setattr(crossuser, '_request', request)
+    crossuser.drive_content_variants(
+        result,
+        identities,
+        seeds.Resolved(fixtures={'platform_document': 'platform-file'}),
+        seeds.SURFACE,
+        ('private-document-marker',),
+    )
+    assert [call[2] for call in calls] == ['/api/v1/files/platform-file/content'] * 2
+    assert bool(result.violations) is leak

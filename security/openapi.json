@@ -16449,7 +16449,7 @@
         "tags": [
           "files"
         ],
-        "description": "Apply existing owner/chat/knowledge access rules. Documents read the first published platform collection, recovering base-code rows by source_id as the requester. Redeem same-origin download links. A platform 403 never uses local bytes. Unknown legacy files with bytes keep local reads; images, videos and skill files remain local."
+        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes."
       },
       "head": {
         "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
@@ -16657,7 +16657,8 @@
         "summary": "Update File Data Content By Id",
         "tags": [
           "files"
-        ]
+        ],
+        "description": "Requires existing file write authority. Platform document extracted text is immutable: 409 with translated original_immutable message, preserving its only original. Local media is classified from sniffed bytes; local media and local-only files retain content update behaviour."
       }
     },
     "/api/v1/files/{id}/process/status": {
@@ -22740,7 +22741,8 @@
         "summary": "Delete Skill By Id",
         "tags": [
           "skills"
-        ]
+        ],
+        "description": "Requires existing skill write authority. Remove skill links and unused backing File rows in the same database transaction; purge bytes only after re-reading committed link/File state. Preserve any File still linked elsewhere."
       }
     },
     "/api/v1/skills/id/{id}/files": {

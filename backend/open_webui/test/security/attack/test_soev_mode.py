@@ -371,3 +371,17 @@ def test_file_upload_and_local_media_controls_stay_driven(monkeypatch, mode):
     for suffix in ('content', 'content/{file_name}'):
         path = '/api/v1/files/{id}/' + suffix
         assert f'GET {path}' in seeds.ordinary_targets()
+
+
+def test_sealed_ci_keeps_svg_control_without_faking_the_platform_variant(monkeypatch):
+    from . import crossuser
+    from types import SimpleNamespace
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
+    request = Mock(side_effect=AssertionError('No platform service in this repository CI'))
+    monkeypatch.setattr(crossuser, '_request', request)
+    crossuser.drive_content_variants(
+        crossuser.Authorization(plane.Seeding()), SimpleNamespace(), seeds.Resolved(), seeds.SURFACE, ()
+    )
+    request.assert_not_called()
+    assert 'GET /api/v1/files/{id}/content' in seeds.ordinary_targets()

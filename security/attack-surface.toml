@@ -309,7 +309,7 @@ key = "skill_bundle"
 v2_refused_value = "fictional-disabled-skill_bundle-{token}"
 name = "id"
 prefix = "/api/v1/skills/id/{id}/files"
-description = "Seed a private skill with separate inline text files for read/edit, move and removal. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
+description = "Seed a private skill with separate inline text files for read/edit, move and removal. Replacing a bundle file and deleting its skill also remove unreferenced backing File rows and bytes after verified commit. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
 seeded_by = "seed_skill_bundle"
 depends_on = []
 actor = "user"
@@ -1685,3 +1685,19 @@ description = "Retain bytes only for a caller-writable skill and an atomic link;
 params = { process = false }
 form = { metadata = '{"skill_id":"{skill_bundle}","skill_path":"attack-upload-{token}.pdf"}' }
 files = [{ field = "file", filename = "attack-{token}.pdf", content = "%PDF-1.7 attack skill {token}", content_type = "application/pdf" }]
+
+
+[[fixture]]
+key = "platform_document"
+backed_by = "soev-solutions"
+description = "A genuine text original uploaded through the platform transfer path and settled by owner-authenticated polling. Requires a real platform in private drive mode; the sealed OWUI CI has no platform service. The SVG file seed remains for the local path."
+seeded_by = "seed_platform_document"
+depends_on = []
+actor = "user"
+
+[[crossuser_variant]]
+route = "GET /api/v1/files/{id}/content"
+fixture = "platform_document"
+backed_by = "soev-solutions"
+name = "platform-original"
+description = "Owner must download the platform original, stranger must not read it. This supplements the local SVG control; it never provisions a fake platform in OWUI CI."

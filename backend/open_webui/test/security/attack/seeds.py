@@ -432,6 +432,22 @@ def seed_feedback(ctx, parameter):
     return f'attack_feedback_probe_{ctx.token}'
 
 
+def seed_platform_document(ctx, parameter):
+    label = f'Platform original {ctx.token}'
+    uploaded = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.client,
+        params={'process': False},
+        files=[('file', (f'platform-{ctx.token}.txt', label, 'text/plain'))],
+    )
+    file_id = _extract(uploaded, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    if uploaded.get('path') is not None or not (uploaded.get('meta') or {}).get('file_hash'):
+        raise RuntimeError('Platform document seed did not use the document transfer path')
+    ctx.wait_for_file(file_id, actor=ctx.client)
+    return file_id
+
+
 def seed_knowledge_file(ctx, parameter):
     # Removal and asynchronous reprocessing each need their own settled file.
     label = f'attack-{parameter["key"]}-{ctx.token}'
@@ -548,6 +564,7 @@ _SEEDERS = {
         seed_cloud_family,
         seed_cloud_mailbox_address,
         seed_knowledge_file,
+        seed_platform_document,
     )
 }
 

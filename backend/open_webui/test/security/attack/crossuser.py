@@ -368,6 +368,38 @@ def _requests(route, parameters, spec, fields, payloads, full):
             yield False, {**benign_request(route, parameters, spec), 'json': plane._body_for(names, batch)}
 
 
+def drive_content_variants(result, identities, parameters, surface, markers):
+    for variant in surface.get('crossuser_variant', []):
+        if not seeds.seed_enabled(variant):
+            continue
+        route = variant['route']
+        file_id = parameters.fixtures.get(variant['fixture'])
+        if not file_id:
+            raise RuntimeError(f'Missing {variant["fixture"]} for platform original control')
+        target = route.split(' ', 1)[1].replace('{id}', quote(file_id, safe=''))
+        owner = _request(identities.admin, identities.user, route, target, result.tally, {})
+        stranger = _request(identities.admin, identities.intruder, route, target, result.tally, {})
+        if result.controls.get(route) != 200 or owner.status != 200:
+            item = {
+                'route': route,
+                'reason': 'Local and platform original owner controls must both succeed',
+                'status': owner.status,
+                'body': owner.body[:2000],
+            }
+            result.violations.append(item)
+            result.tally.body_failures.append(item)
+        _check(
+            result,
+            route,
+            stranger,
+            owner,
+            _markers_outside(target, markers),
+            admin_only=False,
+            control=True,
+            resource_ids=[file_id],
+        )
+
+
 def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     routes, admins = targets(spec)
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
@@ -434,4 +466,10 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                                 subject_scoped=subject_scoped,
                             )
                 plane.flush_hits()
+            variants = {
+                **surface,
+                'crossuser_variant': [v for v in surface.get('crossuser_variant', []) if v['route'] in routes],
+            }
+            drive_content_variants(result, identities, parameters, variants, markers)
+            plane.flush_hits()
     return result

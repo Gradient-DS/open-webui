@@ -1214,3 +1214,20 @@ def test_file_seed_retains_genuine_image_bytes_without_document_bypass():
     field = next(p for p in seeds.SURFACE['field'] if p['route'] == 'POST /api/v1/files/')
     assert sniff_content_type(field['files'][0]['content'].encode()).startswith('image/')
     assert field['params']['process'] is False
+
+
+def test_platform_original_seed_waits_for_the_real_transfer_to_settle():
+    ctx = Mock()
+    ctx.token = 'owner-token'
+    ctx.client = Mock()
+    ctx.request.return_value = {'id': 'document', 'path': None, 'meta': {'file_hash': 'a' * 64}}
+    parameter = next(p for p in seeds.SURFACE['fixture'] if p['key'] == 'platform_document')
+    assert parameter['backed_by'] == 'soev-solutions'
+    assert seeds.seed_platform_document(ctx, parameter) == 'document'
+    args, kwargs = ctx.request.call_args
+    assert args == ('POST', '/api/v1/files/')
+    assert kwargs['files'][0][1][2] == 'text/plain'
+    ctx.wait_for_file.assert_called_once_with('document', actor=ctx.client)
+    ctx.request.return_value['path'] = '/local/bypass'
+    with pytest.raises(RuntimeError, match='transfer path'):
+        seeds.seed_platform_document(ctx, parameter)

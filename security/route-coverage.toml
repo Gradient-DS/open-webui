@@ -1,3 +1,5 @@
+# Platform-original cross-user variant: requires the real private platform; unit proof stays in OWUI CI.
+# SVG owner controls remain driven locally. Content edits refuse platform originals without an exemption.
 # File upload and both original-content routes remain driven, with no exemption.
 # POST /api/v1/files/ has a writable-skill body target in attack-surface.toml;
 # genuine SVG controls cover local images. Document platform reads have unit transport tests.
