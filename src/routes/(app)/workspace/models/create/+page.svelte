@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -17,15 +16,9 @@
 	import { getModels } from '$lib/apis';
 	import { updateUserSettings } from '$lib/apis/users';
 
-	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
 	const i18n = getContext('i18n');
-
-	$: useSimpleBuilder =
-		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
-
-	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
 	const onSubmit = async (modelInfo, { skipNavigate = false } = {}) => {
 		if ($models.find((m) => m.id === modelInfo.id)) {
@@ -79,11 +72,7 @@
 					await updateUserSettings(localStorage.token, { ui: $settings });
 				}
 
-				toast.success(
-					useSimpleBuilder
-						? $i18n.t('Assistant created successfully!')
-						: $i18n.t('Model created successfully!')
-				);
+				toast.success($i18n.t('Assistant created successfully!'));
 				// Land on the edit page for the just-created assistant, where
 				// Sharing is available. The "+ Add knowledge" flow passes
 				// skipNavigate so it can route to the KB-create flow itself.
@@ -135,10 +124,7 @@
 	});
 </script>
 
-{#if useSimpleBuilder}
-	<SimpleModelEditor model={null} edit={false} {onSubmit} onAdvanced={goToAdvanced} />
-{:else}
-	{#key model}
-		<ModelEditor onBack={() => goto('/workspace/models')} {model} {onSubmit} />
-	{/key}
-{/if}
+<!-- [Gradient] All workspace assistants use the simple editor, including imported models. -->
+{#key model}
+	<SimpleModelEditor {model} edit={false} {onSubmit} />
+{/key}

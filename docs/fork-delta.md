@@ -275,15 +275,9 @@ the workspace list's `pinModelHandler`. Why: upstream's only pin surface is the
 model selector, which lists no assistants — without this there is no way to
 pin an assistant from the simple editor.
 
-Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (~65–81,
-~320–330). Commit `1f61ab3b0`. Visible only where the simple builder is used,
-which is gated by `FEATURE_SIMPLE_ASSISTANT_BUILDER`
-(`backend/open_webui/config.py:2894`, default `False`; Helm
-`featureSimpleAssistantBuilder`). Note the flag is **off by default**: although
-`isFeatureEnabled()` treats an *absent* key as enabled, `main.py` always emits
-`feature_simple_assistant_builder` in the authenticated config, so the absent-key
-default never applies to this feature. The editor additionally yields to the
-advanced editor when `?advanced` is present in the URL.
+Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (sidebar pin handler). Commit `1f61ab3b0`. The simple editor is the only
+workspace assistant editor; admin Settings > Models retains the full model editor
+for base-model rows.
 
 ## Model profiles, hosting, and pinning
 

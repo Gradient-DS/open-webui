@@ -3022,7 +3022,6 @@ FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == '
 
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 
-FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
 
 # [Gradient] New models the "what's new" tour announces, per release: {"1.3": ["zai-org/glm-5.3"]}.
 # A release left out falls back to the frontend's list for it; an empty list announces none.

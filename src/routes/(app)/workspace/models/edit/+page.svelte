@@ -5,14 +5,6 @@
 	import { onMount, getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	$: useSimpleBuilder =
-		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
-
-	const goToAdvanced = () => {
-		const _id = $page.url.searchParams.get('id');
-		goto(`/workspace/models/edit?id=${_id}&advanced=true`);
-	};
-
 	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -21,7 +13,6 @@
 	import { getKnowledgeById } from '$lib/apis/knowledge';
 
 	import { getModels } from '$lib/apis';
-	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
 	let model = null;
@@ -100,21 +91,14 @@
 				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 			)
 		);
-		toast.success(
-			useSimpleBuilder
-				? $i18n.t('Assistant updated successfully')
-				: $i18n.t('Model updated successfully')
-		);
+		toast.success($i18n.t('Assistant updated successfully'));
 		if (!skipNavigate) {
 			await goto('/workspace/models');
 		}
 	};
 </script>
 
+<!-- [Gradient] The simple editor preserves fields outside its editable surface. -->
 {#if model}
-	{#if useSimpleBuilder}
-		<SimpleModelEditor edit={true} {model} {onSubmit} onAdvanced={goToAdvanced} />
-	{:else}
-		<ModelEditor onBack={() => goto('/workspace/models')} edit={true} {model} {onSubmit} />
-	{/if}
+	<SimpleModelEditor edit={true} {model} {onSubmit} />
 {/if}
