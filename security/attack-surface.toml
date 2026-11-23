@@ -1421,11 +1421,11 @@ json = { "path" = "moved/created.txt" }
 key = "assistant_skill"
 name = "id"
 prefix = "/api/v1/models/id/{id}"
-description = "Private assistant owned by the admin, with an owner-uploaded raw file and a real folder row. The seed uses ordinary model/file/folder APIs; both runtime modes and the full-stack sweep can create it."
+description = "Assistant owned by the admin with an owner-uploaded raw file and a real folder row. The ordinary caller has a write grant for positive controls; everyone else has only read access and must be refused by all four skill routes. The seed uses ordinary APIs in both runtime modes and the full-stack sweep."
 seeded_by = "seed_assistant_skill"
 depends_on = ["model"]
 provides = ["assistant_skill_upload"]
-actor = "admin"
+actor = "user"
 
 [[field]]
 route = "PUT /api/v1/models/id/{id}/skill-files"

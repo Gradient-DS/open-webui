@@ -1196,7 +1196,10 @@ def test_assistant_skill_seed_creates_owner_bytes_and_a_real_path():
     assert seeds.seed_assistant_skill(ctx, parameter) == 'invented-assistant'
     assert ctx.values['assistant_skill_upload'] == 'invented-upload'
     create, upload, attach = ctx.request.call_args_list
-    assert create.kwargs['json']['access_grants'] == []
+    assert create.kwargs['json']['access_grants'] == [
+        {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
+        {'principal_type': 'user', 'principal_id': ctx.client.user_id, 'permission': 'write'},
+    ]
     assert create.kwargs['json']['base_model_id'] == 'invented-llm'
     assert upload.kwargs['params'] == {'process': False}
     assert attach.args == ('PUT', '/api/v1/models/id/invented-assistant/skill-files')

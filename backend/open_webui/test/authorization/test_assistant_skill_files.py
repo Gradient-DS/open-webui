@@ -69,9 +69,9 @@ def attach(folder, principal='owner', **fields):
     )
 
 
-def test_owner_and_shared_reader_export_without_individual_file_access(folder):
+def test_owner_and_writer_export_without_individual_file_access(folder):
     assert attach(folder).status_code == 200
-    for principal in ('owner', 'reader', 'writer'):
+    for principal in ('owner', 'writer'):
         listing = folder.client.get(PREFIX + '/skill-files', headers=folder.headers(principal))
         assert listing.status_code == 200
         assert listing.json() == [{'path': 'assets/invented.bin', 'file_id': 'owner-upload', 'size': 10}]
@@ -80,6 +80,8 @@ def test_owner_and_shared_reader_export_without_individual_file_access(folder):
         with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
             assert archive.read('assets/invented.bin') == b'\x00\xffinvented'
             assert archive.read('SKILL.md').endswith(b'Invented instructions')
+    for suffix in ('/skill-files', '/skill'):
+        assert folder.client.get(PREFIX + suffix, headers=folder.headers('reader')).status_code == 403
     # The general file route remains protected, even though assistant export delegates these bytes.
     assert folder.client.get('/api/v1/files/owner-upload/content', headers=folder.headers('reader')).status_code == 404
 
@@ -128,6 +130,30 @@ def test_revoked_reader_and_writer_lose_all_folder_access(folder):
             await AccessGrants.revoke_all_access('model', 'invented-helper', db=db)
 
     folder.run(revoke)
+    for principal in ('reader', 'writer'):
+        for suffix in ('/skill-files', '/skill'):
+            assert folder.client.get(PREFIX + suffix, headers=folder.headers(principal)).status_code == 403
+        assert attach(folder, principal).status_code == 403
+
+
+def test_revoked_writer_with_remaining_read_grant_cannot_list_or_export(folder):
+    assert attach(folder).status_code == 200
+    for suffix in ('/skill-files', '/skill'):
+        assert folder.client.get(PREFIX + suffix, headers=folder.headers('writer')).status_code == 200
+
+    async def downgrade():
+        async with folder.sessions() as db:
+            await AccessGrants.set_access_grants(
+                'model',
+                'invented-helper',
+                [
+                    {'principal_type': 'user', 'principal_id': 'reader', 'permission': 'read'},
+                    {'principal_type': 'user', 'principal_id': 'writer', 'permission': 'read'},
+                ],
+                db=db,
+            )
+
+    folder.run(downgrade)
     for principal in ('reader', 'writer'):
         for suffix in ('/skill-files', '/skill'):
             assert folder.client.get(PREFIX + suffix, headers=folder.headers(principal)).status_code == 403

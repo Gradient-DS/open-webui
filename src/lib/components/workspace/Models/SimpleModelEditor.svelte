@@ -86,6 +86,7 @@
 	let importSkillInput: HTMLInputElement;
 	let pendingSkillImport: File | null = null;
 	let showSkillConfirmation = false;
+	$: canWrite = !edit || model?.write_access === true;
 	$: workspaceOffered = simpleCapabilityOffered('workspace', $config?.features);
 
 	// [Gradient] Sidebar pin, right here in the assistant editor: the
@@ -169,7 +170,7 @@
 		savedSnapshot = _snapshot();
 		hasBeenSaved = edit;
 		loaded = true;
-		if (hasBeenSaved) await refreshSkillFiles();
+		if (hasBeenSaved && canWrite) await refreshSkillFiles();
 		const imported = get(assistantSkillImport);
 		if (imported) {
 			assistantSkillImport.set(null);
@@ -284,6 +285,7 @@
 	};
 
 	const refreshSkillFiles = async () => {
+		if (!canWrite) return;
 		try {
 			skillFiles = await getAssistantSkillFiles(localStorage.token, id);
 		} catch {
@@ -330,7 +332,7 @@
 		} catch (error) {
 			skillError(error);
 		} finally {
-			if (hasBeenSaved) await refreshSkillFiles();
+			if (hasBeenSaved && canWrite) await refreshSkillFiles();
 			skillBusy = false;
 		}
 	};
@@ -399,7 +401,7 @@
 		} catch (error) {
 			skillError(error);
 		} finally {
-			if (hasBeenSaved) await refreshSkillFiles();
+			if (hasBeenSaved && canWrite) await refreshSkillFiles();
 			skillBusy = false;
 		}
 	};
@@ -552,13 +554,15 @@
 						{/if}
 					</button>
 				{/if}
-				{#if edit || hasBeenSaved}
+				{#if canWrite && (edit || hasBeenSaved)}
 					<button
 						type="button"
 						class="bg-gray-50 dark:bg-gray-850 px-2 py-1 rounded-full text-sm"
 						disabled={skillBusy || loading}
 						on:click={exportSkill}>{$i18n.t('Export as skill')}</button
 					>
+				{/if}
+				{#if edit || hasBeenSaved}
 					<button
 						class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
 						type="button"
@@ -637,7 +641,7 @@
 			<CapabilityToggles bind:toggles />
 		</div>
 
-		{#if workspaceOffered}
+		{#if canWrite && workspaceOffered}
 			{#if toggles.workspace}
 				<section class="border border-gray-200 dark:border-gray-800 rounded-lg p-3 space-y-2">
 					<div class="text-xs font-medium text-gray-500">{$i18n.t('Skill files')}</div>

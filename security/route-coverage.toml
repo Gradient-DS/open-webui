@@ -435,6 +435,7 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 # [Gradient] No waiver for GET/PUT/DELETE /api/v1/models/id/{id}/skill-files
-# or GET /api/v1/models/id/{id}/skill. seed_assistant_skill creates a private
-# assistant and raw owner upload through public APIs in both runtime modes;
-# ordinary reads, writable-field probes and cross-user controls drive all four.
+# or GET /api/v1/models/id/{id}/skill. seed_assistant_skill creates an assistant
+# and raw owner upload through public APIs in both runtime modes. Its write-granted
+# caller supplies positive controls; the public-read intruder must be refused on
+# all four routes, including list and export. No read grant discloses the folder.

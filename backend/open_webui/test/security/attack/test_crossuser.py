@@ -556,11 +556,11 @@ def test_imported_skill_files_still_require_the_seeded_skill_owners_access():
         'GET /api/v1/models/id/{id}/skill',
     ],
 )
-def test_assistant_skill_routes_require_the_private_assistants_access(route):
+def test_assistant_skill_routes_require_write_access_and_refuse_readers(route):
     routes, admins = crossuser.targets()
     assert route in routes and route not in admins
     assert route not in crossuser._shared()
-    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
+    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'user'
     result = crossuser.Authorization(plane.Seeding())
     crossuser._check(
         result,
@@ -572,3 +572,10 @@ def test_assistant_skill_routes_require_the_private_assistants_access(route):
         control=True,
     )
     assert not result.violations
+
+
+def test_assistant_skill_seed_declares_writer_control_and_reader_refusal():
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'assistant_skill')
+    assert parameter['actor'] == 'user'
+    assert 'write grant' in parameter['description']
+    assert 'read access' in parameter['description']

@@ -531,7 +531,10 @@ def seed_assistant_skill(ctx, parameter):
             'base_model_id': ctx.values['model'],
             'params': {'system': 'Invented instructions'},
             'meta': {'description': 'Invented skill folder'},
-            'access_grants': [],
+            'access_grants': [
+                {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
+                {'principal_type': 'user', 'principal_id': ctx.client.user_id, 'permission': 'write'},
+            ],
         },
     )
     model_id = _extract(model, 'id', name=parameter['key'], via='POST /api/v1/models/create')

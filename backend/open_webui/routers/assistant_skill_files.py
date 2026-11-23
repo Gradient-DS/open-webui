@@ -48,7 +48,7 @@ def refusal(request: Request, reason: str, status_code: int = 400) -> HTTPExcept
     return HTTPException(status_code, nl if request.headers.get('accept-language', '').lower().startswith('nl') else en)
 
 
-async def assistant_access(id, user, db, permission='read', *, lock=False):
+async def assistant_access(id, user, db, *, lock=False):
     if lock:
         # A no-op write serializes admission across workers on PostgreSQL and SQLite alike.
         await db.execute(update(Model).filter_by(id=id).values(updated_at=Model.updated_at))
@@ -57,12 +57,8 @@ async def assistant_access(id, user, db, permission='read', *, lock=False):
         raise HTTPException(404, ERROR_MESSAGES.NOT_FOUND)
     if model.user_id != user.id and not can_bypass_access_control(user):
         allowed = await AccessGrants.has_access(
-            user_id=user.id, resource_type='model', resource_id=id, permission=permission, db=db
+            user_id=user.id, resource_type='model', resource_id=id, permission='write', db=db
         )
-        if not allowed and permission == 'read':
-            allowed = await AccessGrants.has_access(
-                user_id=user.id, resource_type='model', resource_id=id, permission='write', db=db
-            )
         if not allowed:
             raise HTTPException(403, ERROR_MESSAGES.UNAUTHORIZED)
     return model
@@ -104,7 +100,7 @@ async def put_assistant_skill_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    model = await assistant_access(id, user, db, 'write', lock=True)
+    model = await assistant_access(id, user, db, lock=True)
     try:
         validate_path(form_data.path)
         if form_data.from_path is not None:
@@ -157,7 +153,7 @@ async def delete_assistant_skill_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    await assistant_access(id, user, db, 'write', lock=True)
+    await assistant_access(id, user, db, lock=True)
     await db.execute(delete(AssistantSkillFile).filter_by(assistant_id=id, path=path))
     await db.commit()
     return True
