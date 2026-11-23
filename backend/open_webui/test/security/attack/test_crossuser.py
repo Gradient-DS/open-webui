@@ -545,3 +545,30 @@ def test_imported_skill_files_still_require_the_seeded_skill_owners_access():
     routes, _ = crossuser.targets()
     assert 'GET /api/v1/skills/id/{id}/files/content' in routes
     assert crossuser._owner_key('/api/v1/skills/id/{id}/files/content', seeds.SURFACE) == 'admin'
+
+
+@pytest.mark.parametrize(
+    'route',
+    [
+        'GET /api/v1/models/id/{id}/skill-files',
+        'PUT /api/v1/models/id/{id}/skill-files',
+        'DELETE /api/v1/models/id/{id}/skill-files',
+        'GET /api/v1/models/id/{id}/skill',
+    ],
+)
+def test_assistant_skill_routes_require_the_private_assistants_access(route):
+    routes, admins = crossuser.targets()
+    assert route in routes and route not in admins
+    assert route not in crossuser._shared()
+    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(403, True, 'Forbidden'),
+        plane.Outcome(200, True, 'private bytes'),
+        ['invented-private'],
+        admin_only=False,
+        control=True,
+    )
+    assert not result.violations

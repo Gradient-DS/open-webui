@@ -9,6 +9,7 @@ import time
 # local imports
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
+from open_webui.models.assistant_skill_files import AssistantSkillFile  # [Gradient]
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -528,6 +529,7 @@ class FilesTable:
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
         async with get_async_db_context(db) as db:
             try:
+                await db.execute(delete(AssistantSkillFile).filter_by(file_id=id))  # [Gradient]
                 await db.execute(delete(File).filter_by(id=id))
                 await db.commit()
                 return True
@@ -537,6 +539,7 @@ class FilesTable:
     async def delete_files_by_ids(self, ids: list[str], db: AsyncSession | None = None) -> bool:
         async with get_async_db_context(db) as db:
             try:
+                await db.execute(delete(AssistantSkillFile).where(AssistantSkillFile.file_id.in_(ids)))  # [Gradient]
                 await db.execute(delete(File).filter(File.id.in_(ids)))
                 await db.commit()
                 return True
@@ -546,6 +549,7 @@ class FilesTable:
     async def delete_all_files(self, db: AsyncSession | None = None) -> bool:
         async with get_async_db_context(db) as db:
             try:
+                await db.execute(delete(AssistantSkillFile))  # [Gradient]
                 await db.execute(delete(File))
                 await db.commit()
                 return True

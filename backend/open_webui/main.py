@@ -235,6 +235,7 @@ from open_webui.routers import (
     retrieval,
     scim,
     skill_files,
+    assistant_skill_files,  # [Gradient] Assistant-owned skill folders.
     skills,
     tasks,
     terminals,
@@ -1101,6 +1102,7 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
+app.include_router(assistant_skill_files.router, prefix='/api/v1/models', tags=['models'])  # [Gradient]
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.connections_router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])

@@ -176,3 +176,13 @@ def test_skill_bundle_import_remains_local_in_both_runtime_modes(monkeypatch):
         skill = next(p for p in seeds.selected_parameters() if p['key'] == 'skill')
         assert skill['body']['bundle']
         assert skill['via'] not in seeds.SOEV_BACKED
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_assistant_skill_folder_is_local_and_driven_in_both_modes(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    assert 'assistant_skill' in {p['key'] for p in seeds.selected_parameters()}
+    for route in plane.operations():
+        if '/api/v1/models/id/{id}/skill' in route:
+            assert not seeds.route_waived(route)
+            assert route not in seeds.SOEV_BACKED

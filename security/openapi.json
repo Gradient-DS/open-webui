@@ -684,6 +684,61 @@
         "title": "ArchiveListResponse",
         "type": "object"
       },
+      "AssistantSkillFileForm": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "from_path": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Path"
+          },
+          "path": {
+            "maxLength": 255,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "file_id"
+        ],
+        "title": "AssistantSkillFileForm",
+        "type": "object"
+      },
+      "AssistantSkillFileResponse": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "file_id",
+          "size"
+        ],
+        "title": "AssistantSkillFileResponse",
+        "type": "object"
+      },
       "AudioConfigUpdateForm": {
         "properties": {
           "stt": {
@@ -41613,6 +41668,209 @@
           }
         ],
         "summary": "Export Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/id/{id}/skill": {
+      "get": {
+        "operationId": "export_assistant_skill_api_v1_models_id__id__skill_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Assistant Skill",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/id/{id}/skill-files": {
+      "delete": {
+        "operationId": "delete_assistant_skill_file_api_v1_models_id__id__skill_files_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Delete Assistant Skill File Api V1 Models Id  Id  Skill Files Delete",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Assistant Skill File",
+        "tags": [
+          "models"
+        ]
+      },
+      "get": {
+        "operationId": "list_assistant_skill_files_api_v1_models_id__id__skill_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssistantSkillFileResponse"
+                  },
+                  "title": "Response List Assistant Skill Files Api V1 Models Id  Id  Skill Files Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Assistant Skill Files",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_assistant_skill_file_api_v1_models_id__id__skill_files_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantSkillFileForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Put Assistant Skill File Api V1 Models Id  Id  Skill Files Put",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Assistant Skill File",
         "tags": [
           "models"
         ]

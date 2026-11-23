@@ -1186,3 +1186,19 @@ def test_skill_seed_exercises_atomic_import_with_real_zip_bytes():
     content, files = read_bundle(entry['body']['bundle'])
     assert content == entry['body']['content']
     assert files == [('references/imported.txt', b'Invented import fixture')]
+
+
+def test_assistant_skill_seed_creates_owner_bytes_and_a_real_path():
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'assistant_skill')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.values['model'] = 'invented-llm'
+    ctx.request = Mock(side_effect=[{'id': 'invented-assistant'}, {'id': 'invented-upload'}, True])
+    assert seeds.seed_assistant_skill(ctx, parameter) == 'invented-assistant'
+    assert ctx.values['assistant_skill_upload'] == 'invented-upload'
+    create, upload, attach = ctx.request.call_args_list
+    assert create.kwargs['json']['access_grants'] == []
+    assert create.kwargs['json']['base_model_id'] == 'invented-llm'
+    assert upload.kwargs['params'] == {'process': False}
+    assert attach.args == ('PUT', '/api/v1/models/id/invented-assistant/skill-files')
+    assert attach.kwargs['json'] == {'path': 'references/seed.txt', 'file_id': 'invented-upload'}
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)

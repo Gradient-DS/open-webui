@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
+from open_webui.models.assistant_skill_files import AssistantSkillFile  # [Gradient]
 from open_webui.models.files import strip_file_paths
 from open_webui.models.groups import Groups
 from open_webui.models.users import User, UserModel, UserResponse, Users
@@ -594,6 +595,8 @@ class ModelsTable:
         try:
             async with get_async_db_context(db) as db:
                 await AccessGrants.revoke_all_access('model', id, db=db)
+                # [Gradient] SQLite does not enable FK cascades; keep folder cleanup explicit too.
+                await db.execute(delete(AssistantSkillFile).filter_by(assistant_id=id))
                 await db.execute(delete(Model).filter_by(id=id))
                 await db.commit()
 
@@ -608,6 +611,7 @@ class ModelsTable:
                 model_ids = [row[0] for row in result.all()]
                 for model_id in model_ids:
                     await AccessGrants.revoke_all_access('model', model_id, db=db)
+                await db.execute(delete(AssistantSkillFile))  # [Gradient]
                 await db.execute(delete(Model))
                 await db.commit()
 
@@ -646,6 +650,7 @@ class ModelsTable:
                 for model in existing_models:
                     if model.id not in new_model_ids:
                         await AccessGrants.revoke_all_access('model', model.id, db=db)
+                        await db.execute(delete(AssistantSkillFile).filter_by(assistant_id=model.id))  # [Gradient]
                         await db.delete(model)
 
                 await db.commit()

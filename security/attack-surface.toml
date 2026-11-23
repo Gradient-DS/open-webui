@@ -1415,3 +1415,24 @@ json = { "from_path" = "references/", "to_path" = "moved/" }
 route = "POST /api/v1/skills/id/{id}/files/remove"
 description = "Remove the file the create control added, after the move control, as its owner; the imported file stays for the edit control."
 json = { "path" = "moved/created.txt" }
+
+# [Gradient] Assistant skill folders remain driveable without soev-api.
+[[parameter]]
+key = "assistant_skill"
+name = "id"
+prefix = "/api/v1/models/id/{id}"
+description = "Private assistant owned by the admin, with an owner-uploaded raw file and a real folder row. The seed uses ordinary model/file/folder APIs; both runtime modes and the full-stack sweep can create it."
+seeded_by = "seed_assistant_skill"
+depends_on = ["model"]
+provides = ["assistant_skill_upload"]
+actor = "admin"
+
+[[field]]
+route = "PUT /api/v1/models/id/{id}/skill-files"
+description = "Attach or replace an owner-owned upload at a second path. The seeded path stays available for export and list controls."
+json = { path = "references/created.txt", file_id = "{assistant_skill_upload}" }
+
+[[field]]
+route = "DELETE /api/v1/models/id/{id}/skill-files"
+description = "Remove the path the PUT owner control adds; idempotent after earlier passes."
+params = { path = "references/created.txt" }
