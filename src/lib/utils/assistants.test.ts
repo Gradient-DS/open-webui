@@ -41,6 +41,17 @@ const other = { id: 'other', name: 'Other' };
 const models = [llm, assistant, other];
 
 describe('effectiveCapabilities', () => {
+	it.each([true, false, undefined, null, 'true', 1])(
+		'workspace requires exact true on both sides: %s',
+		(value) => {
+			expect(effectiveCapabilities({ workspace: value }, { workspace: true }).workspace).toBe(
+				value === true
+			);
+			expect(effectiveCapabilities({ workspace: true }, { workspace: value }).workspace).toBe(
+				value === true
+			);
+		}
+	);
 	it.each([
 		[true, true, true],
 		[true, false, false],
@@ -69,7 +80,7 @@ describe('effectiveCapabilities', () => {
 		expect(effectiveCapabilities(base, override).web_search).toBe(expected);
 	});
 	it('accepts absent capability maps', () =>
-		expect(effectiveCapabilities(null)).toEqual({ vision: true }));
+		expect(effectiveCapabilities(null)).toEqual({ vision: true, workspace: false }));
 });
 
 describe('effectiveModel', () => {
@@ -221,6 +232,48 @@ describe('models for an assistant that uses tools', () => {
 		expect(pickableLLMId('plain', all, tooled)).toBe('capable');
 		expect(pickableLLMId('capable', all, tooled)).toBe('capable');
 		expect(pickableLLMId('plain', all, null)).toBe('plain');
-		expect(pickableLLMId('plain', [plain], tooled)).toBe('plain');
+		expect(pickableLLMId('plain', [plain], tooled)).toBe('');
+	});
+});
+
+// [Gradient] Workspace support comes from the LLM's own row.
+describe('models for an assistant that uses workspace', () => {
+	const assistant = {
+		id: 'helper',
+		info: {
+			base_model_id: 'old',
+			meta: { capabilities: { workspace: true }, defaultFeatureIds: ['workspace'] }
+		}
+	};
+	const supported = { id: 'supported', info: { meta: { capabilities: { workspace: true } } } };
+	const all = [
+		{ id: 'missing' },
+		{ id: 'off', info: { meta: { capabilities: { workspace: false } } } },
+		{ id: 'truthy', info: { meta: { capabilities: { workspace: 'true' } } } },
+		{
+			id: 'no-tools',
+			info: {
+				meta: {
+					capabilities: { workspace: true },
+					soev: { capabilities: { tools: 'unsupported' } }
+				}
+			}
+		},
+		supported
+	];
+	it('requires workspace and tool support together', () => {
+		expect(pickableLLMs(all, assistant)).toEqual([supported]);
+		expect(pickableLLMId('off', all, assistant, ['off', 'supported'])).toBe('supported');
+		expect(pickableLLMId('supported', all, assistant)).toBe('supported');
+		expect(pickableLLMId('', all, assistant)).toBe('supported');
+	});
+	it('does not fall back to an unsupported LLM when none qualify', () => {
+		const unavailable = all.filter((model) => model.id !== 'supported');
+		expect(pickableLLMs(unavailable, assistant)).toEqual([]);
+		expect(pickableLLMId('off', unavailable, assistant)).toBe('');
+	});
+	it('leaves plain chats unchanged', () => {
+		expect(pickableLLMs(all)).toEqual(all);
+		expect(effectiveModel(supported)).toBe(supported);
 	});
 });

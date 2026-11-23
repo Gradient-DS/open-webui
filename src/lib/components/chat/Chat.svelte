@@ -91,7 +91,7 @@
 		llmSelection
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { isLLM } from '$lib/utils/assistants';
+	import { isLLM, pickableLLMs } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -257,7 +257,9 @@
 
 	// [Gradient] Automatic LLM fallbacks must not inherit assistant visibility metadata.
 	const getAvailableModelIds = () =>
-		$rawModels.filter((m) => isLLM(m) && !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
+		pickableLLMs($rawModels, $activeAssistant)
+			.filter((m) => !(m?.info?.meta?.hidden ?? false))
+			.map((m) => m.id);
 	const getDefaultModelIds = () =>
 		$config?.default_models ? $config.default_models.split(',') : [];
 	const normalizeSelectedModels = (modelIds: string[] = []) => {

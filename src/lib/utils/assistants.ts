@@ -8,7 +8,7 @@ export type AssistantModel = {
 	info?: {
 		base_model_id?: string | null;
 		meta?: {
-			capabilities?: object | null;
+			capabilities?: Record<string, unknown> | null;
 			hidden?: boolean;
 			defaultFeatureIds?: string[];
 			toolIds?: string[];
@@ -45,6 +45,7 @@ export const effectiveCapabilities = (
 	return {
 		...base,
 		...override,
+		workspace: base.workspace === true && override.workspace === true,
 		vision: Boolean(
 			(base.vision === undefined ? true : base.vision) &&
 			(override.vision === undefined ? true : override.vision)
@@ -125,13 +126,18 @@ export const usesTools = (assistant?: AssistantModel | null): boolean => {
 export const supportsTools = (model?: AssistantModel | null): boolean =>
 	model?.info?.meta?.soev?.capabilities?.tools !== 'unsupported';
 
-/** The LLMs the picker offers: with an assistant that uses tools, only those that can call them. */
+/** [Gradient] Assistants require the LLM to support their tools and workspace. */
 export const pickableLLMs = <T extends AssistantModel>(
 	models: T[],
 	assistant?: AssistantModel | null
 ): T[] => {
 	const llms = models.filter(isLLM);
-	return usesTools(assistant) ? llms.filter(supportsTools) : llms;
+	const needsWorkspace = assistant?.info?.meta?.capabilities?.workspace === true;
+	return llms.filter(
+		(model) =>
+			(!(usesTools(assistant) || needsWorkspace) || supportsTools(model)) &&
+			(!needsWorkspace || model.info?.meta?.capabilities?.workspace === true)
+	);
 };
 
 /** The selected LLM, or the default pickable one when the assistant's tools rule it out. */
@@ -142,7 +148,7 @@ export const pickableLLMId = (
 	preferredIds: string[] = []
 ): string => {
 	const pickable = pickableLLMs(models, assistant);
-	if (!isLLM(models.find((model) => model.id === id))) return id;
+	if (id && !isLLM(models.find((model) => model.id === id))) return id;
 	if (pickable.some((model) => model.id === id)) return id;
-	return defaultLLMId(pickable, preferredIds) || id;
+	return defaultLLMId(pickable, preferredIds);
 };
