@@ -1065,3 +1065,99 @@ async def test_processed_image_keeps_storage_and_uses_its_live_request_source(en
     assert saved.path == '/uploads/retained-image.png'
     assert saved.meta['soev_job']['committed']
     assert env.api.uploads[saved.meta['soev_job']['job_id'], saved.id] == image
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        'https://foreign.invalid/file',
+        'https://127.0.0.1/file',
+        'https://store.invalid@foreign.invalid/file',
+        'https://foreign.invalid@store.invalid/file',
+        'https://store.invalid:8443/file',
+        'http://store.invalid/file',
+    ],
+)
+def test_transfer_destination_is_exactly_configured(url):
+    from open_webui.soev.transfers import validate
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+    upload = {
+        'method': 'PUT',
+        'url': url,
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    with pytest.raises(Exception, match='Invalid upload declaration'):
+        validate(upload, size=len(FILE_BYTES), sha256=digest, store_host='store.invalid')
+
+
+@pytest.mark.parametrize(
+    'configured,url,allowed',
+    [
+        ('', 'https://store.invalid/file', False),
+        ('127.0.0.1', 'https://127.0.0.1/file', True),
+        ('store.invalid:8443', 'https://store.invalid:8443/file', True),
+        ('http://s3:9000', 'http://s3:9000/file', True),
+        ('http://s3:9000', 'http://other:9000/file', False),
+    ],
+)
+def test_transfer_origin_setting_is_independent_of_platform(configured, url, allowed):
+    from open_webui.soev.transfers import validate
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+    upload = {
+        'method': 'PUT',
+        'url': url,
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    if allowed:
+        validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
+    else:
+        with pytest.raises(Exception, match='Invalid upload declaration'):
+            validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
+
+
+@pytest.mark.asyncio
+async def test_transfer_redirect_never_sends_bytes_to_redirect_target(env, monkeypatch):
+    requests = []
+    original = AsyncClient
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(307, headers={'Location': 'https://foreign.invalid/original'})
+
+    monkeypatch.setattr(
+        'open_webui.soev.transfers.httpx.AsyncClient',
+        lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+    )
+    from open_webui.soev.transfers import put
+    from open_webui.soev.client import StoreTransferError
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+
+    async def chunks():
+        yield FILE_BYTES
+
+    upload = {
+        'method': 'PUT',
+        'url': 'https://store.invalid/original',
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    with pytest.raises(StoreTransferError):
+        await put(upload, chunks, size=len(FILE_BYTES), sha256=digest, timeout=5, store_host='store.invalid')
+    assert len(requests) == 1 and requests[0].url.host == 'store.invalid'

@@ -567,9 +567,12 @@ class SoevClient:
     async def put_transfer(
         self, upload: dict, chunks: Callable[[], AsyncIterator[bytes]], *, size: int, sha256: str
     ) -> None:
+        from open_webui import config
         from open_webui.soev.transfers import put
 
-        await put(upload, chunks, size=size, sha256=sha256, timeout=self._timeout, platform_url=self._base_url)
+        await put(
+            upload, chunks, size=size, sha256=sha256, timeout=self._timeout, store_host=config.SOEV_TRANSFER_STORE_HOST
+        )
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items with fresh admission for every cursor request."""

@@ -384,3 +384,13 @@ body and idempotency key; 5xx/transport failures get two retries. Originals and
 resubmissions use the platform original route and same-origin `/v1/downloads/{code}`
 redemption with the requesting person's login token. The public gateway must allow
 long upload/download streams and the OWUI pod must reach the signed store host.
+
+Transfer PUT destinations require deployment setting `SOEV_TRANSFER_STORE_HOST`
+(chart `soevApi.transferStoreHost`). Set the exact store hostname, optionally with
+a port; HTTPS and port 443 are the defaults. IP literals require that exact literal
+in this setting. No redirects are followed. Unset or invalid settings refuse upload.
+An explicit store origin can select HTTP for an internal development store; this
+does not depend on the API URL. The full-stack CI ACL signs against
+`http://s3:9000` (`SOEV_ACL_OBJECT_STORE_ENDPOINT`); its OWUI environment must set
+`SOEV_TRANSFER_STORE_HOST=http://s3:9000`. Configure the local stack's signed store
+origin the same way. The sibling stack checkout is maintained separately.

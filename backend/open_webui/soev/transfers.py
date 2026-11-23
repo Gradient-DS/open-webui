@@ -32,10 +32,22 @@ for _name in (
     logging.getLogger(_name).addFilter(_filter)
 
 
-def validate(upload: dict, *, size: int, sha256: str, platform_url: str = 'https://platform.invalid') -> None:
+def validate(upload: dict, *, size: int, sha256: str, store_host: str) -> None:
     from open_webui.soev.client import SoevApiError
 
     try:
+        configured = urlsplit(store_host if '://' in store_host else f'https://{store_host}')
+        if (
+            not configured.hostname
+            or configured.scheme not in ('http', 'https')
+            or configured.username is not None
+            or configured.password is not None
+            or configured.path not in ('', '/')
+            or configured.query
+            or configured.fragment
+        ):
+            raise ValueError
+        port = configured.port or (443 if configured.scheme == 'https' else 80)
         url = httpx.URL(upload['url'])
         headers = upload['headers']
         expected = {
@@ -45,7 +57,9 @@ def validate(upload: dict, *, size: int, sha256: str, platform_url: str = 'https
         }
         if (
             upload['method'] != 'PUT'
-            or not (url.scheme == 'https' or (url.scheme == 'http' and urlsplit(platform_url).scheme == 'http'))
+            or url.scheme != configured.scheme
+            or url.host != configured.hostname
+            or (url.port or (443 if url.scheme == 'https' else 80)) != port
             or not url.host
             or url.userinfo
             or urlsplit(upload['url']).username is not None
@@ -67,11 +81,11 @@ async def put(
     size: int,
     sha256: str,
     timeout: float,
-    platform_url: str,
+    store_host: str,
 ) -> None:
     from open_webui.soev.client import StoreTransferError, _NoCookies
 
-    validate(upload, size=size, sha256=sha256, platform_url=platform_url)
+    validate(upload, size=size, sha256=sha256, store_host=store_host)
     token = _active.set(True)
     try:
         async with httpx.AsyncClient(

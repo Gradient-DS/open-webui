@@ -2472,6 +2472,7 @@ TENANT_NAME = os.environ.get('TENANT_NAME', '')
 # Deployment-only soev-api settings; never register these in DEFAULT_CONFIG.
 # The signing key is the PEM value, including its original newlines.
 SOEV_API_URL = os.environ.get('SOEV_API_URL', '')
+SOEV_TRANSFER_STORE_HOST = os.environ.get('SOEV_TRANSFER_STORE_HOST', '')
 ENABLE_V2_THREADS = os.environ.get('ENABLE_V2_THREADS', 'False').lower() == 'true'
 SOEV_API_KEY = os.environ.get('SOEV_API_KEY', '')
 SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
