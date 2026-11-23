@@ -40,6 +40,8 @@
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
+	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 	import { defaultLLMId, pickableLLMs } from '$lib/utils/assistants';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
@@ -115,6 +117,7 @@
 	let mergeBase: any = { meta: {}, params: {} };
 
 	let showAccessControlModal = false;
+	let showInstructionsModal = false;
 
 	// [Gradient] Every LLM the assistant's tools allow is listed; Workspace greys out the ones without it.
 	const supportsWorkspace = (model: any) => model?.info?.meta?.capabilities?.workspace === true;
@@ -538,6 +541,27 @@
 		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
 	/>
 
+	<Modal size="3xl" bind:show={showInstructionsModal}>
+		<div class="flex flex-col gap-3 p-5">
+			<div class="flex items-center justify-between">
+				<label for="assistant-instructions-large" class="text-sm font-medium"
+					>{$i18n.t('Instructions')}</label
+				>
+				<button
+					type="button"
+					class="px-3 py-1.5 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black"
+					on:click={() => (showInstructionsModal = false)}>{$i18n.t('Close')}</button
+				>
+			</div>
+			<textarea
+				id="assistant-instructions-large"
+				class="w-full h-[75vh] rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden resize-none"
+				bind:value={system}
+				placeholder={$i18n.t('Tell the assistant how it should behave')}
+			></textarea>
+		</div>
+	</Modal>
+
 	<div class="flex flex-col gap-5 max-w-3xl mx-auto w-full p-1">
 		<div class="flex flex-wrap items-center justify-between gap-2">
 			<div class="text-lg font-medium whitespace-nowrap">
@@ -608,10 +632,24 @@
 		</div>
 
 		<div>
-			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Instructions')}</div>
+			<div class="flex items-center justify-between mb-1">
+				<label for="assistant-instructions" class="text-xs font-medium text-gray-500"
+					>{$i18n.t('Instructions')}</label
+				>
+				<!-- [Gradient] Long instructions (an imported SKILL.md) get a large editor of their own. -->
+				<button
+					type="button"
+					class="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 dark:hover:text-gray-100"
+					on:click={() => (showInstructionsModal = true)}
+				>
+					<ArrowsPointingOut className="size-3.5" />
+					{$i18n.t('Open large editor')}
+				</button>
+			</div>
 			<textarea
+				id="assistant-instructions"
 				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden resize-y min-h-[7rem]"
-				rows="6"
+				rows="10"
 				bind:value={system}
 				placeholder={$i18n.t('Tell the assistant how it should behave')}
 			></textarea>
