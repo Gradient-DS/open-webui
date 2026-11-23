@@ -1,5 +1,9 @@
 # owui-dead-features: the data-warning acceptance route is deleted, not waived.
 # owui-dead-features: local credential and MFA issuers are removed; no new waivers.
+# test_live_client.py:test_removed_local_password_routes_return_not_found checks
+# exact 404 Not Found responses for every unmounted credential route, anonymously
+# and with all three actors. test_live_repair_preserves_ids_after_signout checks
+# signout revocation and OIDC repair with the same identity ids.
 # owui-dead-features: tool/function execution and tool OAuth are unmounted, not waived.
 # owui-dead-features: local compaction, approval resolution and task config are unmounted.
 # owui-dead-features: the image-prompt task is unmounted, without a waiver.
