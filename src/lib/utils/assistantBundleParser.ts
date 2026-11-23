@@ -3,57 +3,6 @@ import { parse } from 'yaml';
 
 const SKILL_MD = 'SKILL.md';
 
-// Extensions read as UTF-8 text and stored inline. Everything else is uploaded
-// as a binary File. Mirrors the backend _TEXT_EXTENSIONS allowlist
-// (backend/open_webui/utils/skill_bundles.py); when unsure, treat as binary
-// (reading binary as UTF-8 would corrupt it; storing text as a File is harmless).
-const TEXT_EXTENSIONS = new Set([
-	'md',
-	'markdown',
-	'txt',
-	'py',
-	'js',
-	'ts',
-	'jsx',
-	'tsx',
-	'json',
-	'yaml',
-	'yml',
-	'toml',
-	'ini',
-	'cfg',
-	'conf',
-	'sh',
-	'bash',
-	'zsh',
-	'html',
-	'htm',
-	'css',
-	'scss',
-	'sass',
-	'xml',
-	'csv',
-	'rst',
-	'tex',
-	'sql',
-	'r',
-	'rb',
-	'java',
-	'c',
-	'cpp',
-	'h',
-	'hpp',
-	'cs',
-	'go',
-	'rs',
-	'swift',
-	'kt',
-	'php',
-	'lua',
-	'tf',
-	'hcl'
-]);
-
 export interface SkillBundleFile {
 	path: string;
 	blob: Blob;
@@ -63,11 +12,6 @@ export interface ParsedSkillBundle {
 	skillMd: string;
 	files: SkillBundleFile[];
 }
-
-export const isTextPath = (path: string): boolean => {
-	const ext = path.includes('.') ? path.split('.').pop()!.toLowerCase() : '';
-	return TEXT_EXTENSIONS.has(ext);
-};
 
 // A bundle-relative path under a conventional skill subdir, e.g.
 // "assets/template.docx". The negative lookbehind for \w / / keeps the match from
@@ -130,29 +74,23 @@ export const parseSkillBundle = async (file: File | Blob): Promise<ParsedSkillBu
 export const buildSkillBundle = async (
 	skillMd: string,
 	files: SkillBundleFile[],
-	rootDir = ''
+	rootDir = '',
+	// [Gradient] Assistant exports omit directory entries and use the compressed-byte budget.
+	options: { createFolders?: boolean; compression?: 'STORE' | 'DEFLATE' } = {}
 ): Promise<Blob> => {
 	const zip = new JSZip();
 	// Anthropic .skill bundles wrap their contents in a top-level <skill-name>/
 	// directory. Pass rootDir to produce that layout so the bundle re-imports into
 	// Claude; omit it (or pass '') for a flat bundle.
 	const prefix = rootDir ? `${rootDir.replace(/\/+$/, '')}/` : '';
-	zip.file(`${prefix}${SKILL_MD}`, skillMd);
+	zip.file(`${prefix}${SKILL_MD}`, skillMd, { createFolders: options.createFolders ?? true });
 	// Convert each Blob to an ArrayBuffer first (see parseSkillBundle): JSZip reads
 	// Blob inputs via FileReader, which is browser-only.
-	for (const f of files) zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer());
-	return zip.generateAsync({ type: 'blob' });
-};
-
-// [Gradient] One create request carries the normalized zip, including raw binary files.
-export const encodeSkillBundle = async (
-	skillMd: string,
-	files: SkillBundleFile[]
-): Promise<string> => {
-	const zip = new JSZip();
-	zip.file(SKILL_MD, skillMd);
-	for (const file of files) zip.file(file.path, await file.blob.arrayBuffer());
-	return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+	for (const f of files)
+		zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer(), {
+			createFolders: options.createFolders ?? true
+		});
+	return zip.generateAsync({ type: 'blob', compression: options.compression ?? 'STORE' });
 };
 
 // [Gradient] Claude descriptions can be folded or multiline YAML scalars.

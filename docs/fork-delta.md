@@ -6,7 +6,7 @@ was never attempted. What is captured here is (a) the major standing divergences
 that a reader must know before touching this repo, and (b) the NEO-era changes on
 `merge/neo-to-dev`. The file grows opportunistically — when you touch a divergence
 that has no entry, add one; when you change a gate, fix the entry. Per the
-Gradient doc strategy (soev-docs repo, `doc-strategy.md`), this is the OWUI
+Gradient doc strategy (soev-wiki-docs repo, `docs/internal/guidelines/engineering/repo-docs.md`), this is the OWUI
 fork's special-case doc: every divergence from upstream + why.
 
 **Convention.** Gradient code is marked `[Gradient]` in comments throughout the
@@ -275,15 +275,9 @@ the workspace list's `pinModelHandler`. Why: upstream's only pin surface is the
 model selector, which lists no assistants — without this there is no way to
 pin an assistant from the simple editor.
 
-Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (~65–81,
-~320–330). Commit `1f61ab3b0`. Visible only where the simple builder is used,
-which is gated by `FEATURE_SIMPLE_ASSISTANT_BUILDER`
-(`backend/open_webui/config.py:2894`, default `False`; Helm
-`featureSimpleAssistantBuilder`). Note the flag is **off by default**: although
-`isFeatureEnabled()` treats an *absent* key as enabled, `main.py` always emits
-`feature_simple_assistant_builder` in the authenticated config, so the absent-key
-default never applies to this feature. The editor additionally yields to the
-advanced editor when `?advanced` is present in the URL.
+Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (sidebar pin handler). Commit `1f61ab3b0`. The simple editor is the only
+workspace assistant editor; admin Settings > Models retains the full model editor
+for base-model rows.
 
 ## Model profiles, hosting, and pinning
 
@@ -563,7 +557,41 @@ neither navigate nor reach the network.
 Standalone local development (`open-webui dev`, the repo's docker compose) takes
 its secrets from `op://` references in the tracked `secrets.env`, resolved by
 `op run` through `scripts/op-run`; `.env` holds non-secret settings only. Rule:
-soev-docs `local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
+soev-wiki-docs `docs/internal/guidelines/engineering/local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
 that passes those variables into the container. `.env.example` gains a header
 comment only. No runtime code changes: `env.py` already loads `.env` without
 override, so `op run`'s variables win.
+
+## Assistants own their skill folders
+
+Assistants use `workspace/Models/SimpleModelEditor.svelte` without advanced settings.
+Each assistant may choose a default model, applied only when starting a new chat.
+Workspace requires support from both the assistant and the chosen model. The
+assistant owns its instructions and skill folder; import/export packages them with
+portable settings in a `.skill` bundle. Model write access protects folder editing
+and export. Agent turns send only that assistant's bundle, as the chatting user,
+when Workspace is on and the platform supports skills.
+
+The standalone skill model, router, Svelte screens, middleware and builtin tool are
+upstream code, confirmed by their history and the upstream merge base
+`0a7c15832`. They remain for upstream merges, unreachable through the permanent
+`'skills': False` definition in `backend/open_webui/utils/features.py`. Its value
+also feeds authenticated frontend config. The router is not mounted, existing
+workspace links/menu/selector gates hide it, skill URLs redirect to `/workspace`,
+and middleware and builtin tools use the same definition. Chat requests do not
+send standalone skill ids. Upstream permission definitions remain, with their
+standalone skill rows removed from group settings. There is no deployment switch.
+
+The fork's standalone skill files model/router, tree editor, bundle import/export,
+agent selection and feature settings are deleted. Shared parsing lives in
+`src/lib/utils/assistantBundleParser.ts`; caller-scoped upload caching lives in
+`backend/open_webui/utils/agent_skill_uploads.py`. The earlier scoped skill-file
+JWT refusal remains in session authentication so previously issued tokens cannot
+become ordinary sessions. Assistant isolation and revocation checks remain.
+
+Migration `b7e19d4a6c82` deletes standalone skills and their grants, removes
+`meta.skillIds` from every model and drops `skill_file`. The upstream `skill`
+table remains empty. Downgrade recreates only the empty junction structure. The
+File rows and stored bytes behind former skill files are left alone: they stay
+their uploader's files. The removed
+routes are removed from the security inventories and their own probes only.

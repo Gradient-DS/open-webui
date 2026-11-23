@@ -2,9 +2,9 @@
 
 Gradient-DS fork of **Open WebUI** — the soev.ai chat product. SvelteKit 5 + Vite frontend, FastAPI + SQLAlchemy backend, SQLite/PostgreSQL. Supports Ollama and OpenAI-compatible APIs with built-in RAG.
 
-**Fit in the system:** this fork is everything user-facing (chat UI, auth, knowledge bases, admin, GDPR/compliance) plus the proxy seam to the agents-api built in `soev-solutions`; `soev-gitops` deploys one tenant per customer from this repo's chart. Company context, cross-repo architecture, and the decision log live in the sibling `soev-docs` repo (`../soev-docs`, or `$SOEV_DOCS_PATH`, or `~/gradient/soev-docs`) — start at `architecture/repo-map.md`.
+**Fit in the system:** this fork is everything user-facing (chat UI, auth, knowledge bases, admin, GDPR/compliance) plus the proxy seam to the agents-api built in `soev-solutions`; `soev-gitops` deploys one tenant per customer from this repo's chart. Company context and cross-repo architecture live in the wiki pages in the sibling `soev-wiki-docs` repo (`../soev-wiki-docs` or `$SOEV_WIKI_DOCS`) — start at `docs/internal/platform/index.md`.
 
-Claude scratch (specs, plans, reviews, handoffs) lives in git-ignored `thoughts/<kind>/`; personal commands and agents never go in git. Conventions: `soev-docs/claude-code.md`. Repo decision log: `docs/decisions.md`.
+Claude scratch (specs, plans, reviews, handoffs) lives in git-ignored `thoughts/<kind>/`; personal commands and agents never go in git. Conventions: `soev-wiki-docs/docs/internal/guidelines/engineering/agent-instructions.md`. Repo decision log: `docs/decisions.md`.
 
 ## Commands
 
@@ -33,9 +33,9 @@ Best hot-reload: backend (`open-webui dev`, port 8080) and frontend (`npm run de
 
 ### Local secrets
 
-Running Open WebUI inside a soev stack (`soev-docs/architecture/local-development.md`, profile `owui-src`) is the
+Running Open WebUI inside a soev stack (`soev-wiki-docs/docs/internal/guidelines/engineering/local-development.md`, profile `owui-src`) is the
 preferred way and already takes its secrets from 1Password. For the standalone commands above, secrets come from
-1Password too ([rule](https://github.com/Gradient-DS/soev-docs/blob/main/local-secrets.md)): `secrets.env` holds
+1Password too ([rule](https://github.com/Gradient-DS/soev-wiki-docs/blob/main/docs/internal/guidelines/engineering/local-secrets.md)): `secrets.env` holds
 `op://` references only (item `soev-dev-stack`, vault `soev-development`) and `.env` holds non-secret settings only.
 Start the backend through the wrapper, which runs `op run` for that one process:
 
@@ -59,7 +59,7 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 
 ## Running against a soev stack
 
-To develop this fork against the soev platform, run it from your checkout (commands above) and point it at a running local stack's soev-api, `http://api.<slug>.soev.localhost`: set `AGENT_API_ENABLED=true` plus the `SOEV_API_*` variables in [docs/agent-api-deployment.md](docs/agent-api-deployment.md). Starting a stack, its naming and where its credentials come from: `soev-docs/architecture/local-development.md`.
+To develop this fork against the soev platform, run it from your checkout (commands above) and point it at a running local stack's soev-api, `http://api.<slug>.soev.localhost`: set `AGENT_API_ENABLED=true` plus the `SOEV_API_*` variables in [docs/agent-api-deployment.md](docs/agent-api-deployment.md). Starting a stack, its naming and where its credentials come from: `soev-wiki-docs/docs/internal/guidelines/engineering/local-development.md`.
 
 ## Architecture
 

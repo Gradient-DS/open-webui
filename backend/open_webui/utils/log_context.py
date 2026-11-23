@@ -1,6 +1,6 @@
 """[Gradient] Structured log context and never-empty error rendering.
 
-Implements the cross-repo schema in ``soev-docs/architecture/logging.md``
+Implements the cross-repo schema in ``soev-wiki-docs/docs/internal/platform/architecture/logging.md``
 without modifying upstream files. Enrichment rides in loguru's ``extra``
 dict, which the upstream ``_json_sink`` already serialises wholesale, so
 ``utils/logger.py`` needs no change and stays merge-clean.

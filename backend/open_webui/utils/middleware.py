@@ -146,12 +146,10 @@ from open_webui.utils.webhook import post_webhook
 
 # [Gradient] Fork-only imports (upstream equivalents already imported above).
 from open_webui.utils.agent_routing import agent_owns_tool_execution
-from open_webui.utils.skill_bundles import resolve_skill_bundle_files
 from open_webui.utils.data_separation import request_mixes_data_sources
 from open_webui.config import (
     FEATURE_BUILTIN_TOOLS,
     FEATURE_STRICT_DATA_SEPARATION,
-    FEATURE_SKILL_FILES,
 )
 from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -3077,13 +3075,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Otherwise, save any tools that filter inlets added for merging later.
     inlet_filter_tools = None if payload_tools is not None else form_data.get('tools', None)
 
-    # Mentioned skills get full content; selected/default skills can be loaded through view_skill.
-    # user_skill_ids (user-selected or message-mentioned, vs model-attached) feeds
-    # metadata['skills'][*].is_selected for the agent payload.
-    mentioned_skill_ids = extract_skill_ids_from_messages(form_data.get('messages', []))
-    # [Gradient] Preserve explicit skill selections in the agent payload.
-    user_skill_ids = set(form_data.pop('skill_ids', None) or []) | mentioned_skill_ids
-    skill_ids = sorted(user_skill_ids | set(model.get('info', {}).get('meta', {}).get('skillIds', [])))
+    mentioned_skill_ids = (
+        extract_skill_ids_from_messages(form_data.get('messages', [])) if is_feature_enabled('skills') else set()
+    )
+    selected_skill_ids = form_data.pop('skill_ids', None) or []
+    skill_ids = sorted(set(selected_skill_ids) | mentioned_skill_ids) if is_feature_enabled('skills') else []
     available_skills = []
     view_skill_ids = []
     chat = None
@@ -3151,48 +3147,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data['messages'],
                 append=True,
             )
-
-    # [Gradient] Forward the resolved skills to the agent service as a
-    # dedicated payload field. The messages-inlining above is kept for
-    # non-agent chats; the agent reads this structured list instead.
-    if available_skills:
-        # Pre-compute bundled markdown files per skill.  Building the 'files'
-        # list requires async DB calls, so we resolve all bundles up-front
-        # before the comprehension below.  Skills with no files produce an
-        # empty list; the 'files' key is only included when non-empty so
-        # that skills without files are forwarded byte-identically to today.
-        # Resolve bundled files only when the skill-files extension is enabled.
-        skill_bundle_files = await resolve_skill_bundle_files(available_skills) if FEATURE_SKILL_FILES else {}
-
-        metadata['skills'] = [
-            {
-                'id': s.id,
-                'name': s.name,
-                'description': s.description or '',
-                'content': s.content,
-                'is_selected': s.id in user_skill_ids,
-                **({'files': skill_bundle_files[s.id]} if skill_bundle_files.get(s.id) else {}),
-            }
-            for s in available_skills
-        ]
-
-        # [Gradient] Observability: make the forwarded skill bundle explicit so a
-        # misconfiguration (e.g. FEATURE_SKILL_FILES off on the serving process)
-        # or an empty file manifest is visible in logs instead of silently
-        # surfacing as "agent only has view_skill, no read_skill_file/run_script".
-        log.info(
-            '[skills] forwarding %d skill(s) to agent (FEATURE_SKILL_FILES=%s): %s',
-            len(metadata['skills']),
-            FEATURE_SKILL_FILES,
-            [
-                {
-                    'name': s['name'],
-                    'is_selected': s['is_selected'],
-                    'files': len(s.get('files', [])),
-                }
-                for s in metadata['skills']
-            ],
-        )
 
     # Strip <$skillId|label> mention tags so the model doesn't see raw markup.
     strip_skill_mentions(form_data.get('messages', []))

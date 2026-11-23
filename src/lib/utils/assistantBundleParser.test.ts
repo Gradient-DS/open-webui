@@ -3,11 +3,9 @@ import JSZip from 'jszip';
 import {
 	parseSkillBundle,
 	buildSkillBundle,
-	isTextPath,
 	findMissingSkillFiles,
-	encodeSkillBundle,
 	parseSkillMetadata
-} from './bundle';
+} from './assistantBundleParser';
 
 async function makeSkillFile(entries: Record<string, string | Uint8Array>): Promise<File> {
 	const zip = new JSZip();
@@ -15,19 +13,6 @@ async function makeSkillFile(entries: Record<string, string | Uint8Array>): Prom
 	const blob = await zip.generateAsync({ type: 'blob' });
 	return new File([blob], 'test.skill');
 }
-
-describe('isTextPath', () => {
-	it('treats known text extensions as text', () => {
-		expect(isTextPath('scripts/run.py')).toBe(true);
-		expect(isTextPath('SKILL.md')).toBe(true);
-		expect(isTextPath('a/b/notes.txt')).toBe(true);
-	});
-	it('treats unknown/binary extensions as binary', () => {
-		expect(isTextPath('assets/template.docx')).toBe(false);
-		expect(isTextPath('assets/logo.png')).toBe(false);
-		expect(isTextPath('noext')).toBe(false);
-	});
-});
 
 describe('parseSkillBundle', () => {
 	it('extracts SKILL.md and non-SKILL.md files, skipping directories', async () => {
@@ -134,7 +119,7 @@ describe('buildSkillBundle nested (Anthropic layout)', () => {
 });
 
 // [Gradient] Imports use one normalized zip request, preserving every file's bytes.
-describe('workspace skill import', () => {
+describe('assistant bundle import', () => {
 	it.each(['zip', 'skill'])('imports a Claude .%s export directly', async (extension) => {
 		const archive = await makeSkillFile({
 			'outline/SKILL.md':
@@ -143,8 +128,8 @@ describe('workspace skill import', () => {
 			'outline/scripts/run.py': 'print("example")'
 		});
 		const parsed = await parseSkillBundle(new File([archive], `outline.${extension}`));
-		const encoded = await encodeSkillBundle(parsed.skillMd, parsed.files);
-		const zip = await JSZip.loadAsync(encoded, { base64: true });
+		const bundle = await buildSkillBundle(parsed.skillMd, parsed.files);
+		const zip = await JSZip.loadAsync(await bundle.arrayBuffer());
 		expect(await zip.file('assets/template.bin')!.async('uint8array')).toEqual(
 			new Uint8Array([0, 255, 127])
 		);

@@ -519,6 +519,43 @@ def seed_knowledge_file(ctx, parameter):
     return knowledge_id
 
 
+def seed_assistant_skill(ctx, parameter):
+    # [Gradient] Ordinary APIs only: usable by the full-stack sweep in either runtime mode.
+    model = ctx.request(
+        'POST',
+        '/api/v1/models/create',
+        actor=ctx.admin,
+        json={
+            'id': f'invented-assistant-{ctx.token}',
+            'name': f'Invented assistant {ctx.token}',
+            'base_model_id': ctx.values['model'],
+            'params': {'system': 'Invented instructions'},
+            'meta': {'description': 'Invented skill folder'},
+            'access_grants': [
+                {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
+                {'principal_type': 'user', 'principal_id': ctx.client.user_id, 'permission': 'write'},
+            ],
+        },
+    )
+    model_id = _extract(model, 'id', name=parameter['key'], via='POST /api/v1/models/create')
+    file = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.admin,
+        params={'process': False},
+        files=[('file', ('invented.txt', 'Invented fixture bytes', 'text/plain'))],
+    )
+    file_id = _extract(file, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    ctx.request(
+        'PUT',
+        f'/api/v1/models/id/{quote(model_id, safe="")}/skill-files',
+        actor=ctx.admin,
+        json={'path': 'references/seed.txt', 'file_id': file_id},
+    )
+    ctx.provide(parameter, 'assistant_skill_upload', file_id)
+    return model_id
+
+
 def seed_cloud_family(ctx, parameter):
     return 'live_documents'
 
@@ -614,6 +651,7 @@ _SEEDERS = {
         seed_cloud_mailbox_address,
         seed_knowledge_file,
         seed_external_source,
+        seed_assistant_skill,
     )
 }
 

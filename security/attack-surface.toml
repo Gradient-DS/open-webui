@@ -443,16 +443,6 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
-key = "skill"
-name = "id"
-prefix = "/api/v1/skills/id/{id}"
-description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token. The base64 zip exercises atomic bundle import and single-folder stripping; files are new and private to the creator."
-via = "POST /api/v1/skills/create"
-body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content", "bundle" = "UEsDBBQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAb3V0bGluZS9TS0lMTC5tZHMsKUlMzlYozs7MyVFIzs8rSc0rAQBQSwMEFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAABvdXRsaW5lL3JlZmVyZW5jZXMvaW1wb3J0ZWQudHh088wrS80rSU1RyMwtyC8qUUjLrCgpLUoFAFBLAQIUAxQAAAAIAAAAIQCEunwnFgAAABQAAAAQAAAAAAAAAAAAAACAAQAAAABvdXRsaW5lL1NLSUxMLm1kUEsBAhQDFAAAAAgAAAAhAAKeTNIZAAAAFwAAAB8AAAAAAAAAAAAAAIABRAAAAG91dGxpbmUvcmVmZXJlbmNlcy9pbXBvcnRlZC50eHRQSwUGAAAAAAIAAgCLAAAAmgAAAAAA" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
 key = "prompt"
 name = "prompt_id"
 prefix = "/api/v1/prompts/id/{prompt_id}"
@@ -1390,28 +1380,23 @@ status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
 
-# [Gradient] Imported bundles seed real paths; no private platform service is needed.
-[[field]]
-route = "GET /api/v1/skills/id/{id}/files/content"
-description = "The skill seed imports this raw file. The same skill read-access check protects stored and empty file content."
-params = { "path" = "references/imported.txt" }
+# [Gradient] Assistant skill folders remain driveable without soev-api.
+[[parameter]]
+key = "assistant_skill"
+name = "id"
+prefix = "/api/v1/models/id/{id}"
+description = "Assistant owned by the admin with an owner-uploaded raw file and a real folder row. The ordinary caller has a write grant for positive controls; everyone else has only read access and must be refused by all four skill routes. The seed uses ordinary APIs in both runtime modes and the full-stack sweep."
+seeded_by = "seed_assistant_skill"
+depends_on = ["model"]
+provides = ["assistant_skill_upload"]
+actor = "user"
 
 [[field]]
-route = "POST /api/v1/skills/id/{id}/files"
-description = "Create a new inline path on the seeded, owned skill, without borrowing another user's File."
-json = { "path" = "references/created.txt", "content" = "Invented inline file {token}" }
+route = "PUT /api/v1/models/id/{id}/skill-files"
+description = "Attach or replace an owner-owned upload at a second path. The seeded path stays available for export and list controls."
+json = { path = "references/created.txt", file_id = "{assistant_skill_upload}" }
 
 [[field]]
-route = "PUT /api/v1/skills/id/{id}/files"
-description = "Edit the imported text file where the move control left it: writes run in route order, so the move and remove controls come first."
-json = { "path" = "moved/imported.txt", "content" = "Invented edited file {token}" }
-
-[[field]]
-route = "POST /api/v1/skills/id/{id}/files/move"
-description = "Move the directory seeded by the imported bundle; the remove control follows it."
-json = { "from_path" = "references/", "to_path" = "moved/" }
-
-[[field]]
-route = "POST /api/v1/skills/id/{id}/files/remove"
-description = "Remove the file the create control added, after the move control, as its owner; the imported file stays for the edit control."
-json = { "path" = "moved/created.txt" }
+route = "DELETE /api/v1/models/id/{id}/skill-files"
+description = "Remove the path the PUT owner control adds; idempotent after earlier passes."
+params = { path = "references/created.txt" }

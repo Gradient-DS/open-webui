@@ -23,6 +23,8 @@ const isAvailableAssistant = (id: string | null | undefined, rawModels = get(mod
 	rawModels.some((model) => model.id === id && isAssistant(model));
 
 export const activeAssistantId = writable<string | null>(readAssistantId());
+// [Gradient] A manual LLM choice or a loaded chat prevents assistant defaults for this chat.
+export const assistantDefaultModelBlocked = writable(false);
 // An empty registry can mean loading; validate restored selections once models arrive.
 models.subscribe((rawModels) => {
 	const id = get(activeAssistantId);

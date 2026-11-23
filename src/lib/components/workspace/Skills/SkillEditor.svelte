@@ -7,12 +7,11 @@
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import { user, config } from '$lib/stores';
+	import { user } from '$lib/stores';
 	import { slugify, parseFrontmatter, formatSkillName } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { updateSkillAccessGrants } from '$lib/apis/skills';
 	import { goto } from '$app/navigation';
-	import SkillFileTree from './SkillFileTree.svelte';
 
 	export let onSubmit: Function;
 	export let edit = false;
@@ -195,18 +194,6 @@
 		</div>
 
 		{#if !disabled}
-			<!-- [Gradient] Skill bundles may include reference files. -->
-			<div class="shrink-0">
-				{#if $config?.features?.feature_skill_files}
-					{#if edit && id}
-						<SkillFileTree skillId={id} {disabled} />
-					{:else if !edit}
-						<div class="mt-2 text-xs text-gray-500">
-							{$i18n.t('Save the skill to add reference files.')}
-						</div>
-					{/if}
-				{/if}
-			</div>
 			<div class="flex shrink-0 justify-end py-2">
 				<button
 					class="flex h-7 items-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"

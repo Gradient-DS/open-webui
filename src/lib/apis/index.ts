@@ -1761,6 +1761,7 @@ export interface ModelConfig {
 }
 
 export interface ModelMeta {
+	defaultModelId?: string; // [Gradient] Optional starting LLM for an assistant.
 	toolIds: never[];
 	description?: string;
 	hidden?: boolean;

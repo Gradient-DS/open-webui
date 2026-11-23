@@ -37,6 +37,17 @@ def operations() -> set[str]:
     return {f'{method.upper()} {path}' for path, item in spec['paths'].items() for method in item if method in METHODS}
 
 
+def test_assistant_skill_routes_are_driven_without_any_waiver():
+    expected = {
+        'GET /api/v1/models/id/{id}/skill-files',
+        'PUT /api/v1/models/id/{id}/skill-files',
+        'DELETE /api/v1/models/id/{id}/skill-files',
+        'GET /api/v1/models/id/{id}/skill',
+    }
+    assert expected <= operations()
+    assert not expected.intersection(waivers())
+
+
 def waivers() -> dict[str, str]:
     if not WAIVERS.exists():
         return {}
