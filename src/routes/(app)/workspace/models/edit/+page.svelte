@@ -14,8 +14,12 @@
 
 	import { getModels } from '$lib/apis';
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
+	import { createdAssistant } from '$lib/stores/createdAssistant';
 
-	let model = null;
+	// [Gradient] Arriving from create: show the saved assistant at once, with no fetch in between.
+	const handedOver = $createdAssistant?.id === $page.url.searchParams.get('id');
+	let model = handedOver ? $createdAssistant : null;
+	createdAssistant.set(null);
 
 	// Attach a knowledge base to the model and persist. Returns the model
 	// with the KB folded into meta.knowledge (or the original on failure /
@@ -48,6 +52,8 @@
 			goto('/workspace/models');
 			return;
 		}
+
+		if (handedOver) return;
 
 		let loaded = await getModelById(localStorage.token, _id).catch(() => null);
 		if (!loaded) {
