@@ -1,4 +1,4 @@
-"""[Gradient] The portable assistant bundle, shared by export, admission and workspace turns."""
+"""[Gradient] The portable assistant bundle, shared by export and workspace turns."""
 
 import asyncio
 import io
@@ -73,7 +73,7 @@ async def _owner_bytes(file, owner: str, limit: int) -> bytes:
     raise ValueError('missing')
 
 
-async def build_bundle(model, rows, *, export: bool = False, max_files_size: int | None = None, db=None) -> bytes:
+async def build_bundle(model, rows, *, export: bool = False, db=None) -> bytes:
     if len(rows) + (2 if export else 1) > MAX_ENTRIES:
         raise ValueError('count')
     entries = [('SKILL.md', skill_md(model).encode())]
@@ -92,7 +92,7 @@ async def build_bundle(model, rows, *, export: bool = False, max_files_size: int
         seen.add(row.path.casefold())
         body = await _owner_bytes(backing.get(row.file_id), model.user_id, MAX_EXPANDED - expanded + 1)
         file_size += len(body)
-        if max_files_size is not None and file_size > max_files_size:
+        if file_size > MAX_COMPRESSED:
             raise ValueError('size')
         expanded += len(body)
         if expanded > MAX_EXPANDED:

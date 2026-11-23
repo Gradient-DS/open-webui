@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from unittest.mock import Mock
 
 import pytest
 from open_webui.models.access_grants import AccessGrants
@@ -195,7 +196,7 @@ def test_oversize_admission_is_localized_and_keeps_existing_rows(folder, monkeyp
     from open_webui.routers import assistant_skill_files
 
     assert attach(folder).status_code == 200
-    monkeypatch.setattr(assistant_skill_files, 'MAX_COMPRESSED', 1)
+    monkeypatch.setattr(assistant_skill_files, 'MAX_COMPRESSED', 15)
     result = folder.client.put(
         PREFIX + '/skill-files',
         headers={**folder.headers('owner'), 'Accept-Language': language},
@@ -206,10 +207,10 @@ def test_oversize_admission_is_localized_and_keeps_existing_rows(folder, monkeyp
 
 
 def test_entry_cap_is_checked_before_storage_and_keeps_rows(folder, monkeypatch):
-    from open_webui.utils import assistant_skill_bundles
+    from open_webui.routers import assistant_skill_files
 
     assert attach(folder).status_code == 200
-    monkeypatch.setattr(assistant_skill_bundles, 'MAX_ENTRIES', 3)
+    monkeypatch.setattr(assistant_skill_files, 'MAX_ENTRIES', 3)
     result = attach(folder, path='assets/second.bin')
     assert result.status_code == 400 and '498' in result.json()['detail']
     assert len(folder.client.get(PREFIX + '/skill-files', headers=folder.headers('owner')).json()) == 1
@@ -223,8 +224,8 @@ def test_file_versions_include_owner_without_loading_file_content(folder):
     assert folder.run(versions) == {'owner-upload': ['owner', None, 1, 10]}
 
 
-def test_admission_checks_actual_bytes_when_size_metadata_is_wrong(folder, monkeypatch):
-    from open_webui.routers import assistant_skill_files
+def test_export_checks_actual_bytes_when_admission_size_metadata_is_wrong(folder, monkeypatch, tmp_path):
+    from open_webui.utils import assistant_skill_bundles
     from sqlalchemy import update
 
     async def wrong_size():
@@ -233,9 +234,30 @@ def test_admission_checks_actual_bytes_when_size_metadata_is_wrong(folder, monke
             await db.commit()
 
     folder.run(wrong_size)
-    monkeypatch.setattr(assistant_skill_files, 'MAX_COMPRESSED', 1)
-    assert attach(folder).status_code == 400
-    assert folder.client.get(PREFIX + '/skill-files', headers=folder.headers('owner')).json() == []
+    (tmp_path / 'invented.bin').write_bytes(b'x' * 2048)
+    monkeypatch.setattr(assistant_skill_bundles, 'MAX_COMPRESSED', 1024)
+    assert attach(folder).status_code == 200
+    listing = folder.client.get(PREFIX + '/skill-files', headers=folder.headers('owner')).json()
+    assert listing == [{'path': 'assets/invented.bin', 'file_id': 'owner-upload', 'size': 0}]
+    exported = folder.client.get(PREFIX + '/skill', headers=folder.headers('owner'))
+    assert exported.status_code == 400 and '25 MiB' in exported.json()['detail']
+
+
+def test_upload_and_rename_never_read_storage_with_existing_files(folder, monkeypatch):
+    from open_webui.utils import assistant_skill_bundles
+
+    assert attach(folder).status_code == 200
+    storage_read = Mock(side_effect=AssertionError('Upload must not fetch storage'))
+    bytes_read = Mock(side_effect=AssertionError('Upload must not read bytes'))
+    monkeypatch.setattr(Storage, 'get_file', storage_read)
+    monkeypatch.setattr(assistant_skill_bundles, '_read_bytes', bytes_read)
+    assert attach(folder, path='references/second.bin').status_code == 200
+    assert attach(folder, path='references/third.bin').status_code == 200
+    assert attach(folder, path='references/second.bin').status_code == 200
+    assert attach(folder, from_path='references/third.bin', path='scripts/renamed.bin').status_code == 200
+    assert len(folder.client.get(PREFIX + '/skill-files', headers=folder.headers('owner')).json()) == 3
+    storage_read.assert_not_called()
+    bytes_read.assert_not_called()
 
 
 def test_existing_assistant_ids_with_slashes_can_use_the_folder_routes(folder):

@@ -8,13 +8,19 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.assistant_skill_files import AssistantSkillFile, AssistantSkillFileModel, AssistantSkillFiles
-from open_webui.models.files import Files
+from open_webui.models.files import File, Files
 from open_webui.models.models import Model, Models
 from open_webui.utils.access_control import can_bypass_access_control
-from open_webui.utils.assistant_skill_bundles import MAX_COMPRESSED, build_bundle, skill_name, validate_path
+from open_webui.utils.assistant_skill_bundles import (
+    MAX_COMPRESSED,
+    MAX_ENTRIES,
+    build_bundle,
+    skill_name,
+    validate_path,
+)
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
@@ -107,7 +113,7 @@ async def put_assistant_skill_file(
             validate_path(form_data.from_path)
     except ValueError as error:
         raise refusal(request, str(error)) from None
-    file = await Files.get_file_by_id(form_data.file_id, db=db)
+    file = (await db.execute(select(File.id, File.user_id).filter_by(id=form_data.file_id))).first()
     if file is None or file.user_id != model.user_id:
         raise refusal(request, 'owner', 403)
     rows = await AssistantSkillFiles.get_files(id, db=db)
@@ -130,11 +136,17 @@ async def put_assistant_skill_file(
         file.id: file for file in await Files.get_file_metadatas_by_ids([row.file_id for row in proposed], db=db)
     }
     try:
+        if len(proposed) + 2 > MAX_ENTRIES:
+            raise ValueError('count')
         if sum((backing[row.file_id].meta or {}).get('size', 0) for row in proposed) > MAX_COMPRESSED:
             raise ValueError('size')
-        # Validate actual bytes, case collisions, zip overhead and both generated root entries before committing.
-        await build_bundle(model, proposed, export=True, max_files_size=MAX_COMPRESSED, db=db)
-    except (ValueError, OSError) as error:
+        seen = set()
+        for row in proposed:
+            validate_path(row.path)
+            if row.path.casefold() in seen:
+                raise ValueError('path')
+            seen.add(row.path.casefold())
+    except ValueError as error:
         raise refusal(request, str(error)) from None
     await db.execute(
         delete(AssistantSkillFile)

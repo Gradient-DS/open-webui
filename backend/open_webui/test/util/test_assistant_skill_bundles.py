@@ -113,3 +113,20 @@ def test_description_must_fit_the_platform():
     model.meta.description = 'x' * 1025
     with pytest.raises(ValueError, match='description'):
         bundles.skill_md(model)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('export', [False, True])
+async def test_actual_file_size_limit_applies_to_export_and_chat_even_for_compressible_bytes(
+    monkeypatch, tmp_path, export
+):
+    model = assistant()
+    path = tmp_path / 'invented.bin'
+    path.write_bytes(b'x' * 2048)
+    file = SimpleNamespace(id='invented-file', user_id=model.user_id, path=str(path), meta={'size': 0})
+    row = SimpleNamespace(path='assets/invented.bin', file_id=file.id)
+    monkeypatch.setattr(bundles.Files, 'get_files_by_ids', AsyncMock(return_value=[file]))
+    monkeypatch.setattr(bundles.Storage, 'get_file', lambda path: path)
+    monkeypatch.setattr(bundles, 'MAX_COMPRESSED', 1024)
+    with pytest.raises(ValueError, match='size'):
+        await bundles.build_bundle(model, [row], export=export)
