@@ -10,12 +10,13 @@ if TYPE_CHECKING:
 
 
 def effective_capabilities(llm_caps: dict | None, assistant_caps: dict | None) -> dict:
-    """Restrict vision to both parties and let explicit assistant choices win otherwise."""
+    """Restrict vision and workspace to both parties; other assistant choices win."""
     llm_caps, assistant_caps = llm_caps or {}, assistant_caps or {}
     return deepcopy(
         {
             **llm_caps,
             **assistant_caps,
+            'workspace': llm_caps.get('workspace') is True and assistant_caps.get('workspace') is True,
             'vision': bool(llm_caps.get('vision', True) and assistant_caps.get('vision', True)),
         }
     )

@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
-	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { effectiveModels as models, activeAssistant } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
@@ -201,7 +202,7 @@
 	export let uploadPending = false;
 
 	export let atSelectedModel: Model | undefined = undefined;
-	export let selectedModels: [''];
+	export let selectedModels: string[]; // [Gradient] Independent LLM ids, including assistant defaults.
 
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
@@ -748,7 +749,7 @@
 		command?.charAt(0) === '@' ||
 		(command?.charAt(0) === '/' && isFeatureEnabled('prompts')) ||
 		(command?.charAt(0) === '#' && isFeatureEnabled('knowledge')) ||
-		command?.charAt(0) === '$' ||
+		(command?.charAt(0) === '$' && isFeatureEnabled('skills')) ||
 		('\\#' === command?.slice(0, 2) && isFeatureEnabled('knowledge'));
 	let suggestions = null;
 
@@ -886,10 +887,10 @@
 	$: showToolsButton =
 		isFeatureEnabled('tools') && (($tools ?? []).length > 0 || ($toolServers ?? []).length > 0);
 
-	// [Gradient] Workspace skills are automatic on agent turns; direct models keep per-message selection.
+	// [Gradient] Use the same tenant gate as the skills menu.
 	let showSkillsButton = false;
 	$: showSkillsButton =
-		!agentRouted && isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
+		isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -929,6 +930,15 @@
 		$config?.features?.enable_workspace &&
 		$_user?.permissions?.features?.workspace;
 	$: if (!showWorkspaceButton) workspaceEnabled = false;
+	// [Gradient] An assistant with Workspace on keeps it on in every chat with it, reloads and retries
+	// included: its skill folder only reaches the sandbox through the workspace.
+	$: if (
+		showWorkspaceButton &&
+		!workspaceEnabled &&
+		$activeAssistant?.info?.meta?.capabilities?.workspace === true
+	) {
+		workspaceEnabled = true;
+	}
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -1649,7 +1659,7 @@
 					const model = $models.find((m) => m.id === data.id);
 					// [Gradient] Assistant drops only bind empty chats.
 					if (isAssistant(model)) {
-						if (!history?.currentId) activeAssistantId.set(data.id);
+						if (!history?.currentId) activateAssistant(data.id);
 					}
 					dragged = false;
 					e.stopPropagation();
@@ -1705,6 +1715,17 @@
 
 	const onFocus = () => {};
 
+	// [Gradient] All activation surfaces apply the same optional starting model.
+	const activateAssistant = (query: string) => {
+		const defaultId = selectAssistant(
+			query,
+			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
+			$i18n,
+			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+		);
+		if (defaultId) selectedModels = [defaultId];
+	};
+
 	const onBlur = () => {
 		shiftKey = false;
 	};
@@ -1728,7 +1749,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });
@@ -1829,7 +1850,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });
@@ -1868,7 +1889,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });
@@ -1898,18 +1919,22 @@
 					}
 				})
 			},
-			{
-				char: '$',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: () => {
-						focus({ preventScroll: true });
-					},
+			...(isFeatureEnabled('skills')
+				? [
+						{
+							char: '$',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: () => {
+									focus({ preventScroll: true });
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: () => {}
-				})
-			},
+								insertTextHandler: insertTextAtCursor,
+								onUpload: () => {}
+							})
+						}
+					]
+				: []),
 			{
 				char: ':',
 				allowSpaces: false,

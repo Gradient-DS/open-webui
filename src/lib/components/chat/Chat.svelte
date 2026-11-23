@@ -68,7 +68,6 @@
 		openDocumentTabSignal,
 		requestedWorkspaceFile,
 		tools,
-		skills,
 		toolServers,
 		terminalServers,
 		functions,
@@ -86,12 +85,13 @@
 		effectiveModels as models,
 		activeAssistant,
 		activeAssistantId,
+		assistantDefaultModelBlocked,
 		reconcileAssistantSelection,
 		reconcileFolderSelection,
 		llmSelection
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { isLLM } from '$lib/utils/assistants';
+	import { assistantDefaultLLMId, isLLM, pickableLLMs } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -145,7 +145,6 @@
 		getTaskIdsByChatId
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
-	import { getSkills } from '$lib/apis/skills';
 	import { uploadFile } from '$lib/apis/files';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
@@ -257,7 +256,9 @@
 
 	// [Gradient] Automatic LLM fallbacks must not inherit assistant visibility metadata.
 	const getAvailableModelIds = () =>
-		$rawModels.filter((m) => isLLM(m) && !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
+		pickableLLMs($rawModels, $activeAssistant)
+			.filter((m) => !(m?.info?.meta?.hidden ?? false))
+			.map((m) => m.id);
 	const getDefaultModelIds = () =>
 		$config?.default_models ? $config.default_models.split(',') : [];
 	const normalizeSelectedModels = (modelIds: string[] = []) => {
@@ -466,7 +467,6 @@
 		documentWriterEnabled,
 		councilEnabled,
 		selectedToolIds,
-		selectedSkillIds,
 		selectedFilterIds
 	});
 	let composerSession = 0;
@@ -481,7 +481,6 @@
 			documentWriterEnabled,
 			councilEnabled,
 			selectedToolIds,
-			selectedSkillIds,
 			selectedFilterIds
 		} = value);
 		composerInitialized = true;
@@ -1042,6 +1041,7 @@
 	};
 
 	const initEmbeddedDraft = async () => {
+		assistantDefaultModelBlocked.set(false);
 		// [Gradient] An embedded draft is a new chat too, without a sticky assistant.
 		selectedModels = reconcileAssistantSelection(llmSelection(selectedModels));
 		clearTimeout(saveControlsTimer);
@@ -1108,7 +1108,6 @@
 		documentWriterEnabled,
 		councilEnabled,
 		selectedToolIds,
-		selectedSkillIds,
 		selectedFilterIds
 	});
 	$: if (composerInitialized && !loading && !settingDefaults) {
@@ -1189,7 +1188,7 @@
 	const setDefaults = async (newChat = false) => {
 		if (settingDefaults || composerInitialized || (chatIdProp && !newChat)) return;
 		// [Gradient] An assistant sets the starting state of every new chat with it: its selected
-		// functionalities, tools, skills and filters are on, the rest off. The user's own saved
+		// functionalities, tools and filters are on, the rest off. The user's own saved
 		// choices (composerTools) start chats without an assistant.
 		if (!$activeAssistant && $settings.composerTools) {
 			restoreComposerPreferences(composerPreferences($settings.composerTools));
@@ -1205,9 +1204,6 @@
 			}
 			if (!$functions) {
 				functions.set(await getFunctions(localStorage.token));
-			}
-			if (!$skills) {
-				skills.set(await getSkills(localStorage.token));
 			}
 			// [Gradient] Until the user has chosen (composerTools), the tools the model decides on
 			// start on: web search, the document writer, OneDrive search and mail search. Strict
@@ -1288,19 +1284,6 @@
 					selectedToolIds = $settings.tools;
 				} else {
 					selectedToolIds = selectedToolIds.filter((id) => !id.startsWith('direct_server:'));
-				}
-
-				// Set Default Skills
-				if (model?.info?.meta?.skillIds) {
-					selectedSkillIds = [
-						...new Set(
-							[...(model?.info?.meta?.skillIds ?? [])].filter((id) =>
-								($skills ?? []).find((s) => s.id === id && s.is_active)
-							)
-						)
-					];
-				} else {
-					selectedSkillIds = [];
 				}
 
 				// Set Default Filters (Toggleable only)
@@ -2428,6 +2411,7 @@
 	};
 
 	const initNewChat = async () => {
+		assistantDefaultModelBlocked.set(false);
 		prefetchLiveGrants();
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
@@ -2552,6 +2536,12 @@
 			selectedModels,
 			$page.url.searchParams.get('assistant')
 		);
+		const assistantDefault = assistantDefaultLLMId($rawModels, $activeAssistant, {
+			emptyChat: true,
+			explicitModel: $page.url.searchParams.has('model') || $page.url.searchParams.has('models'),
+			selectionLocked: false
+		});
+		if (assistantDefault) selectedModels = [assistantDefault];
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
@@ -2691,6 +2681,7 @@
 	};
 
 	const loadChat = async () => {
+		assistantDefaultModelBlocked.set(true);
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
@@ -3563,9 +3554,15 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	// [Gradient] Commands select assistants without changing the independently picked LLM.
+	// [Gradient] Commands share the initial-default boundary with mentions and drops.
 	const handleAssistantCommand = (query = '') => {
-		selectAssistant(query, !history?.currentId, $i18n);
+		const defaultId = selectAssistant(
+			query,
+			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
+			$i18n,
+			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+		);
+		if (defaultId) selectedModels = [defaultId];
 		messageInput?.setText('');
 		prompt = '';
 		messageInput?.focus({ preventScroll: true });
@@ -4247,10 +4244,6 @@
 			}
 		}
 
-		// Menu-selected skills are sent as IDs; inline <$skillId|label> mentions stay
-		// in the message so the backend can inject their full content.
-		const skillIds = [...selectedSkillIds];
-
 		// Only send terminal_id if the model has terminal capability enabled
 		const terminalEnabled = model.info?.meta?.capabilities?.terminal ?? true;
 		const useChatVariablesFallback =
@@ -4272,7 +4265,6 @@
 
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
-				skill_ids: skillIds.length > 0 ? skillIds : undefined,
 				terminal_id:
 					terminalEnabled &&
 					supportsComposerFeature('terminal') &&

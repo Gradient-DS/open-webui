@@ -19,6 +19,8 @@
 	const i18n: Writable<i18nType> = getContext('i18n');
 
 	export let toggles: AssistantToggles;
+	// [Gradient] Rows the editor shows in a section of their own.
+	export let exclude: (keyof AssistantToggles)[] = [];
 
 	// Labels and icons of composer tools match the chat + menu.
 	const allRows: { key: keyof AssistantToggles; icon: ComponentType; label: string }[] = [
@@ -34,7 +36,9 @@
 		{ key: 'citations', icon: Link, label: 'Show sources' }
 	];
 
-	$: rows = allRows.filter((row) => simpleCapabilityOffered(row.key, $config?.features));
+	$: rows = allRows.filter(
+		(row) => !exclude.includes(row.key) && simpleCapabilityOffered(row.key, $config?.features)
+	);
 </script>
 
 <div class="flex flex-col gap-2.5">

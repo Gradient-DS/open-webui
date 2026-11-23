@@ -18,7 +18,6 @@ ACCESS_PATHS = {
     'knowledge': '/api/v1/knowledge/{id}/access/update',
     'notes': '/api/v1/notes/{id}/access/update',
     'prompts': '/api/v1/prompts/id/{prompt_id}/access/update',
-    'skills': '/api/v1/skills/id/{id}/access/update',
     'tools': '/api/v1/tools/id/{id}/access/update',
 }
 GRANTS = [
@@ -86,7 +85,6 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
         'knowledge': ('Knowledges', 'get_knowledge_by_id'),
         'notes': ('Notes', 'get_note_by_id'),
         'prompts': ('Prompts', 'get_prompt_by_id'),
-        'skills': ('Skills', 'get_skill_by_id'),
         'tools': ('Tools', 'get_tool_by_id'),
     }[module_name]
     table = getattr(module, table_name)
@@ -261,10 +259,10 @@ def test_access_grant_strings_are_derived(path, committed_spec):
 
 
 @pytest.mark.parametrize(
-    ('path', 'expected'),
+    ('route', 'expected'),
     [
         (
-            '/api/v1/models/import',
+            'POST /api/v1/models/import',
             {
                 'models[].id',
                 'models[].name',
@@ -273,9 +271,10 @@ def test_access_grant_strings_are_derived(path, committed_spec):
                 'models[].access_grants[].principal_id',
             },
         ),
-        ('/api/v1/users/user/info/update', {'location', 'integration_provider'}),
+        ('PUT /api/v1/models/id/{id}/skill-files', {'path', 'file_id', 'from_path'}),
+        ('POST /api/v1/users/user/info/update', {'location', 'integration_provider'}),
         (
-            '/api/v1/users/user/settings/update',
+            'POST /api/v1/users/user/settings/update',
             {
                 'ui.system',
                 'ui.models[]',
@@ -287,10 +286,10 @@ def test_access_grant_strings_are_derived(path, committed_spec):
         ),
     ],
 )
-def test_known_nested_strings_are_derived(path, expected, committed_spec):
+def test_known_nested_strings_are_derived(route, expected, committed_spec):
     from openapi_surface import writable_string_fields
 
-    assert expected <= set(writable_string_fields(committed_spec)[f'POST {path}'])
+    assert expected <= set(writable_string_fields(committed_spec)[route])
 
 
 def test_integration_provider_schema_is_typed_without_invented_slugs(committed_spec):

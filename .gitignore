@@ -335,7 +335,7 @@ cypress/screenshots
 .worktrees/
 .cptr
 
-# Claude Code scratch + personal tooling — never committed (see soev-docs/claude-code.md)
+# Claude Code scratch + personal tooling — never committed (see soev-wiki-docs/docs/internal/guidelines/engineering/agent-instructions.md)
 thoughts/
 # The superpowers plugin writes its plans here by default; they belong in thoughts/.
 docs/superpowers/

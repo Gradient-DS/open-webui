@@ -25,8 +25,9 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (50, 107)
+    assert (len(targets), sum(map(len, targets.values()))) == (48, 102)
     assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
+    assert targets['DELETE /api/v1/models/id/{id}/skill-files'] == ['path']
 
 
 def test_offboarding_query_contract_includes_resource_confirmation_array():

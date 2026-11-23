@@ -49,10 +49,6 @@ MATRIX = [
     ('knowledge', 'update', 'DADADDD', 'AADADDD'),
     ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
     ('knowledge', 'share', 'DADDDDD', 'DADDDDD'),  # Access changes are owner-only; writers edit content.
-    ('skill', 'read', 'DAAADDA', 'AAAADDA'),
-    ('skill', 'update', 'DADADDD', 'AADADDD'),
-    ('skill', 'delete', 'DADADDD', 'AADADDD'),
-    ('skill', 'share', 'DADADDD', 'AADADDD'),
 ]
 
 # Low-level helpers deliberately do not confer ownership/admin privileges unless documented.
@@ -125,7 +121,6 @@ def request_for(kind, action):
         'model': 'models',
         'prompt': 'prompts',
         'tool': 'tools',
-        'skill': 'skills',
         'channel': 'channels',
     }[kind]
     path = f'/api/v1/{plural}'
@@ -136,7 +131,7 @@ def request_for(kind, action):
             'delete': ('POST', path + '/model/delete', {'id': 'target'}),
             'share': ('POST', path + '/model/access/update', {'id': 'target', 'access_grants': []}),
         }[action]
-    path += ('/id' if kind in ('prompt', 'tool', 'skill') else '') + '/target'
+    path += ('/id' if kind in ('prompt', 'tool') else '') + '/target'
     body = {
         'chat': {'chat': {'title': 'changed'}},
         'file': {'filename': 'changed.txt'},
@@ -144,7 +139,6 @@ def request_for(kind, action):
         'folder': {'name': 'changed'},
         'prompt': {'command': '/original', 'name': 'changed', 'content': 'changed'},
         'tool': {'id': 'target', 'name': 'changed', 'content': TOOL_CODE, 'meta': {}},
-        'skill': {'id': 'target', 'name': 'changed', 'description': 'changed', 'content': 'changed', 'meta': {}},
         'channel': {'name': 'changed'},
         'knowledge': {'name': 'changed', 'description': 'changed'},
     }[kind]

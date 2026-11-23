@@ -9,7 +9,6 @@ const featureKeys = {
 	documentWriterEnabled: 'document_writer',
 	councilEnabled: 'council',
 	selectedToolIds: 'tool_ids',
-	selectedSkillIds: 'skill_ids',
 	selectedFilterIds: 'filter_ids'
 } as const;
 
@@ -22,7 +21,6 @@ export type ComposerPreferences = {
 	documentWriterEnabled: boolean;
 	councilEnabled: boolean;
 	selectedToolIds: string[];
-	selectedSkillIds: string[];
 	selectedFilterIds: string[];
 };
 
@@ -40,7 +38,6 @@ export function composerPreferences(
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
 		councilEnabled: values.councilEnabled ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
-		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
 		selectedFilterIds: [...(values.selectedFilterIds ?? [])]
 	};
 }

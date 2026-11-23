@@ -43,6 +43,7 @@ def test_other_capabilities_use_assistant_then_llm():
         {'citations': False, 'usage': True, 'nested': [1]}, {'citations': True, 'search': False}
     ) == {
         'vision': True,
+        'workspace': False,
         'citations': True,
         'usage': True,
         'search': False,
@@ -75,7 +76,7 @@ def test_composition_copies_dispatch_fields_and_assistant_metadata():
     assert model['assistant_id'] == model['info']['id'] == 'assistant'
     assert model['info']['base_model_id'] is None
     assert 'params' not in model['info']
-    assert model['info']['meta']['capabilities'] == {'vision': False, 'usage': True}
+    assert model['info']['meta']['capabilities'] == {'vision': False, 'workspace': False, 'usage': True}
     assert model['info']['meta']['skillIds'] == ['skill']
     model['pipe']['type'] = 'changed'
     model['info']['meta']['knowledge'][0]['id'] = 'changed'
@@ -98,3 +99,64 @@ def test_params_merge_llm_then_assistant_without_mutation():
     merged.params.custom_params['a'] = 9
     assert (llm.model_dump(), assistant.model_dump()) == before
     assert merged_model_info(None, assistant).params == assistant.params
+
+
+# [Gradient] Use the same assembled LLM capabilities as a plain turn, including catalog overrides.
+@pytest.mark.asyncio
+@pytest.mark.parametrize('llm_workspace', [None, False, True, 'true', 1])
+@pytest.mark.parametrize('assistant_workspace', [None, False, True, 'true', 1])
+@pytest.mark.parametrize('allowed', [False, True])
+async def test_workspace_composition_and_permission(llm_workspace, assistant_workspace, allowed):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from open_webui.soev.model_catalog import apply_catalog, owui_model
+    from open_webui.utils.features import gate_workspace_features
+
+    base = owui_model({'id': 'catalog-llm', 'capabilities': {'vision': 'supported'}})
+    llm = deepcopy(base)
+    llm['info'] = row('catalog-llm', None, meta={'capabilities': {'workspace': llm_workspace}}).model_dump()
+    apply_catalog([llm], [base])
+    assistant = row(meta={'capabilities': {'workspace': assistant_workspace}})
+    before = deepcopy(llm), assistant.model_dump()
+    model = build_assistant_model(assistant, llm)
+    capabilities = model['info']['meta']['capabilities']
+    with patch('open_webui.utils.features.workspace_allowed', AsyncMock(return_value=allowed)):
+        result = await gate_workspace_features(
+            {'workspace': True, 'web_search': True}, capabilities, SimpleNamespace(id='alice', role='user')
+        )
+    assert result == {
+        'workspace': llm_workspace is True and assistant_workspace is True and allowed,
+        'web_search': True,
+    }
+    assert (llm, assistant.model_dump()) == before
+
+
+@pytest.mark.asyncio
+async def test_catalog_without_admin_workspace_capability_cannot_run_assistant_workspace():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from open_webui.soev.model_catalog import owui_model
+    from open_webui.utils.features import gate_workspace_features
+
+    llm = owui_model({'id': 'catalog-only', 'capabilities': {'tools': 'supported'}})
+    model = build_assistant_model(row(meta={'capabilities': {'workspace': True}}), llm)
+    with patch('open_webui.utils.features.workspace_allowed', AsyncMock(return_value=True)):
+        result = await gate_workspace_features(
+            {'workspace': True}, model['info']['meta']['capabilities'], SimpleNamespace(id='alice', role='user')
+        )
+    assert result['workspace'] is False
+
+
+# [Gradient] Create/update use this nested form; optional assistant preferences stay free-form meta.
+def test_default_model_meta_survives_model_form_roundtrip():
+    from open_webui.models.models import ModelForm
+
+    data = row(meta={'defaultModelId': 'catalog/llm', 'unshown': {'preserve': True}}).model_dump()
+    first = ModelForm(**data)
+    updated = ModelForm(**first.model_dump())
+    assert updated.meta.model_dump()['defaultModelId'] == 'catalog/llm'
+    assert updated.meta.model_dump()['unshown'] == {'preserve': True}
+    del data['meta']['defaultModelId']
+    assert 'defaultModelId' not in ModelForm(**data).meta.model_dump()

@@ -76,12 +76,14 @@ def test_export_preserves_static_assets(exporter, tmp_path):
     assert status.stdout == '', f'Export changed static assets:\n{status.stdout}'
 
 
-def test_skill_bundle_contract_and_file_routes_are_in_the_inventory():
+def test_assistant_skill_folder_contract_is_in_the_inventory():
     spec = json.loads(OUTPUT_PATH.read_text())
-    route = spec['paths']['/api/v1/skills/create']['post']
-    schema = route['requestBody']['content']['application/json']['schema']
-    create = spec['components']['schemas'][schema['$ref'].rsplit('/', 1)[1]]
-    assert create['properties']['bundle']['anyOf'][0] == {'maxLength': 34952536, 'type': 'string'}
-    assert 'bundle' not in spec['components']['schemas']['SkillForm']['properties']
-    assert 'get' in spec['paths']['/api/v1/skills/id/{id}/files/content']
-    assert {'get', 'post', 'put'} <= spec['paths']['/api/v1/skills/id/{id}/files'].keys()
+    assert {'get', 'put', 'delete'} == spec['paths']['/api/v1/models/id/{id}/skill-files'].keys()
+    export = spec['paths']['/api/v1/models/id/{id}/skill']['get']
+    assert export['responses']['200']['content']['application/zip']['schema'] == {'type': 'string', 'format': 'binary'}
+    assert set(spec['components']['schemas']['AssistantSkillFileForm']['properties']) == {
+        'path',
+        'file_id',
+        'from_path',
+    }
+    assert spec['components']['schemas']['AssistantSkillFileForm']['additionalProperties'] is False

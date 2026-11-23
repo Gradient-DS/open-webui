@@ -293,11 +293,6 @@ openWebui:
     featureKnowledge: "True"
     featurePrompts: "True"
     featureTools: "False"
-    featureSkills: "False"
-    # Soev skill-bundles: simple skills (files only) and full execution.
-    # Both off by default; staging sets them "True" for the execution rollout.
-    featureSkillFiles: "False"
-    enableSkillExecution: "False"
     featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
@@ -305,7 +300,6 @@ openWebui:
     featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
     featureWebpageUrl: "True"
     featureReferenceChats: "True"
-    featureSimpleAssistantBuilder: "False"
     featureInputMenu: "True"
     featureTemporaryChat: "True"
     featureToolServers: "False"

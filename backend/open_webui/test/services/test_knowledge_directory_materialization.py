@@ -25,6 +25,7 @@ from sqlalchemy.pool import StaticPool
 from open_webui.models import files as files_module
 from open_webui.models import knowledge as knowledge_module
 from open_webui.models.access_grants import AccessGrantsTable
+from open_webui.models.assistant_skill_files import AssistantSkillFile
 from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
@@ -57,6 +58,7 @@ async def db_session(monkeypatch):
         await conn.run_sync(KnowledgeDirectory.__table__.create)
         await conn.run_sync(KnowledgeFile.__table__.create)
         await conn.run_sync(File.__table__.create)
+        await conn.run_sync(AssistantSkillFile.__table__.create)
         await conn.run_sync(User.__table__.create)
 
     Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
