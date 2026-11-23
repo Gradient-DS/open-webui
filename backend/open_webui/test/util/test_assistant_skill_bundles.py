@@ -42,15 +42,16 @@ def test_frontmatter_quotes_metadata_and_preserves_instructions():
     model.meta.description = 'Invented: "description"\nSecond line'
     text = bundles.skill_md(model)
     header, body = text[4:].split('---\n', 1)
-    assert yaml.safe_load(header)['description'] == model.meta.description
+    assert yaml.safe_load(header) == {'name': 'invented-helper', 'description': model.meta.description}
     assert body == model.params.system
 
 
 @pytest.mark.asyncio
-async def test_deterministic_export_has_only_allowlisted_settings_and_owner_bytes(monkeypatch, tmp_path):
+@pytest.mark.parametrize('description', ['', 'Invented description'])
+async def test_deterministic_export_has_only_allowlisted_settings_and_owner_bytes(monkeypatch, tmp_path, description):
     model = assistant()
     model.meta = ModelMeta(
-        description='Invented description',
+        description=description,
         defaultModelId='invented-llm',
         capabilities={'workspace': True},
         defaultFeatureIds=['workspace'],
@@ -72,12 +73,19 @@ async def test_deterministic_export_has_only_allowlisted_settings_and_owner_byte
         settings = json.loads(archive.read('soev.json'))
         assert set(settings) == {
             'version',
+            'name',
+            'description',
             'defaultModelId',
             'capabilities',
             'defaultFeatureIds',
             'builtinTools',
             'knowledge',
         }
+        assert settings['name'] == model.name
+        assert settings['description'] == description
+        header, body = archive.read('SKILL.md').decode()[4:].split('---\n', 1)
+        assert yaml.safe_load(header) == {'name': 'invented-helper', 'description': description or model.name}
+        assert body == model.params.system
         assert settings['knowledge'] == [{'type': 'note', 'id': 'invented-note'}]
     file.user_id = 'invented-outsider'
     with pytest.raises(ValueError, match='owner'):

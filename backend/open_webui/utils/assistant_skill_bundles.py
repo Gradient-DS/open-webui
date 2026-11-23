@@ -35,13 +35,9 @@ def skill_name(name: str) -> str:
 def skill_md(model) -> str:
     meta = model.meta.model_dump()
     description = meta.get('description') or model.name
-    # The platform limits metadata, while the original fields remain in portable frontmatter.
     if not 1 <= len(description) <= 1024:
         raise ValueError('description')
     frontmatter = {'name': skill_name(model.name), 'description': description}
-    # A display name cannot be recovered losslessly from a slug alone.
-    frontmatter['display_name'] = model.name
-    frontmatter['assistant_description'] = meta.get('description') or ''
     return (
         '---\n'
         + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False)
@@ -54,6 +50,8 @@ def portable_settings(model) -> dict:
     meta = model.meta.model_dump()
     return {
         'version': 1,
+        'name': model.name,
+        'description': meta.get('description') or '',
         **{key: meta.get(key) for key in ('defaultModelId', 'capabilities', 'defaultFeatureIds', 'builtinTools')},
         'knowledge': [
             {'type': entry['type'], 'id': entry['id']}

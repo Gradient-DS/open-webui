@@ -1,7 +1,7 @@
 // [Gradient] Portable assistant skills; standalone skills keep their existing import behaviour.
 import JSZip from 'jszip';
 import { DEFAULT_CAPABILITIES } from '$lib/constants';
-import { parse, stringify } from 'yaml';
+import { stringify } from 'yaml';
 import {
 	buildSkillBundle,
 	findMissingSkillFiles,
@@ -85,17 +85,8 @@ export const parseAssistantSkill = async (file: File): Promise<AssistantSkillImp
 	}
 	const match = skillMd.match(FRONTMATTER);
 	const metadata = parseSkillMetadata(skillMd);
-	const extra = match ? parse(match[1]) : {};
 	const slug = metadata.name || file.name.replace(/\.(skill|zip|md)$/i, '');
 	const label = slug.replace(/[-_]+/g, ' ');
-	const name =
-		typeof extra?.display_name === 'string'
-			? extra.display_name
-			: label.charAt(0).toUpperCase() + label.slice(1);
-	const description =
-		typeof extra?.assistant_description === 'string'
-			? extra.assistant_description
-			: metadata.description || '';
 	const settingsFile = files.find((file) => file.path === 'soev.json');
 	let settings: Record<string, unknown> = {};
 	if (settingsFile) {
@@ -109,8 +100,12 @@ export const parseAssistantSkill = async (file: File): Promise<AssistantSkillImp
 	files = files.filter((file) => file !== settingsFile);
 	validateAssistantSkillFiles(files);
 	return {
-		name,
-		description,
+		name:
+			typeof settings.name === 'string'
+				? settings.name
+				: label.charAt(0).toUpperCase() + label.slice(1),
+		description:
+			typeof settings.description === 'string' ? settings.description : metadata.description || '',
 		instructions: match ? skillMd.slice(match[0].length) : skillMd,
 		files,
 		settings,
@@ -118,8 +113,16 @@ export const parseAssistantSkill = async (file: File): Promise<AssistantSkillImp
 	};
 };
 
-export const assistantSkillSettings = (meta: any): Record<string, unknown> => ({
+export const assistantSkillSettings = ({
+	name,
+	meta
+}: {
+	name: string;
+	meta: any;
+}): Record<string, unknown> => ({
 	version: 1,
+	name,
+	description: meta.description || '',
 	defaultModelId: meta.defaultModelId ?? null,
 	capabilities: meta.capabilities ?? null,
 	defaultFeatureIds: meta.defaultFeatureIds ?? null,
@@ -155,9 +158,7 @@ export const buildAssistantSkill = async (
 	if (!description || description.length > 1024) throw new Error('INVALID_DESCRIPTION');
 	const skillMd = `---\n${stringify({
 		name: assistantSkillName(assistant.name),
-		description,
-		display_name: assistant.name,
-		assistant_description: assistant.meta.description || ''
+		description
 	})}---\n${assistant.params.system || ''}`;
 	const bundle = await buildSkillBundle(
 		skillMd,
@@ -165,7 +166,7 @@ export const buildAssistantSkill = async (
 			...files,
 			{
 				path: 'soev.json',
-				blob: new Blob([JSON.stringify(assistantSkillSettings(assistant.meta))])
+				blob: new Blob([JSON.stringify(assistantSkillSettings(assistant))])
 			}
 		],
 		'',

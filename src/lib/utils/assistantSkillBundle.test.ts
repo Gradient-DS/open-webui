@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
+import { parse } from 'yaml';
 import {
 	assistantSkillName,
 	buildAssistantSkill,
@@ -28,12 +29,16 @@ const features = {
 const models = [{ id: 'invented-llm', info: { meta: { capabilities: { workspace: true } } } }];
 
 describe('assistant skill round trip', () => {
-	it.each(['Invented Tender Reviewer', 'Één invented helper 🤖'])(
+	it.each([
+		['Invented Tender Reviewer', ''],
+		['Één invented helper 🤖', ''],
+		['Invented Tender Reviewer', 'Invented description']
+	])(
 		'preserves display fields, bytes and settings for %s',
-		async (name) => {
+		async (name, description) => {
 			const meta = applyToggles(
 				{
-					description: '',
+					description,
 					defaultModelId: 'invented-llm',
 					knowledge: [
 						{ type: 'collection', id: 'invented-kb' },
@@ -55,9 +60,15 @@ describe('assistant skill round trip', () => {
 				{ path: 'assets/template.bin', blob: new Blob([new Uint8Array([0, 255, 12])]) }
 			];
 			const blob = await buildAssistantSkill(assistant, files);
+			const archive = await JSZip.loadAsync(await blob.arrayBuffer());
+			const skillMd = await archive.file('SKILL.md')!.async('string');
+			expect(parse(skillMd.slice(4, skillMd.indexOf('---\n', 4)))).toEqual({
+				name: assistantSkillName(name),
+				description: description || name
+			});
 			const imported = await parseAssistantSkill(new File([blob], 'invented.skill'));
 			expect(imported.name).toBe(assistant.name);
-			expect(imported.description).toBe('');
+			expect(imported.description).toBe(description);
 			expect(imported.instructions).toBe(assistant.params.system);
 			expect(imported.files.map((file) => file.path)).toEqual(files.map((file) => file.path));
 			for (let index = 0; index < files.length; index++) {
@@ -93,6 +104,24 @@ describe('assistant skill round trip', () => {
 		expect(imported.missing).toEqual(['references/missing.md']);
 	});
 
+	it('imports a plain skill bundle without soev.json with a name derived from its slug', async () => {
+		const archive = new JSZip()
+			.file(
+				'SKILL.md',
+				'---\nname: tender-reviewer\ndescription: Review tenders\n---\nRead references/example.txt.\n'
+			)
+			.file('references/example.txt', 'Invented reference');
+		const blob = await archive.generateAsync({ type: 'blob' });
+		const imported = await parseAssistantSkill(new File([blob], 'external.skill'));
+		expect(imported.name).toBe('Tender reviewer');
+		expect(imported.description).toBe('Review tenders');
+		expect(imported.instructions).toBe('Read references/example.txt.\n');
+		expect(imported.files.map((file) => file.path)).toEqual(['references/example.txt']);
+		expect(await imported.files[0].blob.text()).toBe('Invented reference');
+		expect(imported.settings).toEqual({});
+		expect(imported.missing).toEqual([]);
+	});
+
 	it('exports only reference metadata and no owner, grants or content', async () => {
 		const blob = await buildAssistantSkill(
 			{
@@ -113,6 +142,8 @@ describe('assistant skill round trip', () => {
 		const settings = JSON.parse(await archive.file('soev.json')!.async('string'));
 		expect(Object.keys(settings)).toEqual([
 			'version',
+			'name',
+			'description',
 			'defaultModelId',
 			'capabilities',
 			'defaultFeatureIds',
