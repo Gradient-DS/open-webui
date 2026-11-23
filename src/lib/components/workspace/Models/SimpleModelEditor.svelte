@@ -39,6 +39,7 @@
 
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import { defaultLLMId, pickableLLMs } from '$lib/utils/assistants';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
@@ -115,17 +116,29 @@
 
 	let showAccessControlModal = false;
 
-	// [Gradient] Evaluate the live assistant, including preserved tool ids and edited knowledge.
-	$: availableDefaultModels = pickableLLMs($models, {
+	// [Gradient] Every LLM the assistant's tools allow is listed; Workspace greys out the ones without it.
+	const supportsWorkspace = (model: any) => model?.info?.meta?.capabilities?.workspace === true;
+	$: liveMeta = applyToggles({ ...mergeBase.meta, knowledge }, toggles);
+	$: defaultModelOptions = pickableLLMs($models, {
 		id,
 		info: {
 			base_model_id: mergeBase.base_model_id ?? '',
-			meta: applyToggles({ ...mergeBase.meta, knowledge }, toggles)
+			meta: { ...liveMeta, capabilities: { ...liveMeta.capabilities, workspace: false } }
 		}
 	});
-	$: if (defaultModelId && !availableDefaultModels.some((model) => model.id === defaultModelId)) {
+	// A stored default the tools or Workspace rule out falls back to no preference.
+	$: if (
+		defaultModelId &&
+		!defaultModelOptions.some(
+			(model) => model.id === defaultModelId && (!toggles.workspace || supportsWorkspace(model))
+		)
+	) {
 		defaultModelId = '';
 	}
+	$: defaultModel = defaultModelOptions.find((model) => model.id === defaultModelId);
+	$: someModelsLackWorkspace = defaultModelOptions.some((model) => !supportsWorkspace(model));
+	// A chosen default model without Workspace keeps the switch off until another model is chosen.
+	$: workspaceBlocked = !toggles.workspace && !!defaultModel && !supportsWorkspace(defaultModel);
 
 	const slugify = (s: string) =>
 		s
@@ -615,14 +628,23 @@
 				bind:value={defaultModelId}
 			>
 				<option value="">{$i18n.t('No preference')}</option>
-				{#each availableDefaultModels as model}
-					<option value={model.id}>{model.name ?? model.id}</option>
+				{#each defaultModelOptions as model}
+					{#if toggles.workspace && !supportsWorkspace(model)}
+						<option value={model.id} disabled
+							>{$i18n.t('{{model}} (no Workspace)', { model: model.name ?? model.id })}</option
+						>
+					{:else}
+						<option value={model.id}>{model.name ?? model.id}</option>
+					{/if}
 				{/each}
 			</select>
 			<div class="text-xs text-gray-500 mt-1">
 				{$i18n.t(
 					'Selected when someone starts a new chat with this assistant. They can still switch model in the chat.'
 				)}
+				{#if toggles.workspace && someModelsLackWorkspace}
+					{$i18n.t('Greyed-out models do not support Workspace, which is on for this assistant.')}
+				{/if}
 			</div>
 		</div>
 
@@ -639,8 +661,37 @@
 
 		<div>
 			<div class="text-xs font-medium text-gray-500 mb-2">{$i18n.t('What it can do')}</div>
-			<CapabilityToggles bind:toggles />
+			<CapabilityToggles bind:toggles exclude={['workspace']} />
 		</div>
+
+		<!-- [Gradient] Workspace has its own section: it limits the models and owns the skill files. -->
+		{#if workspaceOffered}
+			<div class="border-t border-gray-100 dark:border-gray-850 pt-4">
+				<div class="flex items-center justify-between gap-3">
+					<div id="assistant-workspace-label" class="text-sm font-medium">
+						{$i18n.t('Workspace')}
+					</div>
+					<Switch
+						bind:state={toggles.workspace}
+						ariaLabelledbyId="assistant-workspace-label"
+						disabled={workspaceBlocked}
+					/>
+				</div>
+				<p class="text-xs text-gray-500 mt-1">
+					{$i18n.t(
+						'The assistant gets its own sandbox to read, write and run files. Not every model supports this: with Workspace on, the assistant only runs on models that do.'
+					)}
+				</p>
+				{#if workspaceBlocked}
+					<p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+						{$i18n.t(
+							'The default model {{model}} does not support Workspace. Choose another default model to turn it on.',
+							{ model: defaultModel?.name ?? defaultModelId }
+						)}
+					</p>
+				{/if}
+			</div>
+		{/if}
 
 		{#if canWrite && workspaceOffered}
 			{#if toggles.workspace}
