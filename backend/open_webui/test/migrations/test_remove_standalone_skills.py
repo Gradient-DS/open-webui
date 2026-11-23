@@ -1,4 +1,4 @@
-"""[Gradient] Exercise irreversible skill deletion and shared-file preservation on SQLite."""
+"""[Gradient] Exercise irreversible skill deletion on SQLite; File rows are left alone."""
 
 import importlib.util
 import json
@@ -62,14 +62,15 @@ def conn(monkeypatch):
     engine.dispose()
 
 
-def test_upgrade_deletes_only_standalone_data_and_can_rerun(conn, caplog):
+def test_upgrade_deletes_only_standalone_data_and_can_rerun(conn):
     for _ in range(2):
         migration.upgrade()
         assert 'skill_file' not in sa.inspect(conn).get_table_names()
         assert conn.execute(sa.text('SELECT * FROM skill')).all() == []
-        assert conn.execute(sa.text('SELECT id FROM file')).scalars().all() == ['other']
+        assert set(conn.execute(sa.text('SELECT id FROM file')).scalars()) == {'orphan', 'empty', 'other'}
         assert set(conn.execute(sa.text('SELECT id FROM access_grant')).scalars()) == {
             'model-grant',
+            'file-grant',
             'other-file-grant',
         }
         meta = {id: json.loads(value) for id, value in conn.execute(sa.text('SELECT * FROM model'))}
@@ -80,35 +81,6 @@ def test_upgrade_deletes_only_standalone_data_and_can_rerun(conn, caplog):
             'null-meta': None,
             'historical-meta': ['unusual', 'meta'],
         }
-    assert '1 stored objects remain in configured upload storage' in caplog.text
-    assert '/uploads/orphan' not in caplog.text
-
-
-@pytest.mark.parametrize('table', ['assistant_skill_file', 'chat_file', 'knowledge_file', 'channel_file'])
-def test_shared_file_rows_and_junctions_survive(conn, table):
-    conn.execute(sa.text(f'CREATE TABLE {table} (file_id TEXT REFERENCES file(id))'))
-    conn.execute(sa.text(f"INSERT INTO {table} VALUES ('orphan')"))
-    migration.upgrade()
-    assert set(conn.execute(sa.text('SELECT id FROM file')).scalars()) == {'orphan', 'other'}
-    assert conn.execute(sa.text(f'SELECT file_id FROM {table}')).scalars().all() == ['orphan']
-    assert conn.execute(sa.text("SELECT resource_id FROM access_grant WHERE id = 'file-grant'")).scalar() == 'orphan'
-
-
-@pytest.mark.parametrize(
-    'table,column',
-    [('model', 'meta'), ('folder', 'items'), ('note', 'data'), ('chat', 'chat'), ('chat_message', 'content')],
-)
-def test_json_and_historical_message_references_preserve_shared_files(conn, table, column):
-    if table != 'model':
-        conn.execute(sa.text(f'CREATE TABLE {table} (id TEXT PRIMARY KEY, {column} TEXT)'))
-    content = {'files': [{'id': 'orphan'}], 'image': '/api/v1/files/empty/content'}
-    conn.execute(
-        sa.text(f'INSERT INTO {table} (id, {column}) VALUES (:id, :value)'),
-        {'id': 'shared', 'value': json.dumps(content)},
-    )
-    migration.upgrade()
-    assert set(conn.execute(sa.text('SELECT id FROM file')).scalars()) == {'orphan', 'empty', 'other'}
-    assert json.loads(conn.execute(sa.text(f"SELECT {column} FROM {table} WHERE id = 'shared'")).scalar()) == content
 
 
 def test_downgrade_recreates_only_original_structure(conn):
@@ -129,4 +101,4 @@ def test_downgrade_recreates_only_original_structure(conn):
     assert after.get_foreign_keys('skill_file') == foreign_keys
     assert conn.execute(sa.text('SELECT COUNT(*) FROM skill_file')).scalar() == 0
     assert conn.execute(sa.text('SELECT COUNT(*) FROM skill')).scalar() == 0
-    assert set(conn.execute(sa.text('SELECT id FROM file')).scalars()) == {'other'}
+    assert set(conn.execute(sa.text('SELECT id FROM file')).scalars()) == {'orphan', 'empty', 'other'}
