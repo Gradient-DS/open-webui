@@ -526,7 +526,7 @@ async def lifespan(app: FastAPI):
     start_logger()
     # [Gradient] Stamp service/version/tenant onto every log record. Rides in
     # loguru's `extra`, which the sink already serialises — no change to
-    # utils/logger.py. See soev-docs/architecture/logging.md.
+    # utils/logger.py. See soev-wiki-docs/docs/internal/platform/architecture/logging.md.
     install_log_context()
 
     if RESET_CONFIG_ON_START:

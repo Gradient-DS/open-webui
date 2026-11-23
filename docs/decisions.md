@@ -1,8 +1,8 @@
 # Decisions
 
 Append-only log, one line each: `YYYY-MM-DD  decision  PR`. Newest on top.
-Scope-tag module-specific entries, e.g. `[connect]`. Cross-repo decisions go
-to `soev-docs/decisions.md`, not here.
+Scope-tag module-specific entries, e.g. `[connect]`. Cross-repo decisions are logged
+here too, in each repo they touch; the wiki pages in `soev-wiki-docs` show the current state.
 
 2026-11-18  [meetings] an upload keeps its 64 MiB cap; a longer recording is cut into 32 MiB pieces at finish and joined again by the meeting agent, so the speech model still gets one file and speakers stay the same from start to end (separate recordings would number them anew). One recording runs `MEETING_MAX_MINUTES` at most (default 120): the recorder warns five minutes before, then stops and finishes it, so what was recorded is transcribed
 2026-11-18  [meetings] the start form asks the spoken language: detect automatically (the default), Nederlands or English; it preselects `MEETING_DEFAULT_LANGUAGE` (default `auto`) and ignores the UI language, because a UI-language guess transcribes an English meeting under a Dutch UI as Dutch and sends codes the transcription model may not take
