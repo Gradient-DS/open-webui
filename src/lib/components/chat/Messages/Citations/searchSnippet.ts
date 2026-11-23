@@ -1,6 +1,7 @@
 // [Gradient] A search result cited for its snippet alone: a web page's (`metadata.granularity === 'snippet'`),
 // whose page the agent never fetched, a file's in the user's drive (`'file-snippet'`), which it never opened, or
-// a council document's (`'council-snippet'`), which it never read.
+// a council document's (`'council-snippet'`), which it never read. A council document the agent did read
+// (`'council-document'`) shows the same way, without its text: that text is the source's extraction of a PDF.
 import type { CitationDocument } from './citationDocuments';
 
 export type SearchResultKind = 'web' | 'file' | 'council';
@@ -16,6 +17,8 @@ export interface SearchResultPage {
 	file: boolean;
 	// A council result's rendered image of the PDF page the fragment is on.
 	preview: string | null;
+	// Whether the agent read the council document, rather than only its search fragment.
+	read: boolean;
 }
 
 export interface SnippetSegment {
@@ -26,7 +29,8 @@ export interface SnippetSegment {
 const KINDS: Record<string, SearchResultKind> = {
 	snippet: 'web',
 	'file-snippet': 'file',
-	'council-snippet': 'council'
+	'council-snippet': 'council',
+	'council-document': 'council'
 };
 
 const WEB_URL = /^https?:\/\/[^/\s]/i;
@@ -57,9 +61,15 @@ export function searchResultPage(document: CitationDocument | undefined): Search
 		preview:
 			kind === 'council' && typeof preview === 'string' && /^https:\/\//i.test(preview)
 				? preview
-				: null
+				: null,
+		read: document?.metadata?.granularity === 'council-document'
 	};
 }
+
+/** Whether the citation panel shows the passage's text. A council citation shows its PDF instead: its text comes
+ * from an outside source and may be garbled or hostile, so it is never rendered as Markdown. */
+export const showsContent = (document: CitationDocument | undefined): boolean =>
+	searchResultPage(document)?.kind !== 'council';
 
 /** The snippet as segments, the source's matched words marked; well-formed, in-range `[start, end)` ranges only. */
 export function snippetSegments(text: string, highlights: unknown): SnippetSegment[] {

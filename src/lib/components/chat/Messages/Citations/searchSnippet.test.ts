@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import { readable } from 'svelte/store';
 import SearchSnippetNote from './SearchSnippetNote.svelte';
-import { searchResultPage, snippetSegments } from './searchSnippet';
+import { searchResultPage, showsContent, snippetSegments } from './searchSnippet';
 import type { CitationDocument } from './citationDocuments';
 
 const URL = 'https://www.example.com/products/widgets/alpha';
@@ -20,7 +20,8 @@ describe('search result snippets', () => {
 			address: 'example.com/products/widgets/alpha',
 			kind: 'web',
 			file: false,
-			preview: null
+			preview: null,
+			read: false
 		});
 	});
 
@@ -62,7 +63,8 @@ describe('search result snippets', () => {
 			address: 'tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3 plan.pptx',
 			kind: 'file',
 			file: true,
-			preview: null
+			preview: null,
+			read: false
 		});
 		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 		const html = render(SearchSnippetNote, { props: { document }, context }).body;
@@ -106,6 +108,30 @@ describe('search result snippets', () => {
 	it('shows a council meeting without a link or image, and only an https page image', () => {
 		const page = searchResultPage(council({ preview_url: 'http://pages.example/1.jpg' }));
 		expect(page).toMatchObject({ kind: 'council', url: null, preview: null });
+	});
+
+	it('shows a read council document by its page image and link, without its text', () => {
+		const url = 'https://files.example/1.pdf#page=26';
+		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
+		const read = council({ granularity: 'council-document', highlights: undefined }, url);
+		const html = render(SearchSnippetNote, { props: { document: read }, context }).body;
+		expect(html).toContain('Council document — the agent read its text; open the PDF to see it');
+		expect(html).not.toContain('<mark');
+		expect(html).toContain('src="https://pages.example/26.jpg"');
+		expect(html).toContain(`href="${url}"`);
+	});
+
+	it('leaves the content section out of council citations only', () => {
+		expect(showsContent(council({}))).toBe(false);
+		expect(showsContent(council({ granularity: 'council-document' }))).toBe(false);
+		expect(
+			showsContent({
+				source: { id: 'https://example.com', url: 'https://example.com' },
+				document: 'text',
+				metadata: { source: 'https://example.com', granularity: 'snippet' }
+			})
+		).toBe(true);
+		expect(showsContent({ document: 'a passage', metadata: { source: 'file-1' } })).toBe(true);
 	});
 
 	it('marks only well-formed ranges inside the text, in order', () => {

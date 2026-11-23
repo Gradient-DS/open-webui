@@ -3639,6 +3639,38 @@ async def test_a_cited_search_result_is_a_snippet_source(chat: Chat):
 
 
 @pytest.mark.asyncio
+async def test_a_cited_council_read_shows_its_pdf_without_its_text(chat: Chat):
+    """[Gradient] A council read's text is an outside extraction of a PDF: it never reaches the browser."""
+    pdf = 'https://files.example/1.pdf#page=2'
+    hit = {
+        'id': 'document:1',
+        'ref': 'document:1',
+        'type': 'council-result',
+        'title': 'C 1711 - beantwoording schriftelijke vragen',
+        'source_url': pdf,
+        'preview_url': 'https://pages.example/2.jpg',
+        'text': "de huidige capaciteit van boa's en politie",
+    }
+    read = {
+        'id': 'document:1#text',
+        'ref': 'document:1',
+        'type': 'council-text',
+        'text': '[klik](javascript:alert(1)) <img src=https://evil.example/x.png>',
+    }
+    chat.api.chat.turns = [
+        [found(hit), found(read, call_id='c1'), answered('Voldoende', cited(9, 'document:1#text', 'document:1'))]
+    ]
+    assert content(await chat.turn('Is de capaciteit voldoende?', 'a1')) == 'Voldoende [1]'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    read_source = next(source for source in sources if source['metadata'][0]['chunk_id'] == 'document:1#text')
+    assert read_source['document'] == ['']
+    assert read_source['metadata'][0]['granularity'] == 'council-document'
+    assert read_source['metadata'][0]['preview_url'] == 'https://pages.example/2.jpg'
+    assert read_source['source']['url'] == pdf
+    assert 'evil.example' not in json.dumps(sources)
+
+
+@pytest.mark.asyncio
 async def test_a_cited_live_document_hit_is_a_file_snippet_source(chat: Chat):
     url = 'https://tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3%20plan.pptx'
     hit = {

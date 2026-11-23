@@ -829,6 +829,7 @@
   "Council Information": "Raadsinformatie",
   "Council information": "Raadsinformatie",
   "Council information needs the agent API. Set AGENT_API_ENABLED=true to use it.": "Raadsinformatie vereist de agent-API. Stel AGENT_API_ENABLED=true in om het te gebruiken.",
+  "Council document — the agent read its text; open the PDF to see it": "Raadsdocument — de agent heeft de tekst gelezen; open de pdf om die te zien",
   "Council search result — fragment only, the document was not opened": "Zoekresultaat uit raadsinformatie — alleen het fragment, het document is niet geopend",
   "Create": "Aanmaken",
   "Create Account": "Maak account",

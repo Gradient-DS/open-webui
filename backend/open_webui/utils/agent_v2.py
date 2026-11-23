@@ -1331,6 +1331,7 @@ _GRANULARITY = {
     'search-result': 'snippet',
     'live-document': 'file-snippet',
     'council-result': 'council-snippet',
+    'council-text': 'council-document',
 }
 
 
@@ -1347,7 +1348,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
         'granularity': _GRANULARITY.get(element.get('type')),
-        **_council_preview(element),
+        **_council_preview(element, whole),
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:
@@ -1361,15 +1362,20 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     return {
         'id': element['id'],
         'ref': element['ref'],
-        'text': element.get('text') or '',
+        # [Gradient] A council read's text stays with the agent: it is an outside source's extraction of a PDF,
+        # possibly garbled or hostile, and its citation shows the PDF instead.
+        'text': '' if element.get('type') == 'council-text' else element.get('text') or '',
         **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
     }
 
 
-def _council_preview(element: dict[str, Any]) -> dict[str, Any]:
+def _council_preview(element: dict[str, Any], whole: dict[str, Any] | None = None) -> dict[str, Any]:
     """[Gradient] A council hit's image of its matched PDF page and the matched words in its fragment, as
-    `[start, end)` ranges of its text; only well-formed ranges, for the citation panel to mark."""
+    `[start, end)` ranges of its text; only well-formed ranges, for the citation panel to mark. A council read shows
+    the image of the hit it was read by."""
+    if element.get('type') == 'council-text' and (whole or {}).get('type') == 'council-result':
+        return {key: value for key, value in _council_preview(whole).items() if key == 'preview_url'}
     if element.get('type') != 'council-result':
         return {}
     text = element.get('text') or ''

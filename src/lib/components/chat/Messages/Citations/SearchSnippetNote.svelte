@@ -12,7 +12,7 @@
 	export let document: CitationDocument;
 	$: page = searchResultPage(document);
 	$: segments =
-		page?.kind === 'council'
+		page?.kind === 'council' && !page.read
 			? snippetSegments(document?.document ?? '', document?.metadata?.highlights)
 			: [];
 	let previewFailed = false;
@@ -27,11 +27,13 @@
 			<div class="truncate text-gray-500 dark:text-gray-400" title={page.url}>{page.address}</div>
 		{/if}
 		<p class="text-gray-500 dark:text-gray-400">
-			{page.kind === 'council'
-				? $i18n.t('Council search result — fragment only, the document was not opened')
-				: page.file
-					? $i18n.t('Search result in your files — snippet only, the file was not opened')
-					: $i18n.t('Search result — snippet only, the page was not opened')}
+			{page.read
+				? $i18n.t('Council document — the agent read its text; open the PDF to see it')
+				: page.kind === 'council'
+					? $i18n.t('Council search result — fragment only, the document was not opened')
+					: page.file
+						? $i18n.t('Search result in your files — snippet only, the file was not opened')
+						: $i18n.t('Search result — snippet only, the page was not opened')}
 		</p>
 		{#if segments.some((segment) => segment.marked)}
 			<p class="text-gray-700 dark:text-gray-300 break-words">
