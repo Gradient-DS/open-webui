@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
-	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { effectiveModels as models } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
@@ -201,7 +202,7 @@
 	export let uploadPending = false;
 
 	export let atSelectedModel: Model | undefined = undefined;
-	export let selectedModels: [''];
+	export let selectedModels: string[]; // [Gradient] Independent LLM ids, including assistant defaults.
 
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
@@ -1649,7 +1650,7 @@
 					const model = $models.find((m) => m.id === data.id);
 					// [Gradient] Assistant drops only bind empty chats.
 					if (isAssistant(model)) {
-						if (!history?.currentId) activeAssistantId.set(data.id);
+						if (!history?.currentId) activateAssistant(data.id);
 					}
 					dragged = false;
 					e.stopPropagation();
@@ -1705,6 +1706,17 @@
 
 	const onFocus = () => {};
 
+	// [Gradient] All activation surfaces apply the same optional starting model.
+	const activateAssistant = (query: string) => {
+		const defaultId = selectAssistant(
+			query,
+			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
+			$i18n,
+			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+		);
+		if (defaultId) selectedModels = [defaultId];
+	};
+
 	const onBlur = () => {
 		shiftKey = false;
 	};
@@ -1728,7 +1740,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });
@@ -1829,7 +1841,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });
@@ -1868,7 +1880,7 @@
 
 						if (type === 'model') {
 							// [Gradient] Mentions bind assistants only before the first message.
-							selectAssistant(data.id, !history?.currentId, $i18n);
+							activateAssistant(data.id);
 						}
 
 						focus({ preventScroll: true });

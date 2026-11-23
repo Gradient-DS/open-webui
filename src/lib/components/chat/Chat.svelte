@@ -86,12 +86,13 @@
 		effectiveModels as models,
 		activeAssistant,
 		activeAssistantId,
+		assistantDefaultModelBlocked,
 		reconcileAssistantSelection,
 		reconcileFolderSelection,
 		llmSelection
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { isLLM, pickableLLMs } from '$lib/utils/assistants';
+	import { assistantDefaultLLMId, isLLM, pickableLLMs } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -242,6 +243,8 @@
 	let dataWarningCallback: ((confirmed: boolean) => void) | null = null;
 
 	let selectedModels = [''];
+	// [Gradient] Consume session restoration only on the first new-chat initialization.
+	let restoredAssistantId = $activeAssistantId;
 	let atSelectedModel: Model | undefined;
 	// [Gradient] Refresh @ selections when the active assistant changes.
 	$: if (atSelectedModel) atSelectedModel = $models.find((m) => m.id === atSelectedModel?.id);
@@ -1044,6 +1047,8 @@
 	};
 
 	const initEmbeddedDraft = async () => {
+		restoredAssistantId = null;
+		assistantDefaultModelBlocked.set(false);
 		// [Gradient] An embedded draft is a new chat too, without a sticky assistant.
 		selectedModels = reconcileAssistantSelection(llmSelection(selectedModels));
 		clearTimeout(saveControlsTimer);
@@ -2430,6 +2435,9 @@
 	};
 
 	const initNewChat = async () => {
+		const initialAssistantId = restoredAssistantId;
+		restoredAssistantId = null;
+		assistantDefaultModelBlocked.set(false);
 		prefetchLiveGrants();
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
@@ -2552,8 +2560,14 @@
 		// [Gradient] Split URL, folder, session, user and admin defaults before any await/reconciler.
 		selectedModels = reconcileAssistantSelection(
 			selectedModels,
-			$page.url.searchParams.get('assistant')
+			$page.url.searchParams.get('assistant') || initialAssistantId
 		);
+		const assistantDefault = assistantDefaultLLMId($rawModels, $activeAssistant, {
+			emptyChat: true,
+			explicitModel: $page.url.searchParams.has('model') || $page.url.searchParams.has('models'),
+			selectionLocked: false
+		});
+		if (assistantDefault) selectedModels = [assistantDefault];
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
@@ -2693,6 +2707,8 @@
 	};
 
 	const loadChat = async () => {
+		restoredAssistantId = null;
+		assistantDefaultModelBlocked.set(true);
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
@@ -3565,9 +3581,15 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	// [Gradient] Commands select assistants without changing the independently picked LLM.
+	// [Gradient] Commands share the initial-default boundary with mentions and drops.
 	const handleAssistantCommand = (query = '') => {
-		selectAssistant(query, !history?.currentId, $i18n);
+		const defaultId = selectAssistant(
+			query,
+			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
+			$i18n,
+			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+		);
+		if (defaultId) selectedModels = [defaultId];
 		messageInput?.setText('');
 		prompt = '';
 		messageInput?.focus({ preventScroll: true });

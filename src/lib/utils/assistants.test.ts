@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	defaultLLMId,
+	assistantDefaultLLMId,
 	effectiveCapabilities,
 	effectiveModel,
 	isAssistant,
@@ -275,5 +276,48 @@ describe('models for an assistant that uses workspace', () => {
 	it('leaves plain chats unchanged', () => {
 		expect(pickableLLMs(all)).toEqual(all);
 		expect(effectiveModel(supported)).toBe(supported);
+	});
+});
+
+// [Gradient] The default only seeds a newly activated assistant in an untouched empty chat.
+describe('assistant default LLM', () => {
+	const available = [
+		{ id: 'plain', info: { meta: { soev: { capabilities: { tools: 'unsupported' } } } } },
+		{ id: 'capable', info: { meta: { capabilities: { workspace: true } } } },
+		{ id: 'no-workspace' },
+		assistant
+	];
+	const helper = (meta: object) => ({ id: 'helper', info: { base_model_id: 'plain', meta } });
+	const initial = { emptyChat: true, explicitModel: false, selectionLocked: false };
+	it('uses an available default without changing inputs', () => {
+		const selected = helper({ defaultModelId: 'capable' });
+		const before = structuredClone([available, selected]);
+		expect(assistantDefaultLLMId(available, selected, initial)).toBe('capable');
+		expect([available, selected]).toEqual(before);
+	});
+	it.each([
+		{ ...initial, emptyChat: false },
+		{ ...initial, explicitModel: true },
+		{ ...initial, selectionLocked: true }
+	])('does not replace a chosen or saved model: %o', (context) => {
+		expect(
+			assistantDefaultLLMId(available, helper({ defaultModelId: 'capable' }), context)
+		).toBeUndefined();
+	});
+	it.each([
+		{},
+		{ defaultModelId: '' },
+		{ defaultModelId: 'deleted' },
+		{ defaultModelId: 'helper' },
+		{ defaultModelId: 'plain', toolIds: ['tool'] },
+		{ defaultModelId: 'no-workspace', capabilities: { workspace: true } }
+	])('keeps current behaviour for an absent or unpickable default: %o', (meta) => {
+		expect(assistantDefaultLLMId(available, helper(meta), initial)).toBeUndefined();
+	});
+	it('has no default without an assistant or accessible models', () => {
+		expect(assistantDefaultLLMId(available, null, initial)).toBeUndefined();
+		expect(
+			assistantDefaultLLMId([], helper({ defaultModelId: 'capable' }), initial)
+		).toBeUndefined();
 	});
 });

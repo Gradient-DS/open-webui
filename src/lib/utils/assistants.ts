@@ -11,6 +11,7 @@ export type AssistantModel = {
 			capabilities?: Record<string, unknown> | null;
 			hidden?: boolean;
 			defaultFeatureIds?: string[];
+			defaultModelId?: string;
 			toolIds?: string[];
 			knowledge?: unknown[];
 			soev?: { capabilities?: { tools?: string } | null } | null;
@@ -151,4 +152,23 @@ export const pickableLLMId = (
 	if (id && !isLLM(models.find((model) => model.id === id))) return id;
 	if (pickable.some((model) => model.id === id)) return id;
 	return defaultLLMId(pickable, preferredIds);
+};
+
+// [Gradient] Only the initial assistant activation may choose an LLM for the chat.
+export const assistantDefaultLLMId = (
+	models: AssistantModel[],
+	assistant: AssistantModel | null | undefined,
+	{
+		emptyChat,
+		explicitModel,
+		selectionLocked
+	}: {
+		emptyChat: boolean;
+		explicitModel: boolean;
+		selectionLocked: boolean;
+	}
+): string | undefined => {
+	if (!emptyChat || explicitModel || selectionLocked) return undefined;
+	const id = assistant?.info?.meta?.defaultModelId;
+	return id && pickableLLMs(models, assistant).some((model) => model.id === id) ? id : undefined;
 };

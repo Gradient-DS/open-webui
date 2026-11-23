@@ -13,7 +13,7 @@
 
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
-	import { defaultLLMId } from '$lib/utils/assistants';
+	import { defaultLLMId, pickableLLMs } from '$lib/utils/assistants';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
@@ -49,6 +49,7 @@
 	let name = '';
 	let description = '';
 	let system = '';
+	let defaultModelId = '';
 	let profileImageUrl = `${WEBUI_BASE_URL}/static/favicon.png`;
 	let knowledge: any[] = [];
 	let toggles: AssistantToggles = togglesFromMeta({});
@@ -79,6 +80,18 @@
 	let mergeBase: any = { meta: {}, params: {} };
 
 	let showAccessControlModal = false;
+
+	// [Gradient] Evaluate the live assistant, including preserved tool ids and edited knowledge.
+	$: availableDefaultModels = pickableLLMs($models, {
+		id,
+		info: {
+			base_model_id: mergeBase.base_model_id ?? '',
+			meta: applyToggles({ ...mergeBase.meta, knowledge }, toggles)
+		}
+	});
+	$: if (defaultModelId && !availableDefaultModels.some((model) => model.id === defaultModelId)) {
+		defaultModelId = '';
+	}
 
 	const slugify = (s: string) =>
 		s
@@ -113,6 +126,7 @@
 			name = model.name ?? '';
 			description = model?.meta?.description ?? '';
 			system = model?.params?.system ?? '';
+			defaultModelId = model?.meta?.defaultModelId ?? '';
 			profileImageUrl = model?.meta?.profile_image_url ?? profileImageUrl;
 			knowledge = model?.meta?.knowledge ?? [];
 			toggles = togglesFromMeta(model?.meta ?? {});
@@ -131,6 +145,7 @@
 			name,
 			description,
 			system,
+			defaultModelId,
 			profileImageUrl,
 			knowledge,
 			toggles,
@@ -145,6 +160,7 @@
 		name,
 		description,
 		system,
+		defaultModelId,
 		profileImageUrl,
 		knowledge,
 		toggles,
@@ -186,6 +202,11 @@
 		info.meta.profile_image_url = profileImageUrl;
 		info.meta.description = description.trim() === '' ? null : description;
 		info.params.system = system.trim() === '' ? null : system;
+		if (defaultModelId) {
+			info.meta.defaultModelId = defaultModelId;
+		} else {
+			delete info.meta.defaultModelId;
+		}
 
 		if (knowledge.length > 0) {
 			info.meta.knowledge = knowledge;
@@ -303,6 +324,28 @@
 				bind:value={system}
 				placeholder={$i18n.t('Tell the assistant how it should behave')}
 			></textarea>
+		</div>
+
+		<!-- [Gradient] An optional starting LLM; the chat keeps its own later choices. -->
+		<div>
+			<label for="assistant-default-model" class="block text-xs font-medium text-gray-500 mb-1"
+				>{$i18n.t('Default model')}</label
+			>
+			<select
+				id="assistant-default-model"
+				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden"
+				bind:value={defaultModelId}
+			>
+				<option value="">{$i18n.t('No preference')}</option>
+				{#each availableDefaultModels as model}
+					<option value={model.id}>{model.name ?? model.id}</option>
+				{/each}
+			</select>
+			<div class="text-xs text-gray-500 mt-1">
+				{$i18n.t(
+					'Selected when someone starts a new chat with this assistant. They can still switch model in the chat.'
+				)}
+			</div>
 		</div>
 
 		<div>

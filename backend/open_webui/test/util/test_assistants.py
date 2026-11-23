@@ -147,3 +147,16 @@ async def test_catalog_without_admin_workspace_capability_cannot_run_assistant_w
             {'workspace': True}, model['info']['meta']['capabilities'], SimpleNamespace(id='alice', role='user')
         )
     assert result['workspace'] is False
+
+
+# [Gradient] Create/update use this nested form; optional assistant preferences stay free-form meta.
+def test_default_model_meta_survives_model_form_roundtrip():
+    from open_webui.models.models import ModelForm
+
+    data = row(meta={'defaultModelId': 'catalog/llm', 'unshown': {'preserve': True}}).model_dump()
+    first = ModelForm(**data)
+    updated = ModelForm(**first.model_dump())
+    assert updated.meta.model_dump()['defaultModelId'] == 'catalog/llm'
+    assert updated.meta.model_dump()['unshown'] == {'preserve': True}
+    del data['meta']['defaultModelId']
+    assert 'defaultModelId' not in ModelForm(**data).meta.model_dump()
