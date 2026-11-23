@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 import pytest_asyncio
+from open_webui.models.assistant_skill_files import AssistantSkillFile
 from open_webui.test.soev import test_ingest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -33,6 +34,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(AssistantSkillFile.__table__.create)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager

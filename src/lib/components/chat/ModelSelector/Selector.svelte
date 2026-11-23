@@ -489,6 +489,8 @@
 	};
 
 	const selectItem = (item, index: number) => {
+		// [Gradient] Only a user selection locks out an assistant starting model.
+		dispatch('select');
 		selectedModelIdx = index;
 
 		if (values) {

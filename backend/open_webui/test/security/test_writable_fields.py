@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 627 operations. Audit bodies across all
-# OpenAPI methods (631 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 616 operations. Audit bodies across all
+# OpenAPI methods (620 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (627, 631), (
-        f'Expected 627 five-method operations / 631 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (616, 620), (
+        f'Expected 616 five-method operations / 620 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -44,13 +44,13 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        237,
-        2675,
-    ), f'Expected 237 routes / 2675 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        231,
+        2655,
+    ), f'Expected 231 routes / 2655 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
-        50,
-        107,
-    ), f'Expected 50 routes / 107 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        48,
+        102,
+    ), f'Expected 48 routes / 102 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):
@@ -66,6 +66,12 @@ def test_derivation_cannot_silently_collapse(surface):
         f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
         'floor 40 / 90, baseline 47 / 94.'
     )
+
+
+def test_assistant_skill_file_write_and_delete_fields_are_all_probed(surface):
+    _, fields, queries = surface
+    assert set(fields['PUT /api/v1/models/id/{id}/skill-files']) == {'path', 'file_id', 'from_path'}
+    assert queries['DELETE /api/v1/models/id/{id}/skill-files'] == ['path']
 
 
 def test_blind_body_counts(surface):

@@ -24,6 +24,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.models.access_grants import AccessGrant
+from open_webui.models.assistant_skill_files import AssistantSkillFile  # [Gradient]
 from open_webui.models.automations import Automation
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat
@@ -555,6 +556,7 @@ async def _restore_prompt(db: AsyncSession, site: str, row_id: str, entries, rep
         report.skipped.append(f'{site} {row_id}: changed since')
         return
     if site == PROMPT_CREATED:
+        await db.execute(sa.delete(AssistantSkillFile).where(AssistantSkillFile.assistant_id == row_id))  # [Gradient]
         await db.execute(sa.delete(Model).where(Model.id == row_id))
     else:
         old = json.loads(entry.old_value)

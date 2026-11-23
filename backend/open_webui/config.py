@@ -3012,17 +3012,10 @@ FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 
 FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 
-FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
-
-FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
-
-ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
-
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 
-FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
 
 # [Gradient] New models the "what's new" tour announces, per release: {"1.3": ["zai-org/glm-5.3"]}.
 # A release left out falls back to the frontend's list for it; an empty list announces none.

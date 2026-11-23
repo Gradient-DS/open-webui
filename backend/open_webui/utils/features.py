@@ -27,7 +27,6 @@ from open_webui.config import (
     FEATURE_KNOWLEDGE,
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
-    FEATURE_SKILLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
@@ -83,7 +82,8 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'knowledge': FEATURE_KNOWLEDGE,
     'prompts': FEATURE_PROMPTS,
     'tools': FEATURE_TOOLS,
-    'skills': FEATURE_SKILLS,
+    # [Gradient] Standalone skills are replaced by assistant skill folders.
+    'skills': False,
     'admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
     'admin_functions': FEATURE_ADMIN_FUNCTIONS,
     'admin_settings': FEATURE_ADMIN_SETTINGS,

@@ -684,6 +684,61 @@
         "title": "ArchiveListResponse",
         "type": "object"
       },
+      "AssistantSkillFileForm": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "from_path": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Path"
+          },
+          "path": {
+            "maxLength": 255,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "file_id"
+        ],
+        "title": "AssistantSkillFileForm",
+        "type": "object"
+      },
+      "AssistantSkillFileResponse": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "file_id",
+          "size"
+        ],
+        "title": "AssistantSkillFileResponse",
+        "type": "object"
+      },
       "AudioConfigUpdateForm": {
         "properties": {
           "stt": {
@@ -15824,689 +15879,6 @@
           "password"
         ],
         "title": "SignupForm",
-        "type": "object"
-      },
-      "SkillAccessListResponse": {
-        "properties": {
-          "items": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/SkillAccessResponse"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "total": {
-            "default": 0,
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "title": "SkillAccessListResponse",
-        "type": "object"
-      },
-      "SkillAccessResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "access_grants": {
-            "items": {
-              "$ref": "#/components/schemas/AccessGrantModel"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "integer"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/open_webui__models__users__UserResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          },
-          "write_access": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": false,
-            "title": "Write Access"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "name",
-          "meta",
-          "updated_at",
-          "created_at"
-        ],
-        "title": "SkillAccessResponse",
-        "type": "object"
-      },
-      "SkillCreateForm": {
-        "properties": {
-          "access_grants": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Access Grants"
-          },
-          "bundle": {
-            "anyOf": [
-              {
-                "maxLength": 34952536,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bundle"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta",
-            "default": {
-              "tags": []
-            }
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "content"
-        ],
-        "title": "SkillCreateForm",
-        "type": "object"
-      },
-      "SkillFileCreateForm": {
-        "properties": {
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "file_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File Id"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "title": "SkillFileCreateForm",
-        "type": "object"
-      },
-      "SkillFileEditForm": {
-        "properties": {
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "content"
-        ],
-        "title": "SkillFileEditForm",
-        "type": "object"
-      },
-      "SkillFileListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SkillFileUserResponse"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total"
-        ],
-        "title": "SkillFileListResponse",
-        "type": "object"
-      },
-      "SkillFileMoveForm": {
-        "properties": {
-          "from_path": {
-            "title": "From Path",
-            "type": "string"
-          },
-          "to_path": {
-            "title": "To Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "from_path",
-          "to_path"
-        ],
-        "title": "SkillFileMoveForm",
-        "type": "object"
-      },
-      "SkillFilePathForm": {
-        "properties": {
-          "path": {
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "title": "SkillFilePathForm",
-        "type": "object"
-      },
-      "SkillFileUserResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "added_at": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Added At"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Data"
-          },
-          "filename": {
-            "title": "Filename",
-            "type": "string"
-          },
-          "hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hash"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "media_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Media Type"
-          },
-          "meta": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FileMeta"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Path"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/open_webui__models__users__UserResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "filename",
-          "created_at"
-        ],
-        "title": "SkillFileUserResponse",
-        "type": "object"
-      },
-      "SkillForm": {
-        "properties": {
-          "access_grants": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Access Grants"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta",
-            "default": {
-              "tags": []
-            }
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "content"
-        ],
-        "title": "SkillForm",
-        "type": "object"
-      },
-      "SkillMeta": {
-        "properties": {
-          "tags": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": [],
-            "title": "Tags"
-          }
-        },
-        "title": "SkillMeta",
-        "type": "object"
-      },
-      "SkillModel": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "$ref": "#/components/schemas/AccessGrantModel"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "integer"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "name",
-          "content",
-          "meta",
-          "updated_at",
-          "created_at"
-        ],
-        "title": "SkillModel",
-        "type": "object"
-      },
-      "SkillResponse": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "$ref": "#/components/schemas/AccessGrantModel"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "integer"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "name",
-          "meta",
-          "updated_at",
-          "created_at"
-        ],
-        "title": "SkillResponse",
-        "type": "object"
-      },
-      "SkillUserResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "access_grants": {
-            "items": {
-              "$ref": "#/components/schemas/AccessGrantModel"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "integer"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/open_webui__models__users__UserResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "user_id",
-          "name",
-          "meta",
-          "updated_at",
-          "created_at"
-        ],
-        "title": "SkillUserResponse",
         "type": "object"
       },
       "SnapshotData": {
@@ -41618,6 +40990,217 @@
         ]
       }
     },
+    "/api/v1/models/id/{id}/skill": {
+      "get": {
+        "operationId": "export_assistant_skill_api_v1_models_id__id__skill_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Assistant Skill",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/id/{id}/skill-files": {
+      "delete": {
+        "operationId": "delete_assistant_skill_file_api_v1_models_id__id__skill_files_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Delete Assistant Skill File Api V1 Models Id  Id  Skill Files Delete",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Assistant Skill File",
+        "tags": [
+          "models"
+        ]
+      },
+      "get": {
+        "operationId": "list_assistant_skill_files_api_v1_models_id__id__skill_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssistantSkillFileResponse"
+                  },
+                  "title": "Response List Assistant Skill Files Api V1 Models Id  Id  Skill Files Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Assistant Skill Files",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_assistant_skill_file_api_v1_models_id__id__skill_files_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantSkillFileForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Put Assistant Skill File Api V1 Models Id  Id  Skill Files Put",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Assistant Skill File",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/import": {
       "post": {
         "operationId": "import_models_api_v1_models_import_post",
@@ -45194,875 +44777,6 @@
         "summary": "Reset Upload Dir",
         "tags": [
           "retrieval"
-        ]
-      }
-    },
-    "/api/v1/skills/": {
-      "get": {
-        "operationId": "get_skills_api_v1_skills__get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Query"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SkillUserResponse"
-                  },
-                  "title": "Response Get Skills Api V1 Skills  Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Skills",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/create": {
-      "post": {
-        "operationId": "create_new_skill_api_v1_skills_create_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillCreateForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SkillResponse"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Create New Skill Api V1 Skills Create Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create New Skill",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/export": {
-      "get": {
-        "operationId": "export_skills_api_v1_skills_export_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SkillModel"
-                  },
-                  "title": "Response Export Skills Api V1 Skills Export Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Export Skills",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}": {
-      "get": {
-        "operationId": "get_skill_by_id_api_v1_skills_id__id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SkillAccessResponse"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Skill By Id Api V1 Skills Id  Id  Get"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Skill By Id",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/access/update": {
-      "post": {
-        "operationId": "update_skill_access_by_id_api_v1_skills_id__id__access_update_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccessGrantsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SkillModel"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Update Skill Access By Id Api V1 Skills Id  Id  Access Update Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Skill Access By Id",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/delete": {
-      "delete": {
-        "operationId": "delete_skill_by_id_api_v1_skills_id__id__delete_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Delete Skill By Id Api V1 Skills Id  Id  Delete Delete",
-                  "type": "boolean"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Skill By Id",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/files": {
-      "get": {
-        "operationId": "list_skill_files_api_v1_skills_id__id__files_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillFileListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Skill Files",
-        "tags": [
-          "skills"
-        ]
-      },
-      "post": {
-        "operationId": "create_skill_file_api_v1_skills_id__id__files_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillFileCreateForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Skill File",
-        "tags": [
-          "skills"
-        ]
-      },
-      "put": {
-        "operationId": "edit_skill_file_api_v1_skills_id__id__files_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillFileEditForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Edit Skill File",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/files/content": {
-      "get": {
-        "description": "Stream the raw bytes of a skill-bundle file with the correct Content-Type.\n\nReadable by the skill's owner, an admin, or a user with a read grant.",
-        "operationId": "get_skill_file_content_api_v1_skills_id__id__files_content_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Virtual skill-bundle path, e.g. \"assets/logo.png\"",
-            "in": "query",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "description": "Virtual skill-bundle path, e.g. \"assets/logo.png\"",
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Skill File Content",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/files/move": {
-      "post": {
-        "operationId": "move_skill_file_api_v1_skills_id__id__files_move_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillFileMoveForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Move Skill File",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/files/remove": {
-      "post": {
-        "operationId": "remove_skill_file_api_v1_skills_id__id__files_remove_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillFilePathForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Remove Skill File",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/toggle": {
-      "post": {
-        "operationId": "toggle_skill_by_id_api_v1_skills_id__id__toggle_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SkillModel"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Toggle Skill By Id Api V1 Skills Id  Id  Toggle Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Toggle Skill By Id",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/id/{id}/update": {
-      "post": {
-        "operationId": "update_skill_by_id_api_v1_skills_id__id__update_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SkillModel"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Update Skill By Id Api V1 Skills Id  Id  Update Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Skill By Id",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/v1/skills/list": {
-      "get": {
-        "operationId": "get_skill_list_api_v1_skills_list_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Query"
-            }
-          },
-          {
-            "in": "query",
-            "name": "view_option",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "View Option"
-            }
-          },
-          {
-            "in": "query",
-            "name": "order_by",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Order By"
-            }
-          },
-          {
-            "in": "query",
-            "name": "direction",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Direction"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": 1,
-              "title": "Page"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillAccessListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Skill List",
-        "tags": [
-          "skills"
         ]
       }
     },

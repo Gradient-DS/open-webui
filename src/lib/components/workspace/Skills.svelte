@@ -15,20 +15,9 @@
 		getSkillById,
 		getSkillItems,
 		exportSkills,
-		createNewSkill,
-		getSkillFileList,
-		getSkillFileContentBlob,
 		deleteSkillById,
 		toggleSkillById
 	} from '$lib/apis/skills';
-	import { formatSkillName, slugify } from '$lib/utils';
-	import {
-		parseSkillBundle,
-		buildSkillBundle,
-		encodeSkillBundle,
-		parseSkillMetadata,
-		findMissingSkillFiles
-	} from '$lib/utils/skills/bundle';
 
 	import Tooltip from '../common/Tooltip.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -45,10 +34,6 @@
 
 	let shiftKey = false;
 	let loaded = false;
-
-	let importFiles: FileList | null;
-	let importing = false;
-	let importInputElement: HTMLInputElement;
 
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
@@ -172,98 +157,6 @@
 		}
 	};
 
-	const importSkillBundle = async (file: File) => {
-		let parsed;
-		try {
-			parsed = await parseSkillBundle(file);
-		} catch {
-			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
-			return;
-		}
-
-		// Non-blocking guardrail: if the SKILL.md references bundle files (e.g.
-		// assets/template.docx) that aren't in the bundle, the skill will fail at
-		// run time with "cannot stat ...". Warn but still import.
-		const missingFiles = findMissingSkillFiles(parsed.skillMd, parsed.files);
-		if (missingFiles.length) {
-			toast.warning(
-				$i18n.t('SKILL.md references files not in the bundle: {{paths}}', {
-					paths: missingFiles.join(', ')
-				})
-			);
-		}
-
-		let fm: { name?: string; description?: string };
-		try {
-			fm = parseSkillMetadata(parsed.skillMd);
-		} catch {
-			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
-			return;
-		}
-		const baseName = file.name.replace(/\.(skill|zip)$/i, '');
-		const name = formatSkillName(fm.name || baseName);
-
-		let created;
-		try {
-			created = await createNewSkill(localStorage.token, {
-				id: slugify(name),
-				name,
-				description: fm.description || '',
-				content: parsed.skillMd,
-				is_active: true,
-				bundle: await encodeSkillBundle(parsed.skillMd, parsed.files),
-				meta: { tags: [] },
-				access_grants: []
-			});
-		} catch (error) {
-			toast.error(`${error}`);
-			return;
-		}
-
-		toast.success($i18n.t('Skill “{{name}}” uploaded', { name: created.name }));
-		page = 1;
-		loadSkillItems();
-		_skills.set(await getSkills(localStorage.token));
-	};
-
-	const exportBundleHandler = async (skill) => {
-		const _skill = await getSkillById(localStorage.token, skill.id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!_skill) return;
-
-		// The file-list route returns at most the first page (no pagination param),
-		// so a skill with more files than that can only be partially exported. Warn
-		// loudly rather than silently dropping the remainder.
-		const res = await getSkillFileList(localStorage.token, _skill.id).catch(() => null);
-		const items = res?.items ?? [];
-		const total = res?.total ?? items.length;
-		if (total > items.length) {
-			toast.warning(
-				$i18n.t('Only the first {{count}} of {{total}} files were exported.', {
-					count: items.length,
-					total
-				})
-			);
-		}
-
-		const bundleFiles = [];
-		for (const item of items) {
-			try {
-				const blob = await getSkillFileContentBlob(localStorage.token, _skill.id, item.path);
-				bundleFiles.push({ path: item.path, blob });
-			} catch {
-				toast.error($i18n.t('Failed to export file: {{path}}', { path: item.path }));
-			}
-		}
-
-		// Wrap the bundle in a <slug>/ directory (the layout Claude produces and
-		// expects), and name the file by slug so it has no spaces/capitals.
-		const blob = await buildSkillBundle(_skill.content || '', bundleFiles, _skill.id);
-		saveAs(blob, `${_skill.id}.skill`);
-	};
-
 	const deleteHandler = async (skill) => {
 		const res = await deleteSkillById(localStorage.token, skill.id).catch((error) => {
 			toast.error(`${error}`);
@@ -326,32 +219,9 @@
 </svelte:head>
 
 {#if loaded}
-	<!-- [Gradient] Upload creates the complete bundle directly; the editor is a detail view. -->
-	<input
-		bind:this={importInputElement}
-		bind:files={importFiles}
-		type="file"
-		accept=".zip,.skill"
-		hidden
-		on:change={async () => {
-			const file = importFiles?.[0];
-			if (!file || importing) return;
-			importing = true;
-			try {
-				await importSkillBundle(file);
-			} finally {
-				importing = false;
-				importInputElement.value = '';
-			}
-		}}
-	/>
-
 	<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
 		<div>
 			<h1 class="text-xl font-medium">{$i18n.t('Skills')}</h1>
-			<p class="mt-1 text-sm text-gray-500">
-				{$i18n.t('Active skills are used automatically when the workspace is on.')}
-			</p>
 		</div>
 		<div class="flex items-center gap-3">
 			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills_export}
@@ -367,16 +237,6 @@
 				<a class="text-sm text-gray-500 hover:underline" href="/workspace/skills/create">
 					{$i18n.t('Create from scratch')}
 				</a>
-			{/if}
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills_import}
-				<button
-					type="button"
-					class="focus-ring rounded-xl bg-gray-900 px-3 py-2 text-sm text-white dark:bg-white dark:text-gray-900 disabled:opacity-50"
-					disabled={importing}
-					on:click={() => importInputElement.click()}
-				>
-					{$i18n.t('Upload skill')}
-				</button>
 			{/if}
 		</div>
 	</div>
@@ -511,7 +371,6 @@
 									{:else}
 										<div class="flex shrink-0 flex-row items-center gap-1.5 self-center">
 											<SkillMenu
-												exportBundleHandler={() => exportBundleHandler(skill)}
 												show={openSkillMenuId === skill.id}
 												editHandler={() => {
 													goto(`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`);

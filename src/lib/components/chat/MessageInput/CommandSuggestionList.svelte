@@ -212,7 +212,7 @@
 						}
 					}}
 				/>
-			{:else if char === '$'}
+			{:else if char === '$' && isFeatureEnabled('skills')}
 				<Skills
 					bind:this={suggestionElement}
 					{query}

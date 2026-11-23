@@ -32,8 +32,7 @@ export type Feature =
 	| 'admin_settings'
 	| 'input_menu'
 	| 'temporary_chat'
-	| 'builtin_tools'
-	| 'simple_assistant_builder';
+	| 'builtin_tools';
 
 /**
  * Check if a feature is enabled globally.

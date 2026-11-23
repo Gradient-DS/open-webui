@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Carry the chosen bundle into the single assistant editor.
+	import { assistantSkillImport } from '$lib/stores/assistantSkillImport';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -9,7 +11,7 @@
 
 	import { onMount, getContext, tick } from 'svelte';
 	import { goto } from '$app/navigation';
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 	dayjs.extend(relativeTime);
 
 	import {
@@ -67,6 +69,7 @@
 
 	let importFiles;
 	let modelsImportInputElement: HTMLInputElement;
+	let assistantSkillInput: HTMLInputElement;
 	let tagsContainerElement: HTMLDivElement;
 
 	let loaded = false;
@@ -95,6 +98,11 @@
 				id: 'models-new',
 				label: $i18n.t('Create'),
 				href: '/workspace/models/create'
+			},
+			{
+				id: 'models-import-skill',
+				label: $i18n.t('Import skill'),
+				onClick: () => assistantSkillInput?.click()
 			},
 			{
 				id: 'models-import',
@@ -644,6 +652,20 @@
 				</Dropdown>
 			</div>
 
+			<input
+				type="file"
+				class="hidden"
+				accept=".skill,.zip,.md"
+				bind:this={assistantSkillInput}
+				on:change={() => {
+					const file = assistantSkillInput.files?.[0];
+					if (file) {
+						assistantSkillImport.set(file);
+						goto('/workspace/models/create');
+					}
+					assistantSkillInput.value = '';
+				}}
+			/>
 			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 

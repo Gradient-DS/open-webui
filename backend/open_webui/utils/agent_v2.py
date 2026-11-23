@@ -851,15 +851,11 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
 async def _skills(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
     # [Gradient] Use the same already-gated workspace state as tools.workspace_task.
     from open_webui.soev import capabilities
-    from open_webui.utils.agent_skills import skill_references
+    from open_webui.utils.agent_assistant_skills import assistant_reference
 
-    if (
-        not (metadata.get('features') or {}).get('workspace')
-        or not is_feature_enabled('skills')
-        or not await capabilities.has(capabilities.SKILLS)
-    ):
+    if not (metadata.get('features') or {}).get('workspace') or not await capabilities.has(capabilities.SKILLS):
         return [], []
-    return await skill_references(metadata, user)
+    return await assistant_reference(metadata, user)
 
 
 def _unimaged(error: ImagesUnavailable, language: str | None) -> dict[str, Any]:
@@ -1968,7 +1964,7 @@ class AgentTurn:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
-        from open_webui.utils.agent_skills import forget_references
+        from open_webui.utils.agent_skill_uploads import forget_references
 
         for attempt in range(3):
             try:

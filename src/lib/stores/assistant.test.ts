@@ -11,10 +11,11 @@ vi.mock('$lib/stores', async () => {
 	return { models: writable([]), config: writable({}), settings: writable({}) };
 });
 
-import { models } from '$lib/stores';
+import { models, settings } from '$lib/stores';
 import {
 	activeAssistant,
 	activeAssistantId,
+	assistantDefaultModelBlocked,
 	effectiveModels,
 	llmSelection,
 	reconcileFolderSelection,
@@ -37,6 +38,7 @@ beforeAll(async () => {
 beforeEach(() => {
 	vi.clearAllMocks();
 	activeAssistantId.set(null);
+	assistantDefaultModelBlocked.set(false);
 	models.set([
 		llm,
 		assistant,
@@ -113,7 +115,7 @@ describe('assistant stores', () => {
 
 describe('assistant command selection', () => {
 	it('updates the same identity and effective metadata used by the chip and placeholder', () => {
-		selectAssistant('helper', true, i18n);
+		selectAssistant('helper', true, i18n, false);
 		expect(get(activeAssistantId)).toBe('helper');
 		expect(get(activeAssistant)).toBe(assistant);
 		expect(get(effectiveModels)[0]).toMatchObject({
@@ -122,9 +124,49 @@ describe('assistant command selection', () => {
 		});
 		expect(get(models)[0]).toBe(llm);
 	});
+	it('returns the starting LLM once without saving it to user defaults', () => {
+		const preferred = {
+			...assistant,
+			info: {
+				...assistant.info,
+				id: assistant.id,
+				name: assistant.name,
+				params: {},
+				meta: { defaultModelId: 'gpu', toolIds: [] }
+			}
+		};
+		models.set([llm, preferred]);
+		settings.set({ models: ['personal-default'] });
+		expect(selectAssistant('helper', true, i18n, false)).toBe('gpu');
+		expect(selectAssistant('helper', true, i18n, false)).toBeUndefined();
+		expect(get(settings).models).toEqual(['personal-default']);
+	});
+	it.each(['model URL', 'manual choice or loaded chat', 'messages'])(
+		'keeps the current model after %s',
+		(reason) => {
+			models.set([
+				llm,
+				{
+					...assistant,
+					info: {
+						...assistant.info,
+						id: assistant.id,
+						name: assistant.name,
+						params: {},
+						meta: { defaultModelId: 'gpu', toolIds: [] }
+					}
+				}
+			]);
+			assistantDefaultModelBlocked.set(reason === 'manual choice or loaded chat');
+			expect(
+				selectAssistant('helper', reason !== 'messages', i18n, reason === 'model URL')
+			).toBeUndefined();
+		}
+	);
+
 	it('refuses to switch assistants once the chat has a message', () => {
 		activeAssistantId.set('saved');
-		selectAssistant('helper', false, i18n);
+		selectAssistant('helper', false, i18n, false);
 		expect(get(activeAssistantId)).toBe('saved');
 		expect(toast.error).toHaveBeenCalledWith('Start a new chat to switch assistants.');
 	});
@@ -132,16 +174,16 @@ describe('assistant command selection', () => {
 		'keeps the selection when the requested assistant is unavailable: %s',
 		(query) => {
 			activeAssistantId.set('helper');
-			selectAssistant(query, true, i18n);
+			selectAssistant(query, true, i18n, false);
 			expect(get(activeAssistantId)).toBe('helper');
 			expect(toast.error).toHaveBeenCalledWith(`Assistant not found: ${query}`);
 		}
 	);
 	it('reports no selection or the current name without changing the selection', () => {
-		selectAssistant('', true, i18n);
+		selectAssistant('', true, i18n, false);
 		expect(toast.message).toHaveBeenLastCalledWith('No assistant selected');
 		activeAssistantId.set('helper');
-		selectAssistant('', false, i18n);
+		selectAssistant('', false, i18n, false);
 		expect(toast.message).toHaveBeenLastCalledWith('Current assistant: Helper');
 		expect(get(activeAssistantId)).toBe('helper');
 	});

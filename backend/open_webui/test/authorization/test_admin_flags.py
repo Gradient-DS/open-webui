@@ -178,7 +178,7 @@ def test_admin_listing_and_exports(seeded, bypass, monkeypatch, path):
     assert response.status_code == (200 if bypass else 401), response.text
 
 
-@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'tool', 'skill', 'knowledge', 'channel'])
+@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'tool', 'knowledge', 'channel'])
 def test_admin_reader_has_no_write_access(seeded, bypass, kind):
     from open_webui.models.access_grants import AccessGrants
 
@@ -291,7 +291,7 @@ def test_runtime_content_helpers(seeded, bypass, kind):
 
 
 @pytest.mark.parametrize('export_enabled', [False, True])
-@pytest.mark.parametrize('kind', ['model', 'tool', 'skill'])
+@pytest.mark.parametrize('kind', ['model', 'tool'])
 def test_workspace_bulk_exports_need_export_flag(seeded, bypass, monkeypatch, export_enabled, kind):
     from open_webui import config
 
@@ -342,9 +342,7 @@ def test_chat_runtime_ownership(seeded, bypass, monkeypatch):
     seeded.run(check)
 
 
-@pytest.mark.parametrize(
-    'kind,suffix', [('prompt', '/history'), ('skill', '/files'), ('tool', '/valves'), ('tool', '/valves/spec')]
-)
+@pytest.mark.parametrize('kind,suffix', [('prompt', '/history'), ('tool', '/valves'), ('tool', '/valves/spec')])
 def test_workspace_nested_content(seeded, bypass, kind, suffix):
     seeded.run(seed_resource, seeded, kind)
     response = seeded.client.get(f'/api/v1/{kind}s/id/target{suffix}', headers=seeded.headers('admin'))

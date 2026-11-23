@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { config, models, pinnedModels, settings, user } from '$lib/stores';
 	// [Gradient] The picker contains LLMs only and disables compare for assistant chats.
-	import { activeAssistant, activeAssistantId, llmSelection } from '$lib/stores/assistant';
+	import {
+		activeAssistant,
+		activeAssistantId,
+		assistantDefaultModelBlocked,
+		llmSelection
+	} from '$lib/stores/assistant';
 	import { pickableLLMId, pickableLLMs } from '$lib/utils/assistants';
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -94,6 +99,7 @@
 					{align}
 					{showSetDefault}
 					onSetDefault={saveDefaultModel}
+					on:select={() => assistantDefaultModelBlocked.set(true)}
 					multipleEnabled={!$activeAssistantId &&
 						($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))}
 					{disabled}

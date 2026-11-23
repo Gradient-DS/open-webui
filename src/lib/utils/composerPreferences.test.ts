@@ -12,7 +12,6 @@ const chosen = composerPreferences({
 	documentWriterEnabled: true,
 	councilEnabled: true,
 	selectedToolIds: ['tool'],
-	selectedSkillIds: ['skill'],
 	selectedFilterIds: ['filter']
 });
 
