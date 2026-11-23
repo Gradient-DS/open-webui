@@ -112,10 +112,10 @@ base-code ingest cleared `soev_collection_key`; an empty key is never evidence t
 the platform lacks a document. This command replaces the former SQL preflight.
 
 With the application stopped and its usual tenant database/platform configuration
-and uploads volume available, run **once per tenant** and retain its counts:
+and uploads volume available, run **once per owner**, with that owner's verified login, and retain counts:
 
 ```sh
-python -m open_webui.soev.retire_document_bytes
+python -m open_webui.soev.retire_document_bytes --owner-id USER_ID --login-token-stdin
 ```
 
 The command disables schema migrations before loading application config, including
@@ -127,15 +127,16 @@ document must have the row’s recorded SHA256 and byte size (platform `byte_siz
 if local bytes exist, their computed SHA256 and size must match too. A different
 platform version or local mismatch is `platform_differs` and is never touched.
 “Unknown” means absent from that caller's readable collections, never proof of
-absence throughout the platform. Product authority may see fewer documents than an
-owner; the default uses the existing product/service API credential, without a
-person token, and may hold **nothing** (empty visibility or 403). No new credential
-is introduced. It cannot delete unknown rows. Counts contain no file/user identifiers or URLs.
+absence throughout the platform. Every run requires that owner's login token, verified against `/v1/me`;
+service authority and unscoped runs are refused. Counts contain no identifiers or URLs.
+Files linked to chats, knowledge bases, skills, assistants or folders are conservatively
+protected, including shared-chat snapshots after the original link is removed. Their
+bytes stay even when the platform already holds them, preserving every fork reader.
 
 For a reviewed application, use the exact same predicate with explicit `--apply`:
 
 ```sh
-python -m open_webui.soev.retire_document_bytes --apply
+python -m open_webui.soev.retire_document_bytes --owner-id USER_ID --login-token-stdin --apply
 ```
 
 This removes **only local bytes** of positively verified published documents and

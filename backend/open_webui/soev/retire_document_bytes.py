@@ -75,6 +75,41 @@ def protected_file(file, prefix: bytes, *, skill: bool, export: bool) -> bool:
     )
 
 
+def _references_file(value, file_id):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return False
+    if isinstance(value, list):
+        return any(_references_file(item, file_id) for item in value)
+    if isinstance(value, dict):
+        return (
+            value.get('id') == file_id
+            or value.get('file_id') == file_id
+            or any(_references_file(item, file_id) for item in value.values() if isinstance(item, (dict, list)))
+        )
+    return False
+
+
+async def shared_original(session, file, tables):
+    # Conservatively preserve linked resources, even when their current audience is empty.
+    if (file.meta or {}).get('collection_name') or (file.meta or {}).get('soev_kb_links'):
+        return True
+    for name in ('chat_file', 'knowledge_file', 'skill_file'):
+        if name in tables:
+            table = sa.table(name, sa.column('file_id'))
+            if await session.scalar(sa.select(table.c.file_id).where(table.c.file_id == file.id).limit(1)):
+                return True
+    if 'shared_chat' in tables:
+        table = sa.table('shared_chat', sa.column('chat', sa.JSON))
+        if any(_references_file(value, file.id) for value in await session.scalars(sa.select(table.c.chat))):
+            return True
+    from open_webui.soev.file_collections import collections_for
+
+    return len(await collections_for(file, session=session)) > 1
+
+
 async def retire(
     session,
     client,
@@ -86,9 +121,16 @@ async def retire(
     as_user: str | None = None,
 ) -> dict[str, int]:
     from open_webui.models.files import File, FileModel
-    from open_webui.soev import originals
+    from open_webui.soev import acting, originals
     from open_webui.soev.client import SoevApiError
 
+    if (
+        not owner_id
+        or as_user != f'owui:user:{owner_id}'
+        or acting.requester_ref() != as_user
+        or getattr(client, 'is_service', False)
+    ):
+        raise PermissionError('Retirement requires the owner login')
     counts = {
         key: 0
         for key in (
@@ -157,7 +199,13 @@ async def retire(
                     pass
                 except OSError:
                     uncertain = True
-            protected = protected_file(file, prefix, skill=skill, export=export)
+            protected = protected_file(file, prefix, skill=skill, export=export) or await shared_original(
+                session, file, tables
+            )
+            if protected:
+                counts['protected'] += 1
+                await session.rollback()
+                continue
             held, differs = False, False
             try:
                 keys, seen = await originals.candidates(file, client, as_user=as_user, session=session)
@@ -214,12 +262,14 @@ async def run(args) -> dict[str, int]:
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.users import Users
     from open_webui.soev import acting, identity
-    from open_webui.soev.client import build_service_client, close_client
+    from open_webui.soev.client import close_client
     from open_webui.soev.persons import _person_id
 
     if not config.SOEV_API_URL:
         raise ValueError('Platform configuration is required')
-    client = build_service_client()
+    if not args.owner_id or not args.login_token_stdin:
+        raise ValueError('An owner and owner login token on stdin are required')
+    client = identity.build_client()
     requester = resolver = None
     as_user = None
     try:
@@ -258,7 +308,7 @@ async def run(args) -> dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true', help='Retire verified copies and eligible unlinked empty rows')
-    parser.add_argument('--owner-id', help='Restrict to one owner; verify their login before deleting empty rows')
+    parser.add_argument('--owner-id', required=True, help='Restrict to one owner and verify their login')
     parser.add_argument('--login-token-stdin', action='store_true', help='Read the owner login token from stdin')
     args = parser.parse_args()
     try:

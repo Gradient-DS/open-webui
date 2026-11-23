@@ -15,6 +15,14 @@ from open_webui.models.files import File
 from open_webui.soev import retire_document_bytes as retirement
 
 
+@pytest.fixture(autouse=True)
+def owner_request():
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login('owner'):
+        yield
+
+
 def test_no_automatic_document_retirement_revision():
     versions = Path(__file__).resolve().parents[2] / 'migrations/versions'
     assert not (versions / 'f286d9b43a71_retire_document_originals.py').exists()
@@ -105,8 +113,8 @@ async def test_report_and_action_share_safe_per_file_decisions(tmp_path, request
         )
         assert counts['platform_held'] == 2
         assert counts['unknown_with_bytes'] == 1
-        assert counts['unknown_without_bytes'] == 4
-        assert counts['in_flight'] == 1 and counts['protected'] == 5
+        assert counts['unknown_without_bytes'] == 2
+        assert counts['in_flight'] == 1 and counts['protected'] == 7
         assert counts['bytes_removed'] == int(apply) and counts['rows_removed'] == int(apply)
         assert bool(await session.get(File, 'unknown-empty')) is not apply
         for key in ('base-held', 'held-empty', 'linked-chat', 'linked-kb', 'base-hidden'):
@@ -121,7 +129,7 @@ async def test_report_and_action_share_safe_per_file_decisions(tmp_path, request
 async def test_operator_report_disables_schema_migrations(monkeypatch, tmp_path):
     from open_webui import config, env
     from open_webui.internal import db
-    from open_webui.soev import client
+    from open_webui.soev import client, identity
     from unittest.mock import AsyncMock
     from types import SimpleNamespace
 
@@ -134,16 +142,36 @@ async def test_operator_report_disables_schema_migrations(monkeypatch, tmp_path)
         yield object()
 
     monkeypatch.setattr(db, 'get_async_db_context', context)
-    monkeypatch.setattr(client, 'build_service_client', lambda: SimpleNamespace(is_service=True))
+    import io
+    from open_webui.models.users import Users
+
+    monkeypatch.setattr(retirement.sys, 'stdin', io.StringIO('fictional-owner-login\n'))
+    monkeypatch.setattr(
+        Users,
+        'get_user_by_id',
+        AsyncMock(
+            return_value=SimpleNamespace(id='owner', person_id='platform:user:00000000-0000-4000-8000-000000000001')
+        ),
+    )
+    monkeypatch.setattr(
+        identity,
+        'build_client',
+        lambda: SimpleNamespace(
+            is_service=False,
+            me=AsyncMock(return_value={'person_id': 'platform:user:00000000-0000-4000-8000-000000000001'}),
+        ),
+    )
     monkeypatch.setattr(client, 'close_client', AsyncMock())
     report = AsyncMock(return_value={'platform_held': 1})
     monkeypatch.setattr(retirement, 'retire', report)
-    assert await retirement.run(SimpleNamespace(owner_id=None, apply=False)) == {'platform_held': 1}
+    assert await retirement.run(SimpleNamespace(owner_id='owner', login_token_stdin=True, apply=False)) == {
+        'platform_held': 1
+    }
     assert env.ENABLE_DB_MIGRATIONS is False
     assert os.environ['ENABLE_DB_MIGRATIONS'] == 'false'
     assert report.call_args.kwargs['apply'] is False
-    assert report.call_args.args[1].is_service is True
-    assert report.call_args.kwargs['as_user'] is None
+    assert report.call_args.args[1].is_service is False
+    assert report.call_args.kwargs['as_user'] == 'owui:user:owner'
 
 
 @pytest.mark.asyncio
@@ -156,7 +184,7 @@ async def test_operator_report_disables_schema_migrations(monkeypatch, tmp_path)
         ('403', 'platform_error'),
         ('404', 'platform_error'),
         ('down', 'platform_error'),
-        ('service_empty', 'unknown_with_bytes'),
+        ('owner_empty', 'unknown_with_bytes'),
         ('hash_differs', 'platform_differs'),
         ('size_differs', 'platform_differs'),
         ('local_differs', 'platform_differs'),
@@ -181,11 +209,11 @@ async def test_retirement_identity_fingerprints_and_platform_failures(tmp_path, 
     def handle(request):
         calls.append(request)
         assert request.headers['Authorization'] == 'Bearer existing-product-key'
-        assert 'X-Soev-User-Token' not in request.headers
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:owner'
         if request.url.path == '/v1/documents':
             if case in ('403', '404', 'down'):
                 return httpx.Response(503 if case == 'down' else int(case))
-            if case in ('service_empty', 'text_only'):
+            if case in ('owner_empty', 'text_only'):
                 return httpx.Response(200, json={'data': [], 'next_cursor': None})
             row = {
                 'source_id': 'base',
@@ -210,7 +238,7 @@ async def test_retirement_identity_fingerprints_and_platform_failures(tmp_path, 
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
-    client = SoevClient('https://platform.invalid', 'existing-product-key', service=True)
+    client = SoevClient('https://platform.invalid', 'existing-product-key')
     async with sessions() as session:
         session.add(
             File(
@@ -239,7 +267,13 @@ async def test_retirement_identity_fingerprints_and_platform_failures(tmp_path, 
 
             monkeypatch.setattr(session, 'commit', no_write)
         result = await retirement.retire(
-            session, client, upload_dir=tmp_path, export_dir=tmp_path / 'exports', apply=apply
+            session,
+            client,
+            upload_dir=tmp_path,
+            export_dir=tmp_path / 'exports',
+            apply=apply,
+            owner_id='owner',
+            as_user='owui:user:owner',
         )
         assert result[category] == 1
         removed = apply and category == 'platform_held'
@@ -319,7 +353,13 @@ async def test_retirement_commits_each_row_before_unlink_and_survives_later_fail
             patch.setattr(session, 'commit', interrupted_commit)
             with pytest.raises(RuntimeError):
                 await retirement.retire(
-                    session, Client(), upload_dir=tmp_path, export_dir=tmp_path / 'exports', apply=True
+                    session,
+                    Client(),
+                    upload_dir=tmp_path,
+                    export_dir=tmp_path / 'exports',
+                    apply=True,
+                    owner_id='owner',
+                    as_user='owui:user:owner',
                 )
         assert (await session.get(File, 'a')).path is None and not (tmp_path / 'a').exists()
         b = await session.get(File, 'b')
@@ -328,7 +368,15 @@ async def test_retirement_commits_each_row_before_unlink_and_survives_later_fail
         if after_commit:
             assert b.meta['soev_retire_path'] == str(tmp_path / 'b')
         await session.rollback()
-        await retirement.retire(session, Client(), upload_dir=tmp_path, export_dir=tmp_path / 'exports', apply=True)
+        await retirement.retire(
+            session,
+            Client(),
+            upload_dir=tmp_path,
+            export_dir=tmp_path / 'exports',
+            apply=True,
+            owner_id='owner',
+            as_user='owui:user:owner',
+        )
         assert (await session.get(File, 'b')).path is None and not (tmp_path / 'b').exists()
     await engine.dispose()
 
@@ -403,10 +451,109 @@ async def test_retirement_retry_preserves_another_rows_storage_holding(tmp_path,
         )
         await session.commit()
         counts = await retirement.retire(
-            session, Client(), upload_dir=tmp_path, export_dir=tmp_path / 'exports', apply=True, owner_id='owner'
+            session,
+            Client(),
+            upload_dir=tmp_path,
+            export_dir=tmp_path / 'exports',
+            apply=True,
+            owner_id='owner',
+            as_user='owui:user:owner',
         )
         assert counts['platform_held'] == 1 and counts['bytes_removed'] == 0
         assert local.read_bytes() == content
         other = await session.get(File, 'b')
         assert other.path == (str(local) if holding == 'path' else None)
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('apply', [False, True])
+@pytest.mark.parametrize('link', ['chat', 'snapshot', 'knowledge', 'assistant', 'folder', 'legacy_knowledge'])
+async def test_retirement_preserves_every_linked_readers_original(tmp_path, apply, link):
+    import json
+
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/readers.db')
+    async with engine.begin() as connection:
+        await connection.run_sync(File.__table__.create)
+        for statement in [
+            'CREATE TABLE chat_file (file_id TEXT)',
+            'CREATE TABLE shared_chat (chat JSON)',
+            'CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)',
+            'CREATE TABLE model (id TEXT, user_id TEXT, meta JSON)',
+            'CREATE TABLE folder (id TEXT, user_id TEXT, data JSON)',
+        ]:
+            await connection.execute(sa.text(statement))
+    content = b'fictional shared original'
+    local = tmp_path / 'original.pdf'
+    local.write_bytes(content)
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        session.add(
+            File(
+                id='file',
+                user_id='owner',
+                filename='original.pdf',
+                path=str(local),
+                meta={
+                    'status': 'completed',
+                    'file_hash': hashlib.sha256(content).hexdigest(),
+                    'size': len(content),
+                    **({'collection_name': 'fictional-kb'} if link == 'legacy_knowledge' else {}),
+                },
+                data={},
+                created_at=1,
+                updated_at=1,
+            )
+        )
+        if link == 'chat':
+            await session.execute(sa.text("INSERT INTO chat_file VALUES ('file')"))
+        elif link == 'snapshot':
+            await session.execute(
+                sa.text('INSERT INTO shared_chat VALUES (:chat)'),
+                {'chat': json.dumps({'messages': [{'files': [{'id': 'file'}]}]})},
+            )
+        elif link == 'knowledge':
+            await session.execute(sa.text("INSERT INTO knowledge_file VALUES ('file', 'shared-kb')"))
+        elif link in ('assistant', 'folder'):
+            table, field = ('model', 'meta') if link == 'assistant' else ('folder', 'data')
+            value = {'knowledge' if link == 'assistant' else 'files': [{'id': 'file', 'type': 'file'}]}
+            await session.execute(
+                sa.text(f'INSERT INTO {table} VALUES (:id, :owner, :value)'),
+                {'id': 'shared-resource', 'owner': 'owner', 'value': json.dumps(value)},
+            )
+        await session.commit()
+
+        class Client:
+            async def pages(self, *args, **kwargs):
+                pytest.fail('Protected originals must stay without a platform read')
+                yield
+
+        counts = await retirement.retire(
+            session,
+            Client(),
+            upload_dir=tmp_path,
+            export_dir=tmp_path / 'exports',
+            apply=apply,
+            owner_id='owner',
+            as_user='owui:user:owner',
+        )
+        assert counts['protected'] == 1 and counts['bytes_removed'] == counts['rows_removed'] == 0
+        assert local.read_bytes() == content
+        assert (await session.get(File, 'file')).path == str(local)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'service,owner,ref', [(True, 'owner', 'owui:user:owner'), (False, None, None), (False, 'other', 'owui:user:other')]
+)
+async def test_retirement_refuses_service_or_wrong_owner_before_reading(service, owner, ref):
+    with pytest.raises(PermissionError, match='owner login'):
+        await retirement.retire(
+            None,
+            SimpleNamespace(is_service=service),
+            upload_dir=Path('/fictional'),
+            export_dir=Path('/fictional/exports'),
+            apply=True,
+            owner_id=owner,
+            as_user=ref,
+        )
