@@ -590,11 +590,8 @@ JWT refusal remains in session authentication so previously issued tokens cannot
 become ordinary sessions. Assistant isolation and revocation checks remain.
 
 Migration `b7e19d4a6c82` deletes standalone skills and their grants, removes
-`meta.skillIds` from every model and drops `skill_file`. It deletes File rows and
-file grants only when no other junction or stored content refers to the file.
-The upstream `skill` table remains empty. Downgrade recreates only the empty
-junction structure. Stored bytes formerly addressed by the deleted File paths
-remain orphaned in the configured upload storage (local upload directory or the
-configured object store); the migration logs their count. Alembic cannot safely
-perform credential-dependent, nontransactional storage deletion. The removed
+`meta.skillIds` from every model and drops `skill_file`. The upstream `skill`
+table remains empty. Downgrade recreates only the empty junction structure. The
+File rows and stored bytes behind former skill files are left alone: they stay
+their uploader's files. The removed
 routes are removed from the security inventories and their own probes only.
