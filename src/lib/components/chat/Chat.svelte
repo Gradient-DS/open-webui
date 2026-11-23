@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { turnErrorDetails } from '$lib/utils/turnError';
 	import {
 		composerPreferences,
 		composerFeatures,
@@ -4516,7 +4517,6 @@
 			innerError = error;
 		}
 
-		console.error(innerError);
 		if ('detail' in innerError) {
 			// FastAPI error
 			toast.error(innerError.detail);
@@ -4537,12 +4537,8 @@
 		}
 
 		responseMessage.error = {
-			// The professional headline is rendered by the Error component;
-			// `content` carries only the raw error, shown collapsed under a
-			// "Technical details" disclosure.
 			content: errorMessage,
-			// Carry the trace id forward so an error report can deep-link to Tempo.
-			trace_id: innerError?.trace_id ?? innerError?.error?.trace_id ?? null
+			...turnErrorDetails(innerError?.error ?? innerError)
 		};
 		responseMessage.done = true;
 

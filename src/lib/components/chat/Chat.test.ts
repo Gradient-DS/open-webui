@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { buildThreadHistory, extendProjectionToTurn, mergeProjection } from '$lib/utils/threads';
 import type { ProjectionPage } from '$lib/apis/threads';
 import { retainReasoningTiming, updateThreadReasoning } from '$lib/utils/threadReasoning';
+import { turnErrorDetails } from '$lib/utils/turnError';
 import { canRegenerateResponse } from '$lib/utils/features';
 import { threadEditInput, threadRegenerationInput } from '$lib/utils/threadRegeneration';
 
@@ -844,3 +845,36 @@ it('ignores a delayed bundled projection and versions after navigation', async (
 	expect(await pending).toBe('aborted');
 	expect(state.threadVersions).toEqual([]);
 });
+
+it.each([false, true])(
+	'keeps typed turn diagnostics from an error envelope=%s',
+	async (envelope) => {
+		const diagnostic = {
+			code: 'upstream_error',
+			status: 502,
+			upstream_status: 500,
+			trace_id: '1234567890abcdef1234567890abcdef',
+			message: 'The agent request failed.',
+			detail: 'Fictional private prompt and cedar-secret.pdf'
+		};
+		const message = { id: 'fictional-answer', done: false, error: null };
+		const state = {
+			toast: { error: vi.fn() },
+			history: { messages: {} as Record<string, unknown> },
+			turnErrorDetails
+		};
+		await callback('handleOpenAIError', state)(
+			envelope ? { error: diagnostic } : diagnostic,
+			message
+		);
+		expect(message.error).toEqual({
+			content: envelope ? diagnostic.message : diagnostic.detail,
+			code: diagnostic.code,
+			status: 502,
+			upstream_status: 500,
+			trace_id: diagnostic.trace_id
+		});
+		expect(message.done).toBe(true);
+		expect(state.history.messages[message.id]).toBe(message);
+	}
+);

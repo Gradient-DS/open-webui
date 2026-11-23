@@ -78,6 +78,19 @@ the post-tool continuation loop. The model editor hides the subagents builtin
 unconditionally because `/api/config` exposes no subagents feature flag; memory
 capabilities and tools use upstream's `enable_memories` flag.
 
+## Failed agent turn diagnostics
+
+Failed agent turns carry typed `code`, `status`, optional `upstream_status` and
+optional `trace_id` fields in their existing HTTP error or stream chunk. The trace
+comes from the active OpenTelemetry context when `utils/agent_v2.py` logs the
+failure. `main.py` and the response middleware preserve these fields through the
+chat events and saved message errors. No route or authority boundary changes.
+
+The chat's Technical details disclosure renders only codes, statuses and the trace
+id, with a trace copy button and English/Dutch labels. It never renders free-text
+error content. Key files: `utils/turn_error.py`, `utils/agent_v2.py`,
+`src/lib/utils/turnError.ts` and `Messages/TurnErrorDetails.svelte`.
+
 ## Composer model selector
 
 The v0.11.3 merge moves the model selector from the navbar into the composer's
