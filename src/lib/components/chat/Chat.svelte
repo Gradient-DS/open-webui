@@ -243,8 +243,6 @@
 	let dataWarningCallback: ((confirmed: boolean) => void) | null = null;
 
 	let selectedModels = [''];
-	// [Gradient] Consume session restoration only on the first new-chat initialization.
-	let restoredAssistantId = $activeAssistantId;
 	let atSelectedModel: Model | undefined;
 	// [Gradient] Refresh @ selections when the active assistant changes.
 	$: if (atSelectedModel) atSelectedModel = $models.find((m) => m.id === atSelectedModel?.id);
@@ -1047,7 +1045,6 @@
 	};
 
 	const initEmbeddedDraft = async () => {
-		restoredAssistantId = null;
 		assistantDefaultModelBlocked.set(false);
 		// [Gradient] An embedded draft is a new chat too, without a sticky assistant.
 		selectedModels = reconcileAssistantSelection(llmSelection(selectedModels));
@@ -2435,8 +2432,6 @@
 	};
 
 	const initNewChat = async () => {
-		const initialAssistantId = restoredAssistantId;
-		restoredAssistantId = null;
 		assistantDefaultModelBlocked.set(false);
 		prefetchLiveGrants();
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
@@ -2560,7 +2555,7 @@
 		// [Gradient] Split URL, folder, session, user and admin defaults before any await/reconciler.
 		selectedModels = reconcileAssistantSelection(
 			selectedModels,
-			$page.url.searchParams.get('assistant') || initialAssistantId
+			$page.url.searchParams.get('assistant')
 		);
 		const assistantDefault = assistantDefaultLLMId($rawModels, $activeAssistant, {
 			emptyChat: true,
@@ -2707,7 +2702,6 @@
 	};
 
 	const loadChat = async () => {
-		restoredAssistantId = null;
 		assistantDefaultModelBlocked.set(true);
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
