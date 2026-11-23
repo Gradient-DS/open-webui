@@ -386,7 +386,6 @@ openWebui:
     # once per-chunk page metadata / matching is reliable.
     enableCitationTextHighlight: "false"
     enableMessageRating: "true"
-    enableUserWebhooks: "false"
     enableAutocompleteGeneration: "false"
     enableFollowUpGeneration: "true"
     enableTitleGeneration: "true"

@@ -596,12 +596,6 @@ class EventDefinitions(BaseModel):
     TERMINAL_SESSION_CLOSED: EventDefinition = EventDefinition(
         name='terminal.session.closed', description='A terminal session was closed.', message='Terminal Session closed'
     )
-    NOTIFICATION_TEST: EventDefinition = EventDefinition(
-        name='notification.test', description='A notification target test was sent.', message='Notification test'
-    )
-    NOTIFICATION_MANUAL: EventDefinition = EventDefinition(
-        name='notification.manual', description='A manual notification was sent.', message='Notification sent'
-    )
 
 
 EVENTS = EventDefinitions()
@@ -609,12 +603,6 @@ EVENT_DEFINITIONS = tuple(getattr(EVENTS, field_name) for field_name in EventDef
 EVENT_DEFINITIONS_BY_NAME = {definition.name: definition for definition in EVENT_DEFINITIONS}
 EVENT_CATALOG = tuple(definition.name for definition in EVENT_DEFINITIONS)
 EVENT_CATALOG_SET = set(EVENT_CATALOG)
-NOTIFICATION_EVENTS = (
-    EVENTS.CHAT_FINISHED.name,
-    EVENTS.CHAT_FAILED.name,
-    EVENTS.CALENDAR_ALERT.name,
-    EVENTS.RETRIEVAL_CONTENT_PROCESS_FAILED.name,
-)
 
 
 def get_event_catalog() -> list[dict[str, str]]:
@@ -1019,21 +1007,6 @@ class WebhookEventSink:
         schedule_webhook_dispatch(app, event)
 
 
-def schedule_notification_dispatch(app: Any, event: Event) -> None:
-    try:
-        from open_webui.utils.notifications import dispatch_notification_event
-
-        asyncio.create_task(dispatch_notification_event(app, event))
-    except RuntimeError:
-        log.exception('Notification delivery could not be scheduled for %s', event.event)
-
-
-class NotificationEventSink:
-    async def handle_event(self, app: Any, event: Event, request: Any | None = None) -> None:
-        if event.event in NOTIFICATION_EVENTS:
-            schedule_notification_dispatch(app, event)
-
-
 class SocketSessionEventSink:
     async def handle_event(self, app: Any, event: Event, request: Any | None = None) -> None:
         if event.event not in {EVENTS.USER_DELETED.name, EVENTS.USER_ROLE_UPDATED.name}:
@@ -1118,7 +1091,7 @@ class EventFunctionSink:
         schedule_event_function_dispatch(app, event, request)
 
 
-EVENT_SINKS = [SocketSessionEventSink(), EventFunctionSink(), WebhookEventSink(), NotificationEventSink()]
+EVENT_SINKS = [SocketSessionEventSink(), EventFunctionSink(), WebhookEventSink()]
 
 
 async def publish_event(

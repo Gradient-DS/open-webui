@@ -125,7 +125,6 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
-from open_webui.utils.webhook import post_webhook
 from starlette.responses import JSONResponse, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)

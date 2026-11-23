@@ -20,6 +20,5 @@ def test_html_module_imported():
     assert hasattr(middleware, 'html')
 
 
-def test_post_webhook_imported():
-    """Inactive-user webhook notifications call post_webhook (both merge parents imported it)."""
-    assert hasattr(middleware, 'post_webhook')
+def test_user_webhook_sender_is_not_imported():
+    assert not hasattr(middleware, 'post_webhook')

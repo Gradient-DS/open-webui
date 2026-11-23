@@ -66,7 +66,6 @@ from open_webui.tools.builtin import (
     list_knowledge_bases,
     list_memories,
     list_memory_paths,
-    notify,
     query_chat_files,
     query_knowledge_bases,
     query_knowledge_files,
@@ -546,7 +545,6 @@ async def get_builtin_tools(
         'notes.enable',
         'automations.enable',
         'calendar.enable',
-        'ui.enable_user_webhooks',
         'subagents.enable',
         'subagents.background_enabled',
     )
@@ -722,13 +720,6 @@ async def get_builtin_tools(
         builtin_functions.extend(
             [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event]
         )
-
-    if (
-        is_builtin_tool_enabled('notifications')
-        and config.get('ui.enable_user_webhooks')
-        and await has_user_permission('webhooks')
-    ):
-        builtin_functions.append(notify)
 
     if getattr(request.state, 'internal', False) is True:
         from open_webui.utils.subagents import MUTATING_MEMORY_TOOLS

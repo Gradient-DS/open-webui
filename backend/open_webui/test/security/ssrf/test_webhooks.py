@@ -1,16 +1,15 @@
-"""Deliver through the user notification helper and the shared webhook sender."""
+"""Exercise the retained administrator event webhook sender."""
 
 import pytest
-from open_webui.utils import notifications, webhook
+from open_webui.utils import webhook
 
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 
 @pytest.mark.parametrize('url', BLOCKED_URLS)
 @pytest.mark.asyncio
-async def test_notification_target_is_blocked(url, http_boundary):
-    with pytest.raises(ValueError, match='Webhook delivery failed'):
-        await notifications._send_webhook('test', {'config': {'url': url}}, 'message', {})
+async def test_event_webhook_target_is_blocked(url, http_boundary):
+    assert not await webhook.post_webhook('test', url, 'message', {})
     assert http_boundary.sent == []
 
 
@@ -28,6 +27,10 @@ async def test_notification_connect_guard(attack, http_boundary, offline, monkey
 
 
 @pytest.mark.asyncio
-async def test_public_webhook_positive_control(http_boundary):
-    assert await webhook.post_webhook('test', PUBLIC, 'message', {})
+async def test_public_webhook_positive_control(http_boundary, caplog):
+    caplog.set_level('DEBUG', logger=webhook.__name__)
+    message = 'Fictional private message'
+    assert await webhook.post_webhook('test', PUBLIC, message, {'content': message})
+    records = [record for record in caplog.records if record.name == webhook.__name__]
+    assert not any(message in record.getMessage() or PUBLIC in record.getMessage() for record in records)
     assert http_boundary.sent == [PUBLIC]

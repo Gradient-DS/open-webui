@@ -14,7 +14,7 @@ def product_router(router: APIRouter, *, exclude: set[str]) -> APIRouter:
 def product_permissions(permissions: dict) -> dict:
     retired = {
         'chat': {'continue_response', 'valves'},
-        'features': {'direct_tool_servers', 'image_generation'},
+        'features': {'direct_tool_servers', 'image_generation', 'webhooks'},
         'sharing': {'tools', 'public_tools'},
         'workspace': {'tools', 'tools_import', 'tools_export'},
     }

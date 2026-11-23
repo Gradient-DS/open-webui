@@ -364,8 +364,7 @@
         "image_generation": true,
         "memories": true,
         "notes": true,
-        "web_search": true,
-        "webhooks": false
+        "web_search": true
       },
       "settings": {
         "interface": true

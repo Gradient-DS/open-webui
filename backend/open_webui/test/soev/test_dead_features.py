@@ -130,7 +130,13 @@ def test_public_permissions_omit_retired_fields_without_changing_stored_authoriz
 
     stored = {
         'chat': {'valves': True, 'continue_response': True, 'stt': True, 'tts': False, 'call': True},
-        'features': {'direct_tool_servers': True, 'image_generation': True, 'automations': True, 'api_keys': True},
+        'features': {
+            'direct_tool_servers': True,
+            'image_generation': True,
+            'webhooks': True,
+            'automations': True,
+            'api_keys': True,
+        },
         'sharing': {'tools': True, 'public_tools': True, 'notes': False},
         'workspace': {'tools': True, 'tools_import': True, 'tools_export': True, 'skills': True},
     }

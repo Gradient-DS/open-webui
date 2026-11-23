@@ -60,7 +60,6 @@ from open_webui.tasks import stop_item_tasks
 from open_webui.tools.knowledge_fs import kb_exec  # noqa: F401 — re-exported
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import JSONCodec
-from open_webui.utils.notifications import notify_target
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.access_control import can_bypass_access_control
 
@@ -120,36 +119,6 @@ async def _has_read_access_to_file(
 # =============================================================================
 # TIME UTILITIES
 # =============================================================================
-
-
-async def notify(
-    message: str,
-    target: str = '',
-    title: str = '',
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Send a notification to the user's configured notification target.
-
-    :param message: Notification body.
-    :param target: Optional target id or name. Empty uses the default target.
-    :param title: Optional notification title.
-    """
-    user_id = (__user__ or {}).get('id')
-    if not user_id:
-        return 'Notification failed: user not found.'
-
-    app_name = getattr(getattr(__request__, 'app', None), 'state', None)
-    # LICENSE covers this Open WebUI notification identifier.
-    # Do not alter, remove, obscure, or replace it except as LICENSE permits:
-    # https://docs.openwebui.com/license.
-    app_name = getattr(app_name, 'WEBUI_NAME', 'Open WebUI')
-    try:
-        result = await notify_target(user_id, message, target=target, title=title, app_name=app_name)
-        return f'Notification sent to {result.get("target_id")}.'
-    except Exception as e:
-        return f'Notification failed: {e}'
 
 
 async def get_current_timestamp(

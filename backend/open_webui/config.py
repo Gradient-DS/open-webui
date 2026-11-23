@@ -1468,10 +1468,6 @@ USER_PERMISSIONS_FEATURES_AUTOMATIONS = os.getenv('USER_PERMISSIONS_FEATURES_AUT
 
 USER_PERMISSIONS_FEATURES_CALENDAR = os.getenv('USER_PERMISSIONS_FEATURES_CALENDAR', 'True').lower() == 'true'
 
-USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
-    os.getenv('USER_PERMISSIONS_FEATURES_USER_WEBHOOKS', 'False').lower() == 'true'
-)
-
 USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
     os.getenv('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
 )
@@ -1554,7 +1550,6 @@ DEFAULT_USER_PERMISSIONS = {
         'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
         'automations': USER_PERMISSIONS_FEATURES_AUTOMATIONS,
         'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
-        'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
         'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
     },
     'settings': {
@@ -1627,7 +1622,6 @@ ENABLE_COMMUNITY_SHARING = os.getenv('ENABLE_COMMUNITY_SHARING', 'True').lower()
 
 ENABLE_MESSAGE_RATING = os.getenv('ENABLE_MESSAGE_RATING', 'True').lower() == 'true'
 
-ENABLE_USER_WEBHOOKS = os.getenv('ENABLE_USER_WEBHOOKS', 'False').lower() == 'true'
 
 # FastAPI / AnyIO settings
 THREAD_POOL_SIZE = os.getenv('THREAD_POOL_SIZE', None)
@@ -2645,7 +2639,6 @@ DEFAULT_CONFIG = {
     'webhook_url': WEBHOOK_URL,
     'ui.enable_community_sharing': ENABLE_COMMUNITY_SHARING,
     'ui.enable_message_rating': ENABLE_MESSAGE_RATING,
-    'ui.enable_user_webhooks': ENABLE_USER_WEBHOOKS,
     'ui.banners': WEBUI_BANNERS,
     'task.model.default': TASK_MODEL,
     'task.model.external': TASK_MODEL_EXTERNAL,

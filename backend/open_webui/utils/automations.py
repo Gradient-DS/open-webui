@@ -6,7 +6,7 @@ Follows the utils/<feature>.py pattern (cf. utils/task.py).
 
 The scheduler_worker_loop handles all time-based background work:
   - Automation execution (claim_due → execute)
-  - Calendar event alerts (upcoming events → socket + webhook notifications)
+  - Calendar event alerts (upcoming events → socket notifications)
   - One-shot chat timers
 
 Environment:

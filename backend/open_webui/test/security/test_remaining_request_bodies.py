@@ -143,7 +143,7 @@ def test_user_settings_keep_nested_values_and_permission_filter(role, temperatur
         'ui': {
             'system': 'Explain carefully.',
             'models': ['research-model'],
-            'notifications': {'webhook_url': 'https://hooks.example.test/notify', **EXTRA},
+            'audio': {'speaker': 'fictional-speaker', **EXTRA},
             'toolServers': [{'url': 'https://tools.example.test', 'key': 'test-key', **EXTRA}],
             'temperature': temperature,
             'params': {'temperature': temperature, 'stop': ['END'], **EXTRA},
@@ -155,10 +155,6 @@ def test_user_settings_keep_nested_values_and_permission_filter(role, temperatur
     expected['ui'].pop('toolServers')
     monkeypatch.setattr(users.Config, 'get', AsyncMock(return_value={}))
 
-    # Keyed on the permission rather than call order: v0.11.3 added a
-    # features.webhooks check beside the existing tool-servers one, and a
-    # positional side_effect silently reassigns which answer belongs to which
-    # question when a caller inserts a check.
     async def permits(_user_id, permission, *_args, **_kwargs):
         return permission != 'features.direct_tool_servers'
 
@@ -198,7 +194,6 @@ def test_access_grant_strings_are_derived(path, committed_spec):
             {
                 'ui.system',
                 'ui.models[]',
-                'ui.notifications.webhook_url',
                 'ui.toolServers[].url',
                 'ui.title.prompt',
                 'ui.audio.speaker',

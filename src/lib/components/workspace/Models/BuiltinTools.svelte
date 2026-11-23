@@ -48,10 +48,6 @@
 			label: $i18n.t('Files'),
 			description: $i18n.t('List, search, and read files attached to the current chat')
 		},
-		notifications: {
-			label: $i18n.t('Notifications'),
-			description: $i18n.t('Send notifications to configured webhook targets')
-		},
 		web_search: {
 			label: $i18n.t('Web Search'),
 			description: $i18n.t('Search the web and fetch URLs')
