@@ -1,3 +1,5 @@
+# Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
+# Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
 # Seeding order only: what must exist before an id-taking route can run.
 # RUN-TAG: owui-phase6-seeding-order
 #

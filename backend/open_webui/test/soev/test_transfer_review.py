@@ -335,3 +335,53 @@ async def test_retrieval_copy_error_does_not_clear_completed_file_or_hash(env, m
     current = await env.files.Files.get_file_by_id(file.id)
     assert current.meta['status'] == current.data['status'] == 'completed'
     assert current.meta['file_hash'] == DIGEST and current.meta['soev_read_collection'] == 'kb'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_other_requester_defers_cancel_without_using_the_creators_token(env, role):
+    from open_webui.soev import jobs
+    from open_webui.utils.access_control import can_bypass_access_control
+
+    file = await new_file(env)
+    job_id = await submit(env, file)
+    env.api.requests.clear()
+    with owner_login('bob'):
+        assert not can_bypass_access_control(SimpleNamespace(id='bob', role=role))
+        assert await env.module.cancel(file, client=env.client) is False
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert not env.api.requests
+    assert row.meta['soev_job']['cancel_pending'] is True
+    assert row.meta['soev_job']['as_user'] == 'owui:user:alice'
+    assert row.meta['soev_collection_key'] == 'kb'
+    # Removing the local File cannot erase the creator's pending work.
+    async with env.files.get_async_db_context() as db:
+        await db.execute(text('DELETE FROM file WHERE id = :id'), {'id': file.id})
+        await db.commit()
+    with owner_login('bob'):
+        assert await jobs.poll_once(env.client, now=10**10) == 0
+    assert not env.api.requests
+    with owner_login():
+        assert await jobs.poll_once(env.client, now=10**10) == 0
+    assert env.api.jobs[job_id]['status'] == 'CANCELLED'
+    assert env.api.requests[-1].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+    assert await env.files.Files.get_orphaned_file_jobs('alice') == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_404_is_only_requested_and_cleared_as_the_recorded_creator(env):
+    file = await new_file(env)
+    await submit(env, file)
+    async with env.files.get_async_db_context() as db:
+        await db.execute(text('UPDATE file SET user_id = :owner WHERE id = :id'), {'owner': 'bob', 'id': file.id})
+        await db.commit()
+    env.api.requests.clear()
+    env.api.failures.append(404)
+    with owner_login('bob'):
+        await env.module.cancel(file, client=env.client)
+    assert not env.api.requests and env.api.failures == [404]
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_job']
+    with owner_login():
+        await env.module.cancel(file, client=env.client)
+    assert env.api.requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+    assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_job'] is None

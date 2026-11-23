@@ -1163,7 +1163,10 @@ async def rename_file_by_id(
 ############################
 
 
-@router.delete('/{id}')
+@router.delete(
+    '/{id}',
+    description='Requires ownership or current write access. Upload cancellation uses only the recorded creator in their own request; other writers retain a durable pending cancel after local deletion. Admin roles confer no additional file rights.',
+)
 async def delete_file_by_id(
     request: Request, id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):

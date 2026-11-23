@@ -42,6 +42,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(files.FileJob.__table__.create)
         await connection.execute(sql_text('CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)'))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -66,7 +67,15 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
         idempotency_key='collection:kb',
     )
     fake_api.requests.clear()
-    yield SimpleNamespace(module=module, files=files, api=fake_api, client=client, identity=identity, tmp_path=tmp_path)
+    from open_webui.soev import acting
+
+    requester = acting._requester_ref.set('owui:user:alice')
+    try:
+        yield SimpleNamespace(
+            module=module, files=files, api=fake_api, client=client, identity=identity, tmp_path=tmp_path
+        )
+    finally:
+        acting._requester_ref.reset(requester)
     await engine.dispose()
 
 
@@ -312,6 +321,7 @@ async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monke
         assert await env.files.Files.get_files_with_soev_jobs() == []
         return
     assert job == {
+        'as_user': 'owui:user:alice',
         'job_id': job_id,
         'collection_key': 'kb',
         'path': 'a',

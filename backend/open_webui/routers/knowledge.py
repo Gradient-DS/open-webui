@@ -963,7 +963,11 @@ async def update_file_from_knowledge_by_id(
 ############################
 
 
-@router.post('/{id}/file/remove', response_model=KnowledgeFilesResponse | None)
+@router.post(
+    '/{id}/file/remove',
+    response_model=KnowledgeFilesResponse | None,
+    description='Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.',
+)
 async def remove_file_from_knowledge_by_id(
     request: Request,
     id: str,
@@ -1251,7 +1255,11 @@ async def delete_knowledge_by_id(
 ############################
 
 
-@router.post('/{id}/reset', response_model=KnowledgeResponse | None)
+@router.post(
+    '/{id}/reset',
+    response_model=KnowledgeResponse | None,
+    description='Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.',
+)
 async def reset_knowledge_by_id(
     request: Request,
     id: str,

@@ -54,6 +54,7 @@ async def register_attachment(user_id: str, event: dict) -> FileModel:
                     'web_url': url,
                     'attached_by': event['attached_by'],
                     'soev_job': {
+                        'as_user': f'owui:user:{user_id}',
                         'kind': 'reference',
                         'job_id': event['job_id'],
                         'collection_key': collection,

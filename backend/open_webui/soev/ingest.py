@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from open_webui import config
 from open_webui.models.files import FileModel, Files
-from open_webui.soev import identity, copy_state
+from open_webui.soev import acting, identity, copy_state
 from open_webui.soev.client import SoevApiError, SoevClient, StoreTransferError
 from open_webui.soev.principal_refs import person_ref
 from open_webui.utils.content_types import content_type_for
@@ -276,6 +276,7 @@ async def _submit(
         file.id,
         {
             'soev_job': {
+                'as_user': ref,
                 'collection_key': collection_key,
                 'create_body': body,
                 'create_key': job_key,
@@ -299,6 +300,7 @@ async def _submit(
 
         await knowledge_link(file.id, collection_key)
     job = {
+        'as_user': ref,
         'job_id': job_id,
         'collection_key': collection_key,
         'path': path,
@@ -358,7 +360,9 @@ async def successful(file, job, *, client=None) -> None:
     client = client or identity.build_client()
     if client.is_service:
         raise PermissionError('File jobs require user authority')
-    ref = f'owui:user:{file.user_id}'
+    ref = job.get('as_user')
+    if not ref or acting.requester_ref() != ref:
+        raise PermissionError('Job completion requires its creator')
     if job.get('copy'):
         await copy_state.record(file, job['collection_key'], 'completed')
     else:
@@ -426,8 +430,6 @@ async def submit(file: FileModel, **kwargs) -> str:
 
 
 async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_active: bool = False) -> bool:
-    if transfer_active(file.id) and not allow_active:
-        return False
     current = await Files.get_file_by_id(file.id)
     job = ((current if current is not None else file).meta or {}).get('soev_job')
     if job is None:
@@ -435,7 +437,10 @@ async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_act
     client = client if client is not None else identity.build_client()
     if client.is_service:
         raise PermissionError('File jobs require user authority')
-    ref = f'owui:user:{file.user_id}'
+    ref = job.get('as_user')
+    if not ref or acting.requester_ref() != ref or (transfer_active(file.id) and not allow_active):
+        await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'cancel_pending': True}})
+        return False
     job_id = job.get('job_id')
     if job_id is None:
         try:
@@ -463,7 +468,10 @@ async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_act
             result = await client.get(f'/v1/jobs/{quote(job_id, safe="")}', as_user=ref)
             if result['status'] == 'SUCCEEDED':
                 await Files.update_file_metadata_by_id(file.id, {'soev_last_job': job_id})
-                await successful(current or file, job, client=client)
+                if current is not None:
+                    await successful(current, job, client=client)
+                else:
+                    await Files.update_file_metadata_by_id(file.id, {'soev_job': None})
                 return True
         elif error.status != 404:
             raise

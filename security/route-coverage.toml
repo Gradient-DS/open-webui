@@ -1,3 +1,5 @@
+# Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
+# Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
 # Platform-original cross-user variant: requires the real private platform; unit proof stays in OWUI CI.
 # SVG owner controls remain driven locally. Content edits refuse platform originals without an exemption.
 # File upload and both original-content routes remain driven, with no exemption.

@@ -33,6 +33,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(files.FileJob.__table__.create)
         await connection.execute(sql_text('CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)'))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 

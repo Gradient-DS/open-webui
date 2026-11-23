@@ -134,7 +134,7 @@ async def _settle_file(
                 'POST',
                 path + '/move',
                 {'to': job['path'] or ''},
-                as_user=f'owui:user:{file.user_id}',
+                as_user=job['as_user'],
                 idempotency_key=f'{_job_key(file, job)}:move',
             )
         return await _finish(file, job, document=document, client=client)
@@ -153,24 +153,23 @@ async def _claim_files(
         await Files.get_files_with_soev_jobs(user_id=owner_id) if candidates is None else candidates,
         key=lambda file: (file.meta.get('soev_job_polled_at', 0), file.id),
     )
-    if not candidates:
-        return [], {}
     active = []
+    candidates += await Files.get_orphaned_file_jobs(owner_id)
     for file in candidates:
         job = file.meta['soev_job']
-        if ingest.transfer_active(file.id):
-            continue
-        if not job.get('job_id'):
-            if now >= ingest.upload_deadline(job):
-                await ingest.abort(file, error='upload_interrupted')
+        if job.get('as_user') != f'owui:user:{owner_id}' or ingest.transfer_active(file.id):
             continue
         if job.get('cancel_pending'):
             try:
                 await ingest.cancel(file)
             except Exception:
                 pass
-        else:
-            active.append(file)
+            continue
+        if not job.get('job_id'):
+            if now >= ingest.upload_deadline(job):
+                await ingest.abort(file, error='upload_interrupted')
+            continue
+        active.append(file)
     candidates = active
     if not candidates:
         return [], {}
@@ -240,7 +239,7 @@ async def poll_once(client: SoevClient, *, now: int) -> int:
         return 0
     owner_id = ref.removeprefix('owui:user:')
     candidates = await Files.get_files_with_soev_jobs(user_id=owner_id)
-    if not candidates or not await acting.user_token(ref):
+    if not await acting.user_token(ref):
         return 0
     claimed, collections = await _claim_files(owner_id, now, candidates=candidates)
     if not claimed:
