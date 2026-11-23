@@ -7,7 +7,7 @@
 	import { page } from '$app/stores';
 	// [Gradient] Tenant feature gates also apply to administrators.
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 
@@ -23,6 +23,11 @@
 
 	onMount(() => {
 		void loadSourcePolicy(localStorage.token);
+	});
+
+	// [Gradient] Recheck reused layouts so disabled skill URLs cannot render after a redirect.
+	afterNavigate(() => {
+		loaded = false;
 		// Feature flag checks apply to ALL users including admins
 		if ($page.url.pathname.includes('/models') && !isFeatureEnabled('models')) {
 			goto('/');
@@ -48,7 +53,7 @@
 				!$config?.features?.enable_workspace ||
 				!$user?.permissions?.features?.workspace)
 		) {
-			goto('/');
+			goto('/workspace', { replaceState: true });
 			return;
 		}
 

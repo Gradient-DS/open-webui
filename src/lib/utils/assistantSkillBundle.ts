@@ -1,4 +1,4 @@
-// [Gradient] Portable assistant skills; standalone skills keep their existing import behaviour.
+// [Gradient] Portable assistant skill folders.
 import JSZip from 'jszip';
 import { DEFAULT_CAPABILITIES } from '$lib/constants';
 import { stringify } from 'yaml';
@@ -8,7 +8,7 @@ import {
 	parseSkillBundle,
 	parseSkillMetadata,
 	type SkillBundleFile
-} from './skills/bundle';
+} from './assistantBundleParser';
 import {
 	applyToggles,
 	simpleCapabilityOffered,

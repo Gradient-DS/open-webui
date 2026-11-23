@@ -304,13 +304,7 @@
 			}
 		}
 
-		if (skillIds.length > 0) {
-			info.meta.skillIds = skillIds;
-		} else {
-			if (info.meta.skillIds) {
-				delete info.meta.skillIds;
-			}
-		}
+		delete info.meta.skillIds;
 
 		if (filterIds.length > 0) {
 			info.meta.filterIds = filterIds;
@@ -404,7 +398,9 @@
 
 	onMount(async () => {
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
-		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
+		if ($config?.features?.feature_skills) {
+			skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
+		}
 		if (!$functions) {
 			await functions.set(await getFunctions(localStorage.token));
 		}
@@ -487,7 +483,6 @@
 			});
 
 			toolIds = model?.meta?.toolIds ?? [];
-			skillIds = model?.meta?.skillIds ?? [];
 			filterIds = model?.meta?.filterIds ?? [];
 			defaultFilterIds = model?.meta?.defaultFilterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];

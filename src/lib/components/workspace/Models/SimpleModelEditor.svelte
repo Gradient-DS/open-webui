@@ -24,7 +24,7 @@
 		validateAssistantSkillFiles,
 		droppedAssistantFiles
 	} from '$lib/utils/assistantSkillBundle';
-	import type { SkillBundleFile } from '$lib/utils/skills/bundle';
+	import type { SkillBundleFile } from '$lib/utils/assistantBundleParser';
 	import { formatFileSize } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { config, models, settings, user, pinnedModels } from '$lib/stores';
@@ -228,6 +228,7 @@
 		info.id = id;
 		info.name = name;
 		info.meta = info.meta ?? {};
+		delete info.meta.skillIds;
 		info.params = info.params ?? {};
 
 		// The chat's model picker chooses the LLM; base_model_id only marks

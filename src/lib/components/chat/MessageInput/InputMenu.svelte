@@ -306,7 +306,6 @@
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
 	$: showSkills =
-		!agentRouted &&
 		itemAllowed('skills') &&
 		isFeatureEnabled('skills') &&
 		Object.keys(skills ?? {}).length > 0;
@@ -493,6 +492,7 @@
 	};
 
 	const loadSkills = async (query = skillQuery) => {
+		if (!isFeatureEnabled('skills')) return;
 		const requestId = ++skillRequestId;
 		const q = query.trim();
 		searchedSkillQuery = query;

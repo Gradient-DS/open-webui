@@ -749,7 +749,7 @@
 		command?.charAt(0) === '@' ||
 		(command?.charAt(0) === '/' && isFeatureEnabled('prompts')) ||
 		(command?.charAt(0) === '#' && isFeatureEnabled('knowledge')) ||
-		command?.charAt(0) === '$' ||
+		(command?.charAt(0) === '$' && isFeatureEnabled('skills')) ||
 		('\\#' === command?.slice(0, 2) && isFeatureEnabled('knowledge'));
 	let suggestions = null;
 
@@ -887,10 +887,10 @@
 	$: showToolsButton =
 		isFeatureEnabled('tools') && (($tools ?? []).length > 0 || ($toolServers ?? []).length > 0);
 
-	// [Gradient] Workspace skills are automatic on agent turns; direct models keep per-message selection.
+	// [Gradient] Use the same tenant gate as the skills menu.
 	let showSkillsButton = false;
 	$: showSkillsButton =
-		!agentRouted && isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
+		isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -1910,18 +1910,22 @@
 					}
 				})
 			},
-			{
-				char: '$',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: () => {
-						focus({ preventScroll: true });
-					},
+			...(isFeatureEnabled('skills')
+				? [
+						{
+							char: '$',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: () => {
+									focus({ preventScroll: true });
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: () => {}
-				})
-			},
+								insertTextHandler: insertTextAtCursor,
+								onUpload: () => {}
+							})
+						}
+					]
+				: []),
 			{
 				char: ':',
 				allowSpaces: false,
