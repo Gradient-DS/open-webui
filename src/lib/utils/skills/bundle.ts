@@ -130,18 +130,23 @@ export const parseSkillBundle = async (file: File | Blob): Promise<ParsedSkillBu
 export const buildSkillBundle = async (
 	skillMd: string,
 	files: SkillBundleFile[],
-	rootDir = ''
+	rootDir = '',
+	// [Gradient] Assistant exports omit directory entries and use the compressed-byte budget.
+	options: { createFolders?: boolean; compression?: 'STORE' | 'DEFLATE' } = {}
 ): Promise<Blob> => {
 	const zip = new JSZip();
 	// Anthropic .skill bundles wrap their contents in a top-level <skill-name>/
 	// directory. Pass rootDir to produce that layout so the bundle re-imports into
 	// Claude; omit it (or pass '') for a flat bundle.
 	const prefix = rootDir ? `${rootDir.replace(/\/+$/, '')}/` : '';
-	zip.file(`${prefix}${SKILL_MD}`, skillMd);
+	zip.file(`${prefix}${SKILL_MD}`, skillMd, { createFolders: options.createFolders ?? true });
 	// Convert each Blob to an ArrayBuffer first (see parseSkillBundle): JSZip reads
 	// Blob inputs via FileReader, which is browser-only.
-	for (const f of files) zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer());
-	return zip.generateAsync({ type: 'blob' });
+	for (const f of files)
+		zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer(), {
+			createFolders: options.createFolders ?? true
+		});
+	return zip.generateAsync({ type: 'blob', compression: options.compression ?? 'STORE' });
 };
 
 // [Gradient] One create request carries the normalized zip, including raw binary files.

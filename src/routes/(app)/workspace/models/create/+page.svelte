@@ -12,32 +12,38 @@
 			goto('/');
 		}
 	});
-	import { createNewModel } from '$lib/apis/models';
+	import { createNewModel, updateModelById } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
 	const i18n = getContext('i18n');
+	// [Gradient] File imports save in place before uploading, then keep editing the same assistant.
+	let createdId: string | null = null;
 
 	const onSubmit = async (modelInfo, { skipNavigate = false } = {}) => {
-		if ($models.find((m) => m.id === modelInfo.id)) {
+		if (createdId !== modelInfo.id && $models.find((m) => m.id === modelInfo.id)) {
 			toast.error(
 				$i18n.t(
 					"Error: A model with the ID '{{modelId}}' already exists. Please select a different ID to proceed.",
 					{ modelId: modelInfo.id }
 				)
 			);
-			return;
+			return false;
 		}
 
 		if (modelInfo.id === '') {
 			toast.error($i18n.t('Error: Model ID cannot be empty. Please enter a valid ID to proceed.'));
-			return;
+			return false;
 		}
 
 		if (modelInfo) {
-			const res = await createNewModel(localStorage.token, {
+			const persist = (info: any) =>
+				createdId === info.id
+					? updateModelById(localStorage.token, info.id, info)
+					: createNewModel(localStorage.token, info);
+			const res = await persist({
 				...modelInfo,
 				meta: {
 					...modelInfo.meta,
@@ -57,6 +63,7 @@
 			});
 
 			if (res) {
+				createdId = res.id;
 				await models.set(
 					await getModels(
 						localStorage.token,
@@ -79,8 +86,10 @@
 				if (!skipNavigate) {
 					await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
 				}
+				return true;
 			}
 		}
+		return false;
 	};
 
 	let model = null;
