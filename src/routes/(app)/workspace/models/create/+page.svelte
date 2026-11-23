@@ -17,6 +17,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
+	import { createdAssistant } from '$lib/stores/createdAssistant';
 
 	const i18n = getContext('i18n');
 	// [Gradient] File imports save in place before uploading, then keep editing the same assistant.
@@ -84,6 +85,8 @@
 				// Sharing is available. The "+ Add knowledge" flow passes
 				// skipNavigate so it can route to the KB-create flow itself.
 				if (!skipNavigate) {
+					// The creator owns it, so the edit page can show it at once.
+					createdAssistant.set({ ...res, write_access: true });
 					await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
 				}
 				return true;

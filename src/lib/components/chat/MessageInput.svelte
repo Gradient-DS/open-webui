@@ -4,7 +4,7 @@
 	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
-	import { effectiveModels as models } from '$lib/stores/assistant';
+	import { effectiveModels as models, activeAssistant } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
@@ -930,6 +930,15 @@
 		$config?.features?.enable_workspace &&
 		$_user?.permissions?.features?.workspace;
 	$: if (!showWorkspaceButton) workspaceEnabled = false;
+	// [Gradient] An assistant with Workspace on keeps it on in every chat with it, reloads and retries
+	// included: its skill folder only reaches the sandbox through the workspace.
+	$: if (
+		showWorkspaceButton &&
+		!workspaceEnabled &&
+		$activeAssistant?.info?.meta?.capabilities?.workspace === true
+	) {
+		workspaceEnabled = true;
+	}
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
