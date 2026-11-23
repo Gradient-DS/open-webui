@@ -114,6 +114,8 @@ async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | No
     if not config.SOEV_API_URL:
         return None
     client = client if client is not None else identity.build_client()
+    if client.is_service:
+        raise PermissionError('File jobs require user authority')
     ref = f'owui:user:{user_id}'
     keys = [
         document['collection_key']
@@ -210,6 +212,8 @@ async def _submit(
     if current is not None and (current.meta or {}).get('soev_job') is not None:
         raise IngestBusy(file.id)
     client = client if client is not None else identity.build_client()
+    if client.is_service:
+        raise PermissionError('File jobs require user authority')
     meta = (current or file).meta or {}
     attempt = attempt if attempt is not None else int(meta.get('soev_attempt', 0)) + 1
     await Files.update_file_metadata_by_id(file.id, {'soev_attempt': attempt})
@@ -241,7 +245,7 @@ async def _submit(
         document['created_at'] = dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     document.update({'text': text} if inline else {'size': size, 'sha256': digest})
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
-    ref = None if client.is_service else f'owui:user:{user_id}'
+    ref = f'owui:user:{user_id}'
     body = {'collection_key': collection_key, 'documents': [document]}
     if source is None and text is None and not meta.get('soev_read_collection'):
         from open_webui.soev.originals import lookup, remember
@@ -352,7 +356,9 @@ async def _submit(
 
 async def successful(file, job, *, client=None) -> None:
     client = client or identity.build_client()
-    ref = None if client.is_service else f'owui:user:{file.user_id}'
+    if client.is_service:
+        raise PermissionError('File jobs require user authority')
+    ref = f'owui:user:{file.user_id}'
     if job.get('copy'):
         await copy_state.record(file, job['collection_key'], 'completed')
     else:
@@ -374,6 +380,8 @@ async def successful(file, job, *, client=None) -> None:
 async def abort(
     file: FileModel, *, client=None, error: str = 'upload_failed', collection_key: str | None = None, copy: bool = False
 ) -> bool:
+    if client is not None and client.is_service:
+        raise PermissionError('File jobs require user authority')
     current = await Files.get_file_by_id(file.id)
     current = current or file
     job = (current.meta or {}).get('soev_job')
@@ -425,7 +433,9 @@ async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_act
     if job is None:
         return False
     client = client if client is not None else identity.build_client()
-    ref = None if client.is_service else f'owui:user:{file.user_id}'
+    if client.is_service:
+        raise PermissionError('File jobs require user authority')
+    ref = f'owui:user:{file.user_id}'
     job_id = job.get('job_id')
     if job_id is None:
         try:

@@ -1161,3 +1161,27 @@ async def test_transfer_redirect_never_sends_bytes_to_redirect_target(env, monke
     with pytest.raises(StoreTransferError):
         await put(upload, chunks, size=len(FILE_BYTES), sha256=digest, timeout=5, store_host='store.invalid')
     assert len(requests) == 1 and requests[0].url.host == 'store.invalid'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['submit', 'successful', 'cancel', 'abort', 'rendition'])
+async def test_file_jobs_refuse_service_authority(env, operation):
+    file = await new_file(env)
+    await submit(env, file)
+    file = await env.files.Files.get_file_by_id(file.id)
+    before = file.model_dump()
+    env.api.requests.clear()
+    client = env.client.as_service()
+    with pytest.raises(PermissionError, match='user authority'):
+        if operation == 'submit':
+            fresh = await new_file(env)
+            await env.module._submit(fresh, collection_key='kb', user_id='alice', client=client)
+        elif operation == 'successful':
+            await env.module.successful(file, file.meta['soev_job'], client=client)
+        elif operation == 'rendition':
+            file.data = {}
+            await env.module.rendition_of(file, 'alice', client=client)
+        else:
+            await getattr(env.module, operation)(file, client=client)
+    assert not env.api.requests
+    assert (await env.files.Files.get_file_by_id(file.id)).model_dump() == before
