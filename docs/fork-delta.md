@@ -6,7 +6,7 @@ was never attempted. What is captured here is (a) the major standing divergences
 that a reader must know before touching this repo, and (b) the NEO-era changes on
 `merge/neo-to-dev`. The file grows opportunistically — when you touch a divergence
 that has no entry, add one; when you change a gate, fix the entry. Per the
-Gradient doc strategy (soev-docs repo, `doc-strategy.md`), this is the OWUI
+Gradient doc strategy (soev-wiki-docs repo, `docs/internal/guidelines/engineering/repo-docs.md`), this is the OWUI
 fork's special-case doc: every divergence from upstream + why.
 
 **Convention.** Gradient code is marked `[Gradient]` in comments throughout the
@@ -563,7 +563,7 @@ neither navigate nor reach the network.
 Standalone local development (`open-webui dev`, the repo's docker compose) takes
 its secrets from `op://` references in the tracked `secrets.env`, resolved by
 `op run` through `scripts/op-run`; `.env` holds non-secret settings only. Rule:
-soev-docs `local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
+soev-wiki-docs `docs/internal/guidelines/engineering/local-secrets.md`. `docker-compose.secrets.yaml` is an opt-in overlay
 that passes those variables into the container. `.env.example` gains a header
 comment only. No runtime code changes: `env.py` already loads `.env` without
 override, so `op run`'s variables win.
