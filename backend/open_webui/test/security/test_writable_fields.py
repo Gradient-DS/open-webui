@@ -11,7 +11,7 @@ from openapi_surface import query_parameters, writable_string_fields
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
 # Five methods give 631 operations. Audit bodies across all
-# OpenAPI methods (631 including HEAD/OPTIONS), because writable_string_fields
+# OpenAPI methods (635 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -66,6 +66,12 @@ def test_derivation_cannot_silently_collapse(surface):
         f'Query derivation collapsed: {routes} routes / {strings} string query parameters; '
         'floor 40 / 90, baseline 47 / 94.'
     )
+
+
+def test_assistant_skill_file_write_and_delete_fields_are_all_probed(surface):
+    _, fields, queries = surface
+    assert set(fields['PUT /api/v1/models/id/{id}/skill-files']) == {'path', 'file_id', 'from_path'}
+    assert queries['DELETE /api/v1/models/id/{id}/skill-files'] == ['path']
 
 
 def test_blind_body_counts(surface):

@@ -2480,6 +2480,7 @@
   "Only approved users can connect to the platform.": "Alleen goedgekeurde gebruikers kunnen verbinding maken met het platform.",
   "Only can be triggered when the chat input is in focus.": "Kan alleen worden geactiveerd wanneer de chatinvoer is gefocust.",
   "Only collections can be edited, create a new knowledge base to edit/add documents.": "Alleen verzamelingen kunnen gewijzigd worden, maak een nieuwe kennismap aan om bestanden aan te passen/toe te voegen",
+  "Only files owned by this assistant's owner can be added. Ask the owner to upload the files.": "Alleen bestanden van de eigenaar van deze assistent kunnen worden toegevoegd. Vraag de eigenaar om de bestanden te uploaden.",
   "Only individual pages can be attached to a chat — pick pages, not spaces.": "Alleen losse pagina's kunnen aan een chat worden toegevoegd — kies pagina's, geen ruimtes.",
   "Only install functions from sources you trust.": "",
   "Only install tools from sources you trust.": "",

@@ -675,6 +675,12 @@ class ModelsTable:
         """Delete all models for a user."""
         try:
             async with get_async_db_context(db) as db:
+                # [Gradient] Bulk owner deletion also cleans folders on SQLite without FK cascades.
+                await db.execute(
+                    delete(AssistantSkillFile).where(
+                        AssistantSkillFile.assistant_id.in_(select(Model.id).where(Model.user_id == user_id))
+                    )
+                )
                 await db.execute(delete(Model).filter(Model.user_id == user_id))
                 await db.commit()
                 return True

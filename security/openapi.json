@@ -41689,6 +41689,14 @@
         ],
         "responses": {
           "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
             "description": "Successful Response"
           },
           "422": {

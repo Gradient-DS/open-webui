@@ -85,3 +85,16 @@ def test_skill_bundle_contract_and_file_routes_are_in_the_inventory():
     assert 'bundle' not in spec['components']['schemas']['SkillForm']['properties']
     assert 'get' in spec['paths']['/api/v1/skills/id/{id}/files/content']
     assert {'get', 'post', 'put'} <= spec['paths']['/api/v1/skills/id/{id}/files'].keys()
+
+
+def test_assistant_skill_folder_contract_is_in_the_inventory():
+    spec = json.loads(OUTPUT_PATH.read_text())
+    assert {'get', 'put', 'delete'} == spec['paths']['/api/v1/models/id/{id}/skill-files'].keys()
+    export = spec['paths']['/api/v1/models/id/{id}/skill']['get']
+    assert export['responses']['200']['content']['application/zip']['schema'] == {'type': 'string', 'format': 'binary'}
+    assert set(spec['components']['schemas']['AssistantSkillFileForm']['properties']) == {
+        'path',
+        'file_id',
+        'from_path',
+    }
+    assert spec['components']['schemas']['AssistantSkillFileForm']['additionalProperties'] is False

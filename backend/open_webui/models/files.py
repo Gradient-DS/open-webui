@@ -8,8 +8,8 @@ import time
 
 # local imports
 from open_webui.internal.db import Base, get_async_db_context
-from open_webui.utils.misc import sanitize_metadata
 from open_webui.models.assistant_skill_files import AssistantSkillFile  # [Gradient]
+from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession

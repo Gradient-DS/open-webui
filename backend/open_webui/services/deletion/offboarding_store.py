@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.internal.db import Base
 from open_webui.models.access_grants import AccessGrant
+from open_webui.models.assistant_skill_files import AssistantSkillFile  # [Gradient]
 from open_webui.models.auths import Auth
 from open_webui.models.channels import Channel, ChannelFile, ChannelMember, ChannelWebhook
 from open_webui.models.chat_messages import ChatMessage
@@ -300,8 +301,10 @@ async def delete_resource_dependents(table: type[Base], ids: list[str], *, db: A
     if table is Prompt:
         await db.execute(delete(PromptHistory).where(PromptHistory.prompt_id.in_(ids)))
     if table is File:
-        for junction in (ChatFile, ChannelFile, KnowledgeFile):
+        for junction in (ChatFile, ChannelFile, KnowledgeFile, AssistantSkillFile):  # [Gradient]
             await db.execute(delete(junction).where(junction.file_id.in_(ids)))
+    if table is Model:
+        await db.execute(delete(AssistantSkillFile).where(AssistantSkillFile.assistant_id.in_(ids)))  # [Gradient]
 
 
 async def _archive_grants(kind: str, ids: list[str], *, db: AsyncSession) -> None:

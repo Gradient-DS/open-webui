@@ -75,13 +75,16 @@ async def _owner_bytes(file, owner: str, limit: int) -> bytes:
     raise ValueError('missing')
 
 
-async def build_bundle(model, rows, *, export: bool = False, db=None) -> bytes:
+async def build_bundle(model, rows, *, export: bool = False, max_files_size: int | None = None, db=None) -> bytes:
     if len(rows) + (2 if export else 1) > MAX_ENTRIES:
         raise ValueError('count')
     entries = [('SKILL.md', skill_md(model).encode())]
     if export:
         entries.append(('soev.json', json.dumps(portable_settings(model), ensure_ascii=False).encode()))
     expanded = sum(len(body) for _, body in entries)
+    file_size = 0
+    if expanded > MAX_EXPANDED:
+        raise ValueError('size')
     seen = {path.casefold() for path, _ in entries}
     backing = {file.id: file for file in await Files.get_files_by_ids(list({row.file_id for row in rows}), db=db)}
     for row in sorted(rows, key=lambda row: row.path):
@@ -90,12 +93,13 @@ async def build_bundle(model, rows, *, export: bool = False, db=None) -> bytes:
             raise ValueError('path')
         seen.add(row.path.casefold())
         body = await _owner_bytes(backing.get(row.file_id), model.user_id, MAX_EXPANDED - expanded + 1)
+        file_size += len(body)
+        if max_files_size is not None and file_size > max_files_size:
+            raise ValueError('size')
         expanded += len(body)
         if expanded > MAX_EXPANDED:
             raise ValueError('size')
         entries.append((row.path, body))
-    if expanded > MAX_EXPANDED:
-        raise ValueError('size')
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         for path, body in entries:

@@ -8,6 +8,7 @@ import logging
 import re
 import zipfile
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -132,18 +133,23 @@ def forget_references(user: str, references: list[dict[str, Any]], language: str
     return [_notice(names.get(reference['id'], reference['name']), language) for reference in references]
 
 
-async def skill_references(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
+async def skill_references(
+    metadata: dict[str, Any], user: str, *, reserved_names: set[str] | None = None, limit: int = 20
+) -> tuple[list[dict[str, Any]], list[str]]:
     # The model is server-resolved, including the assistant/LLM split. Never trust metadata.skills selections.
     attached = set((((metadata.get('model') or {}).get('info') or {}).get('meta') or {}).get('skillIds') or [])
     readable = await Skills.get_skills(user_id=metadata['user_id'])
     selected = [skill for skill in readable if skill.is_active or skill.id in attached]
+    # [Gradient] An assistant owns its name; leave out matching user skills rather than renaming them.
+    if reserved_names:
+        selected = [skill for skill in selected if _skill_name(skill.id, set(), skill.name or '') not in reserved_names]
     selected.sort(key=lambda skill: (skill.id not in attached, -skill.updated_at, skill.id))
-    if len(selected) > 20:
-        log.warning('Workspace skill limit: left out %d skills', len(selected) - 20)
+    if len(selected) > limit:
+        log.warning('Workspace skill limit: left out %d skills', len(selected) - limit)
     references, notices = [], []
-    names: set[str] = set()
+    names: set[str] = set(reserved_names or ())
     client = identity.build_client() if selected else None
-    selected = selected[:20]
+    selected = selected[:limit]
     bundles = await SkillFiles.get_files_by_skill_ids([skill.id for skill in selected]) if selected else {}
     file_ids = {entry.file_id for files in bundles.values() for entry in files}
     backing = {file.id: file for file in await Files.get_file_metadatas_by_ids(list(file_ids))} if file_ids else {}
@@ -190,6 +196,18 @@ async def _reference(
     user: str,
     client: SoevClient,
 ) -> dict[str, Any] | None:
+    return await upload_reference(key, skill.id, skill.name, lambda: _bundle(skill, name, files), user, client)
+
+
+async def upload_reference(
+    key: tuple[str, ...],
+    source_id: str,
+    label: str,
+    bundle: Callable[[], Awaitable[bytes]],
+    user: str,
+    client: SoevClient,
+) -> dict[str, Any] | None:
+    # [Gradient] Both assistant folders and user skills use this private, caller-scoped upload cache.
     global _upload_lock
     loop = asyncio.get_running_loop()
     if _upload_lock is None or _upload_lock[0] is not loop:
@@ -198,16 +216,16 @@ async def _reference(
         if key in REFERENCES:
             REFERENCES.move_to_end(key)
             return REFERENCES[key][0]
-        body = await _bundle(skill, name, files)
+        body = await bundle()
         await identity.ensure_link(user, client)
         try:
             uploaded = await client.post_bytes('/v1/chat/skills', body, as_user=user, content_type='application/zip')
         except SoevApiError as error:
             if not 400 <= error.status < 500:
                 raise
-            log.warning('Workspace skill refused: skill=%s status=%s code=%s', skill.id, error.status, error.code)
+            log.warning('Workspace skill refused: skill=%s status=%s code=%s', source_id, error.status, error.code)
             return None
-        REFERENCES[key] = (uploaded, skill.name)
+        REFERENCES[key] = (uploaded, label)
         while len(REFERENCES) > CACHE_LIMIT:
             REFERENCES.popitem(last=False)
         return uploaded

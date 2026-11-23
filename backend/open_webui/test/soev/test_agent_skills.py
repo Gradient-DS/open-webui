@@ -11,9 +11,10 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 import yaml
+from open_webui.models.models import ModelMeta, ModelParams
 from open_webui.soev import capabilities
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
-from open_webui.utils import agent_skills, agent_v2
+from open_webui.utils import agent_assistant_skills, agent_skills, agent_v2
 
 
 @pytest.fixture
@@ -590,3 +591,225 @@ async def test_forgetting_references_is_scoped_to_user_and_turn_skills(skills):
     remaining = [reference for reference, _ in agent_skills.REFERENCES.values()]
     assert remaining == other_user + other_skill
     assert old[0] not in remaining
+
+
+# [Gradient] Assistant folders share transport/cache but never standalone-skill authorization.
+@pytest.fixture
+def assistant_folder(skills, monkeypatch):
+    model = SimpleNamespace(
+        id='invented-assistant',
+        user_id='invented-owner',
+        base_model_id='invented-llm',
+        name='Invented Helper',
+        params=ModelParams(system='Invented private instructions'),
+        meta=ModelMeta(description='Invented assistant description', capabilities={'workspace': True}),
+    )
+    skills.file.user_id = model.user_id
+    monkeypatch.setattr(agent_assistant_skills.Models, 'get_model_by_id', AsyncMock(return_value=model))
+    monkeypatch.setattr(agent_assistant_skills.AssistantSkillFiles, 'get_files', AsyncMock(return_value=skills.rows))
+    monkeypatch.setattr(
+        agent_assistant_skills.AssistantSkillFiles,
+        'file_versions',
+        AsyncMock(
+            side_effect=lambda ids: {
+                skills.file.id: [
+                    skills.file.user_id,
+                    skills.file.hash,
+                    skills.file.updated_at,
+                    skills.file.meta.get('size'),
+                ]
+            }
+        ),
+    )
+
+    async def uploaded(path, body, **kwargs):
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            header = yaml.safe_load(archive.read('SKILL.md').decode().split('---\n')[1])
+        digest = hashlib.sha256(body).hexdigest()
+        return {
+            'id': digest[:32],
+            'sha256': digest,
+            'size': len(body),
+            'name': header['name'],
+            'description': header['description'],
+        }
+
+    skills.upload.side_effect = uploaded
+    return model
+
+
+def assistant_metadata(model, **extra):
+    return metadata(assistant_id=model.id, model={'info': {'meta': {'capabilities': {'workspace': True}}}}, **extra)
+
+
+@pytest.mark.asyncio
+async def test_assistant_goes_first_with_owner_bytes_and_no_portable_settings(skills, assistant_folder):
+    references, notices = await agent_v2._skills(assistant_metadata(assistant_folder), 'owui:user:fern')
+    assert [reference['name'] for reference in references] == ['invented-helper', 'outline']
+    assert references[0]['type'] == 'chat-skill'
+    assert not notices
+    call = skills.upload.call_args_list[0]
+    assert call.kwargs['as_user'] == 'owui:user:fern'
+    with zipfile.ZipFile(io.BytesIO(call.args[1])) as archive:
+        assert archive.namelist() == ['SKILL.md', 'assets/template.bin']
+        assert archive.read('assets/template.bin') == skills.path.read_bytes()
+        assert archive.read('SKILL.md').endswith(b'Invented private instructions')
+    # Bytes are delegated through the assistant, not fetched through a caller file route.
+    agent_assistant_skills.Models.get_model_by_id.assert_awaited_once_with(assistant_folder.id)
+
+
+@pytest.mark.asyncio
+async def test_assistant_ignores_standalone_skill_feature_and_permission(skills, assistant_folder, monkeypatch):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    references, notices = await agent_v2._skills(assistant_metadata(assistant_folder), 'owui:user:fern')
+    assert len(references) == 1 and references[0]['name'] == 'invented-helper'
+    assert not notices
+    agent_skills.Skills.get_skills.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('gate', ['turn', 'effective', 'stored', 'platform', 'assistant'])
+async def test_assistant_is_not_sent_when_workspace_or_identity_is_off(skills, assistant_folder, monkeypatch, gate):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    data = assistant_metadata(assistant_folder)
+    if gate == 'turn':
+        data['features']['workspace'] = False
+    elif gate == 'effective':
+        data['model']['info']['meta']['capabilities']['workspace'] = False
+    elif gate == 'stored':
+        assistant_folder.meta.capabilities['workspace'] = False
+    elif gate == 'platform':
+        monkeypatch.setattr(capabilities, 'has', AsyncMock(return_value=False))
+    else:
+        data['assistant_id'] = None
+    assert await agent_v2._skills(data, 'owui:user:fern') == ([], [])
+    skills.upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assistant_without_files_still_sends_skill_md(skills, assistant_folder, monkeypatch):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    skills.rows.clear()
+    references, notices = await agent_v2._skills(assistant_metadata(assistant_folder), 'owui:user:fern')
+    assert len(references) == 1 and not notices
+    with zipfile.ZipFile(io.BytesIO(skills.upload.call_args.args[1])) as archive:
+        assert archive.namelist() == ['SKILL.md']
+
+
+@pytest.mark.asyncio
+async def test_assistant_name_wins_and_twenty_item_budget_is_shared(skills, assistant_folder):
+    candidates = [
+        SimpleNamespace(**{**vars(skills.skill), 'id': f'invented-{index}', 'name': f'Invented user {index}'})
+        for index in range(22)
+    ]
+    candidates.insert(
+        0, SimpleNamespace(**{**vars(skills.skill), 'id': 'invented-collision', 'name': 'Invented Helper'})
+    )
+    agent_skills.Skills.get_skills.return_value = candidates
+    references, notices = await agent_v2._skills(assistant_metadata(assistant_folder), 'owui:user:fern')
+    assert len(references) == 20 and not notices
+    assert references[0]['name'] == 'invented-helper'
+    assert sum(reference['name'] == 'invented-helper' for reference in references) == 1
+    assert len({reference['name'] for reference in references}) == 20
+    assert skills.upload.await_count == 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['instructions', 'name', 'description', 'path', 'file', 'add', 'remove', 'user'])
+async def test_assistant_cache_key_changes_with_every_bundle_source(skills, assistant_folder, monkeypatch, change):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    data = assistant_metadata(assistant_folder)
+    await agent_v2._skills(data, 'owui:user:fern')
+    skills.storage.reset_mock()
+    await agent_v2._skills(data, 'owui:user:fern')
+    assert skills.upload.await_count == 1
+    skills.storage.assert_not_called()
+    caller = 'owui:user:fern'
+    if change == 'instructions':
+        assistant_folder.params.system += ' Invented edit'
+    elif change == 'name':
+        assistant_folder.name += ' edited'
+    elif change == 'description':
+        assistant_folder.meta.description += ' edited'
+    elif change == 'path':
+        skills.rows[0].path = 'assets/renamed.bin'
+    elif change == 'file':
+        skills.path.write_bytes(b'changed invented bytes')
+        skills.file.hash = hashlib.sha256(skills.path.read_bytes()).hexdigest()
+    elif change == 'add':
+        skills.rows.append(SimpleNamespace(path='references/added.bin', file_id=skills.file.id, updated_at=1))
+    elif change == 'remove':
+        skills.rows.clear()
+    else:
+        caller = 'owui:user:reed'
+    await agent_v2._skills(data, caller)
+    assert skills.upload.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en', 'nl'])
+async def test_assistant_upload_refusal_and_missing_owner_bytes_produce_visible_notice(
+    skills, assistant_folder, monkeypatch, language, caplog
+):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    skills.upload.side_effect = SoevApiError(422, 'invalid_field', 'Invented private detail')
+    data = assistant_metadata(assistant_folder, user_language=language)
+    references, notices = await agent_v2._skills(data, 'owui:user:fern')
+    assert not references and notices == [agent_skills._notice(assistant_folder.name, language)]
+    skills.upload.reset_mock()
+    skills.file.user_id = 'invented-other-owner'
+    references, notices = await agent_v2._skills(data, 'owui:user:fern')
+    assert not references and notices == [agent_skills._notice(assistant_folder.name, language)]
+    skills.upload.assert_not_awaited()
+    for secret in (
+        'Invented private detail',
+        assistant_folder.params.system,
+        assistant_folder.name,
+        skills.rows[0].path,
+    ):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_assistant_server_upload_failure_propagates_the_existing_turn_error(
+    skills, assistant_folder, monkeypatch
+):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    error = SoevApiError(503, 'service_unavailable', 'Invented private detail')
+    skills.upload.side_effect = error
+    with pytest.raises(SoevApiError) as caught:
+        await agent_v2._skills(assistant_metadata(assistant_folder), 'owui:user:fern')
+    assert caught.value is error
+
+
+@pytest.mark.asyncio
+async def test_expired_assistant_reference_is_forgotten_in_the_shared_cache(skills, assistant_folder, monkeypatch):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    data = assistant_metadata(assistant_folder)
+    references, _ = await agent_v2._skills(data, 'owui:user:fern')
+    assert len(agent_skills.REFERENCES) == 1
+    assert agent_skills.forget_references('owui:user:fern', references, 'en') == [
+        agent_skills._notice(assistant_folder.name, 'en')
+    ]
+    assert not agent_skills.REFERENCES
+    await agent_v2._skills(data, 'owui:user:fern')
+    assert skills.upload.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('changed', ['assistant', 'file'])
+async def test_owner_changes_never_reuse_a_previously_delegated_cached_bundle(
+    skills, assistant_folder, monkeypatch, changed
+):
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda feature: False)
+    data = assistant_metadata(assistant_folder)
+    references, _ = await agent_v2._skills(data, 'owui:user:fern')
+    assert len(references) == 1
+    if changed == 'assistant':
+        assistant_folder.user_id = 'invented-new-owner'
+    else:
+        skills.file.user_id = 'invented-new-owner'
+    references, notices = await agent_v2._skills(data, 'owui:user:fern')
+    assert references == []
+    assert notices == [agent_skills._notice(assistant_folder.name, None)]
+    assert skills.upload.await_count == 1

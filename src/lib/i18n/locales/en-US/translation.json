@@ -2480,6 +2480,7 @@
   "Only approved users can connect to the platform.": "",
   "Only can be triggered when the chat input is in focus.": "",
   "Only collections can be edited, create a new knowledge base to edit/add documents.": "",
+  "Only files owned by this assistant's owner can be added. Ask the owner to upload the files.": "",
   "Only individual pages can be attached to a chat — pick pages, not spaces.": "",
   "Only install functions from sources you trust.": "",
   "Only install tools from sources you trust.": "",

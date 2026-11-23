@@ -851,15 +851,22 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
 async def _skills(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
     # [Gradient] Use the same already-gated workspace state as tools.workspace_task.
     from open_webui.soev import capabilities
+    from open_webui.utils.agent_assistant_skills import assistant_reference
     from open_webui.utils.agent_skills import skill_references
 
-    if (
-        not (metadata.get('features') or {}).get('workspace')
-        or not is_feature_enabled('skills')
-        or not await capabilities.has(capabilities.SKILLS)
-    ):
+    if not (metadata.get('features') or {}).get('workspace') or not await capabilities.has(capabilities.SKILLS):
         return [], []
-    return await skill_references(metadata, user)
+    # [Gradient] The assistant's own skill is independent of standalone skills availability and permission.
+    assistant, notices, reserved = await assistant_reference(metadata, user)
+    if not is_feature_enabled('skills'):
+        return assistant, notices
+    if reserved:
+        skills, more_notices = await skill_references(
+            metadata, user, reserved_names=reserved, limit=20 - len(assistant)
+        )
+    else:
+        skills, more_notices = await skill_references(metadata, user)
+    return [*assistant, *skills], [*notices, *more_notices]
 
 
 def _unimaged(error: ImagesUnavailable, language: str | None) -> dict[str, Any]:

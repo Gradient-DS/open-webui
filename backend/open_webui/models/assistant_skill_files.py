@@ -31,6 +31,16 @@ class AssistantSkillFileModel(BaseModel):
 
 
 class AssistantSkillFilesTable:
+    async def file_versions(self, file_ids: list[str], db: AsyncSession | None = None) -> dict[str, list]:
+        # Local import: Files also uses this join table for deletion cleanup.
+        from open_webui.models.files import File
+
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(File.id, File.user_id, File.hash, File.updated_at, File.meta).where(File.id.in_(file_ids))
+            )
+            return {row.id: [row.user_id, row.hash, row.updated_at, (row.meta or {}).get('size')] for row in result}
+
     async def get_files(self, assistant_id: str, db: AsyncSession | None = None) -> list[AssistantSkillFileModel]:
         async with get_async_db_context(db) as db:
             rows = await db.execute(

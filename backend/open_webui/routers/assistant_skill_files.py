@@ -20,8 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 
-def refusal(request: Request, reason: str) -> HTTPException:
+def refusal(request: Request, reason: str, status_code: int = 400) -> HTTPException:
     messages = {
+        'owner': (
+            'Alleen bestanden van de eigenaar van deze assistent kunnen worden toegevoegd. '
+            'Vraag de eigenaar om de bestanden te uploaden.',
+            "Only files owned by this assistant's owner can be added. Ask the owner to upload the files.",
+        ),
         'path': (
             'Gebruik een relatief pad van maximaal 255 tekens, zonder lege delen, puntdelen of backslashes. '
             'SKILL.md en soev.json zijn gereserveerd in de hoofdmap.',
@@ -40,7 +45,7 @@ def refusal(request: Request, reason: str) -> HTTPException:
         'missing': ('Een skillbestand is niet beschikbaar.', 'A skill file is unavailable.'),
     }
     nl, en = messages.get(reason, messages['missing'])
-    return HTTPException(400, nl if request.headers.get('accept-language', '').lower().startswith('nl') else en)
+    return HTTPException(status_code, nl if request.headers.get('accept-language', '').lower().startswith('nl') else en)
 
 
 async def assistant_access(id, user, db, permission='read', *, lock=False):
@@ -76,7 +81,7 @@ class AssistantSkillFileForm(BaseModel):
     from_path: str | None = Field(default=None, max_length=255)
 
 
-@router.get('/id/{id}/skill-files', response_model=list[AssistantSkillFileResponse])
+@router.get('/id/{id:path}/skill-files', response_model=list[AssistantSkillFileResponse])
 async def list_assistant_skill_files(
     id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
@@ -91,7 +96,7 @@ async def list_assistant_skill_files(
     ]
 
 
-@router.put('/id/{id}/skill-files', response_model=bool)
+@router.put('/id/{id:path}/skill-files', response_model=bool)
 async def put_assistant_skill_file(
     id: str,
     form_data: AssistantSkillFileForm,
@@ -108,7 +113,7 @@ async def put_assistant_skill_file(
         raise refusal(request, str(error)) from None
     file = await Files.get_file_by_id(form_data.file_id, db=db)
     if file is None or file.user_id != model.user_id:
-        raise HTTPException(403, ERROR_MESSAGES.MODEL_FILE_NOT_OWNED)
+        raise refusal(request, 'owner', 403)
     rows = await AssistantSkillFiles.get_files(id, db=db)
     source = next((row for row in rows if row.path == form_data.from_path), None)
     if form_data.from_path is not None and (source is None or source.file_id != file.id):
@@ -132,7 +137,7 @@ async def put_assistant_skill_file(
         if sum((backing[row.file_id].meta or {}).get('size', 0) for row in proposed) > MAX_COMPRESSED:
             raise ValueError('size')
         # Validate actual bytes, case collisions, zip overhead and both generated root entries before committing.
-        await build_bundle(model, proposed, export=True, db=db)
+        await build_bundle(model, proposed, export=True, max_files_size=MAX_COMPRESSED, db=db)
     except (ValueError, OSError) as error:
         raise refusal(request, str(error)) from None
     await db.execute(
@@ -145,7 +150,7 @@ async def put_assistant_skill_file(
     return True
 
 
-@router.delete('/id/{id}/skill-files', response_model=bool)
+@router.delete('/id/{id:path}/skill-files', response_model=bool)
 async def delete_assistant_skill_file(
     id: str,
     path: str = Query(max_length=255),
@@ -158,7 +163,11 @@ async def delete_assistant_skill_file(
     return True
 
 
-@router.get('/id/{id}/skill', response_class=Response)
+@router.get(
+    '/id/{id:path}/skill',
+    response_class=Response,
+    responses={200: {'content': {'application/zip': {'schema': {'type': 'string', 'format': 'binary'}}}}},
+)
 async def export_assistant_skill(
     id: str, request: Request, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
