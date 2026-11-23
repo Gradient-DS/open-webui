@@ -785,16 +785,19 @@
 			{/if}
 		{/if}
 
-		{#if isDirty || loading}
-			<div class="flex justify-end">
-				<button
-					class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
-					disabled={loading || skillBusy}
-					on:click={() => submitHandler()}
-				>
-					{loading ? $i18n.t('Saving...') : $i18n.t('Save')}
-				</button>
-			</div>
-		{/if}
+		<!-- [Gradient] Always shown, so it is clear whether there is anything left to save. -->
+		<div class="flex justify-end">
+			<button
+				class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
+				disabled={loading || skillBusy || !isDirty}
+				on:click={() => submitHandler()}
+			>
+				{loading
+					? $i18n.t('Saving...')
+					: isDirty || !(edit || hasBeenSaved)
+						? $i18n.t('Save')
+						: $i18n.t('Saved')}
+			</button>
+		</div>
 	</div>
 {/if}
