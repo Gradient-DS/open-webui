@@ -391,6 +391,14 @@ a port; HTTPS and port 443 are the defaults. IP literals require that exact lite
 in this setting. No redirects are followed. Unset or invalid settings refuse upload.
 An explicit store origin can select HTTP for an internal development store; this
 does not depend on the API URL. The full-stack CI ACL signs against
-`http://s3:9000` (`SOEV_ACL_OBJECT_STORE_ENDPOINT`); its OWUI environment must set
-`SOEV_TRANSFER_STORE_HOST=http://s3:9000`. Configure the local stack's signed store
+`http://s3:9000` (`SOEV_ACL_OBJECT_STORE_ENDPOINT`); the fork's `docker-compose.ci.yaml` sets
+`SOEV_TRANSFER_STORE_HOST=http://s3:9000`, inherited by that stack's existing overlay. Configure the local stack's signed store
 origin the same way. The sibling stack checkout is maintained separately.
+
+Upload job creators are retained in `soev_file_job.creator_user_id`, independently
+of File ownership or deletion. Only that creator's authenticated request may
+cancel. Other authorized writers remove membership or the local File while
+leaving a durable pending cancel. Creator requests retry with a database claim
+and exponential backoff from 30 seconds to one hour; the platform expires abandoned
+awaiting-upload jobs. Historical jobs without creator evidence are never cancelled
+by inferring an identity from the File owner. Admins receive ordinary user rights.

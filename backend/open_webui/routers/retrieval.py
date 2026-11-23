@@ -469,7 +469,10 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
-@router.post('/process/file')
+@router.post(
+    '/process/file',
+    description='Owner-only processing. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
+)
 async def process_file(
     request: Request,
     form_data: ProcessFileForm,
@@ -524,14 +527,12 @@ async def process_file(
         except SoevNotConfigured:
             raise
         except Exception as e:
-            log.exception(e)
+            log.warning('File processing failed (%s)', type(e).__name__)
             # Fresh session for error status update.
             # [Gradient] A failed destination copy never changes the original's status.
             if not ingest.copying(file, text=form_data.content, source=ingest.source_for(file.id)):
                 async with get_async_db() as session:
                     await Files.set_status(file.id, 'failed', error=str(e), db=session)
-                # Clear the hash so the file can be re-uploaded after fixing the issue
-                await Files.update_file_hash_by_id(file.id, None, db=session)
 
             await publish_event(
                 request,
@@ -1370,7 +1371,10 @@ class BatchProcessFilesResponse(BaseModel):
     errors: List[BatchProcessFilesResult]
 
 
-@router.post('/process/files/batch')
+@router.post(
+    '/process/files/batch',
+    description='Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned.',
+)
 async def process_files_batch(
     request: Request,
     form_data: BatchProcessFilesForm,
@@ -1385,20 +1389,18 @@ async def process_files_batch(
     errors = []
     for file in form_data.files:
         db_file = await Files.get_file_by_id(file.id, db=db)
-        if not db_file:
+        if not db_file or db_file.user_id != user.id:
             errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error='File not found'))
-            continue
-        if db_file.user_id != user.id and not can_bypass_access_control(user):
-            errors.append(
-                BatchProcessFilesResult(file_id=file.id, status='failed', error='Permission denied: not file owner')
-            )
             continue
         try:
             await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
         except SoevNotConfigured:
             raise
         except (SoevApiError, ingest.IngestBusy) as e:
-            error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
+            from open_webui.soev.errors import problem_message
+
+            language = getattr(request, 'headers', {}).get('accept-language', 'en-US')
+            error = problem_message(e, language) if isinstance(e, SoevApiError) else 'file is being processed'
             errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
         else:
             results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))

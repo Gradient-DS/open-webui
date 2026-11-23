@@ -25,6 +25,7 @@ services:
       - 'WEBUI_SECRET_KEY='
       # [Gradient] Explicit public platform host; standalone mode leaves this empty.
       - 'SOEV_API_URL=${SOEV_API_URL:-}'
+      - 'SOEV_TRANSFER_STORE_HOST=${SOEV_TRANSFER_STORE_HOST:-}'
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped

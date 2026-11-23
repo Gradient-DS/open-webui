@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     [
         'owner',
         'stranger',
+        'writer',
+        'missing',
         'link_failure',
         'write_failure',
         'replace',
@@ -60,7 +62,7 @@ async def test_skill_upload_is_atomic(tmp_path, monkeypatch, request, database, 
     monkeypatch.setattr(files, 'get_async_db_context', context)
     monkeypatch.setattr(Skills, '_get_access_grants', AsyncMock(return_value=[]))
     monkeypatch.setattr(skill_files, 'require_skill_files', AsyncMock())
-    monkeypatch.setattr(skill_files.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr(skill_files.AccessGrants, 'has_access', AsyncMock(return_value=case == 'writer'))
     monkeypatch.setattr(skill_files, 'can_bypass_access_control', lambda user: False)
     stored = tmp_path / 'upload_readme.md'
 
@@ -100,21 +102,24 @@ async def test_skill_upload_is_atomic(tmp_path, monkeypatch, request, database, 
             monkeypatch.setattr(session, 'commit', committed_then_failed)
         kwargs = dict(
             file_id='upload',
-            metadata={'skill_id': 'skill', 'skill_path': 'docs/readme.md'},
-            user=SimpleNamespace(id='stranger' if case == 'stranger' else 'owner', role='user'),
+            metadata={'skill_id': 'missing' if case == 'missing' else 'skill', 'skill_path': 'docs/readme.md'},
+            user=SimpleNamespace(id=case if case in ('stranger', 'writer') else 'owner', role='user'),
             db=session,
             extension='md',
             allowed_extensions=[],
             max_size=1,
             content_type='text/markdown',
         )
-        if case in ('stranger', 'link_failure', 'write_failure'):
-            with pytest.raises(HTTPException if case == 'stranger' else RuntimeError):
+        if case in ('stranger', 'missing', 'link_failure', 'write_failure'):
+            with pytest.raises(HTTPException if case in ('stranger', 'missing') else RuntimeError) as caught:
                 await skill_uploads.upload(UploadFile(file=BytesIO(b'content'), filename='readme.md'), **kwargs)
             assert await session.scalar(select(func.count()).select_from(files.File)) == 0
             assert await session.scalar(select(func.count()).select_from(SkillFile)) == 0
             assert not stored.exists()
-            if case == 'stranger':
+            if case in ('stranger', 'missing'):
+                from open_webui.constants import ERROR_MESSAGES
+
+                assert caught.value.status_code == 404 and caught.value.detail == ERROR_MESSAGES.NOT_FOUND
                 upload.assert_not_called()
             else:
                 delete.assert_called_once()

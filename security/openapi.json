@@ -15953,6 +15953,7 @@
         ]
       },
       "post": {
+        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses. Transfers require the explicitly configured store origin.",
         "operationId": "upload_file_api_v1_files__post",
         "parameters": [
           {
@@ -16294,6 +16295,7 @@
     },
     "/api/v1/files/{id}/content": {
       "get": {
+        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content_get",
         "parameters": [
           {
@@ -16347,6 +16349,7 @@
         ]
       },
       "head": {
+        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
         "parameters": [
           {
@@ -16402,6 +16405,7 @@
     },
     "/api/v1/files/{id}/content/{file_name}": {
       "get": {
+        "description": "Apply the same document recovery, platform readership and local-media rules as the inline content route. Filename does not grant access.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content__file_name__get",
         "parameters": [
           {
@@ -16501,6 +16505,7 @@
     },
     "/api/v1/files/{id}/data/content/update": {
       "post": {
+        "description": "Requires existing file write authority. Platform document extracted text is immutable: 409 with translated original_immutable message, preserving its only original. Local media is classified from sniffed bytes; local media and local-only files retain content update behaviour.",
         "operationId": "update_file_data_content_by_id_api_v1_files__id__data_content_update_post",
         "parameters": [
           {
@@ -21953,6 +21958,7 @@
     },
     "/api/v1/retrieval/process/file": {
       "post": {
+        "description": "Owner-only processing. Failures preserve recorded original fingerprints and return fixed platform problem messages.",
         "operationId": "process_file_api_v1_retrieval_process_file_post",
         "requestBody": {
           "content": {
@@ -21997,6 +22003,7 @@
     },
     "/api/v1/retrieval/process/files/batch": {
       "post": {
+        "description": "Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned.",
         "operationId": "process_files_batch_api_v1_retrieval_process_files_batch_post",
         "parameters": [
           {

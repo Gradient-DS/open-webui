@@ -147,21 +147,26 @@ async def _settle_file(
 
 
 async def _claim_files(
-    owner_id: str, now: int, *, max_collections: int = 15, candidates: list[FileModel] | None = None
+    owner_id: str,
+    now: int,
+    *,
+    max_collections: int = 15,
+    candidates: list[FileModel] | None = None,
+    orphaned: list[FileModel] | None = None,
 ) -> tuple[list[FileModel], dict[str, list[str]]]:
     candidates = sorted(
         await Files.get_files_with_soev_jobs(user_id=owner_id) if candidates is None else candidates,
         key=lambda file: (file.meta.get('soev_job_polled_at', 0), file.id),
     )
     active = []
-    candidates += await Files.get_orphaned_file_jobs(owner_id)
+    candidates += await Files.get_orphaned_file_jobs(owner_id) if orphaned is None else orphaned
     for file in candidates:
         job = file.meta['soev_job']
         if job.get('as_user') != f'owui:user:{owner_id}' or ingest.transfer_active(file.id):
             continue
         if job.get('cancel_pending'):
             try:
-                await ingest.cancel(file)
+                await ingest.cancel(file, now=now)
             except Exception:
                 pass
             continue
@@ -239,9 +244,10 @@ async def poll_once(client: SoevClient, *, now: int) -> int:
         return 0
     owner_id = ref.removeprefix('owui:user:')
     candidates = await Files.get_files_with_soev_jobs(user_id=owner_id)
-    if not await acting.user_token(ref):
+    orphaned = await Files.get_orphaned_file_jobs(owner_id)
+    if (not candidates and not orphaned) or not await acting.user_token(ref):
         return 0
-    claimed, collections = await _claim_files(owner_id, now, candidates=candidates)
+    claimed, collections = await _claim_files(owner_id, now, candidates=candidates, orphaned=orphaned)
     if not claimed:
         return 0
     reads = _status_reads(claimed, collections)

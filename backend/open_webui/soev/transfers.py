@@ -47,7 +47,9 @@ def validate(upload: dict, *, size: int, sha256: str, store_host: str) -> None:
             or configured.fragment
         ):
             raise ValueError
-        port = configured.port or (443 if configured.scheme == 'https' else 80)
+        port = configured.port if configured.port is not None else (443 if configured.scheme == 'https' else 80)
+        if port < 1:
+            raise ValueError
         url = httpx.URL(upload['url'])
         headers = upload['headers']
         expected = {
@@ -59,7 +61,7 @@ def validate(upload: dict, *, size: int, sha256: str, store_host: str) -> None:
             upload['method'] != 'PUT'
             or url.scheme != configured.scheme
             or url.host != configured.hostname
-            or (url.port or (443 if url.scheme == 'https' else 80)) != port
+            or (url.port if url.port is not None else (443 if url.scheme == 'https' else 80)) != port
             or not url.host
             or url.userinfo
             or urlsplit(upload['url']).username is not None

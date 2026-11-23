@@ -129,6 +129,8 @@ services:
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
       STORAGE_PROVIDER: "s3"
       S3_ENDPOINT_URL: "http://s3:9000"
+      # Also used by the soev-solutions full-stack overlay: ACL signs this exact store origin.
+      SOEV_TRANSFER_STORE_HOST: "http://s3:9000"
       S3_BUCKET_NAME: "ci-uploads"
       S3_ACCESS_KEY_ID: "ci-s3-access-key"
       S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"

@@ -1,3 +1,5 @@
+# File upload skill body seed requires exact foreign-target 404 concealment.
+# Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
 # Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
 # Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
 # Seeding order only: what must exist before an id-taking route can run.
@@ -191,7 +193,7 @@ backed_by = "soev-solutions"
 key = "knowledge_reset"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/reset"
-description = "knowledge/{id}/reset is destructive and runs after the DELETE group, which has deleted the shared knowledge fixture by then: the owner's reset answered 404. Reset gets a knowledge base nothing else touches."
+description = "knowledge/{id}/reset is destructive and runs after the DELETE group, which has deleted the shared knowledge fixture by then: the owner's reset answered 404. Reset gets a knowledge base nothing else touches. Noncreator writers leave in-flight cancellation pending for the creator; admins have ordinary user rights."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "attack-reset-{token}", "description" = "Attack knowledge for reset" }
 extract = "id"
@@ -417,7 +419,7 @@ backed_by = "soev-solutions"
 key = "removable_knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/file/remove"
-description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads, processes and adds a file of its own and provides its id as {removable_file}."
+description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads, processes and adds a file of its own and provides its id as {removable_file}. Upload cancellation is made only in the recorded creator request; other authorized writers retain durable pending cancellation without sign-in redirection."
 seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["removable_file"]
@@ -773,12 +775,12 @@ setup = [
 
 [[field]]
 route = "POST /api/v1/retrieval/process/file"
-description = "routers/retrieval.py:process_file looks the file up by file_id and answers 404 for an unknown one."
+description = "routers/retrieval.py:process_file requires the file owner and answers 404 for missing or foreign files. Processing failures preserve original fingerprints and expose only fixed platform problem messages."
 json = { "file_id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/retrieval/process/files/batch"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Each file must also exist."
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Every file requires current ownership; missing and foreign files return the same result. Upstream detail never reaches the batch response."
 json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
@@ -1691,7 +1693,7 @@ routes = [
 [[body_target]]
 route = "POST /api/v1/files/"
 owner = "skill_bundle"
-description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and a non-bypassing administrator must be refused before storage. Owner positive control requires skills and skill_files enabled. No exemption."
+description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and an administrator without write access receive exactly the same 404 as a missing skill, before storage. Owner positive control requires skills and skill_files enabled. No exemption."
 params = { process = false }
 form = { metadata = '{"skill_id":"{skill_bundle}","skill_path":"attack-upload-{token}.pdf"}' }
 files = [{ field = "file", filename = "attack-{token}.pdf", content = "%PDF-1.7 attack skill {token}", content_type = "application/pdf" }]

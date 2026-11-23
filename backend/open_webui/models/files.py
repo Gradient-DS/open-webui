@@ -56,7 +56,7 @@ async def _record_job(db, file_id, job):
             if row.creator_user_id != creator:
                 raise PermissionError('Job creator is immutable')
             if row.job.get('cancel_pending'):
-                job = {**job, 'cancel_pending': True}
+                job = {**job, **{key: value for key, value in row.job.items() if key.startswith('cancel_')}}
             row.job = job
         else:
             db.add(FileJob(file_id=file_id, creator_user_id=creator, job=job))
@@ -218,7 +218,7 @@ class FilesTable:
                 else:
                     return None
             except Exception as e:
-                log.exception(f'Error inserting a new file: {e}')
+                log.error('File insert failed (%s)', type(e).__name__)
                 return None  # insertion failed
 
     async def get_file_by_id(
@@ -585,6 +585,44 @@ class FilesTable:
             if claimed.rowcount != 1:
                 return None
             return FileModel.model_validate(file).model_copy(update={'meta': metadata})
+
+    async def claim_soev_job_cancel(self, file_id: str, creator_user_id: str, *, now: int) -> dict | None:
+        async with get_async_db_context() as db:
+            row = await db.scalar(
+                select(FileJob)
+                .where(
+                    FileJob.file_id == file_id,
+                    FileJob.creator_user_id == creator_user_id,
+                )
+                .with_for_update()
+            )
+            if row is None or row.job.get('cancel_retry_at', 0) > now:
+                return None
+            previous = row.job.get('cancel_attempts', 0)
+            job = {
+                **row.job,
+                'cancel_pending': True,
+                'cancel_attempts': previous + 1,
+                'cancel_retry_at': now + min(30 * 2 ** min(previous, 7), 3600),
+            }
+            claimed = await db.execute(
+                update(FileJob)
+                .where(
+                    FileJob.file_id == file_id,
+                    FileJob.creator_user_id == creator_user_id,
+                    func.coalesce(FileJob.job['cancel_attempts'].as_integer(), 0) == previous,
+                )
+                .values(job=job)
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                await db.rollback()
+                return None
+            file = await db.get(File, file_id)
+            if file is not None:
+                file.meta = {**(file.meta or {}), 'soev_job': job}
+            await db.commit()
+            return job
 
     async def get_orphaned_file_jobs(self, creator_user_id: str) -> list[FileModel]:
         async with get_async_db_context() as db:

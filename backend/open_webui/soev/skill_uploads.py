@@ -52,7 +52,12 @@ async def upload(
             skill = await session.scalar(select(Skill).where(Skill.id == metadata['skill_id']).with_for_update())
             if skill is None:
                 raise HTTPException(404, detail=ERROR_MESSAGES.NOT_FOUND)
-            await _assert_write_access(skill, user, session)
+            try:
+                await _assert_write_access(skill, user, session)
+            except HTTPException as error:
+                if error.status_code in (401, 403):
+                    raise HTTPException(404, detail=ERROR_MESSAGES.NOT_FOUND) from None
+                raise
             existing = await session.scalar(
                 select(SkillFile)
                 .where(

@@ -274,7 +274,11 @@ async def process_uploaded_file(
                 _cleanup_local_cache(file_path)
 
 
-@router.post('/', response_model=FileModelResponse)
+@router.post(
+    '/',
+    response_model=FileModelResponse,
+    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses. Transfers require the explicitly configured store origin.',
+)
 async def upload_file(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -880,7 +884,10 @@ class ContentForm(BaseModel):
     content: str
 
 
-@router.post('/{id}/data/content/update')
+@router.post(
+    '/{id}/data/content/update',
+    description='Requires existing file write authority. Platform document extracted text is immutable: 409 with translated original_immutable message, preserving its only original. Local media is classified from sniffed bytes; local media and local-only files retain content update behaviour.',
+)
 async def update_file_data_content_by_id(
     request: Request,
     id: str,
@@ -961,7 +968,12 @@ async def update_file_data_content_by_id(
 # [Gradient] Preserve reverse-route names and the later images.py export without redefining this handler.
 # HEAD is what the sources panel probes before offering the document viewer (Starlette answers it
 # from the GET handler with an empty body).
-@router.api_route('/{id}/content', methods=['GET', 'HEAD'], name='get_file_content_by_id')
+@router.api_route(
+    '/{id}/content',
+    methods=['GET', 'HEAD'],
+    name='get_file_content_by_id',
+    description='Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.',
+)
 async def get_file_content_by_id_inline(
     id: str,
     request: Request = None,
@@ -1038,7 +1050,10 @@ async def get_file_content_by_id_inline(
         )
 
 
-@router.get('/{id}/content/{file_name}')
+@router.get(
+    '/{id}/content/{file_name}',
+    description='Apply the same document recovery, platform readership and local-media rules as the inline content route. Filename does not grant access.',
+)
 async def get_file_content_by_id(
     id: str,
     file_name: str,  # [Gradient] Bound from the path; kept for catalog downloads.

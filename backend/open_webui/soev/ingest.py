@@ -108,6 +108,8 @@ def is_chat_attachment(entry: dict) -> bool:
 
 
 async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | None = None) -> str | None:
+    if client is not None and client.is_service:
+        raise PermissionError('File jobs require user authority')
     content = (file.data or {}).get('content')
     if content:
         return content
@@ -351,7 +353,9 @@ async def _submit(
                         raise SoevApiError(502, 'upload_declaration_invalid', 'Invalid upload declaration') from None
         except SoevApiError as error:
             raise
-        await client.send('POST', f'/v1/jobs/{job_id}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit')
+        await client.send(
+            'POST', f'/v1/jobs/{quote(job_id, safe="")}/commit', None, as_user=ref, idempotency_key=f'{job_key}:commit'
+        )
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}})
     return job_id
 
@@ -409,6 +413,8 @@ async def abort(
 
 
 async def submit(file: FileModel, **kwargs) -> str:
+    if kwargs.get('client') is not None and kwargs['client'].is_service:
+        raise PermissionError('File jobs require user authority')
     if transfer_active(file.id):
         raise IngestBusy(file.id)
     _active_transfers.add(file.id)
@@ -429,7 +435,11 @@ async def submit(file: FileModel, **kwargs) -> str:
         _active_transfers.discard(file.id)
 
 
-async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_active: bool = False) -> bool:
+async def cancel(
+    file: FileModel, *, client: SoevClient | None = None, allow_active: bool = False, now: int | None = None
+) -> bool:
+    if client is not None and client.is_service:
+        raise PermissionError('File jobs require user authority')
     current = await Files.get_file_by_id(file.id)
     job = ((current if current is not None else file).meta or {}).get('soev_job')
     if job is None:
@@ -440,6 +450,11 @@ async def cancel(file: FileModel, *, client: SoevClient | None = None, allow_act
     ref = job.get('as_user')
     if not ref or acting.requester_ref() != ref or (transfer_active(file.id) and not allow_active):
         await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'cancel_pending': True}})
+        return False
+    job = await Files.claim_soev_job_cancel(
+        file.id, ref.removeprefix('owui:user:'), now=int(time.time()) if now is None else now
+    )
+    if job is None:
         return False
     job_id = job.get('job_id')
     if job_id is None:

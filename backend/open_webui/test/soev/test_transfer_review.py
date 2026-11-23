@@ -12,9 +12,11 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from open_webui.test.soev.test_ingest import FILE_BYTES, env, new_file, submit
+from open_webui.test.soev import test_ingest
+from open_webui.test.soev.test_ingest import FILE_BYTES, new_file, submit
 from open_webui.test.soev.test_jobs import owner_login
 
+env = test_ingest.env
 DIGEST = hashlib.sha256(FILE_BYTES).hexdigest()
 
 
@@ -385,3 +387,83 @@ async def test_cancel_404_is_only_requested_and_cleared_as_the_recorded_creator(
         await env.module.cancel(file, client=env.client)
     assert env.api.requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
     assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_job'] is None
+
+
+@pytest.mark.asyncio
+async def test_commit_quotes_the_platform_job_id_as_one_path_segment(env, monkeypatch):
+    file = await new_file(env)
+    job_id = 'fictional/job?query#fragment'
+    send = AsyncMock(side_effect=[{'job_id': job_id, 'status': 'QUEUED'}, {}])
+    monkeypatch.setattr(env.client, 'send', send)
+    assert await env.module._submit(file, collection_key='kb', user_id='alice', client=env.client) == job_id
+    assert send.await_args_list[1].args[1] == '/v1/jobs/fictional%2Fjob%3Fquery%23fragment/commit'
+    assert send.await_args_list[1].kwargs['as_user'] == 'owui:user:alice'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('orphan', [False, True])
+async def test_cancel_backoff_survives_owner_requests_workers_and_local_deletion(env, monkeypatch, orphan):
+    from open_webui.soev import jobs
+    from open_webui.soev.client import SoevClient
+
+    file = await new_file(env)
+    await submit(env, file)
+    calls = []
+    original = SoevClient.send
+
+    async def unavailable(self, method, path, *args, **kwargs):
+        if path.endswith('/cancel'):
+            calls.append(kwargs['as_user'])
+            raise env.module.SoevApiError(503, 'upstream_error', 'fictional private upstream text')
+        return await original(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(SoevClient, 'send', unavailable)
+    with owner_login(), pytest.raises(env.module.SoevApiError):
+        await env.module.cancel(file, client=env.client, now=100)
+    if orphan:
+        async with env.files.get_async_db_context() as db:
+            await db.execute(text('DELETE FROM file WHERE id = :id'), {'id': file.id})
+            await db.commit()
+    with owner_login():
+        for now in (100, 101, 110, 129):
+            assert await jobs.poll_once(env.identity.build_client(), now=now) == 0
+        assert calls == ['owui:user:alice']
+        await asyncio.gather(*(jobs.poll_once(env.identity.build_client(), now=130) for _ in range(4)))
+        assert calls == ['owui:user:alice'] * 2
+        assert await jobs.poll_once(env.identity.build_client(), now=189) == 0
+        assert calls == ['owui:user:alice'] * 2
+        assert await jobs.poll_once(env.identity.build_client(), now=190) == 0
+        assert calls == ['owui:user:alice'] * 3
+    if orphan:
+        row = (await env.files.Files.get_orphaned_file_jobs('alice'))[0]
+    else:
+        row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['soev_job']['cancel_attempts'] == 3
+    assert row.meta['soev_job']['cancel_retry_at'] == 310
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_authorized_other_writer_can_delete_without_a_login_bounce(env, monkeypatch, role):
+    from open_webui.routers import files
+
+    file = await new_file(env)
+    job_id = await submit(env, file)
+    file = await env.files.Files.update_file_path_by_id(file.id, None)
+    monkeypatch.setattr(files, 'has_access_to_file', AsyncMock(return_value=True))
+    monkeypatch.setattr(files.Models, 'get_model_owners_attaching_file', AsyncMock(return_value={}))
+    monkeypatch.setattr(files.Models, 'remove_file_from_models', AsyncMock())
+    monkeypatch.setattr(files.Knowledges, 'get_knowledges_by_file_id', AsyncMock(return_value=[]))
+    monkeypatch.setattr(files, 'publish_event', AsyncMock())
+    env.api.requests.clear()
+    with owner_login('bob'):
+        result = await files.delete_file_by_id(
+            SimpleNamespace(), file.id, user=SimpleNamespace(id='bob', role=role), db=None
+        )
+    assert result == {'message': 'File deleted successfully'}
+    assert env.api.requests == []
+    assert await env.files.Files.get_file_by_id(file.id) is None
+    orphan = (await env.files.Files.get_orphaned_file_jobs('alice'))[0]
+    assert orphan.meta['soev_job']['job_id'] == job_id
+    assert orphan.meta['soev_job']['cancel_pending'] is True
+    assert env.api.jobs[job_id]['status'] == 'QUEUED'

@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from open_webui.test.soev.fake_api import person_ref
+from open_webui.soev.client import SoevApiError
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -1085,6 +1086,7 @@ async def test_processed_image_keeps_storage_and_uses_its_live_request_source(en
         'https://store.invalid@foreign.invalid/file',
         'https://foreign.invalid@store.invalid/file',
         'https://store.invalid:8443/file',
+        'https://store.invalid:0/file',
         'http://store.invalid/file',
     ],
 )
@@ -1102,7 +1104,7 @@ def test_transfer_destination_is_exactly_configured(url):
             'If-None-Match': '*',
         },
     }
-    with pytest.raises(Exception, match='Invalid upload declaration'):
+    with pytest.raises(SoevApiError, match='Invalid upload declaration'):
         validate(upload, size=len(FILE_BYTES), sha256=digest, store_host='store.invalid')
 
 
@@ -1110,6 +1112,7 @@ def test_transfer_destination_is_exactly_configured(url):
     'configured,url,allowed',
     [
         ('', 'https://store.invalid/file', False),
+        ('store.invalid:0', 'https://store.invalid/file', False),
         ('127.0.0.1', 'https://127.0.0.1/file', True),
         ('store.invalid:8443', 'https://store.invalid:8443/file', True),
         ('http://s3:9000', 'http://s3:9000/file', True),
@@ -1133,7 +1136,7 @@ def test_transfer_origin_setting_is_independent_of_platform(configured, url, all
     if allowed:
         validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
     else:
-        with pytest.raises(Exception, match='Invalid upload declaration'):
+        with pytest.raises(SoevApiError, match='Invalid upload declaration'):
             validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
 
 

@@ -60,7 +60,7 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
     monkeypatch.setattr(retrieval_router, 'get_rag_config_state', AsyncMock(return_value=config))
     return SimpleNamespace(
         file=file,
-        request=MagicMock(),
+        request=SimpleNamespace(headers={'accept-language': 'en-US'}),
         user=SimpleNamespace(id='user-1', role='user'),
         db=SimpleNamespace(commit=AsyncMock()),
         session=session,
@@ -92,7 +92,7 @@ async def test_a_kb_file_submits_into_the_knowledge_base(monkeypatch):
         'job_id': 'job-1',
     }
     retrieval_router._validate_collection_access.assert_awaited_once_with(['kb-1'], env.user, access_type='write')
-    env.submit.assert_awaited_once_with(env.file, collection_key='kb-1', user_id=env.user.id, text=None)
+    env.submit.assert_awaited_once_with(env.file, collection_key='kb-1', user_id=env.user.id, text=None, source=None)
     env.ensure.assert_not_awaited()
 
 
@@ -104,7 +104,7 @@ async def test_a_chat_file_submits_into_the_users_attachments_collection(monkeyp
     assert result['job_id'] == 'job-1'
     env.ensure.assert_awaited_once_with(env.user.id, env.client)
     env.submit.assert_awaited_once_with(
-        env.file, collection_key='owui-attachments-user-1', user_id=env.user.id, text=None
+        env.file, collection_key='owui-attachments-user-1', user_id=env.user.id, text=None, source=None
     )
 
 
@@ -120,6 +120,7 @@ async def test_inline_content_uses_the_inline_arm(monkeypatch, content, collecti
         collection_key=collection_name or 'owui-attachments-user-1',
         user_id=env.user.id,
         text=content,
+        source=None,
     )
 
 
@@ -127,13 +128,13 @@ async def test_inline_content_uses_the_inline_arm(monkeypatch, content, collecti
 async def test_a_refused_submit_marks_the_file_failed_with_the_code(monkeypatch):
     env = _setup(monkeypatch)
     env.submit.side_effect = SoevApiError(403, 'scope_insufficient', 'Writer membership required')
-    detail = 'scope_insufficient: Writer membership required'
+    detail = 'The platform could not complete this request.'
     with pytest.raises(HTTPException) as error:
         await _invoke(env, collection_name='kb-1')
     assert error.value.status_code == 400
     assert error.value.detail == detail
     retrieval_router.Files.set_status.assert_awaited_once_with(env.file.id, 'failed', error=detail, db=env.session)
-    retrieval_router.Files.update_file_hash_by_id.assert_awaited_once_with(env.file.id, None, db=env.session)
+    retrieval_router.Files.update_file_hash_by_id.assert_not_awaited()
     retrieval_router.publish_event.assert_awaited_once_with(
         env.request,
         retrieval_router.EVENTS.RETRIEVAL_CONTENT_PROCESS_FAILED,
@@ -182,7 +183,7 @@ async def test_process_files_batch_submits_each_file_as_processing(monkeypatch, 
     expected_ids = ['file-2'] if failure else ['file-1', 'file-2']
     assert [(item.file_id, item.status) for item in result.results] == [(id, 'processing') for id in expected_ids]
     if failure:
-        detail = 'scope_insufficient: Writer membership required' if failure == 'refused' else 'file is being processed'
+        detail = 'The platform could not complete this request.' if failure == 'refused' else 'file is being processed'
         assert [item.model_dump() for item in result.errors] == [
             {'file_id': 'file-1', 'status': 'failed', 'error': detail}
         ]
@@ -190,3 +191,65 @@ async def test_process_files_batch_submits_each_file_as_processing(monkeypatch, 
         assert not result.errors
     env.ensure.assert_not_awaited()
     retrieval_router.Files.update_file_by_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_batch_foreign_and_missing_are_indistinguishable(monkeypatch, role):
+    env = _setup(monkeypatch)
+    env.user.role = role
+    foreign = env.file.model_copy(update={'user_id': 'other'})
+    retrieval_router.Files.get_file_by_id.side_effect = [foreign, None]
+    result = await retrieval_router.process_files_batch(
+        env.request, BatchProcessFilesForm(files=[env.file, env.file], collection_name='kb-1'), user=env.user, db=env.db
+    )
+    assert len(result.errors) == 2
+    assert result.errors[0].model_dump() == result.errors[1].model_dump()
+    assert result.errors[0].error == 'File not found'
+    env.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        ('en-US', 'The platform could not complete this request.'),
+        ('nl-NL', 'Het platform kon dit verzoek niet uitvoeren.'),
+    ],
+)
+async def test_batch_never_returns_private_upstream_text(monkeypatch, language, expected):
+    env = _setup(monkeypatch)
+    env.request.headers['accept-language'] = language
+    env.submit.side_effect = SoevApiError(503, 'upstream_error', 'fictional-private-document-name')
+    result = await retrieval_router.process_files_batch(
+        env.request, BatchProcessFilesForm(files=[env.file], collection_name='kb-1'), user=env.user, db=env.db
+    )
+    assert result.errors[0].error == expected
+    assert 'fictional-private' not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_process_failure_updates_inside_session_and_preserves_original_fingerprint(monkeypatch):
+    env = _setup(monkeypatch)
+    env.file.meta.update(file_hash='a' * 64, size=12, soev_read_collection='kb-1')
+    active = []
+
+    @asynccontextmanager
+    async def session():
+        active.append(True)
+        try:
+            yield env.session
+        finally:
+            active.clear()
+
+    async def failed(*args, **kwargs):
+        assert active and kwargs['db'] is env.session
+
+    monkeypatch.setattr(retrieval_router, 'get_async_db', session)
+    monkeypatch.setattr(retrieval_router.Files, 'set_status', AsyncMock(side_effect=failed))
+    env.submit.side_effect = SoevApiError(503, 'upstream_error', 'fictional-private-detail')
+    with pytest.raises(HTTPException):
+        await _invoke(env, content='replacement', collection_name='kb-1')
+    assert active == []
+    retrieval_router.Files.update_file_hash_by_id.assert_not_awaited()
+    assert env.file.meta['file_hash'] == 'a' * 64

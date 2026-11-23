@@ -303,6 +303,8 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         # Status 0 would read as "not refused" and invent an authorization
         # violation out of a slow route.
         return
+    if route == 'POST /api/v1/files/' and not subject_scoped and stranger.status != 404:
+        reasons.append(('concealment', 'foreign skill upload must be concealed as HTTP 404'))
     if any(marker in stranger.body for marker in markers):
         reasons.append(('owner-marker', 'seeded owner marker in second-account response (including refusals)'))
     if admin_only and not _administrator_refused(route, stranger):

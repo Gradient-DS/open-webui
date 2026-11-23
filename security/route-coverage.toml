@@ -1,3 +1,5 @@
+# File upload skill body seed requires exact foreign-target 404 concealment.
+# Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
 # Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
 # Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
 # Platform-original cross-user variant: requires the real private platform; unit proof stays in OWUI CI.

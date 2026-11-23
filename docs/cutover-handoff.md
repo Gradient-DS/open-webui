@@ -178,13 +178,13 @@ with local bytes retains the existing owner/chat/knowledge checks. Images sent f
 extraction and videos continue to display from local bytes.
 
 Strict egress requires the public `soevApi.url` hostname and
-`soevApi.transferStoreHost` (the presigned store hostname, without scheme/path).
-The chart derives the first and allows both through its FQDN selectors. With a
-platform URL and strict egress, an empty store hostname fails chart rendering. The platform
-must provide the store hostname; it cannot be inferred from the API URL. Explicit
-plain-http or internal-looking platform URLs have no deployment-environment heuristic
-in OWUI. Deployment configuration and strict egress enforce the chosen host; local
-http stacks remain supported. Store HTTP is accepted only with an HTTP platform URL.
+`soevApi.transferStoreHost` (the exact presigned store destination). The chart
+passes the store setting as `SOEV_TRANSFER_STORE_HOST` and derives the hostname
+for its FQDN selector. Bare host[:port] means HTTPS, default port 443; explicit
+store origins select scheme and port for internal development stores. HTTP is
+permitted only when that store origin explicitly says HTTP, independently of
+the API URL. Uploads fail closed without a store setting. The CI compose base
+sets `http://s3:9000`, matching the platform overlay's ACL store endpoint.
 
 Transfer reconciliation skips transfers active in this process and waits for the
 job’s `expires_at` (15 minutes), not its upload capability’s 60-second expiry.

@@ -94,6 +94,7 @@ async def env(identity_config, fake_api, monkeypatch):
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(files.FileJob.__table__.create)
         await connection.run_sync(models.User.__table__.create)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -1037,7 +1038,7 @@ async def test_add_file_before_submit_records_the_collection_key(env, job_meta):
     )
     result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice')
     updated = await env.files.Files.get_file_by_id(row.id)
-    assert updated.meta == {**row.meta, 'soev_collection_key': 'kb'}
+    assert updated.meta == {**row.meta, 'soev_collection_key': 'kb', 'soev_kb_links': ['kb']}
     assert result.file_id == row.id and result.knowledge_id == 'kb'
     assert result.relative_path is None and result.directory_id is None
     assert result.created_at == result.updated_at == row.created_at
@@ -1061,7 +1062,7 @@ async def test_add_file_in_another_collection_preserves_the_in_flight_job(env, d
     env.api.requests.clear()
     result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice', directory_id)
     updated = await env.files.Files.get_file_by_id(row.id)
-    assert updated == row
+    assert updated == row.model_copy(update={'meta': {**row.meta, 'soev_kb_links': ['kb', 'other']}})
     assert result.file_id == row.id and result.knowledge_id == 'kb'
     assert result.relative_path is None and result.directory_id is None
     assert result.created_at == result.updated_at == row.created_at
@@ -1271,7 +1272,10 @@ async def test_removing_an_in_flight_file_cancels_its_job(env):
     row = await in_flight(env)
     job_id = row.meta['soev_job']['job_id']
     env.api.requests.clear()
-    assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
     assert [(request.method, request.url.path) for request in env.api.requests] == [
         ('POST', f'/v1/jobs/{job_id}/cancel')
     ]
@@ -1292,7 +1296,10 @@ async def test_reset_cancels_in_flight_jobs_before_deleting_documents(env):
     env.api.advance(failed.meta['soev_job']['job_id'], 'FAILED')
     await env.files.Files.update_file_metadata_by_id(failed.id, {'soev_job': None, 'status': 'failed'})
     env.api.requests.clear()
-    assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
     writes = [request for request in recorded_reads(env.api.requests) if request.method != 'GET']
     assert [request.method for request in writes] == ['POST', 'POST', 'DELETE', 'DELETE']
     assert {request.url.path for request in writes[:2]} == {

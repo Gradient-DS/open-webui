@@ -847,7 +847,7 @@ def test_upload_body_targets_another_users_skill_with_no_exemption():
     crossuser._check(
         result,
         route,
-        plane.Outcome(401, True, 'unauthorized'),
+        plane.Outcome(404, True, 'not found'),
         plane.Outcome(200, True, '{"id":"new-file"}'),
         (),
         admin_only=False,
@@ -893,3 +893,18 @@ def test_platform_original_variant_is_in_addition_to_svg_control(monkeypatch, ow
     )
     assert [call[2] for call in calls] == ['/api/v1/files/platform-file/content'] * 2
     assert bool(result.violations) is leak
+
+
+@pytest.mark.parametrize('status', [401, 403, 404])
+def test_skill_upload_requires_exact_concealment(status):
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /api/v1/files/',
+        plane.Outcome(status, True, 'refused'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert bool(result.violations) is (status != 404)
