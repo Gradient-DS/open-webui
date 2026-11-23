@@ -10,6 +10,7 @@
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { copyToClipboard, unescapeHtml } from '$lib/utils';
+	import { safeHref } from '$lib/utils/safeHref';
 
 	import Image from '$lib/components/common/Image.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
@@ -73,8 +74,16 @@
 	{:else if token.type === 'html'}
 		<HtmlToken {id} {token} {onSourceClick} />
 	{:else if token.type === 'link'}
-		{@const noteId = getNoteIdFromHref(token.href)}
-		{#if noteId}
+		{@const href = safeHref(token.href)}
+		{@const noteId = href ? getNoteIdFromHref(href) : null}
+		{#if !href}
+			<!-- [Gradient] A link with a scheme that does not navigate (javascript:, data:, …) shows as its text. -->
+			{#if token.tokens}
+				<svelte:self id={`${id}-a`} tokens={token.tokens} {sourceIds} {onSourceClick} {done} />
+			{:else}
+				{token.text}
+			{/if}
+		{:else if noteId}
 			<NoteLinkToken {noteId} href={token.href} />
 		{:else if token.tokens}
 			<a
