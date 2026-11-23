@@ -3,7 +3,6 @@ import asyncio
 import base64
 import json
 import re
-import sqlite3
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -516,39 +515,6 @@ def test_every_plain_seed_calls_a_real_nondestructive_operation():
         assert references <= set(p.get('depends_on', [])), p
 
 
-def test_skill_seed_survives_an_existing_name_and_repeated_resolution():
-    model = ast.parse((ROOT / 'backend/open_webui/models/skills.py').read_text())
-    skill = next(node for node in model.body if isinstance(node, ast.ClassDef) and node.name == 'Skill')
-    unique_fields = [
-        node.targets[0].id
-        for node in skill.body
-        if isinstance(node, ast.Assign)
-        and isinstance(node.value, ast.Call)
-        and any(k.arg == 'unique' and ast.literal_eval(k.value) for k in node.value.keywords)
-    ]
-    assert set(unique_fields) == {'id'}, 'Review all skill uniqueness constraints when the model changes'
-    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
-    owner, admin = Mock(spec=seeds.AttackClient), Mock(spec=seeds.AttackClient)
-    with sqlite3.connect(':memory:') as db:
-        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT)')
-        db.execute('INSERT INTO skill VALUES (?, ?)', ('previous-id', 'Attack skill'))
-
-        def create(method, path, **kwargs):
-            assert (method, path) == ('POST', '/api/v1/skills/create')
-            body = kwargs['json']
-            try:
-                db.execute('INSERT INTO skill VALUES (?, ?)', (body['id'], body['name']))
-            except sqlite3.IntegrityError:
-                return response(400, {'detail': 'Error creating skill'})
-            return response(200, {'id': body['id']})
-
-        admin.request.side_effect = create
-        for _ in range(2):
-            seeds.resolve_parameters(owner, admin=admin, surface=tiny_surface(entry), spec={'paths': {}})
-        assert db.execute('SELECT COUNT(*) FROM skill').fetchone()[0] == 3
-    owner.request.assert_not_called()
-
-
 def test_plain_seed_bodies_supply_all_required_schema_fields():
     def check(value, schema):
         if '$ref' in schema:
@@ -1022,7 +988,6 @@ LIVE_READS = [
     '/api/v1/functions/id/{id}',
     '/api/v1/functions/id/{id}/valves/spec',
     '/api/v1/tools/id/{id}/valves/spec',
-    '/api/v1/skills/id/{id}',
     '/api/v1/prompts/id/{prompt_id}/history/{history_id}',
     '/api/v1/evaluations/feedback/{id}',
     '/api/v1/archives/{archive_id}',
@@ -1177,15 +1142,6 @@ def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alo
     assert (name, content, content_type) == ('data', '{"a": {"b": "p1"}}', 'application/json')
     assert filename.startswith('f-') and filename.endswith('.json') and '{token}' not in filename
     assert fields['form'] == {'idx': 'p1'}
-
-
-def test_skill_seed_exercises_atomic_import_with_real_zip_bytes():
-    from open_webui.utils.skill_imports import read_bundle
-
-    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
-    content, files = read_bundle(entry['body']['bundle'])
-    assert content == entry['body']['content']
-    assert files == [('references/imported.txt', b'Invented import fixture')]
 
 
 def test_assistant_skill_seed_creates_owner_bytes_and_a_real_path():

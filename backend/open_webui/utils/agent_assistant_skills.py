@@ -1,4 +1,4 @@
-"""[Gradient] Send an assistant's owner-owned folder ahead of the user's standalone skills."""
+"""[Gradient] Send the assistant's owner-owned folder to the workspace."""
 
 import hashlib
 import json
@@ -10,22 +10,21 @@ from open_webui import config
 from open_webui.models.assistant_skill_files import AssistantSkillFiles
 from open_webui.models.models import Models
 from open_webui.soev import identity
-from open_webui.utils.agent_skills import _notice, upload_reference
-from open_webui.utils.assistant_skill_bundles import build_bundle, skill_name
+from open_webui.utils.agent_skill_uploads import _notice, upload_reference
+from open_webui.utils.assistant_skill_bundles import build_bundle
 
 log = logging.getLogger(__name__)
 
 
-async def assistant_reference(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str], set[str]]:
+async def assistant_reference(metadata: dict[str, Any], user: str) -> tuple[list[dict[str, Any]], list[str]]:
     id = metadata.get('assistant_id')
     effective = (((metadata.get('model') or {}).get('info') or {}).get('meta') or {}).get('capabilities') or {}
     if not id or effective.get('workspace') is not True:
-        return [], [], set()
+        return [], []
     # assistant_id and effective capabilities have already been resolved and authorized by main.py.
     model = await Models.get_model_by_id(id)
     if model is None or not model.base_model_id or (model.meta.capabilities or {}).get('workspace') is not True:
-        return [], [], set()
-    name = skill_name(model.name)
+        return [], []
     try:
         rows = await AssistantSkillFiles.get_files(id)
         backing = await AssistantSkillFiles.file_versions([row.file_id for row in rows])
@@ -56,5 +55,5 @@ async def assistant_reference(metadata: dict[str, Any], user: str) -> tuple[list
         log.warning('Assistant workspace skill unavailable: assistant=%s', id)
         reference = None
     if reference is None:
-        return [], [_notice(model.name, metadata.get('user_language'))], {name}
-    return [{'type': 'chat-skill', **reference}], [], {name}
+        return [], [_notice(model.name, metadata.get('user_language'))]
+    return [{'type': 'chat-skill', **reference}], []

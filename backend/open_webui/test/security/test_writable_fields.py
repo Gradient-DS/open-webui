@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 631 operations. Audit bodies across all
-# OpenAPI methods (635 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 616 operations. Audit bodies across all
+# OpenAPI methods (620 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (631, 635), (
-        f'Expected 631 five-method operations / 635 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (616, 620), (
+        f'Expected 616 five-method operations / 620 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -44,13 +44,13 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        238,
-        2678,
-    ), f'Expected 238 routes / 2678 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        231,
+        2655,
+    ), f'Expected 231 routes / 2655 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
-        51,
-        108,
-    ), f'Expected 51 routes / 108 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        48,
+        102,
+    ), f'Expected 48 routes / 102 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):

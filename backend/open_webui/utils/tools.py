@@ -5,6 +5,7 @@ import base64
 import copy
 import inspect
 import logging
+
 import os
 import re
 from functools import cache, partial, update_wrapper
@@ -99,6 +100,7 @@ from open_webui.tools.builtin import (
     view_skill,
     write_note,
 )
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.access_control import has_access, has_connection_access, has_permission
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.headers import (
@@ -733,7 +735,7 @@ async def get_builtin_tools(
         )
 
     # Skills tools - view_skill allows model to load full skill instructions on demand
-    if extra_params.get('__skill_ids__'):
+    if is_feature_enabled('skills') and extra_params.get('__skill_ids__'):
         builtin_functions.append(view_skill)
 
     # Task management - break down complex work into trackable steps

@@ -170,14 +170,6 @@ reason = "Unrelated waiver"
             coverage.assert_no_waiver_covers_a_route_the_plane_actually_reached()
 
 
-def test_skill_bundle_import_remains_local_in_both_runtime_modes(monkeypatch):
-    for mode in ('drive', 'waive'):
-        monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
-        skill = next(p for p in seeds.selected_parameters() if p['key'] == 'skill')
-        assert skill['body']['bundle']
-        assert skill['via'] not in seeds.SOEV_BACKED
-
-
 @pytest.mark.parametrize('mode', ['waive', 'drive'])
 def test_assistant_skill_folder_is_local_and_driven_in_both_modes(monkeypatch, mode):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)

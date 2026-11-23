@@ -59,8 +59,6 @@ from open_webui.config import (
     ENABLE_DOCX_EXPORT,
     ENABLE_AGENT_TRACE_DOWNLOAD,
     USE_STYLIZED_PDF_EXPORT,
-    # [Gradient] Skills
-    ENABLE_SKILL_EXECUTION,
     # OpenAI
     ENV,
     # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
@@ -86,8 +84,6 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_REFERENCE_CHATS,
     WHATS_NEW_MODELS,
-    FEATURE_SKILL_FILES,
-    FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
     FEATURE_SYSTEM_PROMPT,
     FEATURE_TEMPORARY_CHAT,
@@ -234,7 +230,6 @@ from open_webui.routers import (
     prompts,
     retrieval,
     scim,
-    skill_files,
     assistant_skill_files,  # [Gradient] Assistant-owned skill folders.
     skills,
     tasks,
@@ -272,6 +267,7 @@ from open_webui.tasks import (
     stop_task,
 )  # Import from tasks.py
 from open_webui.utils import logger
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
@@ -1109,9 +1105,8 @@ app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledg
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
-app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
-if FEATURE_SKILL_FILES:
-    app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
+if is_feature_enabled('skills'):
+    app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
@@ -2872,9 +2867,7 @@ async def get_app_config(request: Request):
                     'feature_knowledge': FEATURE_KNOWLEDGE,
                     'feature_prompts': FEATURE_PROMPTS,
                     'feature_tools': FEATURE_TOOLS,
-                    'feature_skills': FEATURE_SKILLS,
-                    'feature_skill_files': FEATURE_SKILL_FILES,
-                    'enable_skill_execution': ENABLE_SKILL_EXECUTION,
+                    'feature_skills': is_feature_enabled('skills'),
                     'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
                     'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
                     'feature_admin_settings': FEATURE_ADMIN_SETTINGS,

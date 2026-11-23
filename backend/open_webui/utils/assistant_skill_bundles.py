@@ -9,7 +9,7 @@ import zipfile
 import yaml
 from open_webui.models.files import Files
 from open_webui.storage.provider import Storage
-from open_webui.utils.agent_skills import MAX_EXPANDED, _read_bytes
+from open_webui.utils.agent_skill_uploads import MAX_EXPANDED, _read_bytes
 
 MAX_COMPRESSED = 25 * 1024 * 1024
 MAX_ENTRIES = 500

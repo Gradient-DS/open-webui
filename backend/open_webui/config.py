@@ -3012,12 +3012,6 @@ FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 
 FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 
-FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
-
-FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
-
-ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
-
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
