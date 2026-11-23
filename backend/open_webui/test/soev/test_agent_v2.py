@@ -25,6 +25,7 @@ from open_webui.soev import acting, agent_threads, identity, ingest, threads
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 from open_webui.utils import agent, agent_v2
+from opentelemetry import trace
 from starlette.responses import JSONResponse, StreamingResponse
 
 # The turn's tools field while the web search control is Uit (or absent).
@@ -895,7 +896,7 @@ async def test_attached_text_is_cut_in_characters_and_keeps_its_full_length(
 async def test_more_than_ten_notes_and_chats_refuses_before_sending(chat: Chat, language: str, message: str) -> None:
     files = [{'type': 'note' if index % 2 else 'chat', 'id': str(index)} for index in range(11)]
     chunks = await chat.turn('read', 'a1', files=files, user_language=language)
-    assert chunks == [{'error': {'code': 'attachments_unavailable', 'message': message}}]
+    assert chunks == [{'error': {'code': 'attachments_unavailable', 'message': message, 'status': 422}}]
     assert chat.status == 422
     assert chat.mutations() == []
 
@@ -1613,7 +1614,7 @@ async def test_running_input_is_reported_without_resume_or_cancel(chat: Chat) ->
     await chat.turn('first', 'a1')
     chat.api.chat.threads['thr-1']['state'] = 'running'
     chunks = await chat.turn('second', 'a2', 'a1')
-    assert chunks == [agent_v2._error('thread_active')]
+    assert chunks == [agent_v2._error('thread_active', diagnostics={'status': 409, 'upstream_status': 409})]
     assert chat.status == 409
     assert len(chat.mutations()) == 2
 
@@ -2256,7 +2257,7 @@ async def test_a_turn_failing_before_its_stream_is_an_http_error_with_a_safe_mes
         response = await chat.response('geheime vraag', 'a1', stream=stream)
     assert isinstance(response, JSONResponse) and response.status_code == status
     body = json.loads(response.body)
-    assert body == agent_v2._error(code)
+    assert body == agent_v2._error(code, diagnostics={'status': status, 'upstream_status': upstream})
     assert not any(internal in body['error']['message'] for internal in INTERNALS)
     [record] = failures(caplog)
     assert record.levelname == 'WARNING'
@@ -2273,7 +2274,7 @@ async def test_a_turn_failing_mid_stream_shows_the_error_and_logs_the_thread(
     with caplog.at_level('WARNING', logger=agent_v2.log.name):
         chunks = await chat.turn('geheime vraag', 'a1', user_language=language)
     assert chat.status is None
-    assert chunks[-1] == agent_v2._error('failed', language=language)
+    assert chunks[-1] == agent_v2._error('failed', language=language, diagnostics={'status': 502})
     assert ('gestopt' if language == 'nl-NL' else 'stopped') in chunks[-1]['error']['message']
     assert 'agents-host' not in json.dumps(chunks)
     [record] = failures(caplog)
@@ -2286,7 +2287,7 @@ async def test_a_turn_failing_mid_stream_without_a_stream_is_an_http_error(chat:
     chat.api.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'private'})]]
     response = await chat.response('question', 'a1', stream=False)
     assert isinstance(response, JSONResponse) and response.status_code == 503
-    assert json.loads(response.body) == agent_v2._error('service_unavailable')
+    assert json.loads(response.body) == agent_v2._error('service_unavailable', diagnostics={'status': 503})
 
 
 @pytest.mark.asyncio
@@ -2297,7 +2298,7 @@ async def test_an_internal_failure_is_a_500_logged_by_its_type_only(
     with caplog.at_level('WARNING', logger=agent_v2.log.name):
         response = await chat.response('geheime vraag', 'a1')
     assert isinstance(response, JSONResponse) and response.status_code == 500
-    assert json.loads(response.body) == agent_v2._error('service_unavailable')
+    assert json.loads(response.body) == agent_v2._error('service_unavailable', diagnostics={'status': 500})
     [record] = failures(caplog)
     assert record.levelname == 'ERROR' and 'status=500 upstream=None code=KeyError' in record.getMessage()
     assert 'geheime vraag' not in caplog.text
@@ -2314,7 +2315,9 @@ async def test_a_refusal_without_a_known_reason_keeps_the_generic_text(
         problem['constraint'] = constraint
     refuse_turns(chat, monkeypatch, problem)
     chunks = await chat.turn('question', 'a1', user_language='nl-NL')
-    assert chunks[-1] == agent_v2._error('invalid_field', language='nl-NL')
+    assert chunks[-1] == agent_v2._error(
+        'invalid_field', language='nl-NL', diagnostics={'status': 422, 'upstream_status': 422}
+    )
 
 
 @pytest.mark.asyncio
@@ -2407,7 +2410,7 @@ async def test_terminal_state_never_cancels(chat: Chat, state: str, error: bool)
 async def test_terminal_relay_error_is_safe_and_does_not_cancel(chat: Chat) -> None:
     chat.api.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'private prompt and traceback'})]]
     chunks = await chat.turn('question', 'a1')
-    assert chunks == [agent_v2._error('service_unavailable')]
+    assert chunks == [agent_v2._error('service_unavailable', diagnostics={'status': 503})]
     assert len(chat.mutations()) == 1
     assert chat.bookmark('a1')['position'] == 2
 
@@ -2960,7 +2963,7 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
     monkeypatch.setattr(chat.api.chat, '_response', response)
     if fail:
         chunks = await chat.turn('question', 'a1')
-        assert chunks[-1] == agent_v2._error('service_unavailable')
+        assert chunks[-1] == agent_v2._error('service_unavailable', diagnostics={'status': 503, 'upstream_status': 502})
     else:
         task = asyncio.create_task(chat.turn('question', 'a1'))
         async with asyncio.timeout(2):
@@ -4074,7 +4077,7 @@ async def test_other_image_upload_errors_refuse_the_turn_as_unavailable(chat, im
     chunks = await chat.turn(
         'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]}
     )
-    assert chunks == [agent_v2._error('service_unavailable')]
+    assert chunks == [agent_v2._error('service_unavailable', diagnostics={'status': 503, 'upstream_status': 503})]
     assert chat.status == 503
     assert chat.mutations() == [('/v1/chat/threads:reserve', {'agent': 'test', 'title': None, 'temporary': False})]
 
@@ -4418,3 +4421,52 @@ async def test_non_streaming_returns_the_summed_usage(chat: Chat) -> None:
     result = await chat.response('question', 'a1', stream=False)
     assert result['choices'][0]['message']['content'] == 'Answer'
     assert result['usage'] == usage(12, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stream', [True, False])
+@pytest.mark.parametrize('early', [True, False])
+@pytest.mark.parametrize('tracing', [True, False])
+async def test_failure_diagnostics_use_the_logging_trace_context(
+    chat: Chat,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stream: bool,
+    early: bool,
+    tracing: bool,
+) -> None:
+    private = 'Fictional private prompt and cedar-secret.pdf'
+    if early:
+        fail_turns(
+            chat,
+            monkeypatch,
+            httpx.Response(
+                500,
+                json={'code': 'upstream_error', 'detail': private},
+                headers={'Content-Type': 'application/problem+json'},
+            ),
+        )
+    else:
+        chat.api.chat.turns = [[('error', {'code': 'upstream_error', 'detail': private})]]
+    span_context = trace.SpanContext(
+        trace_id=0x1234567890ABCDEF1234567890ABCDEF if tracing else 0,
+        span_id=0x1234567890ABCDEF if tracing else 0,
+        is_remote=False,
+    )
+    with trace.use_span(trace.NonRecordingSpan(span_context)), caplog.at_level('WARNING', logger=agent_v2.log.name):
+        if stream:
+            payload = (await chat.turn(private, 'fictional-answer', trace_id='untrusted-metadata'))[-1]
+        else:
+            response = await chat.response(private, 'fictional-answer', stream=False, trace_id='untrusted-metadata')
+            assert isinstance(response, JSONResponse) and response.status_code == 502
+            payload = json.loads(response.body)
+    expected = {'status': 502}
+    if early:
+        expected['upstream_status'] = 500
+    if tracing:
+        expected['trace_id'] = trace.format_trace_id(span_context.trace_id)
+    assert payload == agent_v2._error('upstream_error', diagnostics=expected)
+    [record] = failures(caplog)
+    assert record.trace_id == expected.get('trace_id')
+    assert private not in json.dumps(payload) and private not in caplog.text
+    assert 'untrusted-metadata' not in json.dumps(payload)

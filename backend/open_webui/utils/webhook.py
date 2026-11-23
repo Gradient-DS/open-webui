@@ -29,13 +29,9 @@ def _event_text(message: str, description: str | None = None, event_data: dict |
 
 async def post_webhook(name: str, url: str, message: str, event_data: dict, description: str | None = None) -> bool:
     try:
-        log.debug('post_webhook: %s, %s, %s', url, message, event_data)
-        # Block private-IP / loopback / cloud-metadata targets — the URL is
-        # caller-controlled (user notification settings under
-        # ENABLE_USER_WEBHOOKS, automation notification triggers).
         await asyncio.to_thread(validate_url, url)
-    except Exception as e:
-        log.warning('Webhook skipped, URL invalid or not publicly resolvable: %s', e)
+    except Exception:
+        log.warning('Event webhook skipped: invalid or non-public destination')
         return False
 
     try:
@@ -83,7 +79,6 @@ async def post_webhook(name: str, url: str, message: str, event_data: dict, desc
         else:
             payload = event_data
 
-        log.debug('payload: %s', payload)
         async with get_ssrf_safe_session() as session:
             async with session.post(
                 url,
@@ -91,11 +86,9 @@ async def post_webhook(name: str, url: str, message: str, event_data: dict, desc
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
             ) as r:
-                r_text = await r.text()
                 r.raise_for_status()
-                log.debug('r.text: %s', r_text)
 
         return True
-    except Exception as e:
-        log.exception(e)
+    except Exception as exc:
+        log.warning('Event webhook delivery failed (%s)', type(exc).__name__)
         return False

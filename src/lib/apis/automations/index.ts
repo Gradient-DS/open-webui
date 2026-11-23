@@ -25,7 +25,6 @@ export type AutomationForm = {
 		system_prompt?: string;
 		temperature?: number;
 		max_tokens?: number;
-		webhook?: string;
 	};
 	is_active?: boolean;
 };

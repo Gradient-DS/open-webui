@@ -68,12 +68,16 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
     'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at the in-network S3 gateway with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
-    'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
+    'utils/automations.py': (
+        'Automation model requests use the configured stub; calendar alerts publish socket and administrator events.'
+    ),
     'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
     'utils/oauth.py': 'All OAuth providers unconfigured; no IdP credentials, sessions, or external tools seeded.',
     'utils/tools.py': 'No external tool servers configured; request-supplied public server URLs are findings.',
-    'utils/webhook.py': 'Configured signup/chat webhook points at stub; supplied public webhook URLs are findings.',
+    'utils/webhook.py': (
+        'Retained administrator event webhooks validate public destinations; user targets and dispatch are removed.'
+    ),
 }
 
 _HTTP_CLIENTS = {'requests', 'http_requests', 'httpx', 'urllib3', 'aiohttp'}

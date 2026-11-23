@@ -1,12 +1,16 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { page } from '$app/stores';
 
 	import { config, chatId, showFeedbackModal, feedbackModalContext } from '$lib/stores';
 
 	import Info from '$lib/components/icons/Info.svelte';
+	import TurnErrorDetails from './TurnErrorDetails.svelte';
+	import type { TurnErrorDetails as ErrorDetails } from '$lib/utils/turnError';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	type ErrorContent =
 		| string
@@ -20,7 +24,7 @@
 
 	export let content: ErrorContent = '';
 	// `message.error` is either a structured object or the legacy `true` flag.
-	export let error: boolean | { trace_id?: string; content?: string } | null = null;
+	export let error: boolean | (ErrorDetails & { content?: ErrorContent }) | null = null;
 	export let model: string | null = null;
 
 	const getErrorMessage = (value: unknown): string => {
@@ -54,7 +58,7 @@
 		return JSON.stringify(value) ?? String(value);
 	};
 
-	// [Gradient] Keep the report payload aligned with the technical-details disclosure.
+	// [Gradient] Retain the existing error message for the report context.
 	$: errorText = getErrorMessage(content);
 
 	const reportProblem = () => {
@@ -79,20 +83,7 @@
 	<div class="min-w-0 flex flex-col gap-1.5 break-words text-[0.8125rem] leading-5">
 		<div>{$i18n.t('There was a problem generating a response.')}</div>
 
-		{#if errorText}
-			<details class="text-xs text-gray-500 dark:text-gray-400">
-				<summary
-					class="cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300 hover:underline transition"
-				>
-					{$i18n.t('Technical details')}
-				</summary>
-				<div
-					class="mt-1 whitespace-pre-wrap break-words font-mono text-gray-500 dark:text-gray-400"
-				>
-					{errorText}
-				</div>
-			</details>
-		{/if}
+		<TurnErrorDetails {error} />
 
 		{#if $config?.features?.enable_feedback_report}
 			<button

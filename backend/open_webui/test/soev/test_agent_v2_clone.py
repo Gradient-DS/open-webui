@@ -53,4 +53,13 @@ async def test_a_copy_keeping_the_owners_bookmarks_fails_for_another_user(
 
     chunks = await chat.turn('What is my project called?', 'b1', 'a2', chat_id='clone', user_id='bob')
 
-    assert chunks == [{'error': {'code': 'not_found', 'message': 'The agent thread is unavailable.'}}]
+    assert chunks == [
+        {
+            'error': {
+                'code': 'not_found',
+                'message': 'The agent thread is unavailable.',
+                'status': 404,
+                'upstream_status': 404,
+            }
+        }
+    ]

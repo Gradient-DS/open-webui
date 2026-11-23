@@ -1,16 +1,9 @@
 """Live sealed-stack checks; run only by runtime-security.yml."""
 
-from uuid import uuid4
-
 import pytest
 
 from . import oidc
-from .client import (
-    AttackClient,
-    AuthenticationError,
-    entered_the_handler,
-    login,
-)
+from .client import AttackClient, entered_the_handler
 from .seeds import runtime_soev_backed
 
 
@@ -61,47 +54,10 @@ def test_an_authenticated_client_can_write(identities):
     assert deleted.status_code == 200, deleted.text
 
 
-def test_live_repair_preserves_ids_after_refused_local_password_change_and_signout(identities):
-    from .identities import PASSWORD, ensure_identities
+def test_live_repair_preserves_ids_after_signout(identities):
+    from .identities import ensure_identities
 
     ids = [c.identity['id'] for c in identities.clients]
-    user = identities.user
-    changed = user.request(
-        'POST',
-        '/api/v1/auths/update/password',
-        json={
-            'password': PASSWORD,
-            'new_password': 'Hostile-Replacement-Passw0rd!',
-        },
-    )
-    assert changed.status_code == 400, changed.text
-    assert changed.json() == {'detail': 'The password provided is incorrect. Please check for typos and try again.'}, (
-        changed.text
-    )
-    with AttackClient() as anonymous:
-        for _ in range(20):
-            result = anonymous.request(
-                'POST',
-                '/api/v1/auths/signin',
-                json={
-                    'email': user.identity['email'],
-                    'password': 'wrong-password',
-                },
-            )
-            if runtime_soev_backed() == 'drive':
-                assert result.status_code == 403, result.text
-                assert result.json() == {
-                    'detail': (
-                        'You do not have permission to access this resource. '
-                        'Please contact your administrator for assistance.'
-                    )
-                }, result.text
-                assert not entered_the_handler(result)
-            elif result.status_code == 429:
-                assert not entered_the_handler(result)
-                break
-        else:
-            assert runtime_soev_backed() == 'drive', 'Never reached the real signin throttle'
     signed_out = identities.admin.request('POST', '/api/v1/auths/signout')
     assert signed_out.status_code == 200, signed_out.text
     revoked = identities.admin._send('GET', '/api/v1/auths/')
@@ -118,9 +74,22 @@ def test_live_repair_preserves_ids_after_refused_local_password_change_and_signo
         repaired.close()
 
 
-def test_wrong_password_login_is_refused(identities):
-    user = identities.user
-    with pytest.MonkeyPatch.context() as password_mode:
-        password_mode.delenv('ATTACK_OIDC_LOGIN', raising=False)
-        with pytest.raises(AuthenticationError, match='HTTP 403' if runtime_soev_backed() == 'drive' else 'HTTP 400'):
-            login(user.identity['email'], 'wrong-password', base_url=user.base_url)
+@pytest.mark.parametrize(
+    ('method', 'path'),
+    [
+        ('POST', '/api/v1/auths/signin'),
+        ('POST', '/api/v1/auths/signup'),
+        ('POST', '/api/v1/auths/ldap'),
+        ('POST', '/api/v1/auths/update/password'),
+        ('POST', '/api/v1/auths/password/forgot'),
+        ('POST', '/api/v1/auths/password/reset'),
+        ('GET', '/api/v1/auths/password/reset/fictional-reset-token/validate'),
+    ],
+)
+def test_removed_local_password_routes_return_not_found(identities, method, path):
+    with AttackClient(identities.user.base_url) as anonymous:
+        for client in (anonymous, *identities.clients):
+            result = client.request(method, path, json={} if method == 'POST' else None)
+            assert result.status_code == 404, result.text
+            assert result.json() == {'detail': 'Not Found'}, result.text
+            assert not entered_the_handler(result)

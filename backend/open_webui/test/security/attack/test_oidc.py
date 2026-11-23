@@ -52,6 +52,16 @@ class FakeStack:
             return self.callback(request)
         assert path.startswith('/api/'), f'Unexpected app request: {path}'
         assert set(request.cookies) <= {'oauth_session_id'}
+        if path in {
+            '/api/v1/auths/signin',
+            '/api/v1/auths/signup',
+            '/api/v1/auths/ldap',
+            '/api/v1/auths/update/password',
+            '/api/v1/auths/password/forgot',
+            '/api/v1/auths/password/reset',
+            '/api/v1/auths/password/reset/fictional-reset-token/validate',
+        }:
+            return JSONResponse({'detail': 'Not Found'}, status_code=404)
         token = request.headers.get('authorization', '').removeprefix('Bearer ')
         if path == '/api/v1/memories/' or path.startswith('/api/v1/export/data'):
             return self.platform(request, token)
@@ -238,8 +248,7 @@ def test_provision_and_form_login_capture_bearer_and_isolate_cookies(stack):
     assert not any(path == '/api/v1/auths/signin' for _, _, path, _ in stack.calls)
 
 
-def test_oidc_identities_survive_local_password_damage_and_revocation(stack, tmp_path):
-    path = tmp_path / 'identities.json'
+def test_oidc_identities_survive_local_password_damage_and_revocation(stack):
     with_clients = identities.ensure_identities('http://app')
     ids = [c.user_id for c in with_clients.clients]
     with_clients.close()
@@ -282,14 +291,32 @@ def test_disposable_and_seed_identities_use_oidc(stack, tmp_path):
         actors.close()
 
 
-def test_password_endpoint_negative_probe_remains_enabled_in_oidc_mode(stack, tmp_path):
-    from .test_live_client import test_wrong_password_login_is_refused
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+@pytest.mark.parametrize(
+    ('method', 'path'),
+    [
+        ('POST', '/api/v1/auths/signin'),
+        ('POST', '/api/v1/auths/signup'),
+        ('POST', '/api/v1/auths/ldap'),
+        ('POST', '/api/v1/auths/update/password'),
+        ('POST', '/api/v1/auths/password/forgot'),
+        ('POST', '/api/v1/auths/password/reset'),
+        ('GET', '/api/v1/auths/password/reset/fictional-reset-token/validate'),
+    ],
+)
+def test_removed_password_route_probes_remain_enabled_in_oidc_mode(stack, monkeypatch, mode, method, path):
+    from .test_live_client import test_removed_local_password_routes_return_not_found as check
 
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     actors = identities.ensure_identities('http://app')
     try:
-        test_wrong_password_login_is_refused(actors)
+        check(actors, method, path)
         assert oidc.enabled()
-        assert stack.identities.attempts == {identities.USER_EMAIL: 1}
+        assert stack.identities.attempts == {}
+        probes = [headers for host, verb, route, headers in stack.calls if verb == method and route == path]
+        assert len(probes) == 4
+        assert 'authorization' not in probes[0]
+        assert [headers['authorization'] for headers in probes[1:]] == [f'Bearer {c.token}' for c in actors.clients]
         actors.user.verify_identity(email=identities.USER_EMAIL, role='user')
     finally:
         actors.close()

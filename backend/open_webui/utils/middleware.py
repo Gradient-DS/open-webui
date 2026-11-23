@@ -125,7 +125,6 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
-from open_webui.utils.webhook import post_webhook
 from starlette.responses import JSONResponse, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -4167,9 +4166,12 @@ async def non_streaming_chat_response_handler(response, ctx):
                 else:
                     error = str(error)
 
-                # [Gradient] carry the trace id so an error report deep-links to Tempo
-                error_obj = {'content': error, 'trace_id': metadata.get('trace_id')}
-                log.error('Provider returned error (non-streaming): %s', error)
+                # [Gradient] Agent errors already carry the failure's trace context.
+                if metadata.get('route_to_agent'):
+                    error_obj = error
+                else:
+                    error_obj = {'content': error, 'trace_id': metadata.get('trace_id')}
+                    log.error('Provider returned error (non-streaming): %s', error)
 
                 if save_to_chat:
                     await Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -5077,18 +5079,23 @@ async def streaming_chat_response_handler(response, ctx):
                                     if not choices:
                                         error = data.get('error', {})
                                         if error:
-                                            # [Gradient] tag the provider error
-                                            # with the trace id for feedback reports
-                                            if isinstance(error, dict):
-                                                error['trace_id'] = metadata.get('trace_id')
-                                            log.error('Provider returned error (streaming): %s', error)
+                                            # [Gradient] Agent failures keep their trace context;
+                                            # provider errors use the request's trace id.
+                                            if not metadata.get('route_to_agent'):
+                                                if isinstance(error, dict):
+                                                    error['trace_id'] = metadata.get('trace_id')
+                                                log.error('Provider returned error (streaming): %s', error)
                                             if save_to_chat:
                                                 try:
                                                     await Chats.upsert_message_to_chat_by_id_and_message_id(
                                                         metadata['chat_id'],
                                                         metadata['message_id'],
                                                         {
-                                                            'error': {'content': error},
+                                                            'error': (
+                                                                error
+                                                                if metadata.get('route_to_agent')
+                                                                else {'content': error}
+                                                            ),
                                                         },
                                                     )
                                                 except Exception:

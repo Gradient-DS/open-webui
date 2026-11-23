@@ -194,7 +194,6 @@ from open_webui.routers import (
     memories,
     models,
     notes,
-    notifications,
     ollama,
     prompts,
     retrieval,
@@ -317,6 +316,7 @@ from open_webui.utils.tool_approval import (
     resolve_tool_call_output,
 )
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
+from open_webui.utils.turn_error import AgentTurnError
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -949,7 +949,6 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
-app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
@@ -1710,6 +1709,8 @@ async def chat_completion(
             # raise so the except-block below emits chat:message:error +
             # chat:tasks:cancel, unblocking the frontend.
             if isinstance(response, JSONResponse) and response.status_code >= 400:
+                if route_to_agent:
+                    raise AgentTurnError(JSONCodec.loads(response.body)['error'])
                 raise Exception(get_response_error_detail(response))
 
             ctx = await build_chat_response_context(request, form_data, user, model, metadata, tasks, events)
@@ -1736,9 +1737,12 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
-                    # [Gradient] trace_id (captured in chat_completion) rides
-                    # along so an error report can deep-link to the Tempo trace.
-                    error = {'content': error_detail, 'trace_id': metadata.get('trace_id')}
+                    # [Gradient] Preserve the diagnostics captured when the agent failed.
+                    error = (
+                        e.error
+                        if isinstance(e, AgentTurnError)
+                        else {'content': error_detail, 'trace_id': metadata.get('trace_id')}
+                    )
                     if not soev_threads.enabled() and is_saved_chat_id(metadata.get('chat_id')):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
@@ -2231,7 +2235,6 @@ async def get_app_config(request: Request):
         'task.autocomplete.enable',
         'ui.enable_community_sharing',
         'ui.enable_message_rating',
-        'ui.enable_user_webhooks',
         'users.enable_status',
         'google_drive.enable',
         'onedrive.enable',
@@ -2364,7 +2367,6 @@ async def get_app_config(request: Request):
                     'conversation_feedback_header': config.get('evaluation.feedback.conversation.header'),
                     'conversation_feedback_placeholder': config.get('evaluation.feedback.conversation.placeholder'),
                     'enable_feedback_report': config.get('bug_reports.enabled'),  # [Gradient]
-                    'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
                     'enable_user_status': config.get('users.enable_status'),
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
                     # [Gradient] Feature Flags (SaaS Tier Control)

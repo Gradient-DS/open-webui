@@ -6122,100 +6122,6 @@
         "title": "NoteUserResponse",
         "type": "object"
       },
-      "NotificationSettings": {
-        "additionalProperties": true,
-        "properties": {
-          "webhook_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Webhook Url"
-          }
-        },
-        "title": "NotificationSettings",
-        "type": "object"
-      },
-      "NotificationTargetForm": {
-        "properties": {
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
-          },
-          "delivery": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delivery"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "events": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Events"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Type"
-          }
-        },
-        "title": "NotificationTargetForm",
-        "type": "object"
-      },
       "PickerAttachment": {
         "additionalProperties": false,
         "properties": {
@@ -9076,16 +8982,6 @@
               }
             ],
             "title": "Models"
-          },
-          "notifications": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NotificationSettings"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "num_batch": {
             "anyOf": [
@@ -16120,8 +16016,7 @@
         "summary": "Upload File",
         "tags": [
           "files"
-        ],
-        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path."
+        ]
       }
     },
     "/api/v1/files/count": {
@@ -16448,8 +16343,7 @@
         "summary": "Get File Content By Id",
         "tags": [
           "files"
-        ],
-        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes."
+        ]
       },
       "head": {
         "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
@@ -16556,8 +16450,7 @@
         "summary": "Get File Content By Id",
         "tags": [
           "files"
-        ],
-        "description": "Apply the same document recovery, platform readership and local-media rules as the inline content route. Filename does not grant access."
+        ]
       }
     },
     "/api/v1/files/{id}/data/content": {
@@ -16657,8 +16550,7 @@
         "summary": "Update File Data Content By Id",
         "tags": [
           "files"
-        ],
-        "description": "Requires existing file write authority. Platform document extracted text is immutable: 409 with translated original_immutable message, preserving its only original. Local media is classified from sniffed bytes; local media and local-only files retain content update behaviour."
+        ]
       }
     },
     "/api/v1/files/{id}/process/status": {
@@ -21148,284 +21040,6 @@
         ]
       }
     },
-    "/api/v1/notifications/events": {
-      "get": {
-        "operationId": "get_notification_events_api_v1_notifications_events_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Notification Events",
-        "tags": [
-          "notifications"
-        ]
-      }
-    },
-    "/api/v1/notifications/targets": {
-      "get": {
-        "operationId": "get_notification_targets_api_v1_notifications_targets_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Notification Targets",
-        "tags": [
-          "notifications"
-        ]
-      },
-      "post": {
-        "operationId": "create_notification_target_api_v1_notifications_targets_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NotificationTargetForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Notification Target",
-        "tags": [
-          "notifications"
-        ]
-      }
-    },
-    "/api/v1/notifications/targets/{target_id}": {
-      "delete": {
-        "operationId": "delete_notification_target_api_v1_notifications_targets__target_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "target_id",
-            "required": true,
-            "schema": {
-              "title": "Target Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Notification Target",
-        "tags": [
-          "notifications"
-        ]
-      },
-      "put": {
-        "operationId": "update_notification_target_api_v1_notifications_targets__target_id__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "target_id",
-            "required": true,
-            "schema": {
-              "title": "Target Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NotificationTargetForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Notification Target",
-        "tags": [
-          "notifications"
-        ]
-      }
-    },
-    "/api/v1/notifications/targets/{target_id}/default": {
-      "put": {
-        "operationId": "set_default_notification_target_api_v1_notifications_targets__target_id__default_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "target_id",
-            "required": true,
-            "schema": {
-              "title": "Target Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Set Default Notification Target",
-        "tags": [
-          "notifications"
-        ]
-      }
-    },
-    "/api/v1/notifications/targets/{target_id}/test": {
-      "post": {
-        "operationId": "test_notification_target_api_v1_notifications_targets__target_id__test_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "target_id",
-            "required": true,
-            "schema": {
-              "title": "Target Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Test Notification Target",
-        "tags": [
-          "notifications"
-        ]
-      }
-    },
     "/api/v1/prompts/": {
       "get": {
         "operationId": "get_prompts_api_v1_prompts__get",
@@ -22741,8 +22355,7 @@
         "summary": "Delete Skill By Id",
         "tags": [
           "skills"
-        ],
-        "description": "Requires existing skill write authority. Remove skill links and unused backing File rows in the same database transaction; purge bytes only after re-reading committed link/File state. Preserve any File still linked elsewhere."
+        ]
       }
     },
     "/api/v1/skills/id/{id}/files": {
