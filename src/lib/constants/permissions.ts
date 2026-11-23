@@ -70,8 +70,7 @@ export const DEFAULT_PERMISSIONS = {
 		document_writer: true,
 		memories: true,
 		automations: false,
-		calendar: true,
-		webhooks: false
+		calendar: true
 	},
 	settings: {
 		interface: true

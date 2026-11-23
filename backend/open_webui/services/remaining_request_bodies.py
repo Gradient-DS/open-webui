@@ -84,10 +84,6 @@ class UserInfoBody(OpenBody):
     integration_provider: str | None = None
 
 
-class NotificationSettings(OpenBody):
-    webhook_url: str | None = None
-
-
 class UserToolServer(OpenBody):
     url: str | None = None
     key: str | None = None
@@ -124,7 +120,6 @@ class UserUISettings(OpenBody):
     num_ctx: str | int | float | None = None
     num_batch: str | int | float | None = None
     num_keep: str | int | float | None = None
-    notifications: NotificationSettings | None = None
     toolServers: list[UserToolServer] | None = None
     title: UserTitleSettings | None = None
     audio: UserAudioSettings | None = None

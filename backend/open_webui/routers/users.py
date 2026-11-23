@@ -253,7 +253,6 @@ class FeaturesPermissions(BaseModel):
     memories: bool = True
     automations: bool = False
     calendar: bool = True
-    webhooks: bool = False
 
 
 class SettingsPermissions(BaseModel):
@@ -450,21 +449,6 @@ async def update_user_settings_by_session_user(
     ):
         # If the user is not an admin and does not have permission to use tool servers, remove the key
         updated_user_settings['ui'].pop('toolServers', None)
-
-    ui_notifications = ui_settings.get('notifications') if isinstance(ui_settings, dict) else None
-    if (
-        'notifications' in updated_user_settings
-        or (isinstance(ui_notifications, dict) and 'webhook_url' in ui_notifications)
-    ) and (
-        not await has_permission(
-            user.id,
-            'features.webhooks',
-            await Config.get('user.permissions'),
-        )
-    ):
-        updated_user_settings.pop('notifications', None)
-        if isinstance(ui_notifications, dict):
-            ui_notifications.pop('webhook_url', None)
 
     default_interface_settings = await Config.get('ui.default_interface_settings')
     ui_settings = updated_user_settings.get('ui')

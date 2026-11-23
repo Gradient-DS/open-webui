@@ -2,8 +2,9 @@
 
 The product owner's explicit exceptions override the read-only platform registry:
 voice/audio, scheduled automations/calendar, skills, workspace/sandboxes,
-transcription, notes, memories, folders, API keys, task switches, arena and webhooks
-remain. Browser execution is removed despite its live registry classification.
+transcription, notes, memories, folders, API keys, task switches and arena
+remain. User webhooks are retired everywhere. Browser execution is removed
+despite its live registry classification.
 Upstream implementations stay in place; `soev/product_surface.py` makes filtered
 copies at the fork's mount boundary, preserving source routers and dependencies.
 The security source inventory resolves those copies to their original handlers.
@@ -544,3 +545,113 @@ stored true flags to prove all nine retired leaves disappear, voice/automations/
 API keys/skills remain, and the stored authorization object is unchanged. Fresh
 OpenAPI equals the committed specification; inventory classification and counts
 remain unchanged. Ruff: zero new findings. No frontend source changed.
+
+## User webhooks — webhook-routes
+
+User webhooks are retired everywhere. Removing their platform settings had left
+seven `/api/v1/notifications` operations mounted, their user-target dispatcher
+registered, and their UI/client code present. The full-stack route-coverage gate
+therefore still required evidence for a retired feature.
+
+Deleted the notification target router, target storage/migration/delivery helper,
+user notification event sink/catalog entries and builtin `notify` tool. Removed
+the enable/permission defaults, environment/chart/CI wiring, admin config fields,
+public permission/feature metadata, typed webhook settings body, frontend client,
+store/type fields, target editor, model tool toggle, search keywords and unused
+user-webhook translations across all 64 locales. Historical migrations and stored
+user settings are unchanged; no user-target reader or sender remains.
+
+`notifications.py` served only user webhook targets. Browser notifications and
+notification sounds remain in `Settings/Notifications.svelte`; socket delivery,
+calendar alerts and platform automations remain. The administrator event webhook
+sink, shared transport, `events.webhooks` and legacy global `WEBHOOK_URL` path
+remain. Bug reports and feedback still forward to soev-api. The shared transport
+now logs neither destination URLs nor request/response content; its SSRF guards
+and delivery behavior remain covered.
+
+Regenerated `security/openapi.json` with `scripts/security/export_openapi.py` in
+the disposable offline environment above. The declarative TOML inventories have
+no generator: removed the obsolete target seed and four target-route waivers,
+and recorded all seven operations as removed/retired. No waiver or exemption was
+added. Operations: 310 → 303 (300 five-method operations). Writable bodies/string
+leaves: 96/944 → 94/935. Query operations/string leaves remain 35/77. Exact count
+expectations track these removals; derivation floors and all route-coverage,
+isolation, disclosure and revocation assertions remain intact.
+
+Existing test changes are limited to exact surface counts, removal of the retired
+URL from the writable schema expectation, using audio settings instead of webhook
+settings in the open-body preservation fixture, deleting the obsolete user-target
+migration crash regression, and inverting the middleware's obsolete sender-import
+expectation. The same blocked-URL corpus now calls the retained shared transport
+directly (which returns false); redirect/rebind and no-egress assertions remain.
+New regressions check absent routes/settings/code, retained admin event dispatch
+without user-target lookup, hidden legacy permission metadata, and content-free
+shared-transport logs.
+
+Each file below ran as its own pytest invocation, with this command template:
+
+```sh
+PYTHON_DOTENV_DISABLED=1 PYTHONPATH="$PWD/backend" DO_NOT_TRACK=true SCARF_NO_ANALYTICS=true CONNECT_TEST_DSN=postgresql://soev:soev-dev@127.0.0.1:15432/postgres uv run --no-project -- /Users/lexlubbers/Code/soev/open-webui/.venv/bin/python -m pytest -c backend/pytest.ini <file> -q --tb=short
+```
+
+Backend files below are relative to `backend/open_webui/test/`; the last file is
+relative to the repository root. Result: **1,111 passed across 34 files, no skips**
+(repeated verification runs are not counted twice).
+
+```text
+authorization/test_admin_flags.py
+authorization/test_routes.py
+security/attack/test_crossuser.py
+security/attack/test_plane.py
+security/attack/test_seeds.py
+security/attack/test_soev_mode.py
+security/ssrf/test_webhooks.py
+security/test_deployed_config.py
+security/test_model_request_bodies.py
+security/test_openapi_surface.py
+security/test_plane_findings.py
+security/test_platform_config_writes.py
+security/test_remaining_request_bodies.py
+security/test_removed_channels_admin_chats.py
+security/test_removed_user_webhooks.py
+security/test_removed_v1_routes.py
+security/test_route_coverage.py
+security/test_route_shadowing.py
+security/test_runtime_egress.py
+security/test_spa_api_refusals.py
+security/test_writable_fields.py
+soev/test_config_subject_writers.py
+soev/test_context_import.py
+soev/test_dead_features.py
+soev/test_document_writer.py
+soev/test_functions_v2.py
+soev/test_groups.py
+soev/test_policy_jobs.py
+soev/test_product_config.py
+util/test_config_env_authoritative.py
+util/test_features.py
+util/test_middleware_imports.py
+util/test_oauth_invite.py
+helm/open-webui-tenant/tests/test_render.py
+```
+
+Changed-file `ruff check` reports 369 inherited findings versus 370 at HEAD;
+there are no new findings (the existing builtin-tool complexity drops 32 → 31).
+`ruff format --check` passes on all 21 surviving changed Python files, and the
+hook's `ruff format --check backend` preflight passes on all 706 backend files.
+Changed-file mypy ran with `--follow-imports silent --ignore-missing-imports
+--python-executable /Users/lexlubbers/Code/soev/open-webui/.venv/bin/python`:
+321 inherited errors versus 324 at HEAD, zero new errors. The lint/type baselines
+were checked against the original contents of the same files; no suppression or
+configuration change was introduced.
+
+This worktree has no `node_modules`, so `npm run check` was not run and no
+packages were installed. No Vitest files exist for the three touched components.
+Using the existing shared checkout's read-only dependencies, all three Svelte
+components compile with zero warnings. Prettier passes on the touched TS/Svelte
+files; 62 of the 64 translation files have the same inherited formatting
+failures as HEAD, zero new failures. All locale JSON parses successfully.
+
+The live full-stack sweep, browser interactions, real administrator webhook
+receivers and platform-forwarded delivery were not exercised. Verification was
+offline; no Docker stack was started.

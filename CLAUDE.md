@@ -103,7 +103,7 @@ behaviour. Never exempt a route or loosen an assertion to make a count match. Us
 
 The product no longer offers local credential login/MFA, OWUI RAG/web loaders,
 inference proxies, custom tools/functions/tool servers, local retention workers,
-image generation controls, channels or browser code execution. Upstream source
+image generation controls, channels, user webhooks or browser code execution. Upstream source
 remains behind the fork's mount/UI boundaries; do not restore a route or control
 merely because its implementation remains. Platform search, cloud connections,
 voice, scheduled automations/calendar, skills and workspace/sandboxes stay.

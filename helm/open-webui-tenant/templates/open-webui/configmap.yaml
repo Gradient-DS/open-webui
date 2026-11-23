@@ -239,7 +239,6 @@ data:
   ENABLE_CITATION_RELEVANCE: {{ .Values.openWebui.config.enableCitationRelevance | quote }}
   ENABLE_CITATION_TEXT_HIGHLIGHT: {{ .Values.openWebui.config.enableCitationTextHighlight | quote }}
   ENABLE_MESSAGE_RATING: {{ .Values.openWebui.config.enableMessageRating | quote }}
-  ENABLE_USER_WEBHOOKS: {{ .Values.openWebui.config.enableUserWebhooks | quote }}
   ENABLE_AUTOCOMPLETE_GENERATION: {{ .Values.openWebui.config.enableAutocompleteGeneration | quote }}
   ENABLE_FOLLOW_UP_GENERATION: {{ .Values.openWebui.config.enableFollowUpGeneration | quote }}
   ENABLE_TITLE_GENERATION: {{ .Values.openWebui.config.enableTitleGeneration | quote }}

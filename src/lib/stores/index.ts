@@ -255,7 +255,6 @@ type Settings = {
 	notificationSound?: boolean;
 	notificationSoundAlways?: boolean;
 	stylizedPdfExport?: boolean;
-	notifications?: any;
 	imageCompression?: boolean;
 	imageCompressionSize?: any;
 	textScale?: number;

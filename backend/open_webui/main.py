@@ -194,7 +194,6 @@ from open_webui.routers import (
     memories,
     models,
     notes,
-    notifications,
     ollama,
     prompts,
     retrieval,
@@ -950,7 +949,6 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
-app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
@@ -2237,7 +2235,6 @@ async def get_app_config(request: Request):
         'task.autocomplete.enable',
         'ui.enable_community_sharing',
         'ui.enable_message_rating',
-        'ui.enable_user_webhooks',
         'users.enable_status',
         'google_drive.enable',
         'onedrive.enable',
@@ -2370,7 +2367,6 @@ async def get_app_config(request: Request):
                     'conversation_feedback_header': config.get('evaluation.feedback.conversation.header'),
                     'conversation_feedback_placeholder': config.get('evaluation.feedback.conversation.placeholder'),
                     'enable_feedback_report': config.get('bug_reports.enabled'),  # [Gradient]
-                    'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
                     'enable_user_status': config.get('users.enable_status'),
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
                     # [Gradient] Feature Flags (SaaS Tier Control)

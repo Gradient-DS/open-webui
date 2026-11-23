@@ -251,7 +251,6 @@ services:
       REQUIRE_2FA: "true"
       TWO_FA_GRACE_PERIOD_DAYS: "7"
       ENABLE_FORGOT_PASSWORD: "true"
-      ENABLE_USER_WEBHOOKS: "true"
       # Chat sharing is opt-in per tenant (default off since 2026-10-12) and binds
       # admins too; a tenant admin can turn it on at runtime, so the plane drives
       # the share routes with it on. The refusal with it off is covered by

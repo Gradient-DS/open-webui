@@ -539,12 +539,6 @@ extract = "id"
 actor = "user"
 
 [[parameter]]
-key = "notification_target"
-name = "target_id"
-prefix = "/api/v1/notifications/targets/{target_id}"
-unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, s3) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
-
-[[parameter]]
 backed_by = "soev-solutions"
 key = "platform_thread"
 name = "thread_id"
@@ -1225,6 +1219,7 @@ routes = [
   "DELETE /api/v1/groups/id/{id}/delete",
   "DELETE /api/v1/invites/{id}",
   "DELETE /api/v1/models/delete/all",
+  "DELETE /api/v1/notifications/targets/{target_id}",
   "DELETE /api/v1/tools/id/{id}/delete",
   "DELETE /api/v1/users/{user_id}",
   "DELETE /ollama/api/delete",
@@ -1292,6 +1287,8 @@ routes = [
   "GET /api/v1/knowledge/{id}/export",
   "GET /api/v1/models/base",
   "GET /api/v1/models/base/tags",
+  "GET /api/v1/notifications/events",
+  "GET /api/v1/notifications/targets",
   "GET /api/v1/retrieval/config",
   "GET /api/v1/tasks/config",
   "GET /api/v1/tools/",
@@ -1398,6 +1395,8 @@ routes = [
   "POST /api/v1/knowledge/reindex",
   "POST /api/v1/memories/reindex",
   "POST /api/v1/models/sync",
+  "POST /api/v1/notifications/targets",
+  "POST /api/v1/notifications/targets/{target_id}/test",
   "POST /api/v1/retrieval/config/update",
   "POST /api/v1/retrieval/delete",
   "POST /api/v1/retrieval/process/url",
@@ -1451,6 +1450,8 @@ routes = [
   "POST /ollama/v1/responses/{url_idx}",
   "POST /ollama/verify",
   "PUT /api/events/webhooks/{webhook_id}",
+  "PUT /api/v1/notifications/targets/{target_id}",
+  "PUT /api/v1/notifications/targets/{target_id}/default",
 ]
 
 [[control]]
@@ -1608,12 +1609,15 @@ reason = "routers/tasks.py:generate_autocompletion refuses when task.autocomplet
 [retired_product]
 reason = "Product-owner removal of local runtime features (owui-dead-features)."
 routes = [
+  "DELETE /api/v1/notifications/targets/{target_id}",
   "DELETE /api/v1/tools/id/{id}/delete",
   "GET /api/v1/auths/2fa/status",
   "GET /api/v1/auths/password/reset/{token}/validate",
   "GET /api/v1/functions/",
   "GET /api/v1/functions/id/{id}/valves/user",
   "GET /api/v1/functions/id/{id}/valves/user/spec",
+  "GET /api/v1/notifications/events",
+  "GET /api/v1/notifications/targets",
   "GET /api/v1/tasks/config",
   "GET /api/v1/tools/",
   "GET /api/v1/tools/export",
@@ -1645,6 +1649,8 @@ routes = [
   "POST /api/v1/data-warnings/accept",
   "POST /api/v1/embeddings",
   "POST /api/v1/functions/id/{id}/valves/user/update",
+  "POST /api/v1/notifications/targets",
+  "POST /api/v1/notifications/targets/{target_id}/test",
   "POST /api/v1/retrieval/process/url",
   "POST /api/v1/retrieval/process/web",
   "POST /api/v1/retrieval/process/web/search",
@@ -1674,4 +1680,6 @@ routes = [
   "POST /ollama/v1/messages/{url_idx}",
   "POST /ollama/v1/responses",
   "POST /ollama/v1/responses/{url_idx}",
+  "PUT /api/v1/notifications/targets/{target_id}",
+  "PUT /api/v1/notifications/targets/{target_id}/default",
 ]

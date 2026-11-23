@@ -315,14 +315,8 @@
 			keywords: [
 				'browser notifications',
 				'browsernotifications',
-				'chat failed',
-				'chat finished',
 				'notification sound',
-				'notifications',
-				'notify',
-				'webhook',
-				'webhook notifications',
-				'webhooks'
+				'notifications'
 			]
 		},
 		{
@@ -545,8 +539,6 @@
 				'login',
 				'new password',
 				'newpassword',
-				'notification webhook url',
-				'notificationwebhookurl',
 				'personal settings',
 				'personalsettings',
 				'privacy settings',
@@ -573,9 +565,7 @@
 				'userdata',
 				'username',
 				'userpreferences',
-				'userprofile',
-				'webhook url',
-				'webhookurl'
+				'userprofile'
 			]
 		},
 		{

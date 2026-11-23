@@ -161,22 +161,6 @@ def test_speech_refuses_a_body_that_is_not_an_object(body, monkeypatch):
     assert response.status_code == 422, (response.status_code, response.text)
 
 
-def test_a_legacy_webhook_url_the_guard_refuses_does_not_break_notifications(monkeypatch):
-    # PLANE-016: migrating a stored legacy webhook_url ran it through the SSRF
-    # guard, whose ValueError reached the notifications page as a 500.
-    import asyncio
-
-    from open_webui.utils import notifications
-
-    async def user(*args, **kwargs):
-        return SimpleNamespace(settings={'notifications': {'webhook_url': 'http://169.254.169.254/latest'}})
-
-    monkeypatch.setattr(notifications.Users, 'get_user_by_id', user)
-    monkeypatch.setattr(notifications.Users, 'update_user_settings_by_id', _nothing)
-    loaded = asyncio.run(notifications._load_notifications('control-user'))
-    assert not loaded.get('targets')
-
-
 @pytest.mark.parametrize(
     'order_by, direction',
     [('no_such', 'asc'), ('title', 'sideways'), ('chat', 'asc'), ('meta', 'desc'), ('__class__', 'desc'), ('', 'asc')],

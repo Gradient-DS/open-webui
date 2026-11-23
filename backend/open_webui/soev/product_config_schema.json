@@ -17,13 +17,11 @@
     "permissions.features.automations": false,
     "permissions.features.direct_tool_servers": false,
     "permissions.features.image_generation": false,
-    "permissions.features.webhooks": false,
     "permissions.sharing.public_tools": false,
     "permissions.sharing.tools": false,
     "permissions.workspace.tools": false,
     "permissions.workspace.tools_export": false,
     "permissions.workspace.tools_import": false,
-    "ui.enable_user_webhooks": false,
     "webhook_url": ""
   },
   "features": [
