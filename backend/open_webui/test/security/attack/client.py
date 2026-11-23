@@ -97,7 +97,7 @@ _NOT_ENTERED_MARKERS = (
         'ACCESS_PROHIBITED',
         70,
     ),
-    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 871, 'RATE_LIMIT_EXCEEDED', 87),
+    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 870, 'RATE_LIMIT_EXCEEDED', 87),
     RefusalMarker(
         (400,),
         'The email or password provided is incorrect. Please check for typos and try logging in again.',
