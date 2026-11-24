@@ -997,7 +997,7 @@
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
 		);
 
-		const loadResult = chatIdProp ? await loadChat() : 'not_found';
+		const loadResult = chatIdProp ? await loadChat(true) : 'not_found';
 
 		if (loadResult === 'aborted') {
 			return; // a newer navigateHandler is in charge; don't reset loading or redirect
@@ -1118,6 +1118,16 @@
 			if ($chatId && !$temporaryChatEnabled && history?.currentId) {
 				saveChatHandler($chatId, history);
 			}
+		}
+	}
+
+	// [Gradient] The Workspace switch is stored with the chat as soon as it changes, so a reload
+	// or reopening the chat never brings back an older state.
+	let lastSavedWorkspace = false;
+	$: if (workspaceEnabled !== lastSavedWorkspace && !loading && !settingDefaults) {
+		lastSavedWorkspace = workspaceEnabled;
+		if ($chatId && !$temporaryChatEnabled && history?.currentId) {
+			saveChatHandler($chatId, history);
 		}
 	}
 
@@ -2680,10 +2690,11 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	const loadChat = async () => {
+	const loadChat = async (opening = false) => {
 		assistantDefaultModelBlocked.set(true);
 		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
 		const targetId = chatIdProp || $chatId;
+		const sameChat = chat?.id === targetId;
 		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
@@ -2778,7 +2789,15 @@
 
 				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
-				workspaceEnabled = chatContent?.features?.workspace ?? false;
+				// [Gradient] A reload of the open chat (after a turn, a retry, a reconnect) keeps the
+				// switch as the user left it. Opening a chat restores its stored state; one saved
+				// before the switch was stored starts as its assistant does.
+				if (opening || !sameChat) {
+					workspaceEnabled =
+						chatContent?.features?.workspace ??
+						($activeAssistant?.info?.meta?.defaultFeatureIds ?? []).includes('workspace');
+				}
+				lastSavedWorkspace = workspaceEnabled;
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -4644,7 +4663,10 @@
 				{
 					id: _chatId,
 					title: $i18n.t('New Chat'),
-					features: composerFeatures(currentComposerPreferences()),
+					features: {
+						...composerFeatures(currentComposerPreferences()),
+						workspace: workspaceEnabled
+					},
 					models: selectedModels,
 					system: $settings.system ?? undefined,
 					params: params,
