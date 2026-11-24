@@ -6,7 +6,7 @@
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistant } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { isAssistant, isLLM } from '$lib/utils/assistants';
+	import { isAssistant, isLLM, urlChoosesLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
@@ -1721,7 +1721,7 @@
 			query,
 			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
 			$i18n,
-			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+			urlChoosesLLM($page.url.searchParams, $models)
 		);
 		if (defaultId) selectedModels = [defaultId];
 	};

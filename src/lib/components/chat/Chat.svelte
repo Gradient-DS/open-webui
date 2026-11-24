@@ -91,7 +91,7 @@
 		llmSelection
 	} from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { assistantDefaultLLMId, isLLM, pickableLLMs } from '$lib/utils/assistants';
+	import { assistantDefaultLLMId, isLLM, pickableLLMs, urlChoosesLLM } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -2538,7 +2538,7 @@
 		);
 		const assistantDefault = assistantDefaultLLMId($rawModels, $activeAssistant, {
 			emptyChat: true,
-			explicitModel: $page.url.searchParams.has('model') || $page.url.searchParams.has('models'),
+			explicitModel: urlChoosesLLM($page.url.searchParams, $rawModels),
 			selectionLocked: false
 		});
 		if (assistantDefault) selectedModels = [assistantDefault];
@@ -3560,7 +3560,7 @@
 			query,
 			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
 			$i18n,
-			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+			urlChoosesLLM($page.url.searchParams, $rawModels)
 		);
 		if (defaultId) selectedModels = [defaultId];
 		messageInput?.setText('');

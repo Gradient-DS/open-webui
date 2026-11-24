@@ -154,6 +154,15 @@ export const pickableLLMId = (
 	return defaultLLMId(pickable, preferredIds);
 };
 
+/**
+ * Whether the URL's `model`/`models` parameter names an LLM. A link to an assistant alone
+ * (`/?model=<assistant id>`, as the sidebar and the assistants list use) chooses no LLM.
+ */
+export const urlChoosesLLM = (params: URLSearchParams, models: AssistantModel[]): boolean =>
+	(params.get('models') || params.get('model') || '')
+		.split(',')
+		.some((id) => isLLM(models.find((model) => model.id === id)));
+
 // [Gradient] Only the initial assistant activation may choose an LLM for the chat.
 export const assistantDefaultLLMId = (
 	models: AssistantModel[],
