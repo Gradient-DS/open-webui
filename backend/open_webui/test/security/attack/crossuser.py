@@ -349,7 +349,7 @@ def _benign(route, parameters, spec):
     if declared.get('json'):
         variant = next((entry.get('v2', {}) for entry in seeds.SURFACE.get('field', []) if entry['route'] == route), {})
         request['json'] = (
-            deepcopy(declared['json'])
+            plane._hold_declared(None, (), declared['json'])[0]
             if seeds.runtime_soev_backed() == 'drive' and 'json' in variant
             else plane._hold_declared(request.get('json'), (), declared['json'])[0]
         )

@@ -152,6 +152,73 @@ def test_schedule_control_keeps_the_declared_provider_scope():
     assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
 
 
+@pytest.mark.parametrize(
+    'route',
+    ['POST /api/v1/knowledge/{id}/files/batch/add', 'POST /api/v1/retrieval/process/files/batch'],
+)
+def test_batch_controls_expand_declared_array_paths(monkeypatch, route):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(
+        None,
+        None,
+        seeds.SURFACE,
+        values={
+            'file': 'fictional-retained-file',
+            'platform_document': 'fictional-document',
+            'knowledge': 'fictional-kb',
+        },
+    )
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    [(_, request)] = crossuser._requests(route, parameters, seeds.SPEC, {}, (), False)
+    file_id = context.values['platform_document']
+    if route.startswith('POST /api/v1/knowledge/'):
+        from pydantic import TypeAdapter
+        from open_webui.routers.knowledge import KnowledgeFileIdForm
+
+        assert request['json'] == [{'file_id': file_id}]
+        validated = TypeAdapter(list[KnowledgeFileIdForm]).validate_python(request['json'])
+        assert validated[0].file_id == file_id
+    else:
+        assert request['json']['files'][0]['id'] == file_id
+        assert 'files[].id' not in request['json']
+        assert request['json'] == {'collection_name': 'fictional-kb', 'files': [{'id': file_id}]}
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_batch_add_sends_the_same_list_to_the_owner_and_intruder(offline, monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    path = '/api/v1/knowledge/{id}/files/batch/add'
+    route = f'POST {path}'
+    spec = {'paths': {path: seeds.SPEC['paths'][path]}, 'components': seeds.SPEC['components']}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    parameters = seeds.Resolved(
+        {(path, 'id'): 'fictional-kb'}, fields={route: {'json': {'[].file_id': 'fictional-document'}}}
+    )
+
+    @contextmanager
+    def fixtures(*args, **kwargs):
+        yield parameters, (), seeds.SURFACE, {'user': identities.user}
+
+    monkeypatch.setattr(crossuser, 'own_fixtures', fixtures)
+    monkeypatch.setattr(crossuser, '_owner_key', lambda *args: 'user')
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=['fictional-probe'])
+    assert [actor for actor, _, _, _ in order] == ['intruder', 'user'] * (len(order) // 2)
+    assert all(kwargs['json'] == [{'file_id': 'fictional-document'}] for _, _, _, kwargs in order[:2])
+    assert all(order[index][3] == order[index + 1][3] for index in range(0, len(order), 2))
+    assert result.controls == {route: 200}
+    assert not result.violations
+
+
+def test_platform_body_override_keeps_its_contract_without_legacy_skeleton_fields(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/chats/new'
+    body = {'agent': 'soev_react', 'input': {'text': 'Fictional conversation.'}}
+    parameters = seeds.Resolved(fields={route: {'json': body}})
+    assert crossuser._benign(route, parameters, seeds.SPEC)['json'] == body
+    assert parameters.fields[route]['json'] == body
+
+
 def test_mailbox_control_uses_the_saved_address_and_the_matching_owner(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     route = 'POST /api/v1/cloud-sync/connections/{connection_id}/mailboxes'
