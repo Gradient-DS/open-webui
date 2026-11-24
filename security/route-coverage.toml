@@ -173,7 +173,7 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 [[waived]]
 id = "POST /api/v1/knowledge/{id}/file/add"
 backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local knowledge store. The full stack requires the admitted file in the add response with its destination processing status before publication, then waits for the existing completion signal. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
 id = "POST /api/v1/knowledge/{id}/file/move"

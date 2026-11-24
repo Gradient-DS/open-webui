@@ -10,7 +10,7 @@ import time
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select, update
+from sqlalchemy import JSON, BigInteger, Column, String, Text, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -184,6 +184,23 @@ class FileUpdateForm(BaseModel):
     hash: str | None = None
     data: dict | None = None
     meta: dict | None = None
+
+
+def unlanded_collection_filter(collection_keys: list[str]):
+    job = File.meta['soev_job']
+    return or_(
+        and_(
+            File.meta['soev_collection_key']
+            .as_string()
+            .in_([value for key in collection_keys for value in (key, json.dumps(key))]),
+            func.coalesce(File.meta['status'].as_string(), '') != 'completed',
+        ),
+        and_(
+            job['collection_key'].as_string().in_(collection_keys),
+            job['copy'].as_boolean().is_(True),
+            func.coalesce(job['cancel_pending'].as_boolean(), False).is_(False),
+        ),
+    )
 
 
 class FilesTable:
@@ -653,13 +670,7 @@ class FilesTable:
         self, collection_key: str, db: AsyncSession | None = None
     ) -> list[FileModel]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(
-                select(File).filter(
-                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)]),
-                    # [Gradient] Completed originals retain their platform collection for downloads.
-                    func.coalesce(File.meta['status'].as_string(), '') != 'completed',
-                )
-            )
+            result = await db.execute(select(File).filter(unlanded_collection_filter([collection_key])))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:

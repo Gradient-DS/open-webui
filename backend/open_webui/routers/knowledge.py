@@ -760,7 +760,7 @@ class KnowledgeFileIdForm(BaseModel):
 @router.post(
     '/{id}/file/add',
     response_model=KnowledgeFilesResponse | None,
-    description='Requires knowledge write and file read authority. A supported platform document or supplied text representation is required for indexing; local image retention alone is insufficient. Unsupported input preserves the fixed translated type refusal and HTTP 415.',
+    description='Requires knowledge write and file read authority. A supported platform document or supplied text representation is required for indexing; local image retention alone is insufficient. Unsupported input preserves the fixed translated type refusal and HTTP 415. The response includes an admitted copy under the requested file id with its destination processing status before publication, without waiting for ingestion; the original status is preserved.',
 )
 async def add_file_to_knowledge_by_id(
     request: Request,

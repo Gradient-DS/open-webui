@@ -823,7 +823,7 @@ json = { "version_id" = "{prompt_history}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/add"
-description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
+description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB. Platform copies must appear in the response under the requested file id while processing, before catalog publication. removable_knowledge and update_knowledge keep the membership assertion and wait for the existing completion signal."
 json = { "file_id" = "{file}" }
 
 v2 = { json = { "file_id" = "{platform_document}" } }
