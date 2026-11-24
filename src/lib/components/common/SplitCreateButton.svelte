@@ -85,8 +85,13 @@
 						{#if action.href}
 							<a
 								href={action.href}
-								on:click={() => {
+								on:click={(event) => {
 									showMenu = false;
+									// [Gradient] The menu is portaled to <body>, outside the SvelteKit root, so the
+									// router never sees this click and the browser would load the page in full.
+									if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+									event.preventDefault();
+									void runAction(action);
 								}}
 							>
 								<Icon className="size-3.5" />
