@@ -342,6 +342,7 @@ const chatOpenState = (): Record<string, any> => ({
 	restoreComposerPreferences: vi.fn(),
 	composerFromFeatures: vi.fn(),
 	composerPreferences: vi.fn(),
+	composerUserDefaults: (value: unknown) => value,
 	$settings: {},
 	lastSavedFeatures: '',
 	currentComposerPreferences: vi.fn(() => ({})),
