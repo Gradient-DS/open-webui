@@ -936,6 +936,16 @@
 	$: if (showWorkspaceButton && !workspaceEnabled && assistantNeedsWorkspace) {
 		workspaceEnabled = true;
 	}
+	// [Gradient] Why Workspace cannot run here, shown when the assistant needs it: without this the
+	// switch is simply missing and the chat looks as if Workspace were on.
+	$: workspaceBlockedReason = showWorkspaceButton
+		? ''
+		: !(isFeatureEnabled('workspace') && $config?.features?.enable_workspace)
+			? 'Workspace is not available in this environment.'
+			: !$_user?.permissions?.features?.workspace
+				? 'Your account has no permission for Workspace. Ask an admin to turn it on.'
+				: 'The selected model does not support Workspace. Choose another model.';
+	$: workspaceMissing = assistantNeedsWorkspace && !showWorkspaceButton;
 	// [Gradient] Turning Workspace off in a chat that already used it asks first: its files stay behind.
 	$: workspaceUsed = Object.values(history?.messages ?? {}).some(
 		(message: any) =>
@@ -1005,7 +1015,7 @@
 		code_interpreter: itemState(codeInterpreterEnabled),
 		document_writer: itemState(documentWriterEnabled),
 		council: itemState(showCouncilButton && councilEnabled),
-		workspace: itemState(workspaceEnabled),
+		workspace: itemState(workspaceEnabled || workspaceMissing),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
@@ -2615,6 +2625,8 @@
 											{showCouncilButton}
 											{showWorkspaceButton}
 											workspaceUsed={workspaceUsed && !assistantNeedsWorkspace}
+											workspaceRequired={assistantNeedsWorkspace}
+											{workspaceBlockedReason}
 											{agentRouted}
 											bind:selectedToolIds
 											bind:selectedSkillIds
@@ -2946,16 +2958,34 @@
 															<BuildingLibrary className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
+												{:else if itemId === 'workspace' && workspaceMissing}
+													<Tooltip
+														content={`${$i18n.t('This assistant needs Workspace.')} ${$i18n.t(workspaceBlockedReason)}`}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Workspace')}
+															aria-disabled="true"
+															class="{pinnedToggleClass(
+																false
+															)} text-amber-600 dark:text-amber-400 opacity-70"
+														>
+															<CommandLine className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
 												{:else if itemId === 'workspace' && showWorkspaceButton}
 													<Tooltip
 														content={pinnedStateTooltip(
 															$i18n.t('Workspace'),
 															workspaceEnabled,
-															workspaceEnabled
-																? $i18n.t(
-																		'Make files, analyse data and draw charts in a secure workspace'
-																	)
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
+															assistantNeedsWorkspace
+																? $i18n.t('Always on with this assistant')
+																: workspaceEnabled
+																	? $i18n.t(
+																			'Make files, analyse data and draw charts in a secure workspace'
+																		)
+																	: $i18n.t(TOOL_OFF_DESCRIPTION)
 														)}
 														placement="top"
 													>
