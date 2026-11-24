@@ -1329,3 +1329,14 @@ def test_live_processing_positives_use_a_supported_transfer_without_changing_svg
     assert file['query']['process'] is False and upload['params']['process'] is False
     if mode == 'drive':
         assert all(not seeds.route_waived(route) for route in routes)
+
+
+# [Gradient] Listing succeeds with no consented sources, without fabricating a connection seed.
+def test_tool_source_discovery_is_required_in_private_drive(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'GET /api/v1/tool-sources'
+    assert route in seeds.ordinary_targets()
+    assert not seeds.route_waived(route)
+    assert route in seeds.SURFACE['required_drive_routes']
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    assert entry['backed_by'] == 'soev-solutions'

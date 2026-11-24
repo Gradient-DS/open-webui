@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 303
+    assert len(plane.operations()) == 304
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -922,7 +922,7 @@ def test_conversation_mark_read_is_driven_as_a_bodyless_write(monkeypatch):
 
 
 def test_fanout_queries_extend_existing_reads_without_adding_routes():
-    assert len(plane.operations()) == 303
+    assert len(plane.operations()) == 304
     for path, name in [
         ('/api/v1/chats/', 'include_sidebar'),
         ('/api/v1/chats/list', 'include_sidebar'),
@@ -937,7 +937,7 @@ def test_fanout_queries_extend_existing_reads_without_adding_routes():
 
 def test_changed_file_routes_keep_the_same_plane_and_no_exemption():
     routes = set(plane.operations())
-    assert len(routes) == 303
+    assert len(routes) == 304
     assert {
         'POST /api/v1/files/',
         'GET /api/v1/files/{id}/content',
@@ -954,7 +954,7 @@ def test_changed_file_routes_keep_the_same_plane_and_no_exemption():
 
 def test_original_recovery_edit_refusal_and_skill_cleanup_do_not_remove_operations():
     routes = set(plane.operations())
-    assert len(routes) == 303
+    assert len(routes) == 304
     assert {
         'POST /api/v1/files/{id}/data/content/update',
         'GET /api/v1/files/{id}/content',

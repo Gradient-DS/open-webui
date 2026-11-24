@@ -385,3 +385,13 @@ def test_sealed_ci_keeps_svg_control_without_faking_the_platform_variant(monkeyp
     )
     request.assert_not_called()
     assert 'GET /api/v1/files/{id}/content' in seeds.ordinary_targets()
+
+
+# [Gradient] The sealed stack has no platform; private mode must exercise discovery.
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_tool_source_discovery_uses_the_platform_mode_boundary(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'GET /api/v1/tool-sources'
+    assert route in seeds.SOEV_BACKED
+    assert seeds.route_waived(route) is (mode == 'waive')
+    assert (route in seeds.ordinary_targets()) is (mode == 'drive')

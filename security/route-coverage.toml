@@ -389,3 +389,10 @@ reason = "soev/thread_routes.py relays current cache authorization using only th
 id = "GET /api/v1/threads/{thread_id}/versions"
 backed_by = "soev-solutions"
 reason = "soev/thread_routes.py proxies the owner-only conversation version list. The sealed stack has no soev-api; fake-platform tests verify the owner read, missing/reader 404, feature gate and private no-store headers. Private drive uses the existing owner thread fixture."
+
+
+# [Gradient] ts-select-owui: driven with the real platform in private mode.
+[[waived]]
+id = "GET /api/v1/tool-sources"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/tool_sources.py forwards as the verified caller and uses the meetings discovery capability and configuration boundary. The sealed stack has no soev-solutions service; anonymous refusal is checked live. Private drive mode exercises the caller-scoped list, including a valid empty list."

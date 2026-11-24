@@ -183,5 +183,6 @@ def platform_operations(spec=SPEC):
             'POST /api/v1/audio/speech',
             'GET /api/v1/chats/',
             'GET /api/v1/chats/list',
+            'GET /api/v1/tool-sources',  # [Gradient] Caller-scoped discovery, including empty lists.
         }
     ]
