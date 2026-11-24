@@ -35,7 +35,25 @@ def matches(file, document: dict) -> bool:
     )
 
 
-async def candidates(file, client, *, as_user: str | None, session=None) -> tuple[list[str], bool]:
+def _read_matches(file, document: dict) -> bool:
+    recorded = fingerprint(file)
+    # The public catalog permits absent size; the download must then supply it.
+    return matches(file, document) or bool(
+        recorded and document.get('byte_size') is None and document.get('sha256') == recorded[1]
+    )
+
+
+def _download_size(response) -> int | None:
+    if response.status_code == 200:
+        value = response.headers.get('content-length', '')
+        return int(value) if re.fullmatch('[0-9]{1,20}', value) else None
+    if response.status_code in (206, 416):
+        match = re.fullmatch(r'bytes (?:[0-9]+-[0-9]+|\*)/([0-9]{1,20})', response.headers.get('content-range', ''))
+        return int(match[1]) if match else None
+    return None
+
+
+async def candidates(file, client, *, as_user: str | None, session=None, for_read=False) -> tuple[list[str], bool]:
     from open_webui.soev.file_collections import collections_for
 
     allowed = await collections_for(file, session=session)
@@ -45,16 +63,16 @@ async def candidates(file, client, *, as_user: str | None, session=None) -> tupl
             continue
         seen = True
         key = row.get('collection_key')
-        if key in allowed and matches(file, row):
+        if key in allowed and (_read_matches(file, row) if for_read else matches(file, row)):
             keys.add(key)
     preferred = 'owui-attachments-' + file.user_id
     return sorted(keys, key=lambda key: (key != preferred, key)), seen
 
 
-async def lookup(file, client, *, as_user: str | None) -> str | None:
+async def lookup(file, client, *, as_user: str | None, for_read=False) -> str | None:
     if fingerprint(file) is None:
         return None
-    keys, _ = await candidates(file, client, as_user=as_user)
+    keys, _ = await candidates(file, client, as_user=as_user, for_read=for_read)
     return next(iter(keys), None)
 
 
@@ -106,25 +124,32 @@ async def open_original(file, *, client=None, as_user: str, range_header: str | 
     client = client or identity.build_client()
     collection = read_collection(file)
     verified = False
+    document = {}
     if fingerprint(file) is None:
         raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
     if collection and collection in await collections_for(file):
         try:
             document = await client.get(path_for(collection, file.id).removesuffix('/original'), as_user=as_user)
-            verified = matches(file, document)
+            verified = _read_matches(file, document)
         except SoevApiError as error:
             if error.status != 404:
                 raise
     if not verified:
-        collection = await lookup(file, client, as_user=as_user)
+        collection = await lookup(file, client, as_user=as_user, for_read=True)
     if collection is None or (not verified and collection == read_collection(file)):
         # A mismatched pinned version cannot be bypassed by a list response for the same collection.
         raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
+    if not verified:
+        document = await client.get(path_for(collection, file.id).removesuffix('/original'), as_user=as_user)
+        if not _read_matches(file, document):
+            raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
     async with client.stream_response(
         path_for(collection, file.id),
         as_user=as_user,
         **({'range_header': range_header} if range_header is not None else {}),
     ) as response:
+        if document.get('byte_size') is None and _download_size(response) != fingerprint(file)[0]:
+            raise SoevApiError(404, 'file_not_found', 'Original unavailable', constraint='upload:original')
         if not read_collection(file):
             await remember(file, collection)
         yield response

@@ -288,3 +288,85 @@ async def test_later_completion_with_a_stale_row_cannot_replace_first_source(env
     await jobs._finish(file, {'collection_key': 'kb'}, document=document)
     await jobs._finish(file, {'collection_key': 'copy'}, document=document)
     assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'kb'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('named', [False, True])
+@pytest.mark.parametrize(
+    'range_header,status,headers,payload,accepted',
+    [
+        (None, 200, {}, FILE_BYTES, True),
+        (None, 200, {}, b'wrong-size', False),
+        ('bytes=0-3', 206, {'Content-Range': f'bytes 0-3/{len(FILE_BYTES)}'}, FILE_BYTES[:4], True),
+        ('bytes=0-3', 206, {'Content-Range': 'bytes 0-3/999'}, FILE_BYTES[:4], False),
+        ('bytes=999-', 416, {'Content-Range': f'bytes */{len(FILE_BYTES)}'}, b'', True),
+        ('bytes=0-3', 206, {}, FILE_BYTES[:4], False),
+    ],
+)
+async def test_nullable_catalog_size_is_bound_to_the_authenticated_original(
+    env, monkeypatch, named, range_header, status, headers, payload, accepted
+):
+    from open_webui.routers import files
+    from open_webui.soev import originals
+
+    file = await new_file(env, status='completed', content_type='application/pdf')
+    async with env.files.get_async_db_context() as session:
+        stored = await session.get(env.files.File, file.id)
+        stored.path = None
+        await session.commit()
+    env.api.add_document('kb', file.id, byte_size=None, sha256=hashlib.sha256(FILE_BYTES).hexdigest())
+    # Strict inventory/retirement evidence is not broadened by read recovery.
+    document = env.api.documents['kb', file.id]
+    assert not originals.matches(file, document)
+    calls = []
+    handle = env.api.handle
+
+    def respond(request):
+        calls.append(request)
+        if request.url.path.endswith('/original'):
+            assert request.headers.get('Range') == range_header
+            return httpx.Response(status, headers=headers, content=payload)
+        return handle(request)
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    user = SimpleNamespace(id='alice', role='user')
+    request = SimpleNamespace(headers={'range': range_header} if range_header else {})
+
+    async def read():
+        return await (
+            files.get_file_content_by_id(file.id, 'original.pdf', request=request, user=user, db=None)
+            if named
+            else files.get_file_content_by_id_inline(file.id, request=request, user=user, attachment=False, db=None)
+        )
+
+    if accepted:
+        response = await read()
+        assert response.status_code == status
+        assert b''.join([chunk async for chunk in response.body_iterator]) == payload
+        assert (await env.files.Files.get_file_by_id(file.id)).meta['soev_read_collection'] == 'kb'
+    else:
+        with pytest.raises(HTTPException) as caught:
+            await read()
+        assert caught.value.status_code == 404
+        assert not (await env.files.Files.get_file_by_id(file.id)).meta.get('soev_read_collection')
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice' for r in calls)
+    env.api.collections['kb']['principals'] = []
+    with pytest.raises(HTTPException) as denied:
+        await read()
+    assert denied.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('digest,size', [(None, None), ('0' * 64, None), (hashlib.sha256(FILE_BYTES).hexdigest(), 999)])
+async def test_original_read_rejects_missing_or_changed_digest_and_known_size(env, monkeypatch, digest, size):
+    from open_webui.soev import originals
+
+    file = await new_file(env, status='completed')
+    env.api.add_document('kb', file.id, sha256=digest, byte_size=size)
+    stream = Mock(side_effect=AssertionError('Unverified document must not be downloaded'))
+    monkeypatch.setattr(env.client, 'stream_response', stream)
+    with pytest.raises(env.module.SoevApiError) as caught:
+        async with originals.open_original(file, client=env.client, as_user='owui:user:alice'):
+            pytest.fail('Unverified original was admitted')
+    assert caught.value.status == 404
+    stream.assert_not_called()
