@@ -21,12 +21,8 @@
 		workspaceActions.set([]);
 	}
 
-	onMount(() => {
-		void loadSourcePolicy(localStorage.token);
-	});
-
 	// [Gradient] Recheck reused layouts so disabled skill URLs cannot render after a redirect.
-	afterNavigate(() => {
+	const checkAccess = () => {
 		loaded = false;
 		// Feature flag checks apply to ALL users including admins
 		if ($page.url.pathname.includes('/models') && !isFeatureEnabled('models')) {
@@ -82,7 +78,15 @@
 		}
 
 		loaded = true;
+	};
+
+	// After a page load this layout mounts once the app layout is ready, when the first
+	// navigation is already over: afterNavigate alone would leave the page empty.
+	onMount(() => {
+		void loadSourcePolicy(localStorage.token);
+		checkAccess();
 	});
+	afterNavigate(checkAccess);
 </script>
 
 <svelte:head>
