@@ -3593,6 +3593,7 @@
   "Theme": "",
   "There was a problem generating a response.": "",
   "There was an error syncing your stats. Please try again.": "",
+  "These files are uploaded when you save the assistant.": "",
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.",
   "These items stay private:": "",
   "These settings are read from environment variables and cannot be edited here while {{ENV_VAR}} is disabled.": "",
