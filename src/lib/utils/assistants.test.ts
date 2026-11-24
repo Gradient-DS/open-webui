@@ -3,13 +3,15 @@ import {
 	defaultLLMId,
 	assistantDefaultLLMId,
 	effectiveCapabilities,
+	SWITCHABLE_CAPABILITIES,
 	effectiveModel,
 	isAssistant,
 	isLLM,
 	pickableLLMId,
 	pickableLLMs,
 	resolveAssistant,
-	splitSelection
+	splitSelection,
+	urlChoosesLLM
 } from './assistants';
 
 const llm = {
@@ -43,14 +45,12 @@ const models = [llm, assistant, other];
 
 describe('effectiveCapabilities', () => {
 	it.each([true, false, undefined, null, 'true', 1])(
-		'workspace requires exact true on both sides: %s',
+		'workspace requires exact true on the LLM, whatever the assistant chose: %s',
 		(value) => {
 			expect(effectiveCapabilities({ workspace: value }, { workspace: true }).workspace).toBe(
 				value === true
 			);
-			expect(effectiveCapabilities({ workspace: true }, { workspace: value }).workspace).toBe(
-				value === true
-			);
+			expect(effectiveCapabilities({ workspace: true }, { workspace: value }).workspace).toBe(true);
 		}
 	);
 	it.each([
@@ -73,13 +73,21 @@ describe('effectiveCapabilities', () => {
 	});
 	it.each([
 		[{}, {}, undefined],
-		[{ web_search: true }, {}, true],
-		[{}, { web_search: false }, false],
-		[{ web_search: false }, { web_search: true }, true],
-		[{ web_search: true }, { web_search: false }, false]
+		[{ citations: true }, {}, true],
+		[{}, { citations: false }, false],
+		[{ citations: false }, { citations: true }, true],
+		[{ citations: true }, { citations: false }, false]
 	])('uses explicit assistant choices for other keys', (base, override, expected) => {
-		expect(effectiveCapabilities(base, override).web_search).toBe(expected);
+		expect(effectiveCapabilities(base, override).citations).toBe(expected);
 	});
+	it.each(SWITCHABLE_CAPABILITIES.filter((key) => key !== 'workspace'))(
+		'%s follows the LLM: the assistant sets a starting state, not a limit',
+		(key) => {
+			expect(effectiveCapabilities({}, { [key]: false })[key]).toBeUndefined();
+			expect(effectiveCapabilities({ [key]: true }, { [key]: false })[key]).toBe(true);
+			expect(effectiveCapabilities({ [key]: false }, { [key]: true })[key]).toBe(false);
+		}
+	);
 	it('accepts absent capability maps', () =>
 		expect(effectiveCapabilities(null)).toEqual({ vision: true, workspace: false }));
 });
@@ -319,5 +327,17 @@ describe('assistant default LLM', () => {
 		expect(
 			assistantDefaultLLMId([], helper({ defaultModelId: 'capable' }), initial)
 		).toBeUndefined();
+	});
+});
+
+describe('urlChoosesLLM', () => {
+	it.each([
+		['', false],
+		['model=helper', false],
+		['model=gpu', true],
+		['models=helper,gpu', true],
+		['model=deleted', false]
+	])('%s -> %s', (query, expected) => {
+		expect(urlChoosesLLM(new URLSearchParams(query), models)).toBe(expected);
 	});
 });

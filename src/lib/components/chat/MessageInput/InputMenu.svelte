@@ -20,6 +20,7 @@
 		type LiveFamily
 	} from '$lib/utils/live-connections';
 	import { toast } from 'svelte-sonner';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
 
@@ -185,6 +186,9 @@
 	// [Gradient] The Workspace switch: on/off, editing follows creation.
 	export let showWorkspaceButton = false;
 	export let workspaceEnabled = false;
+	// Whether this chat already ran something in the workspace: turning it off then asks first.
+	export let workspaceUsed = false;
+	let showWorkspaceOffConfirm = false;
 	export let documentWriterEnabled = true;
 	export let councilEnabled = false;
 	export let oauthRedirectHandler: (tool: {
@@ -306,9 +310,7 @@
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
 	$: showSkills =
-		itemAllowed('skills') &&
-		isFeatureEnabled('skills') &&
-		Object.keys(skills ?? {}).length > 0;
+		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
 	$: showLiveMail =
 		itemAllowed('live_mail') && (!!$config?.features?.enable_live_mail || liveMailState !== 'off');
@@ -604,7 +606,8 @@
 		} else if (tool === 'code_interpreter') {
 			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else if (tool === 'workspace') {
-			workspaceEnabled = !workspaceEnabled;
+			if (workspaceEnabled && workspaceUsed) showWorkspaceOffConfirm = true;
+			else workspaceEnabled = !workspaceEnabled;
 		} else if (tool === 'council') {
 			councilEnabled = !councilEnabled;
 		} else {
@@ -624,6 +627,18 @@
 	const subRowClass =
 		'relative flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/60';
 </script>
+
+<ConfirmDialog
+	bind:show={showWorkspaceOffConfirm}
+	title={$i18n.t('Turn off Workspace?')}
+	message={$i18n.t(
+		'This chat has already used the workspace. With Workspace off, the assistant can no longer read or change the files it made there. You can turn it on again at any time.'
+	)}
+	confirmLabel={$i18n.t('Turn off')}
+	on:confirm={() => {
+		workspaceEnabled = false;
+	}}
+/>
 
 <AttachWebpageModal
 	bind:show={showAttachWebpageModal}

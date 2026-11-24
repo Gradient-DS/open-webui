@@ -6,7 +6,7 @@
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistant } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
-	import { isAssistant, isLLM } from '$lib/utils/assistants';
+	import { isAssistant, isLLM, urlChoosesLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
@@ -930,15 +930,18 @@
 		$config?.features?.enable_workspace &&
 		$_user?.permissions?.features?.workspace;
 	$: if (!showWorkspaceButton) workspaceEnabled = false;
-	// [Gradient] An assistant with Workspace on keeps it on in every chat with it, reloads and retries
-	// included: its skill folder only reaches the sandbox through the workspace.
-	$: if (
-		showWorkspaceButton &&
-		!workspaceEnabled &&
-		$activeAssistant?.info?.meta?.capabilities?.workspace === true
-	) {
+	// [Gradient] An assistant with Workspace on keeps it on in every chat with it: its skill folder
+	// only reaches the sandbox through the workspace. Other assistants only set the starting state.
+	$: assistantNeedsWorkspace = $activeAssistant?.info?.meta?.capabilities?.workspace === true;
+	$: if (showWorkspaceButton && !workspaceEnabled && assistantNeedsWorkspace) {
 		workspaceEnabled = true;
 	}
+	// [Gradient] Turning Workspace off in a chat that already used it asks first: its files stay behind.
+	$: workspaceUsed = Object.values(history?.messages ?? {}).some(
+		(message: any) =>
+			(message?.statusHistory ?? []).some((status: any) => status?.action === 'workspace_task') ||
+			(message?.files ?? []).some((file: any) => file?.type === 'workspace')
+	);
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -1721,7 +1724,7 @@
 			query,
 			!history?.currentId && Object.keys(history?.messages ?? {}).length === 0,
 			$i18n,
-			$page.url.searchParams.has('model') || $page.url.searchParams.has('models')
+			urlChoosesLLM($page.url.searchParams, $models)
 		);
 		if (defaultId) selectedModels = [defaultId];
 	};
@@ -2611,6 +2614,7 @@
 											{showDocumentWriterButton}
 											{showCouncilButton}
 											{showWorkspaceButton}
+											workspaceUsed={workspaceUsed && !assistantNeedsWorkspace}
 											{agentRouted}
 											bind:selectedToolIds
 											bind:selectedSkillIds

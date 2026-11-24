@@ -9,14 +9,29 @@ if TYPE_CHECKING:
     from open_webui.models.models import ModelModel
 
 
+# Functionalities a user switches per chat: an assistant's choice is the starting state, never a limit.
+SWITCHABLE_CAPABILITIES = frozenset(
+    {
+        'web_search',
+        'image_generation',
+        'code_interpreter',
+        'document_writer',
+        'workspace',
+        'live_documents',
+        'live_mail',
+    }
+)
+
+
 def effective_capabilities(llm_caps: dict | None, assistant_caps: dict | None) -> dict:
-    """Restrict vision and workspace to both parties; other assistant choices win."""
-    llm_caps, assistant_caps = llm_caps or {}, assistant_caps or {}
+    """Vision needs both parties; switchable functionalities follow the LLM; other assistant choices win."""
+    llm_caps = llm_caps or {}
+    assistant_caps = {key: value for key, value in (assistant_caps or {}).items() if key not in SWITCHABLE_CAPABILITIES}
     return deepcopy(
         {
             **llm_caps,
             **assistant_caps,
-            'workspace': llm_caps.get('workspace') is True and assistant_caps.get('workspace') is True,
+            'workspace': llm_caps.get('workspace') is True,
             'vision': bool(llm_caps.get('vision', True) and assistant_caps.get('vision', True)),
         }
     )

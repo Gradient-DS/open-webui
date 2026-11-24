@@ -126,10 +126,24 @@ async def test_workspace_composition_and_permission(llm_workspace, assistant_wor
             {'workspace': True, 'web_search': True}, capabilities, SimpleNamespace(id='alice', role='user')
         )
     assert result == {
-        'workspace': llm_workspace is True and assistant_workspace is True and allowed,
+        # The assistant's own choice is a chat's starting state, never a limit.
+        'workspace': llm_workspace is True and allowed,
         'web_search': True,
     }
     assert (llm, assistant.model_dump()) == before
+
+
+@pytest.mark.parametrize('llm', [None, False, True])
+@pytest.mark.parametrize('assistant', [None, False, True])
+@pytest.mark.parametrize(
+    'capability',
+    ['web_search', 'image_generation', 'code_interpreter', 'document_writer', 'live_documents', 'live_mail'],
+)
+def test_switchable_capabilities_follow_the_llm(capability, llm, assistant):
+    """A functionality the assistant leaves off can still be switched on in a chat with it."""
+    llm_caps = {} if llm is None else {capability: llm}
+    assistant_caps = {} if assistant is None else {capability: assistant}
+    assert effective_capabilities(llm_caps, assistant_caps).get(capability) is llm
 
 
 @pytest.mark.asyncio
