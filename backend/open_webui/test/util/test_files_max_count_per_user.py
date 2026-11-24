@@ -14,8 +14,8 @@ Route-level tests drive ``upload_file_handler`` directly (mirroring
 ``test_upload_guard.py``): monkeypatched ``Config.get`` + a stubbed
 ``Files.count_files_by_user_id`` (the existing per-user count method this
 task reuses -- see the report for why a new ``count_by_user_id`` method was
-not added). Storage/DB stay unmocked, so a request that clears the cap guard
-fails downstream with a *different* error; that's the established way this
+not added). Storage accepts and the file insert fails on purpose, so a request
+that clears the cap guard fails downstream with a *different* error; that's the established way this
 suite proves a guard did or didn't fire without doing a full upload.
 """
 
@@ -41,6 +41,12 @@ def _patch_config(monkeypatch, *, max_count_per_user=None) -> None:
         return values.get(key, default)
 
     monkeypatch.setattr(files_router.Config, 'get', staticmethod(fake_get))
+    # A request that clears the cap guard stops at this boundary, after the guard.
+    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda source, *args: (source.read(), '/fictional/upload'))
+    monkeypatch.setattr(files_router.Storage, 'delete_file', MagicMock())
+    monkeypatch.setattr(
+        files_router.Files, 'insert_new_file', AsyncMock(side_effect=RuntimeError('post-guard boundary'))
+    )
 
 
 def _patch_count(monkeypatch, *, count: int) -> AsyncMock:
@@ -98,7 +104,7 @@ async def test_upload_accepted_when_under_cap(monkeypatch):
     _patch_config(monkeypatch, max_count_per_user=5)
     _patch_count(monkeypatch, count=4)
 
-    # Guard passes -> fails downstream (Storage/DB unmocked), NOT a cap reject.
+    # Guard passes -> fails at the insert boundary, NOT a cap reject.
     with pytest.raises(HTTPException) as exc_info:
         await upload_file_handler(
             _request(), file=_upload_file(), process=False, process_in_background=False, user=_user()
