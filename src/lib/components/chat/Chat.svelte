@@ -3647,7 +3647,17 @@
 	// Phase 1 left this comment in but new upstream call sites in the merge
 	// reference `submitHandler` by name (9 of them across this file). Aliasing
 	// keeps both names live without rewriting every call site.
-	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
+	// [Gradient] `inputFiles` are the files of a message released from the queue. Such a message is sent
+	// with its own files and leaves the composer's draft (text and files) alone.
+	const submitPrompt = async (userPrompt, inputFiles: ChatAttachment[] | null = null) => {
+		const queued = Array.isArray(inputFiles);
+		const turnFiles: ChatAttachment[] = queued ? inputFiles : files;
+		const clearComposer = () => {
+			if (queued) return;
+			messageInput?.setText('');
+			prompt = '';
+			files = [];
+		};
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -3684,7 +3694,7 @@
 			toast.warning($i18n.t('Please connect all required integrations before sending a message'));
 			return;
 		}
-		if (userPrompt === '' && files.length === 0) {
+		if (userPrompt === '' && turnFiles.length === 0) {
 			toast.error($i18n.t('Please enter a prompt'));
 			return;
 		}
@@ -3705,7 +3715,7 @@
 
 		if (
 			($config?.file?.max_count ?? null) !== null &&
-			files.length + chatFiles.length > $config?.file?.max_count
+			turnFiles.length + chatFiles.length > $config?.file?.max_count
 		) {
 			toast.error(
 				$i18n.t(`You can only chat with a maximum of {{maxCount}} file(s) at a time.`, {
@@ -3727,15 +3737,13 @@
 
 		if (
 			($chatRequestQueues[$chatId] ?? []).some((m) => isAwaitingUpload(m.files)) ||
-			isAwaitingUpload(files)
+			isAwaitingUpload(turnFiles)
 		) {
 			chatRequestQueues.update((q) => ({
 				...q,
-				[$chatId]: [...(q[$chatId] ?? []), { id: uuidv4(), prompt: userPrompt, files }]
+				[$chatId]: [...(q[$chatId] ?? []), { id: uuidv4(), prompt: userPrompt, files: turnFiles }]
 			}));
-			messageInput?.setText('');
-			prompt = '';
-			files = [];
+			clearComposer();
 			return;
 		}
 
@@ -3747,15 +3755,12 @@
 		if (isGenerating) {
 			if ($settings?.enableMessageQueue ?? true) {
 				// Enqueue the request
-				const _files = structuredClone(files);
+				const _files = structuredClone(turnFiles);
 				chatRequestQueues.update((q) => ({
 					...q,
 					[$chatId]: [...(q[$chatId] ?? []), { id: uuidv4(), prompt: userPrompt, files: _files }]
 				}));
-				// Clear input
-				messageInput?.setText('');
-				prompt = '';
-				files = [];
+				clearComposer();
 				return;
 			} else {
 				// Interrupt: stop current generation and proceed
@@ -3776,14 +3781,14 @@
 		// Data sovereignty warning check
 		// Combine current files + accumulated chatFiles to detect KB types
 		const allKbFiles = [
-			...files.filter((f) => f.type === 'collection'),
+			...turnFiles.filter((f) => f.type === 'collection'),
 			...chatFiles.filter((f) => f.type === 'collection')
 		];
 		const hasLocalKb = allKbFiles.some((f) => !f.knowledge_type || f.knowledge_type === 'local');
 		const hasExternalKb = allKbFiles.some((f) => f.knowledge_type && f.knowledge_type !== 'local');
 		const activeCapabilities: Record<string, boolean> = {
-			file_upload: files.some((f) => f.type !== 'image' && f.type !== 'collection'),
-			vision: files.some((f) => f.type === 'image'),
+			file_upload: turnFiles.some((f) => f.type !== 'image' && f.type !== 'collection'),
+			vision: turnFiles.some((f) => f.type === 'image'),
 			web_search: webSearchEnabled,
 			image_generation: imageGenerationEnabled,
 			code_interpreter: codeInterpreterEnabled,
@@ -3797,11 +3802,8 @@
 		if (!warningAccepted) return;
 		rememberComposerPreferences(currentComposerPreferences());
 
-		messageInput?.setText('');
-		prompt = '';
-
 		const messages = createMessagesList(history, history.currentId);
-		const _files = structuredClone(files);
+		const _files = structuredClone(turnFiles);
 
 		// [Gradient] 'url' — a web page attached for the agent to fetch live
 		// (GRA-222). It joins the chat-level attachments for the same reason
@@ -3822,8 +3824,7 @@
 				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
 		);
 
-		files = [];
-		messageInput?.setText('');
+		clearComposer();
 
 		// Create user message
 		let userMessageId = uuidv4();
