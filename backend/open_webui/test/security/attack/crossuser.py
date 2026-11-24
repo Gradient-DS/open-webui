@@ -362,6 +362,23 @@ def _benign(route, parameters, spec):
     return request
 
 
+def _owner_request(route, parameters, kwargs):
+    target = next((item for item in seeds.SURFACE.get('body_target', []) if item['route'] == route), None)
+    if not target or seeds.runtime_soev_backed() != 'drive' or 'v2_owner_control' not in target:
+        return kwargs
+    # The sealed platform seeds a deliberately missing skill for refusal probes.
+    # Its upload route still needs a successful control using the admitted media flow.
+    context = SimpleNamespace(
+        values=parameters.fixtures,
+        token=uuid4().hex,
+        surface={
+            'field': [{'route': route, **target['v2_owner_control']}],
+        },
+    )
+    declared = seeds.resolve_fields(context)[route]
+    return {'files': declared['files'], 'params': declared['params']}
+
+
 def _requests(route, parameters, spec, fields, payloads, full):
     yield True, _benign(route, parameters, spec)
     names = fields.get(route, [])
@@ -454,7 +471,10 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                             _request(identities.admin, actor, route, target, tally, kwargs)
                             for actor in stranger_clients
                         ]
-                        positive = _request(identities.admin, owner, route, target, tally, kwargs) if owner else None
+                        owner_kwargs = _owner_request(route, parameters, kwargs) if control else kwargs
+                        positive = (
+                            _request(identities.admin, owner, route, target, tally, owner_kwargs) if owner else None
+                        )
                         for stranger in answers:
                             _check(
                                 result,

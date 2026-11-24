@@ -1,3 +1,4 @@
+# Transfer completion: upload seeds poll completed status and cleared job; retained media can be processed later from trusted storage. Original reads bind missing catalog size to authenticated download length. No route exemption.
 # Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
 # File upload skill body seed requires exact foreign-target 404 concealment.
 # Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
@@ -216,7 +217,7 @@ actor = "user"
 key = "file"
 name = "id"
 prefix = "/api/v1/files/{id}"
-description = "routers/files.py authenticates the upload owner. Genuine SVG bytes remain local even with platform mode; documents relay synchronously to the platform. Skill retention requires write authority and an atomic skill_file link. No process=false document bypass."
+description = "routers/files.py authenticates the upload owner. Genuine SVG bytes remain local even with platform mode; documents relay and commit in the request, then finish asynchronously through owner-authenticated status polling. Skill retention requires write authority and an atomic skill_file link. No process=false document bypass."
 via = "POST /api/v1/files/"
 extract = "id"
 files = [{ "field" = "file", "filename" = "attack-{token}.svg", "content" = "<svg xmlns='http://www.w3.org/2000/svg'><text>Attack file {token}</text></svg>", "content_type" = "image/svg+xml" }]
@@ -420,7 +421,7 @@ backed_by = "soev-solutions"
 key = "removable_knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/file/remove"
-description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads, processes and adds a file of its own and provides its id as {removable_file}. Upload cancellation is made only in the recorded creator request; other authorized writers retain durable pending cancellation without sign-in redirection."
+description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads a file of its own, observes completed status and cleared job, then adds it and provides its id as {removable_file}. Upload cancellation is made only in the recorded creator request; other authorized writers retain durable pending cancellation without sign-in redirection."
 seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["removable_file"]
@@ -767,7 +768,7 @@ json = { "folder_id" = "{folder}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
-description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
+description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. The genuine local SVG seed uploads with process=false. Setup submits its retained storage bytes for processing, waits for completed status and a cleared job, then adds it to the KB and waits for the destination copy. No duplicate process request is sent for a document transfer."
 json = { "file_id" = "{file}" }
 setup = [
     { via = "POST /api/v1/retrieval/process/file", body = { "file_id" = "{file}" } },
@@ -1694,9 +1695,10 @@ routes = [
 [[body_target]]
 route = "POST /api/v1/files/"
 owner = "skill_bundle"
-description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and an administrator without write access receive exactly the same 404 as a missing skill, before storage. Owner positive control requires skills and skill_files enabled. No exemption."
+description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and an administrator without write access receive exactly the same 404 as a missing skill, before storage. Skill lookup and write authority precede plan disclosure. The sealed platform uses a missing skill refusal seed; its owner route control uploads genuine SVG without skill metadata. Entitled skill owner/writer admission is proved in test_skill_uploads. No exemption."
 params = { process = false }
 form = { metadata = '{"skill_id":"{skill_bundle}","skill_path":"attack-upload-{token}.pdf"}' }
+v2_owner_control = { params = { process = false }, files = [{ field = "file", filename = "attack-owner-{token}.svg", content = "<svg xmlns='http://www.w3.org/2000/svg'><text>Fictional owner upload {token}</text></svg>", content_type = "image/svg+xml" }] }
 files = [{ field = "file", filename = "attack-{token}.pdf", content = "%PDF-1.7 attack skill {token}", content_type = "application/pdf" }]
 
 

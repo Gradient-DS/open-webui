@@ -172,3 +172,60 @@ async def test_skill_upload_is_atomic(tmp_path, monkeypatch, request, database, 
                 assert await session.scalar(select(func.count()).select_from(SkillFile)) == 0
                 assert not stored.exists()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'target,actor,role,expected',
+    [
+        ('missing', 'stranger', 'user', 404),
+        ('skill', 'stranger', 'user', 404),
+        ('skill', 'administrator', 'admin', 404),
+        ('skill', 'owner', 'user', 403),
+    ],
+)
+async def test_skill_upload_conceals_targets_before_the_plan_gate(tmp_path, monkeypatch, target, actor, role, expected):
+    from open_webui.models.skills import Skill
+    from open_webui.routers import skill_files
+    from open_webui.soev import skill_uploads
+    from open_webui.constants import ERROR_MESSAGES
+
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/concealment.db')
+    async with engine.begin() as connection:
+        await connection.run_sync(Skill.__table__.create)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    gate = AsyncMock(side_effect=HTTPException(403, detail="Feature 'skills' is not available in your plan"))
+    monkeypatch.setattr(skill_files, 'require_skill_files', gate)
+    monkeypatch.setattr(skill_files.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr(skill_files, 'can_bypass_access_control', lambda user: False)
+    storage = Mock(side_effect=AssertionError('A refused upload cannot store bytes'))
+    monkeypatch.setattr(skill_uploads.Storage, 'upload_file', storage)
+    try:
+        async with sessions() as session:
+            session.add(
+                Skill(
+                    id='skill', user_id='owner', name='Fictional skill', content='', meta={}, created_at=1, updated_at=1
+                )
+            )
+            await session.commit()
+            with pytest.raises(HTTPException) as caught:
+                await skill_uploads.upload(
+                    UploadFile(file=BytesIO(b'fictional'), filename='fictional.txt'),
+                    file_id='fictional-upload',
+                    metadata={'skill_id': target, 'skill_path': 'fictional.txt'},
+                    user=SimpleNamespace(id=actor, role=role),
+                    db=session,
+                    extension='txt',
+                    allowed_extensions=[],
+                    max_size=1,
+                    content_type='text/plain',
+                )
+            assert caught.value.status_code == expected
+            if expected == 404:
+                assert caught.value.detail == ERROR_MESSAGES.NOT_FOUND
+                gate.assert_not_awaited()
+            else:
+                gate.assert_awaited_once()
+            storage.assert_not_called()
+    finally:
+        await engine.dispose()

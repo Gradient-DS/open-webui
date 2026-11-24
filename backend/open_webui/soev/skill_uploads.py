@@ -42,7 +42,6 @@ async def upload(
     if not isinstance(path, str) or metadata.get('knowledge_id'):
         raise HTTPException(400, detail=ERROR_MESSAGES.DEFAULT('Error uploading file'))
     _validate_skill_path(path)
-    await require_skill_files()
     stored_path = None
     removed = []
     result = None
@@ -58,6 +57,7 @@ async def upload(
                 if error.status_code in (401, 403):
                     raise HTTPException(404, detail=ERROR_MESSAGES.NOT_FOUND) from None
                 raise
+            await require_skill_files()
             existing = await session.scalar(
                 select(SkillFile)
                 .where(

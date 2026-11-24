@@ -908,3 +908,43 @@ def test_skill_upload_requires_exact_concealment(status):
         control=True,
     )
     assert bool(result.violations) is (status != 404)
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_skill_refusal_keeps_404_while_the_owner_control_uses_an_available_upload(monkeypatch, mode):
+    import json
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'POST /api/v1/files/'
+    parameters = seeds.Resolved(fixtures={'skill_bundle': 'fictional-disabled-skill_bundle'})
+    foreign = crossuser._benign(route, parameters, seeds.SPEC)
+    assert json.loads(foreign['data']['metadata'])['skill_id'] == 'fictional-disabled-skill_bundle'
+    owner = crossuser._owner_request(route, parameters, foreign)
+    if mode == 'drive':
+        assert 'data' not in owner
+        assert owner['params'] == {'process': 'false'}
+        assert sniff_content_type(owner['files'][0][1][1].encode()).startswith('image/')
+    else:
+        assert owner == foreign
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(404, True, 'not found'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls[route] == 200 and not result.violations
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(403, True, 'Feature unavailable'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert any('concealed as HTTP 404' in item['reason'] for item in result.violations)

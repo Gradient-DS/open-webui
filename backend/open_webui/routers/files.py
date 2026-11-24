@@ -277,7 +277,7 @@ async def process_uploaded_file(
 @router.post(
     '/',
     response_model=FileModelResponse,
-    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415.',
+    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415.',
 )
 async def upload_file(
     request: Request,
@@ -972,7 +972,7 @@ async def update_file_data_content_by_id(
     '/{id}/content',
     methods=['GET', 'HEAD'],
     name='get_file_content_by_id',
-    description='Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.',
+    description='Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. When catalog byte_size is null, the authenticated download Content-Length or Content-Range total must equal the recorded size before any bytes are relayed. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.',
 )
 async def get_file_content_by_id_inline(
     id: str,
@@ -1052,7 +1052,7 @@ async def get_file_content_by_id_inline(
 
 @router.get(
     '/{id}/content/{file_name}',
-    description='Apply the same document recovery, platform readership and local-media rules as the inline content route. Filename does not grant access.',
+    description='Apply the same document recovery, platform readership and local-media rules as the inline content route, including authenticated download size verification when catalog size is null. Filename does not grant access.',
 )
 async def get_file_content_by_id(
     id: str,
