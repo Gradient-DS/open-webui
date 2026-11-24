@@ -65,6 +65,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'routers/terminals.py': 'No terminal connections configured; supplied connection destinations are findings.',
     'services/email/auth.py': 'Missing EMAIL_GRAPH credentials raise before the Microsoft token request.',
     'services/email/graph_mail_client.py': 'Mail token acquisition raises before Graph sendMail when EMAIL_GRAPH credentials are empty.',
+    'soev/transfers.py': 'Document PUTs require the exact SOEV_TRANSFER_STORE_HOST origin (HTTPS and port 443 by default; only an explicit internal HTTP origin permits HTTP). Unconfigured or foreign destinations fail before I/O. No redirects, Authorization, cookies or environment proxies. CI explicitly selects http://s3:9000; unit tests use MockTransport.',
     'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
     'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at the in-network S3 gateway with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
