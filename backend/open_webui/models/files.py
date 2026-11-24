@@ -10,7 +10,7 @@ import time
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select, update
+from sqlalchemy import JSON, BigInteger, Column, String, Text, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -36,6 +36,30 @@ class File(Base):  # uploaded file record
 
     created_at = Column(BigInteger, index=True)  # upload timestamp
     updated_at = Column(BigInteger)
+
+
+class FileJob(Base):
+    __tablename__ = 'soev_file_job'
+    file_id = Column(Text, primary_key=True)
+    creator_user_id = Column(Text, nullable=False, index=True)
+    job = Column(JSON, nullable=False)
+
+
+async def _record_job(db, file_id, job):
+    row = await db.get(FileJob, file_id)
+    if job is None:
+        if row is not None:
+            await db.delete(row)
+    elif isinstance(job, dict) and job.get('as_user'):
+        creator = job['as_user'].removeprefix('owui:user:')
+        if row is not None:
+            if row.creator_user_id != creator:
+                raise PermissionError('Job creator is immutable')
+            if row.job.get('cancel_pending'):
+                job = {**job, **{key: value for key, value in row.job.items() if key.startswith('cancel_')}}
+            row.job = job
+        else:
+            db.add(FileJob(file_id=file_id, creator_user_id=creator, job=job))
 
 
 class FileModel(BaseModel):
@@ -151,7 +175,7 @@ class FileForm(BaseModel):
     id: str
     hash: str | None = None
     filename: str
-    path: str
+    path: str | None = None  # [Gradient] Document originals live on the platform.
     data: dict = {}
     meta: dict = {}
 
@@ -160,6 +184,23 @@ class FileUpdateForm(BaseModel):
     hash: str | None = None
     data: dict | None = None
     meta: dict | None = None
+
+
+def unlanded_collection_filter(collection_keys: list[str]):
+    job = File.meta['soev_job']
+    return or_(
+        and_(
+            File.meta['soev_collection_key']
+            .as_string()
+            .in_([value for key in collection_keys for value in (key, json.dumps(key))]),
+            func.coalesce(File.meta['status'].as_string(), '') != 'completed',
+        ),
+        and_(
+            job['collection_key'].as_string().in_(collection_keys),
+            job['copy'].as_boolean().is_(True),
+            func.coalesce(job['cancel_pending'].as_boolean(), False).is_(False),
+        ),
+    )
 
 
 class FilesTable:
@@ -186,13 +227,15 @@ class FilesTable:
             try:
                 result = File(**file.model_dump())
                 db.add(result)
+                if 'soev_job' in (result.meta or {}):
+                    await _record_job(db, result.id, result.meta['soev_job'])
                 await db.commit()
                 if result:
                     return FileModel.model_validate(result)
                 else:
                     return None
             except Exception as e:
-                log.exception(f'Error inserting a new file: {e}')
+                log.error('File insert failed (%s)', type(e).__name__)
                 return None  # insertion failed
 
     async def get_file_by_id(
@@ -441,11 +484,21 @@ class FilesTable:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
                 file = result.scalars().first()
+                if 'soev_job' in meta:
+                    pending = ((file.meta or {}).get('soev_job') or {}).get('cancel_pending') if file else False
+                    if pending and isinstance(meta['soev_job'], dict):
+                        meta = {**meta, 'soev_job': {**meta['soev_job'], 'cancel_pending': True}}
+                    await _record_job(db, id, meta['soev_job'])
+                if file is None:
+                    await db.commit()
+                    return None
                 file.meta = {**(file.meta if file.meta else {}), **meta}
                 file.updated_at = int(time.time())
                 await db.commit()
                 return FileModel.model_validate(file)
             except Exception:
+                if 'soev_job' in meta:
+                    raise
                 return None
 
     async def update_file_name_by_id(self, id: str, name: str, db: AsyncSession | None = None) -> FileModel | None:
@@ -511,7 +564,7 @@ class FilesTable:
         async with get_async_db_context(db) as db:
             query = select(File).filter(File.meta['soev_job'].as_string().is_not(None))
             if user_id is not None:
-                query = query.filter_by(user_id=user_id)
+                query = query.where(File.meta['soev_job']['as_user'].as_string() == f'owui:user:{user_id}')
             result = await db.execute(query)
             return [
                 FileModel.model_validate(file)
@@ -521,7 +574,11 @@ class FilesTable:
 
     async def claim_soev_job_poll(self, id: str, user_id: str, *, now: int, interval: int) -> FileModel | None:
         async with get_async_db_context() as db:
-            result = await db.execute(select(File).filter_by(id=id, user_id=user_id).with_for_update())
+            result = await db.execute(
+                select(File)
+                .where(File.id == id, File.meta['soev_job']['as_user'].as_string() == f'owui:user:{user_id}')
+                .with_for_update()
+            )
             file = result.scalar_one_or_none()
             if file is None or not isinstance((file.meta or {}).get('soev_job'), dict):
                 return None
@@ -534,7 +591,7 @@ class FilesTable:
                 update(File)
                 .where(
                     File.id == id,
-                    File.user_id == user_id,
+                    File.meta['soev_job']['as_user'].as_string() == f'owui:user:{user_id}',
                     File.meta['soev_job']['job_id'].as_string() == file.meta['soev_job']['job_id'],
                     func.coalesce(File.meta['soev_job_polled_at'].as_integer(), 0) == previous,
                 )
@@ -546,15 +603,74 @@ class FilesTable:
                 return None
             return FileModel.model_validate(file).model_copy(update={'meta': metadata})
 
+    async def claim_soev_job_cancel(self, file_id: str, creator_user_id: str, *, now: int) -> dict | None:
+        async with get_async_db_context() as db:
+            row = await db.scalar(
+                select(FileJob)
+                .where(
+                    FileJob.file_id == file_id,
+                    FileJob.creator_user_id == creator_user_id,
+                )
+                .with_for_update()
+            )
+            if row is None or row.job.get('cancel_retry_at', 0) > now:
+                return None
+            previous = row.job.get('cancel_attempts', 0)
+            job = {
+                **row.job,
+                'cancel_pending': True,
+                'cancel_attempts': previous + 1,
+                'cancel_retry_at': now + min(30 * 2 ** min(previous, 7), 3600),
+            }
+            claimed = await db.execute(
+                update(FileJob)
+                .where(
+                    FileJob.file_id == file_id,
+                    FileJob.creator_user_id == creator_user_id,
+                    func.coalesce(FileJob.job['cancel_attempts'].as_integer(), 0) == previous,
+                )
+                .values(job=job)
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                await db.rollback()
+                return None
+            file = await db.get(File, file_id)
+            if file is not None:
+                file.meta = {**(file.meta or {}), 'soev_job': job}
+            await db.commit()
+            return job
+
+    async def get_orphaned_file_jobs(self, creator_user_id: str) -> list[FileModel]:
+        async with get_async_db_context() as db:
+            rows = (
+                (
+                    await db.execute(
+                        select(FileJob)
+                        .outerjoin(File, File.id == FileJob.file_id)
+                        .where(File.id.is_(None), FileJob.creator_user_id == creator_user_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                FileModel(
+                    id=row.file_id,
+                    user_id=creator_user_id,
+                    filename='',
+                    meta={'soev_job': {**row.job, 'cancel_pending': True}},
+                    created_at=0,
+                    updated_at=0,
+                )
+                for row in rows
+            ]
+
     async def get_unlanded_files_for_collection(
         self, collection_key: str, db: AsyncSession | None = None
     ) -> list[FileModel]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(
-                select(File).filter(
-                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)])
-                )
-            )
+            result = await db.execute(select(File).filter(unlanded_collection_filter([collection_key])))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:

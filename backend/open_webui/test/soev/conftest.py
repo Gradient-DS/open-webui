@@ -53,6 +53,7 @@ def identity_config(monkeypatch, tmp_path):
         identity.config, 'SOEV_ARCHIVE_READERS_GROUP_REF', 'platform:group:acb96241-0178-4089-b438-fae30a08d3ee'
     )
     monkeypatch.setattr(identity.config, 'SOEV_GROUP_SNAPSHOT_MAX_AGE_SECONDS', 5)
+    monkeypatch.setattr(identity.config, 'SOEV_TRANSFER_STORE_HOST', 'store.invalid')
     return identity, None
 
 

@@ -67,6 +67,7 @@ class FakeSoevApi:
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
+        self.transfer_signatures = {}
         self.images = {}
         self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
@@ -91,6 +92,9 @@ class FakeSoevApi:
             return httpx.Response(error.status, json=body, headers={'Content-Type': 'application/problem+json'})
 
     def _handle(self, request):
+        if request.url.host == 'store.invalid':
+            assert not {'authorization', 'cookie', 'x-soev-user-token'} & request.headers.keys()
+            return self._upload(request)
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
@@ -98,13 +102,8 @@ class FakeSoevApi:
         if request.method == 'GET' and request.url.path == '/v1/products/owui/config':
             assert subject is None
             return httpx.Response(200, json=self.product_config)
-        if (
-            request.method == 'PUT'
-            and re.fullmatch(r'/v1/jobs/[^/]+/uploads/.+', request.url.path)
-            or request.method == 'POST'
-            and request.url.path == '/v1/chat/images'
-        ):
-            return self._binary_upload(request, credential, subject)
+        if request.method == 'POST' and request.url.path == '/v1/chat/images':
+            return self._image_upload(request, (credential, subject))
         body = json.loads(request.content) if request.content else None
         if (
             request.method == 'GET'
@@ -136,11 +135,6 @@ class FakeSoevApi:
         response = self._route(request, body, credential, subject)
         self.replays[key] = (copy.deepcopy(fingerprint), response.status_code, response.content)
         return response
-
-    def _binary_upload(self, request, credential, subject):
-        if request.url.path == '/v1/chat/images':
-            return self._image_upload(request, (credential, subject))
-        return self._upload(request, credential)
 
     def _image_upload(self, request, owner):
         # [Gradient] Binary uploads require a valid, caller-owned thread before the first turn.
@@ -191,7 +185,12 @@ class FakeSoevApi:
             raise Problem(409, 'idempotency_conflict')
         if ingest_create:
             job = self.jobs[json.loads(content)['job_id']]
-            return httpx.Response(200, json=self._job_view(job))
+            view = self._job_view(job)
+            if job['status'] == 'AWAITING_UPLOAD':
+                view['uploads'] = json.loads(content)['uploads']
+                for upload in view['uploads']:
+                    upload['expires_at'] = (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=60)).isoformat()
+            return httpx.Response(200, json=view)
         return httpx.Response(200 if status == 201 else status, content=content)
 
     def _require(self, credential, capability):
@@ -199,11 +198,15 @@ class FakeSoevApi:
         if '*' not in capabilities and capability not in capabilities:
             raise Problem(403, 'scope_insufficient', f'capability:{capability}')
 
-    def _upload(self, request, credential):
-        self._require(credential, 'ingest')
-        _, _, _, job_id, _, source_id = request.url.path.split('/', 5)
+    def _upload(self, request):
+        _, job_id, source_id = request.url.path.split('/', 2)
+        signature = self.transfer_signatures.get((job_id, source_id))
+        if signature is None or request.url.params.get('signature') != signature:
+            raise Problem(403, 'access_denied')
+        if request.method != 'PUT':
+            raise Problem(405, 'method_not_allowed')
         job = self.jobs.get(job_id)
-        if job is None or self.job_owners[job_id] != credential or job['status'] != 'AWAITING_UPLOAD':
+        if job is None or job['status'] != 'AWAITING_UPLOAD':
             raise Problem(404, 'not_found')
         if dt.datetime.fromisoformat(self.now) >= dt.datetime.fromisoformat(job['created_at']) + dt.timedelta(
             minutes=15
@@ -212,12 +215,21 @@ class FakeSoevApi:
         document = next((doc for doc in job.get('documents', []) if doc['source_id'] == source_id), None)
         if document is None or 'size' not in document:
             raise Problem(404, 'not_found')
+        expected = {
+            'content-length': str(document['size']),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
+            'if-none-match': '*',
+        }
+        if any(request.headers.get(key) != value for key, value in expected.items()):
+            raise Problem(400, 'upload_missing')
+        if (job_id, source_id) in self.uploads:
+            return httpx.Response(412)
         if len(request.content) != document['size']:
             raise Problem(400, 'upload_missing')
         if hashlib.sha256(request.content).hexdigest() != document['sha256']:
             raise Problem(400, 'upload_missing')
         self.uploads[job_id, source_id] = request.content
-        return httpx.Response(204)
+        return httpx.Response(200)
 
     def _closure(self, ref):
         refs = {ref}
@@ -607,6 +619,37 @@ class FakeSoevApi:
         self._require(credential, 'ingest')
         if subject:
             self._collection(body['collection_key'], credential, subject, write=True)
+        self._validate_formats(body['documents'])
+
+    def _validate_formats(self, documents):
+        # Mirror the platform parser boundary; local image retention is not document ingestion.
+        from open_webui.utils.content_types import EXTENSION_MIME
+
+        extensions = set(EXTENSION_MIME) | {'wav', 'mp3', 'm4a', 'webm', 'ogg', 'flac', 'mp4'}
+        mimes = set(EXTENSION_MIME.values()) | {
+            'audio/wav',
+            'audio/x-wav',
+            'audio/wave',
+            'audio/vnd.wave',
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/mp4',
+            'audio/m4a',
+            'audio/x-m4a',
+            'audio/webm',
+            'audio/ogg',
+            'audio/flac',
+            'audio/x-flac',
+            'text/rtf',
+            'text/x-markdown',
+            'application/xhtml+xml',
+            'text/xml',
+        }
+        for document in documents:
+            mime = (document.get('content_type') or '').split(';', 1)[0].strip().lower()
+            extension = Path(document['filename']).suffix.lower().removeprefix('.')
+            if mime not in mimes and extension not in extensions:
+                raise Problem(415, 'content_type_rejected')
 
     def _validate_document(self, document):
         common = {
@@ -663,16 +706,23 @@ class FakeSoevApi:
             for document in documents
         ]
         job['progress'].update(total=len(documents), pending=len(documents))
-        job['expires_at'] = self.now
-        expires_at = (dt.datetime.fromisoformat(self.now) + dt.timedelta(minutes=15)).isoformat().replace('+00:00', 'Z')
+        job['expires_at'] = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=15)).isoformat().replace('+00:00', 'Z')
+        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=60)).isoformat().replace('+00:00', 'Z')
+        for document in documents:
+            if 'size' in document:
+                self.transfer_signatures[job['job_id'], document['source_id']] = uuid4().hex
         uploads = [
             {
                 'source_id': document['source_id'],
                 'method': 'PUT',
-                'url': f'/v1/jobs/{job["job_id"]}/uploads/{quote(document["source_id"], safe="")}',
+                'url': (
+                    f'https://store.invalid/{job["job_id"]}/{quote(document["source_id"], safe="")}'
+                    f'?signature={self.transfer_signatures[job["job_id"], document["source_id"]]}'
+                ),
                 'headers': {
                     'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
                     'Content-Length': str(document['size']),
+                    'If-None-Match': '*',
                 },
                 'expires_at': expires_at,
             }

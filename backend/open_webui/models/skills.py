@@ -7,7 +7,7 @@ from open_webui.models.access_grants import AccessGrantModel, AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.users import User, UserModel, UserResponse, Users
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, BigInteger, Boolean, Column, String, Text, delete, func, or_, select, update
+from sqlalchemy import JSON, BigInteger, Boolean, Column, String, Text, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -347,15 +347,10 @@ class SkillsTable:
                 return None
 
     async def delete_skill_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        try:
-            async with get_async_db_context(db) as db:
-                await AccessGrants.revoke_all_access('skill', id, db=db)
-                await db.execute(delete(Skill).filter_by(id=id))
-                await db.commit()
+        # [Gradient] Bundle links and unused backing Files are removed together.
+        from open_webui.soev.skill_storage import delete_skill
 
-                return True
-        except Exception:
-            return False
+        return await delete_skill(id, db=db)
 
 
 Skills = SkillsTable()

@@ -18,6 +18,9 @@ data:
   {{- with .Values.soevApi.url }}
   SOEV_API_URL: {{ . | quote }}
   {{- end }}
+  {{- with .Values.soevApi.transferStoreHost }}
+  SOEV_TRANSFER_STORE_HOST: {{ . | quote }}
+  {{- end }}
   {{- with .Values.soevApi.servicePrincipal }}
   SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
   {{- end }}

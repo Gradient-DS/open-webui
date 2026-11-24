@@ -221,3 +221,29 @@ def test_incomplete_or_invalid_migration_values_are_rejected(settings):
     result = render(settings)
     assert result.returncode != 0
     assert 'postgres.migration.' in result.stderr
+
+
+def test_strict_egress_allows_public_platform_and_transfer_store():
+    result = render(values='strict-egress-values.yaml')
+    assert result.returncode == 0, result.stderr
+    policies = [m for m in yaml.safe_load_all(result.stdout) if m and m['kind'] == 'CiliumNetworkPolicy']
+    selectors = [s for p in policies for e in p['spec']['egress'] for s in e.get('toFQDNs', [])]
+    names = {s.get('matchName') for s in selectors}
+    assert {'api.tenant.example.invalid', 'transfers.example.invalid'} <= names
+    assert '8020' not in result.stdout
+    pod, _ = objects(values='strict-egress-values.yaml')
+    assert all('retire_document_bytes' not in str(c) for c in pod['initContainers'])
+
+
+@pytest.mark.parametrize('fqdn', ['true', 'false'])
+def test_strict_egress_requires_transfer_store_hostname(fqdn):
+    result = render(
+        {
+            'soevApi.url': 'https://api.public.invalid',
+            'soevApi.transferStoreHost': '',
+            'networkPolicy.egress.strict': 'true',
+            'networkPolicy.egress.fqdn.enabled': fqdn,
+        }
+    )
+    assert result.returncode != 0
+    assert 'soevApi.transferStoreHost is required' in result.stderr

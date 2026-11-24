@@ -207,3 +207,27 @@ def test_a_long_model_id_gets_a_collection_key_soev_api_accepts():
     assert ingest.assistant_collection_key('helper') == 'owui-assistant-helper'
     assert len(ingest.assistant_collection_key(long_id)) <= 128
     assert ingest.assistant_collection_key(long_id) != ingest.assistant_collection_key(long_id + 'y')
+
+
+@pytest.mark.asyncio
+async def test_one_platform_file_failure_does_not_abort_assistant_sync(saved, monkeypatch):
+    from unittest.mock import AsyncMock
+    from open_webui.soev.client import SoevApiError
+
+    saved.model = assistant('bad', 'good')
+    saved.files = {name: file(name) for name in ('bad', 'good')}
+    submitted = []
+
+    async def submit(record, **kwargs):
+        submitted.append(record.id)
+        if record.id == 'bad':
+            raise SoevApiError(403, 'scope_insufficient', 'private original')
+
+    status = AsyncMock()
+    monkeypatch.setattr(ingest, 'submit', submit)
+    from open_webui.soev import copy_state
+
+    monkeypatch.setattr(copy_state, 'record', status)
+    await assistant_files.sync('helper')
+    assert submitted == ['bad', 'good']
+    status.assert_awaited_once_with(saved.files['bad'], KEY, 'failed', error='scope_insufficient')

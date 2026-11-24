@@ -8,7 +8,6 @@
 	import {
 		getSkillFileList,
 		getSkillFileContentBlob,
-		createSkillFile,
 		createSkillFileInline,
 		updateSkillFileContent,
 		moveSkillFile,
@@ -235,15 +234,16 @@
 		uploading = true;
 		for (const file of files) {
 			try {
-				const uploaded = await uploadFile(localStorage.token, file, null, false);
+				const uploaded = await uploadFile(
+					localStorage.token,
+					file,
+					{ skill_id: skillId, skill_path: joinPath(folderPrefix, file.name) },
+					false
+				);
 				if (!uploaded) {
 					toast.error($i18n.t('Failed to upload file.'));
 					continue;
 				}
-				await createSkillFile(localStorage.token, skillId, {
-					path: joinPath(folderPrefix, file.name),
-					file_id: uploaded.id
-				});
 			} catch (e) {
 				toast.error(`${e}`);
 			}
@@ -272,14 +272,15 @@
 		if (!activePath) return;
 		uploading = true;
 		try {
-			const uploaded = await uploadFile(localStorage.token, file, null, false);
+			const uploaded = await uploadFile(
+				localStorage.token,
+				file,
+				{ skill_id: skillId, skill_path: activePath, skill_replace: true },
+				false
+			);
 			if (!uploaded) {
 				toast.error($i18n.t('Failed to upload file.'));
 			} else {
-				await createSkillFile(localStorage.token, skillId, {
-					path: activePath,
-					file_id: uploaded.id
-				});
 				toast.success($i18n.t('Saved'));
 			}
 		} catch (e) {
@@ -629,7 +630,7 @@
 					{expandedKey}
 					bind:expandedSources
 					{disabled}
-					activePath={activePath}
+					{activePath}
 					onOpenFile={selectFile}
 					onNewFile={openNewFile}
 					onNewFolder={openNewFolder}
@@ -646,12 +647,16 @@
 		<!-- RIGHT: active-file pane -->
 		<div class="flex-1 min-w-0 flex flex-col">
 			{#if activeKind === ''}
-				<div class="flex-1 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 italic">
+				<div
+					class="flex-1 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 italic"
+				>
 					{$i18n.t('Select a file to edit')}
 				</div>
 			{:else}
 				<!-- Pane header -->
-				<div class="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-gray-100/50 dark:border-gray-850/50">
+				<div
+					class="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-gray-100/50 dark:border-gray-850/50"
+				>
 					<div class="flex items-center gap-1.5 min-w-0 text-gray-600 dark:text-gray-300">
 						<DocumentPage className="size-3.5 shrink-0" />
 						<span class="line-clamp-1 text-xs font-medium">{activeName}</span>
@@ -711,11 +716,17 @@
 							/>
 						{/key}
 					{:else if activeKind === 'image'}
-						<div class="h-full overflow-auto flex items-center justify-center p-3 bg-gray-50/50 dark:bg-gray-900/50">
+						<div
+							class="h-full overflow-auto flex items-center justify-center p-3 bg-gray-50/50 dark:bg-gray-900/50"
+						>
 							{#if paneLoading}
 								<Spinner className="size-5" />
 							{:else if activeImageUrl}
-								<img src={activeImageUrl} alt={activeName} class="max-w-full max-h-full object-contain" />
+								<img
+									src={activeImageUrl}
+									alt={activeName}
+									class="max-w-full max-h-full object-contain"
+								/>
 							{:else}
 								<div class="text-xs text-gray-400 dark:text-gray-500 italic">
 									{$i18n.t('Preview')}
@@ -723,7 +734,9 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="h-full overflow-auto flex flex-col items-center justify-center gap-1 p-4 text-center">
+						<div
+							class="h-full overflow-auto flex flex-col items-center justify-center gap-1 p-4 text-center"
+						>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{$i18n.t('Binary file — preview not available')}
 							</div>

@@ -2,15 +2,11 @@
 
 import asyncio
 import time
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 from weakref import WeakValueDictionary
-
-from fastapi import HTTPException
 
 from open_webui.models.files import FileForm, FileModel, Files
 from open_webui.soev import identity, ingest
-from open_webui.soev.client import SoevApiError
-from open_webui.soev.downloads import proxy_download
 
 
 class AttachmentMismatch(Exception):
@@ -58,6 +54,7 @@ async def register_attachment(user_id: str, event: dict) -> FileModel:
                     'web_url': url,
                     'attached_by': event['attached_by'],
                     'soev_job': {
+                        'as_user': f'owui:user:{user_id}',
                         'kind': 'reference',
                         'job_id': event['job_id'],
                         'collection_key': collection,
@@ -94,19 +91,6 @@ ORIGINAL_PROCESSING = 'original_processing'
 
 
 async def stream_original(file: FileModel, user, *, attachment: bool, range_header: str | None = None):
-    client = identity.build_client()
-    ref = identity.external_ref(user)
-    collection = quote(file.meta['collection_name'], safe='')
-    path = f'/v1/collections/{collection}/documents/{quote(file.id, safe="")}/original'
-    try:
-        return await proxy_download(
-            client.stream_response(path, as_user=ref, range_header=range_header),
-            filename=file.filename,
-            content_type=file.meta.get('content_type') or 'application/octet-stream',
-            attachment=attachment,
-        )
-    except SoevApiError as error:
-        # The original exists only once the reference job lands; previews wait.
-        if error.status == 404 and file.meta.get('status') in ('pending', 'processing'):
-            raise HTTPException(status_code=409, detail=ORIGINAL_PROCESSING) from None
-        raise HTTPException(status_code=error.status, detail=error.detail) from None
+    from open_webui.soev.originals import proxy_original
+
+    return await proxy_original(file, user, attachment=attachment, range_header=range_header)

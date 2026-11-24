@@ -1,3 +1,15 @@
+# Processing positives use a completed text/plain transfer in live mode; SVG upload/read and unsupported-media refusals remain. Processing, upload and knowledge mutations preserve type refusal 415; no route waived.
+# Transfer completion: existing upload/file/knowledge seeds wait for terminal status and cleared job. Content routes verify nullable catalog size at authenticated download; skill upload conceals the target before plan checks. Existing routes remain driven, with no waiver.
+# Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
+# File upload skill body seed requires exact foreign-target 404 concealment.
+# Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
+# Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
+# Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
+# Platform-original cross-user variant: requires the real private platform; unit proof stays in OWUI CI.
+# SVG owner controls remain driven locally. Content edits refuse platform originals without an exemption.
+# File upload and both original-content routes remain driven, with no exemption.
+# POST /api/v1/files/ has a writable-skill body target in attack-surface.toml;
+# genuine SVG controls cover local images. Document platform reads have unit transport tests.
 # owui-dead-features: the data-warning acceptance route is deleted, not waived.
 # owui-dead-features: local credential and MFA issuers are removed; no new waivers.
 # test_live_client.py:test_removed_local_password_routes_return_not_found checks
@@ -161,7 +173,7 @@ reason = "Backed by soev-solutions; security tested there. routers/knowledge.py 
 [[waived]]
 id = "POST /api/v1/knowledge/{id}/file/add"
 backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local knowledge store. The full stack requires the admitted file in the add response with its destination processing status before publication, then waits for the existing completion signal. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
 id = "POST /api/v1/knowledge/{id}/file/move"

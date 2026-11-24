@@ -357,3 +357,31 @@ def test_retired_product_routes_are_absent_in_both_sweep_modes(monkeypatch, mode
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
     retired = set(seeds.SURFACE['retired_product']['routes'])
     assert not retired & (set(plane.operations()) | coverage.waivers().keys() | crossuser.expected_refusals().keys())
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_file_upload_and_local_media_controls_stay_driven(monkeypatch, mode):
+    from . import crossuser
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'POST /api/v1/files/'
+    assert route not in seeds.SOEV_BACKED
+    assert route in seeds.ordinary_targets()
+    assert route in crossuser.targets()[0]
+    for suffix in ('content', 'content/{file_name}'):
+        path = '/api/v1/files/{id}/' + suffix
+        assert f'GET {path}' in seeds.ordinary_targets()
+
+
+def test_sealed_ci_keeps_svg_control_without_faking_the_platform_variant(monkeypatch):
+    from . import crossuser
+    from types import SimpleNamespace
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
+    request = Mock(side_effect=AssertionError('No platform service in this repository CI'))
+    monkeypatch.setattr(crossuser, '_request', request)
+    crossuser.drive_content_variants(
+        crossuser.Authorization(plane.Seeding()), SimpleNamespace(), seeds.Resolved(), seeds.SURFACE, ()
+    )
+    request.assert_not_called()
+    assert 'GET /api/v1/files/{id}/content' in seeds.ordinary_targets()

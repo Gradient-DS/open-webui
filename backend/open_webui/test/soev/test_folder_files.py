@@ -153,3 +153,28 @@ async def test_narrowing_a_folder_that_will_not_be_shared_deletes_its_collection
 def test_folder_collections_are_internal():
     assert ingest.is_folder_collection(KEY)
     assert not ingest.is_assistant_collection(KEY) and not ingest.is_attachments_collection(KEY)
+
+
+@pytest.mark.asyncio
+async def test_one_platform_file_failure_does_not_abort_folder_sync(folder, monkeypatch):
+    from unittest.mock import AsyncMock
+    from open_webui.soev.client import SoevApiError
+
+    folder.entries = [entry('bad'), entry('good')]
+    folder.grants = [grant('user', 'frank')]
+    folder.files = {name: upload(name) for name in ('bad', 'good')}
+    submitted = []
+
+    async def submit(record, **kwargs):
+        submitted.append(record.id)
+        if record.id == 'bad':
+            raise SoevApiError(403, 'scope_insufficient', 'private original')
+
+    status = AsyncMock()
+    monkeypatch.setattr(ingest, 'submit', submit)
+    from open_webui.soev import copy_state
+
+    monkeypatch.setattr(copy_state, 'record', status)
+    await folder_files.sync('project')
+    assert submitted == ['bad', 'good']
+    status.assert_awaited_once_with(folder.files['bad'], KEY, 'failed', error='scope_insufficient')

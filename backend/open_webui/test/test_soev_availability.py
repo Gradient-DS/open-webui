@@ -191,7 +191,14 @@ async def test_file_delete_skips_kb_cleanup(soev_state, monkeypatch):
 async def test_content_update_skips_only_kb_propagation(soev_state, monkeypatch):
     from open_webui.routers import files
 
-    file = SimpleNamespace(id='file', user_id='owner', data={'content': 'updated'})
+    file = SimpleNamespace(
+        id='file',
+        user_id='owner',
+        data={'content': 'updated'},
+        meta={'local_blob': True},
+        filename='fictional.txt',
+        path=None,
+    )
     monkeypatch.setattr(files.Files, 'get_file_by_id', AsyncMock(return_value=file))
     monkeypatch.setattr(files.Config, 'get', AsyncMock(return_value=None))
     monkeypatch.setattr(files, 'process_file', AsyncMock())

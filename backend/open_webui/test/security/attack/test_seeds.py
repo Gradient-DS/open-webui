@@ -7,7 +7,7 @@ import sqlite3
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 import requests
@@ -1203,3 +1203,129 @@ def test_retired_product_routes_have_no_remaining_seeds_or_controls():
     assert not retired & set(seeds.ordinary_targets())
     for kind in ('field', 'control', 'destructive', 'shared'):
         assert not retired & {entry.get('route', entry.get('id')) for entry in seeds.SURFACE.get(kind, [])}
+
+
+def test_file_seed_retains_genuine_image_bytes_without_document_bypass():
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    file = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'file')
+    part = file['files'][0]
+    assert sniff_content_type(part['content'].encode()).startswith('image/')
+    field = next(p for p in seeds.SURFACE['field'] if p['route'] == 'POST /api/v1/files/')
+    assert sniff_content_type(field['files'][0]['content'].encode()).startswith('image/')
+    assert field['params']['process'] is False
+
+
+def test_platform_original_seed_waits_for_the_real_transfer_to_settle():
+    ctx = Mock()
+    ctx.token = 'owner-token'
+    ctx.client = Mock()
+    ctx.request.return_value = {'id': 'document', 'path': None, 'meta': {'file_hash': 'a' * 64}}
+    parameter = next(p for p in seeds.SURFACE['fixture'] if p['key'] == 'platform_document')
+    assert parameter['backed_by'] == 'soev-solutions'
+    assert seeds.seed_platform_document(ctx, parameter) == 'document'
+    args, kwargs = ctx.request.call_args
+    assert args == ('POST', '/api/v1/files/')
+    assert kwargs['files'][0][1][2] == 'text/plain'
+    ctx.wait_for_file.assert_called_once_with('document', actor=ctx.client)
+    ctx.request.return_value['path'] = '/local/bypass'
+    with pytest.raises(RuntimeError, match='transfer path'):
+        seeds.seed_platform_document(ctx, parameter)
+
+
+@pytest.mark.parametrize('method,path', [('POST', '/api/v1/files/'), ('POST', '/api/v1/files')])
+def test_document_upload_seed_observes_completion_before_any_next_mutation(monkeypatch, method, path):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(
+            200, {'id': 'fictional-document', 'meta': {'status': 'processing', 'soev_job': {'job_id': 'fictional-job'}}}
+        ),
+        response(200, {'meta': {'status': 'processing', 'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': None}}),
+    ]
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    ctx.request(method, path, actor=client, params={'process': False})
+    assert [call.args for call in client.request.call_args_list[1:]] == [
+        ('GET', '/api/v1/files/fictional-document')
+    ] * 3
+    assert not any('retrieval/process' in call.args[1] for call in client.request.call_args_list)
+
+
+@pytest.mark.parametrize(
+    'key,provided', [('removable_knowledge', 'removable_file'), ('update_knowledge', 'update_file')]
+)
+def test_platform_knowledge_seed_does_not_submit_an_already_uploaded_document_again(monkeypatch, key, provided):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fictional')
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'fictional-file'},
+            {'id': 'fictional-kb'},
+            {'id': 'fictional-kb', 'files': [{'id': 'fictional-file'}]},
+        ]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == key)
+    assert seeds.seed_knowledge_file(ctx, parameter) == 'fictional-kb'
+    assert ctx.values[provided] == 'fictional-file'
+    assert [call.args[1] for call in ctx.request.call_args_list] == [
+        '/api/v1/files/',
+        '/api/v1/knowledge/create',
+        '/api/v1/knowledge/fictional-kb/file/add',
+    ]
+    assert all(call.kwargs['actor'] is ctx.client for call in ctx.request.call_args_list)
+
+
+def test_document_upload_seed_surfaces_terminal_failure_before_followup():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'id': 'fictional-document', 'meta': {'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'failed', 'error': 'upload_failed', 'soev_job': None}}),
+    ]
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    with pytest.raises(RuntimeError, match='upload_failed'):
+        ctx.request('POST', '/api/v1/files/', actor=client)
+    assert len(client.request.call_args_list) == 2
+
+
+@pytest.mark.parametrize('mode', ['drive', 'waive'])
+def test_live_processing_positives_use_a_supported_transfer_without_changing_svg_controls(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    routes = {
+        'POST /api/v1/knowledge/{id}/file/move',
+        'POST /api/v1/knowledge/{id}/file/add',
+        'POST /api/v1/knowledge/{id}/files/batch/add',
+        'POST /api/v1/retrieval/process/file',
+        'POST /api/v1/retrieval/process/files/batch',
+    }
+    entries = [entry for entry in seeds.SURFACE['field'] if entry['route'] in routes]
+    ctx = seeds.SeedContext(
+        Mock(),
+        Mock(),
+        seeds.SURFACE,
+        token='fictional',
+        values={'file': 'retained-svg', 'platform_document': 'settled-text-document', 'knowledge': 'own-kb'},
+    )
+    ctx.request = Mock()
+    resolved = seeds.resolve_fields(ctx, entries=entries)
+    if mode == 'drive':
+        assert set(resolved) == routes
+        assert all('settled-text-document' in json.dumps(body) for body in resolved.values())
+        assert all('retained-svg' not in json.dumps(body) for body in resolved.values())
+        assert ctx.request.call_args_list == [
+            call(
+                'POST', '/api/v1/knowledge/own-kb/file/add', actor=ctx.client, json={'file_id': 'settled-text-document'}
+            )
+        ]
+    file = next(parameter for parameter in seeds.SURFACE['parameter'] if parameter['key'] == 'file')
+    upload = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == 'POST /api/v1/files/')
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    for declaration in (file, upload):
+        part = declaration['files'][0]
+        assert part['filename'].endswith('.svg') and part['content_type'] == 'image/svg+xml'
+        assert sniff_content_type(part['content'].encode()) == 'image/svg+xml'
+    assert file['query']['process'] is False and upload['params']['process'] is False
+    if mode == 'drive':
+        assert all(not seeds.route_waived(route) for route in routes)

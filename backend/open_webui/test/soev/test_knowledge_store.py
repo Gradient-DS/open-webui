@@ -1,6 +1,7 @@
 """Knowledge store behavior against recorded HTTP and isolated OWUI file rows."""
 
 import datetime as dt
+import hashlib
 import importlib
 import inspect
 import json
@@ -86,6 +87,8 @@ async def env(identity_config, fake_api, monkeypatch):
     projection = importlib.import_module('open_webui.soev.projection')
     api = fake_api
     api.page_size = 1
+    # Route imports must bind the real DB context before this fixture replaces it.
+    importlib.import_module('open_webui.routers.knowledge')
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
@@ -94,6 +97,7 @@ async def env(identity_config, fake_api, monkeypatch):
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(files.FileJob.__table__.create)
         await connection.run_sync(models.User.__table__.create)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -1023,6 +1027,108 @@ async def test_add_file_is_a_no_op_for_a_landed_document(env):
 
 
 @pytest.mark.asyncio
+async def test_file_add_response_includes_the_unpublished_copy_without_waiting(env, monkeypatch):
+    from open_webui.routers import knowledge, retrieval
+    from open_webui.retrieval import utils
+    from open_webui.soev import jobs
+    from open_webui.soev.request_cache import request_cache
+    from open_webui.test.soev.test_jobs import owner_login
+
+    await seed(env, 'origin')
+    content = b'Fictional document for a knowledge copy.'
+    digest = hashlib.sha256(content).hexdigest()
+    row = await env.files.Files.insert_new_file(
+        'alice',
+        env.files.FileForm(
+            id='copy-source',
+            filename='fictional.txt',
+            path=None,
+            data={'status': 'completed'},
+            meta={
+                'status': 'completed',
+                'size': len(content),
+                'file_hash': digest,
+                'content_type': 'text/plain',
+                'soev_collection_key': 'origin',
+                'soev_read_collection': 'origin',
+                'soev_kb_links': ['origin'],
+            },
+        ),
+    )
+    env.api.add_document('origin', row.id, byte_size=len(content), sha256=digest)
+    handle = env.api.handle
+
+    def respond(request):
+        if request.url.path.endswith('/original'):
+            return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-copy'})
+        if request.url.path == '/v1/downloads/fictional-copy':
+            return httpx.Response(200, content=content)
+        return handle(request)
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    await importlib.import_module('open_webui.soev.client').close_client()
+    monkeypatch.setattr(env.identity, 'build_client', lambda: env.client)
+    for module in (knowledge, retrieval, utils):
+        monkeypatch.setattr(module, 'Knowledges', env.store)
+    monkeypatch.setattr(knowledge, 'publish_event', AsyncMock())
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    with owner_login(), request_cache():
+        assert await env.store.get_file_metadatas_by_id('kb') == []
+        response = await knowledge.add_file_to_knowledge_by_id(
+            SimpleNamespace(),
+            'kb',
+            knowledge.KnowledgeFileIdForm(file_id=row.id),
+            user=SimpleNamespace(id='alice', role='user'),
+            db=None,
+        )
+        assert [(item['id'], item['meta']['status']) for item in response['files']] == [(row.id, 'processing')]
+        assert (await env.store.get_file_metadatas_by_id('origin'))[0].meta['status'] == 'completed'
+        assert await env.store.get_file_counts_by_knowledge_ids(['kb', 'origin']) == {'kb': 1, 'origin': 1}
+        listed = await env.store.search_files_by_id('kb', 'alice', {}, metadata_only=True)
+        assert [(item.id, item.status) for item in listed.items] == [(row.id, 'processing')]
+    saved = await env.files.Files.get_file_by_id(row.id)
+    job_id = saved.meta['soev_job']['job_id']
+    assert env.api.jobs[job_id]['status'] == 'QUEUED'
+    assert env.api.jobs[job_id]['documents'][0]['source_id'] == row.id
+    assert ('kb', row.id) not in env.api.documents
+    assert env.api.uploads[job_id, row.id] == content
+    assert saved.meta['status'] == saved.data['status'] == 'completed'
+    assert saved.meta['soev_collection_key'] == saved.meta['soev_read_collection'] == 'origin'
+    assert saved.path is None and saved.meta['file_hash'] == digest
+    assert not any(request.method == 'GET' and request.url.path.startswith('/v1/jobs') for request in env.api.requests)
+    with owner_login('bob'):
+        assert await env.store.get_file_metadatas_by_id('kb') == []
+        assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
+    env.api.advance(job_id, 'SUCCEEDED')
+    with owner_login():
+        assert await jobs.poll_once(env.client, now=saved.meta['soev_job']['submitted_at']) == 1
+        listed = await env.store.get_file_metadatas_by_id('kb')
+        assert [(item.id, item.meta['status']) for item in listed] == [(row.id, 'completed')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel_pending', [False, True])
+async def test_pending_copy_membership_excludes_deferred_cancellation(env, cancel_pending):
+    row = await env.files.Files.insert_new_file(
+        'alice',
+        env.files.FileForm(
+            id='pending-copy',
+            filename='fictional.txt',
+            meta={
+                'status': 'completed',
+                'soev_collection_key': 'origin',
+                'soev_job': {'copy': True, 'collection_key': 'kb', 'cancel_pending': cancel_pending},
+                'soev_copies': {'kb': {'status': 'processing', 'error': None}},
+            },
+        ),
+    )
+    listed = await env.store.get_file_metadatas_by_id('kb')
+    assert [(item.id, item.meta['status']) for item in listed] == ([] if cancel_pending else [(row.id, 'processing')])
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == ({} if cancel_pending else {'kb': 1})
+    assert await env.store.get_file_metadatas_by_id('unrelated') == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('job_meta', [{}, {'soev_job': None}])
 async def test_add_file_before_submit_records_the_collection_key(env, job_meta):
     row = await env.files.Files.insert_new_file(
@@ -1037,7 +1143,7 @@ async def test_add_file_before_submit_records_the_collection_key(env, job_meta):
     )
     result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice')
     updated = await env.files.Files.get_file_by_id(row.id)
-    assert updated.meta == {**row.meta, 'soev_collection_key': 'kb'}
+    assert updated.meta == {**row.meta, 'soev_collection_key': 'kb', 'soev_kb_links': ['kb']}
     assert result.file_id == row.id and result.knowledge_id == 'kb'
     assert result.relative_path is None and result.directory_id is None
     assert result.created_at == result.updated_at == row.created_at
@@ -1061,7 +1167,7 @@ async def test_add_file_in_another_collection_preserves_the_in_flight_job(env, d
     env.api.requests.clear()
     result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice', directory_id)
     updated = await env.files.Files.get_file_by_id(row.id)
-    assert updated == row
+    assert updated == row.model_copy(update={'meta': {**row.meta, 'soev_kb_links': ['kb', 'other']}})
     assert result.file_id == row.id and result.knowledge_id == 'kb'
     assert result.relative_path is None and result.directory_id is None
     assert result.created_at == result.updated_at == row.created_at
@@ -1271,7 +1377,10 @@ async def test_removing_an_in_flight_file_cancels_its_job(env):
     row = await in_flight(env)
     job_id = row.meta['soev_job']['job_id']
     env.api.requests.clear()
-    assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
     assert [(request.method, request.url.path) for request in env.api.requests] == [
         ('POST', f'/v1/jobs/{job_id}/cancel')
     ]
@@ -1292,7 +1401,10 @@ async def test_reset_cancels_in_flight_jobs_before_deleting_documents(env):
     env.api.advance(failed.meta['soev_job']['job_id'], 'FAILED')
     await env.files.Files.update_file_metadata_by_id(failed.id, {'soev_job': None, 'status': 'failed'})
     env.api.requests.clear()
-    assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
     writes = [request for request in recorded_reads(env.api.requests) if request.method != 'GET']
     assert [request.method for request in writes] == ['POST', 'POST', 'DELETE', 'DELETE']
     assert {request.url.path for request in writes[:2]} == {

@@ -219,7 +219,9 @@ def test_no_unreviewed_raw_sql_content_access():
                     for value in ast.walk(argument)
                 ):
                     actual.append((str(relative), 'raw SQL'))
+    # Owner-scoped retirement reads shared snapshots only to preserve their local originals.
     assert sorted(actual) == [
+        ('soev/retire_document_bytes.py', 'shared_chat'),
         ('soev/thread_organizations.py', 'chat'),
         ('soev/thread_organizations.py', 'shared_chat'),
     ]

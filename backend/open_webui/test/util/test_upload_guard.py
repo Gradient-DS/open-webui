@@ -316,6 +316,15 @@ def test_guard_result_shape():
 # ==========================================================================
 
 
+@pytest.fixture(autouse=True)
+def isolate_post_guard_storage(monkeypatch):
+    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda source, *args: (source.read(), '/fictional/upload'))
+    monkeypatch.setattr(files_router.Storage, 'delete_file', MagicMock())
+    monkeypatch.setattr(
+        files_router.Files, 'insert_new_file', AsyncMock(side_effect=RuntimeError('post-guard boundary'))
+    )
+
+
 def _patch_config(monkeypatch, *, allowed=None, engine='external') -> None:
     values = {
         'rag.content_extraction_engine': engine,
@@ -404,7 +413,7 @@ async def test_route_pe_bytes_named_pdf_rejected(monkeypatch, mode):
 @pytest.mark.asyncio
 async def test_route_pe_bytes_pass_in_off_mode(monkeypatch):
     # off disables the guard entirely — the executable is NOT rejected by it
-    # (it fails downstream on unmocked Storage/DB instead).
+    # (it fails downstream on the deliberate post-guard insert failure instead).
     exc = await _run(
         monkeypatch,
         filename='invoice.pdf',
@@ -414,6 +423,7 @@ async def test_route_pe_bytes_pass_in_off_mode(monkeypatch):
         mode='off',
     )
     assert 'application/x-dosexec' not in str(exc.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -430,6 +440,7 @@ async def test_route_extensionless_html_accepted_when_html_allowed(monkeypatch):
     )
     # Guard accepts -> fails downstream (Storage/DB unmocked), NOT a guard reject.
     assert 'does not map' not in str(exc.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -458,6 +469,7 @@ async def test_route_docx_zip_accepted(monkeypatch):
     )
     # Consistent OOXML -> guard accepts -> downstream failure, not a guard reject.
     assert 'does not match' not in str(exc.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -486,6 +498,7 @@ async def test_route_zip_named_txt_accepted_in_log(monkeypatch):
     )
     # log mode soft-passes the mismatch -> downstream failure, not a guard reject.
     assert 'does not match' not in str(exc.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 # --- process=false must NOT bypass the guard on the user route -------------
@@ -543,13 +556,14 @@ async def test_route_mismatch_accepted_in_log_with_process_false(monkeypatch):
         process=False,
     )
     assert 'does not match' not in str(exc.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_route_internal_sniff_guard_false_skips_guard(monkeypatch):
     # The internal opt-out (sniff_guard=False) that images/audio/agent callers
     # use must NOT sniff — even executable bytes pass the guard (they fail
-    # downstream on unmocked Storage/DB instead). This locks the internal
+    # downstream on the deliberate post-guard insert failure instead). This locks the internal
     # callers' behaviour so the fix can't regress them.
     monkeypatch.setenv('RAG_FILE_SNIFF_MODE', 'enforce')
     _patch_config(monkeypatch, allowed=['pdf'])
@@ -563,6 +577,7 @@ async def test_route_internal_sniff_guard_false_skips_guard(monkeypatch):
             sniff_guard=False,
         )
     assert 'application/x-dosexec' not in str(exc_info.value.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 # --- octet-stream carve-out: extensionless upload must reach branch 2 -------
@@ -586,6 +601,7 @@ async def test_route_octet_stream_html_reaches_branch2_and_accepts(monkeypatch):
     )
     assert 'bin is not allowed' not in str(exc.detail)  # not derived to .bin
     assert 'does not map' not in str(exc.detail)  # branch 2 accepted
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio

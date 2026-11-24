@@ -160,12 +160,21 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
         if job is not None:
             waiting = waiting or job.get('collection_key') != key
             continue
-        if file.id in documents or (meta.get('status') == 'failed' and meta.get('soev_collection_key') == key):
+        from open_webui.soev import copy_state
+
+        if (
+            file.id in documents
+            or copy_state.outcome(file, key).get('status') == 'failed'
+            or (meta.get('status') == 'failed' and meta.get('soev_collection_key') == key)
+        ):
             continue
         try:
             await ingest.submit(file, collection_key=key, user_id=folder.user_id, client=client)
         except ingest.IngestBusy:
             waiting = True
-        except OSError as error:
+        except (OSError, SoevApiError) as error:
+            await copy_state.record(
+                file, key, 'failed', error=error.code if isinstance(error, SoevApiError) else 'upload_failed'
+            )
             log.warning('Folder file %s of %s not submitted (%s)', file.id, folder_id, type(error).__name__)
     return waiting

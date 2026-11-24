@@ -1,5 +1,7 @@
 """Forward only the authenticated request's generic OIDC access token."""
 
+import base64
+import hashlib
 import asyncio
 import logging
 import time
@@ -21,11 +23,32 @@ async def _send_file(api, ref, operation):
     if operation == 'bytes':
         await api.post_bytes('/v1/images', b'fictional-image', as_user=ref)
     else:
+        data = b'fictional-upload'
+        digest = hashlib.sha256(data).hexdigest()
+        job = await api.send(
+            'POST',
+            '/v1/jobs',
+            {
+                'collection_key': 'fictional-collection',
+                'documents': [
+                    {
+                        'source_id': 'source',
+                        'filename': 'fictional.txt',
+                        'content_type': 'text/plain',
+                        'size': len(data),
+                        'sha256': digest,
+                    }
+                ],
+            },
+            as_user=ref,
+            idempotency_key='fictional-create',
+        )
 
         async def chunks():
-            yield b'fictional-upload'
+            yield data
 
-        await api.upload_document('job', 'source', chunks(), size=16, content_type='text/plain', as_user=ref)
+        await api.put_transfer(job['uploads'][0], chunks, size=len(data), sha256=digest)
+        await api.send('POST', '/v1/jobs/fictional-job/commit', None, as_user=ref, idempotency_key='fictional-commit')
 
 
 async def platform_error(request, error):
@@ -88,6 +111,31 @@ async def token_app(identity_config, monkeypatch):
 
     def handle(request):
         requests.append(request)
+        if request.url.host == 'store.invalid':
+            assert 'Authorization' not in request.headers and 'X-Soev-User-Token' not in request.headers
+            assert 'cookie' not in request.headers
+            assert request.content == b'fictional-upload'
+            return httpx.Response(200)
+        if request.url.path == '/v1/jobs':
+            return httpx.Response(
+                201,
+                json={
+                    'job_id': 'fictional-job',
+                    'uploads': [
+                        {
+                            'method': 'PUT',
+                            'url': 'https://store.invalid/original?signature=fictional-capability',
+                            'headers': {
+                                'Content-Length': str(len(b'fictional-upload')),
+                                'x-amz-checksum-sha256': base64.b64encode(
+                                    hashlib.sha256(b'fictional-upload').digest()
+                                ).decode(),
+                                'If-None-Match': '*',
+                            },
+                        }
+                    ],
+                },
+            )
         if request.url.path == '/v1/me':
             return httpx.Response(200, json={'person_id': 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'})
         if request.url.path == '/v1/chat':
@@ -115,6 +163,13 @@ async def token_app(identity_config, monkeypatch):
         return httpx.Response(200, json={})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as api_http:
+        original_client = httpx.AsyncClient
+
+        def transport_client(**kwargs):
+            kwargs.setdefault('transport', httpx.MockTransport(handle))
+            return original_client(**kwargs)
+
+        monkeypatch.setattr('open_webui.soev.transfers.httpx.AsyncClient', transport_client)
         monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: api_http)
         api = SoevClient('https://soev.invalid', 'fictional-product-key')
 
@@ -191,6 +246,15 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
     if operation != 'product':
         assert 'X-Soev-' + 'Subject' not in request.headers
+    if operation == 'upload':
+        create, store, commit = requests
+        assert create.method == commit.method == 'POST'
+        assert create.url.path == '/v1/jobs' and commit.url.path == '/v1/jobs/fictional-job/commit'
+        assert commit.headers['X-Soev-User-Token'] == 'fictional-access-token'
+        assert commit.headers['Authorization'] == 'Bearer fictional-product-key'
+        assert store.url.host == 'store.invalid' and store.method == 'PUT'
+        assert set(store.headers) == {'host', 'content-length', 'x-amz-checksum-sha256', 'if-none-match'}
+        assert 'fictional-capability' not in caplog.text
     if operation == 'bytes':
         assert request.content == b'fictional-image'
     if operation == 'chat':

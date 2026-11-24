@@ -435,6 +435,8 @@ Output: YAML list of {matchName} / {matchPattern}.
 {{- $fqdn := .Values.networkPolicy.egress.fqdn -}}
 {{- $names := list -}}
 {{- $patterns := list -}}
+{{- with .Values.soevApi.url }}{{ $names = append $names (urlParse .).host }}{{ end -}}
+{{- with .Values.soevApi.transferStoreHost }}{{ $store := . }}{{ if not (contains "://" $store) }}{{ $store = printf "https://%s" $store }}{{ end }}{{ $names = append $names (urlParse $store).hostname }}{{ end -}}
 {{- with $c.openidProviderUrl }}{{ $names = append $names (urlParse .).host }}{{ end -}}
 {{- if or $c.microsoftClientId (eq (toString $c.enableEmailInvites) "true") (eq (toString $c.enableOnedriveIntegration) "true") }}
 {{- $names = concat $names (list "login.microsoftonline.com" "graph.microsoft.com") -}}

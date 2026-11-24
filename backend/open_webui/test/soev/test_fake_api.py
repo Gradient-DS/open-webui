@@ -1,6 +1,7 @@
 """Exercise the reusable fake through HTTP against the recorded B5 wire contract."""
 
 import base64
+import datetime as dt
 import hashlib
 from uuid import uuid4
 
@@ -301,8 +302,8 @@ def test_pages_and_document_acl_follow_the_wire_contract(api):
     assert missing_key.status_code == 400
 
 
-def test_a_file_document_opens_an_awaiting_upload_job_with_an_authenticated_put(api):
-    """File proposals publish a relative streaming PUT route and the declared length."""
+def test_a_file_document_opens_an_awaiting_upload_job_with_a_store_capability(api):
+    """File proposals publish one absolute, write-once store capability."""
     fake, client = api
     seed(client)
     document = file_document()
@@ -311,16 +312,26 @@ def test_a_file_document_opens_an_awaiting_upload_job_with_an_authenticated_put(
     job = response.json()
     assert job['kind'] == 'ingest' and job['status'] == 'AWAITING_UPLOAD'
     assert job['progress'] == {'total': 1, 'succeeded': 0, 'failed': 0, 'pending': 1, 'skipped': 0}
+    capability = job['uploads'][0]
+    assert len(job['uploads']) == 1
+    url = httpx.URL(capability['url'])
+    assert url.scheme == 'https' and url.host == 'store.invalid'
+    assert url.path == f'/{job["job_id"]}/file'
+    assert url.params['signature']
+    expiry = dt.datetime.fromisoformat(capability['expires_at'])
+    assert dt.datetime.now(dt.UTC) < expiry <= dt.datetime.now(dt.UTC) + dt.timedelta(seconds=60)
+    assert expiry < dt.datetime.fromisoformat(job['expires_at'])
     assert job['uploads'] == [
         {
             'source_id': 'file',
             'method': 'PUT',
-            'url': f'/v1/jobs/{job["job_id"]}/uploads/file',
+            'url': str(url),
             'headers': {
                 'x-amz-checksum-sha256': base64.b64encode(hashlib.sha256(FILE_BYTES).digest()).decode(),
                 'Content-Length': str(len(FILE_BYTES)),
+                'If-None-Match': '*',
             },
-            'expires_at': '2026-09-11T12:15:00Z',
+            'expires_at': capability['expires_at'],
         }
     ]
     assert fake.jobs[job['job_id']]['documents'] == [document]
@@ -394,33 +405,59 @@ def test_an_unreadable_collection_is_404(api, user):
     assert not fake.jobs
 
 
-def test_a_replayed_job_create_returns_no_uploads(api):
-    """Create replay returns the current job without reminting uploads."""
+def test_a_replayed_awaiting_job_refreshes_its_upload_capability(api):
+    """Create replay refreshes pending upload capabilities for the same declaration."""
     fake, client = api
     seed(client)
     operation = str(uuid4())
     first = ingest(client, file_document(), operation=operation).json()
     replay = ingest(client, file_document(), operation=operation)
     assert replay.status_code == 200
-    assert replay.json() == {**first, 'uploads': []}
+    replayed = replay.json()
+    assert replayed == {**first, 'uploads': replayed['uploads']}
+    assert len(replayed['uploads']) == 1
+    assert replayed['uploads'][0] == {**first['uploads'][0], 'expires_at': replayed['uploads'][0]['expires_at']}
+    assert dt.datetime.fromisoformat(replayed['uploads'][0]['expires_at']) >= dt.datetime.fromisoformat(
+        first['uploads'][0]['expires_at']
+    )
     fake.advance(first['job_id'], 'RUNNING')
     assert ingest(client, file_document(), operation=operation).json()['status'] == 'RUNNING'
     assert ingest(client, file_document('changed'), operation=operation).status_code == 409
     assert len(fake.jobs) == 1
 
 
-def test_the_upload_put_requires_a_bearer(api):
-    """Streaming uploads require the product credential."""
+@pytest.mark.parametrize('signature', [None, 'fictional-wrong-signature'])
+def test_the_store_put_requires_its_issued_capability(api, signature):
+    """The URL capability replaces API bearer authority; missing or forged capabilities refuse."""
     fake, client = api
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
-    response = client.put(
-        upload['url'],
-        content=FILE_BYTES,
-        headers=upload['headers'],
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'invalid_credential'
+    url = httpx.URL(upload['url']).copy_with(query=b'')
+    if signature is not None:
+        url = url.copy_add_param('signature', signature)
+    response = client.put(url, content=FILE_BYTES, headers=upload['headers'])
+    assert response.status_code == 403
+    assert response.json()['code'] == 'access_denied'
+    assert not fake.uploads
+
+
+def test_store_put_sends_no_api_credentials_and_cannot_overwrite(api):
+    fake, client = api
+    seed(client)
+    job = ingest(client, file_document()).json()
+    upload = job['uploads'][0]
+    assert client.put(upload['url'], content=FILE_BYTES, headers=upload['headers']).status_code == 200
+    assert client.put(upload['url'], content=b'x' * len(FILE_BYTES), headers=upload['headers']).status_code == 412
+    assert fake.uploads[job['job_id'], 'file'] == FILE_BYTES
+
+
+@pytest.mark.parametrize('header', ['Authorization', 'Cookie', 'X-Soev-User-Token'])
+def test_store_put_refuses_api_credentials_even_with_a_valid_capability(api, header):
+    fake, client = api
+    seed(client)
+    upload = ingest(client, file_document()).json()['uploads'][0]
+    with pytest.raises(AssertionError):
+        client.put(upload['url'], content=FILE_BYTES, headers={**upload['headers'], header: 'fictional-secret'})
     assert not fake.uploads
 
 
@@ -443,7 +480,6 @@ def test_the_upload_put_checks_length_and_digest(api, length, content, code):
         headers={
             **upload['headers'],
             'Content-Length': length,
-            'Authorization': 'Bearer soev_test_cred-runtime_test-secret',
         },
     )
     assert response.status_code == 400
@@ -471,9 +507,9 @@ def test_commit_after_upload_queues_the_job(api):
     response = client.put(
         upload['url'],
         content=FILE_BYTES,
-        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+        headers=upload['headers'],
     )
-    assert response.status_code == 204 and response.content == b''
+    assert response.status_code == 200 and response.content == b''
     assert fake.uploads[job['job_id'], 'file'] == FILE_BYTES
     operation = str(uuid4())
     response = send(client, 'POST', f'/v1/jobs/{job["job_id"]}/commit', operation=operation)
@@ -760,9 +796,9 @@ def test_the_fake_never_advances_a_job_on_its_own(api):
         client.put(
             upload['url'],
             content=FILE_BYTES,
-            headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
+            headers=upload['headers'],
         ).status_code
-        == 204
+        == 200
     )
     fake.now = '2030-01-01T00:00:00Z'
     for _ in range(3):
@@ -774,3 +810,18 @@ def test_the_fake_never_advances_a_job_on_its_own(api):
             assert response.status_code == 200 and response.json()['status'] == 'QUEUED'
             assert send(client, 'GET', f'/v1/jobs/{job["job_id"]}').json()['status'] == 'QUEUED'
     assert not fake.documents
+
+
+@pytest.mark.parametrize('filename,mime', [('fictional.svg', 'image/svg+xml'), ('fictional.png', 'image/png')])
+def test_retained_image_is_not_a_supported_document_and_is_not_relabelled(api, filename, mime):
+    fake, client = api
+    seed(client)
+    response = ingest(client, file_document(filename=filename, content_type=mime))
+    assert response.status_code == 415 and response.json()['code'] == 'content_type_rejected'
+    assert not fake.jobs and not fake.uploads and not fake.transfer_signatures
+    # Actual generated/extracted text is a supported representation with the same identity.
+    response = ingest(client, inline_document('file', filename=filename, content_type='text/plain'))
+    assert response.status_code == 201
+    document = fake.jobs[response.json()['job_id']]['documents'][0]
+    assert document['source_id'] == 'file' and document['text'] == 'hello'
+    assert document['content_type'] == 'text/plain'

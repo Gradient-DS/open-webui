@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from uuid import uuid4
+from types import SimpleNamespace
 
 import requests
 from hostile_corpus import fetch_payloads
@@ -157,10 +158,12 @@ def _is_seedable(route, surface):
 def targets(spec=seeds.SPEC, *, surface=None):
     admins = set(admin_gated_operations(spec))
     platform = set(platform_operations(spec))
+    body_targets = {entry['route'] for entry in (surface or seeds.SURFACE).get('body_target', [])}
     routes = [
         route
         for route in plane.operations(spec)
-        if ('{' in route or route in admins or route in platform) and _is_seedable(route, surface or seeds.SURFACE)
+        if ('{' in route or route in admins or route in platform or route in body_targets)
+        and _is_seedable(route, surface or seeds.SURFACE)
     ]
     return routes, admins
 
@@ -176,6 +179,9 @@ def _owner_key(path, surface):
 
 
 def _field_owner_key(route, surface):
+    body = next((entry for entry in surface.get('body_target', []) if entry['route'] == route), None)
+    if body:
+        return next(entry.get('actor', 'user') for entry in surface['parameter'] if entry['key'] == body['owner'])
     entries = [*surface.get('parameter', []), *surface.get('fixture', [])]
     by_key = {key: entry for entry in entries for key in [entry['key'], *entry.get('provides', [])]}
     owners = set()
@@ -297,6 +303,8 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         # Status 0 would read as "not refused" and invent an authorization
         # violation out of a slow route.
         return
+    if route == 'POST /api/v1/files/' and not subject_scoped and stranger.status != 404:
+        reasons.append(('concealment', 'foreign skill upload must be concealed as HTTP 404'))
     if any(marker in stranger.body for marker in markers):
         reasons.append(('owner-marker', 'seeded owner marker in second-account response (including refusals)'))
     if admin_only and not _administrator_refused(route, stranger):
@@ -331,12 +339,17 @@ def _benign(route, parameters, spec):
     Without them a route that needs a real id in a request field answers 404 to
     the owner too, and an owner control that fails proves nothing about isolation.
     """
+    body = next((entry for entry in seeds.SURFACE.get('body_target', []) if entry['route'] == route), None)
+    if body:
+        context = SimpleNamespace(values=parameters.fixtures, token=uuid4().hex, surface={'field': [body]})
+        resolved = seeds.resolve_fields(context)[route]
+        return {'files': resolved['files'], 'data': resolved['form'], 'params': resolved['params']}
     request = benign_request(route, parameters, spec)
     declared = plane._declared(parameters, route)
     if declared.get('json'):
         variant = next((entry.get('v2', {}) for entry in seeds.SURFACE.get('field', []) if entry['route'] == route), {})
         request['json'] = (
-            deepcopy(declared['json'])
+            plane._hold_declared(None, (), declared['json'])[0]
             if seeds.runtime_soev_backed() == 'drive' and 'json' in variant
             else plane._hold_declared(request.get('json'), (), declared['json'])[0]
         )
@@ -349,12 +362,61 @@ def _benign(route, parameters, spec):
     return request
 
 
+def _owner_request(route, parameters, kwargs):
+    target = next((item for item in seeds.SURFACE.get('body_target', []) if item['route'] == route), None)
+    if not target or seeds.runtime_soev_backed() != 'drive' or 'v2_owner_control' not in target:
+        return kwargs
+    # The sealed platform seeds a deliberately missing skill for refusal probes.
+    # Its upload route still needs a successful control using the admitted media flow.
+    context = SimpleNamespace(
+        values=parameters.fixtures,
+        token=uuid4().hex,
+        surface={
+            'field': [{'route': route, **target['v2_owner_control']}],
+        },
+    )
+    declared = seeds.resolve_fields(context)[route]
+    return {'files': declared['files'], 'params': declared['params']}
+
+
 def _requests(route, parameters, spec, fields, payloads, full):
     yield True, _benign(route, parameters, spec)
     names = fields.get(route, [])
     if names:
         for batch in plane._payload_batches(route, names, payloads, full=full):
             yield False, {**benign_request(route, parameters, spec), 'json': plane._body_for(names, batch)}
+
+
+def drive_content_variants(result, identities, parameters, surface, markers):
+    for variant in surface.get('crossuser_variant', []):
+        if not seeds.seed_enabled(variant):
+            continue
+        route = variant['route']
+        file_id = parameters.fixtures.get(variant['fixture'])
+        if not file_id:
+            raise RuntimeError(f'Missing {variant["fixture"]} for platform original control')
+        target = route.split(' ', 1)[1].replace('{id}', quote(file_id, safe=''))
+        owner = _request(identities.admin, identities.user, route, target, result.tally, {})
+        stranger = _request(identities.admin, identities.intruder, route, target, result.tally, {})
+        if result.controls.get(route) != 200 or owner.status != 200:
+            item = {
+                'route': route,
+                'reason': 'Local and platform original owner controls must both succeed',
+                'status': owner.status,
+                'body': owner.body[:2000],
+            }
+            result.violations.append(item)
+            result.tally.body_failures.append(item)
+        _check(
+            result,
+            route,
+            stranger,
+            owner,
+            _markers_outside(target, markers),
+            admin_only=False,
+            control=True,
+            resource_ids=[file_id],
+        )
 
 
 def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
@@ -409,7 +471,10 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                             _request(identities.admin, actor, route, target, tally, kwargs)
                             for actor in stranger_clients
                         ]
-                        positive = _request(identities.admin, owner, route, target, tally, kwargs) if owner else None
+                        owner_kwargs = _owner_request(route, parameters, kwargs) if control else kwargs
+                        positive = (
+                            _request(identities.admin, owner, route, target, tally, owner_kwargs) if owner else None
+                        )
                         for stranger in answers:
                             _check(
                                 result,
@@ -423,4 +488,10 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                                 subject_scoped=subject_scoped,
                             )
                 plane.flush_hits()
+            variants = {
+                **surface,
+                'crossuser_variant': [v for v in surface.get('crossuser_variant', []) if v['route'] in routes],
+            }
+            drive_content_variants(result, identities, parameters, variants, markers)
+            plane.flush_hits()
     return result

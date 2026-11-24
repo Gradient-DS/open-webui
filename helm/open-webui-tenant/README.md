@@ -17,7 +17,7 @@ is rendered as `"false"`.
 
 | Value | Environment variable | Default when unset |
 | --- | --- | --- |
-| `soevApi.url` | `SOEV_API_URL` | Empty |
+| `soevApi.url` | `SOEV_API_URL` (public tenant API host) | Empty; no in-cluster default |
 | `soevApi.servicePrincipal` | `SOEV_API_SERVICE_PRINCIPAL` | Empty |
 | `liveDocuments.enabled` | `ENABLE_LIVE_DOCUMENTS` | `false` |
 | `liveMail.enabled` | `ENABLE_LIVE_MAIL` | `false` |

@@ -469,7 +469,10 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
-@router.post('/process/file')
+@router.post(
+    '/process/file',
+    description='Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the platform read authority of the requesting user. Raw unsupported media returns the specific translated type refusal and 415; actual supplied text indexes under the same file identity. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
+)
 async def process_file(
     request: Request,
     form_data: ProcessFileForm,
@@ -497,12 +500,23 @@ async def process_file(
                     user.id, identity.build_client()
                 )
                 job_id = await ingest.submit(
-                    file, collection_key=collection_key, user_id=user.id, text=form_data.content
+                    file,
+                    collection_key=collection_key,
+                    user_id=user.id,
+                    text=form_data.content,
+                    source=ingest.source_for(file.id),  # [Gradient] Request-owned document bytes only.
                 )
             except SoevNotConfigured:
                 raise
             except SoevApiError as e:
-                raise ValueError(f'{e.code}: {e.detail}') from e
+                # [Gradient] File status errors use fixed English/Dutch messages, never upstream details.
+                from open_webui.soev.errors import problem_message
+
+                language = getattr(request, 'headers', {}).get('accept-language', 'en-US')
+                if e.status == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+                    refusal = SoevApiError(415, 'content_type_rejected', '')
+                    raise HTTPException(415, detail=problem_message(refusal, language)) from e
+                raise ValueError(problem_message(e, language)) from e
             return {
                 'status': True,
                 'collection_name': form_data.collection_name,
@@ -516,12 +530,13 @@ async def process_file(
         except SoevNotConfigured:
             raise
         except Exception as e:
-            log.exception(e)
+            log.warning('File processing failed (%s)', type(e).__name__)
+            error_message = e.detail if isinstance(e, HTTPException) else str(e)
             # Fresh session for error status update.
-            async with get_async_db() as session:
-                await Files.set_status(file.id, 'failed', error=str(e), db=session)
-                # Clear the hash so the file can be re-uploaded after fixing the issue
-                await Files.update_file_hash_by_id(file.id, None, db=session)
+            # [Gradient] A failed destination copy never changes the original's status.
+            if not ingest.copying(file, text=form_data.content, source=ingest.source_for(file.id)):
+                async with get_async_db() as session:
+                    await Files.set_status(file.id, 'failed', error=error_message, db=session)
 
             await publish_event(
                 request,
@@ -532,10 +547,12 @@ async def process_file(
                 data={
                     'collection_name': collection_name,
                     'filename': file.filename,
-                    'message': f'{file.filename}: {e}',
+                    'message': f'{file.filename}: {error_message}',
                 },
             )
 
+            if isinstance(e, HTTPException) and e.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+                raise
             if 'No pandoc was found' in str(e):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1360,7 +1377,10 @@ class BatchProcessFilesResponse(BaseModel):
     errors: List[BatchProcessFilesResult]
 
 
-@router.post('/process/files/batch')
+@router.post(
+    '/process/files/batch',
+    description='Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned. Unsupported document formats remain per-file failures with a fixed translated type refusal.',
+)
 async def process_files_batch(
     request: Request,
     form_data: BatchProcessFilesForm,
@@ -1375,20 +1395,18 @@ async def process_files_batch(
     errors = []
     for file in form_data.files:
         db_file = await Files.get_file_by_id(file.id, db=db)
-        if not db_file:
+        if not db_file or db_file.user_id != user.id:
             errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error='File not found'))
-            continue
-        if db_file.user_id != user.id and not can_bypass_access_control(user):
-            errors.append(
-                BatchProcessFilesResult(file_id=file.id, status='failed', error='Permission denied: not file owner')
-            )
             continue
         try:
             await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
         except SoevNotConfigured:
             raise
         except (SoevApiError, ingest.IngestBusy) as e:
-            error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
+            from open_webui.soev.errors import problem_message
+
+            language = getattr(request, 'headers', {}).get('accept-language', 'en-US')
+            error = problem_message(e, language) if isinstance(e, SoevApiError) else 'file is being processed'
             errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
         else:
             results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))

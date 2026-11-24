@@ -24,7 +24,12 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     # Operations whose id the surface records as unseedable are out of scope: an
     # ownership check needs a resource that exists, and counting them would make the
     # pass look as though it left ownership unverified rather than unseedable.
-    expected = admins | {r for r in plane.operations() if '{' in r} | set(platform_operations())
+    expected = (
+        admins
+        | {r for r in plane.operations() if '{' in r}
+        | set(platform_operations())
+        | {e['route'] for e in seeds.SURFACE.get('body_target', [])}
+    )
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
@@ -145,6 +150,73 @@ def test_schedule_control_keeps_the_declared_provider_scope():
     assert request['json']['scope'] == scope
     assert request['json']['connection_id'] == 'owned'
     assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
+
+
+@pytest.mark.parametrize(
+    'route',
+    ['POST /api/v1/knowledge/{id}/files/batch/add', 'POST /api/v1/retrieval/process/files/batch'],
+)
+def test_batch_controls_expand_declared_array_paths(monkeypatch, route):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(
+        None,
+        None,
+        seeds.SURFACE,
+        values={
+            'file': 'fictional-retained-file',
+            'platform_document': 'fictional-document',
+            'knowledge': 'fictional-kb',
+        },
+    )
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    [(_, request)] = crossuser._requests(route, parameters, seeds.SPEC, {}, (), False)
+    file_id = context.values['platform_document']
+    if route.startswith('POST /api/v1/knowledge/'):
+        from pydantic import TypeAdapter
+        from open_webui.routers.knowledge import KnowledgeFileIdForm
+
+        assert request['json'] == [{'file_id': file_id}]
+        validated = TypeAdapter(list[KnowledgeFileIdForm]).validate_python(request['json'])
+        assert validated[0].file_id == file_id
+    else:
+        assert request['json']['files'][0]['id'] == file_id
+        assert 'files[].id' not in request['json']
+        assert request['json'] == {'collection_name': 'fictional-kb', 'files': [{'id': file_id}]}
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_batch_add_sends_the_same_list_to_the_owner_and_intruder(offline, monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    path = '/api/v1/knowledge/{id}/files/batch/add'
+    route = f'POST {path}'
+    spec = {'paths': {path: seeds.SPEC['paths'][path]}, 'components': seeds.SPEC['components']}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    parameters = seeds.Resolved(
+        {(path, 'id'): 'fictional-kb'}, fields={route: {'json': {'[].file_id': 'fictional-document'}}}
+    )
+
+    @contextmanager
+    def fixtures(*args, **kwargs):
+        yield parameters, (), seeds.SURFACE, {'user': identities.user}
+
+    monkeypatch.setattr(crossuser, 'own_fixtures', fixtures)
+    monkeypatch.setattr(crossuser, '_owner_key', lambda *args: 'user')
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=['fictional-probe'])
+    assert [actor for actor, _, _, _ in order] == ['intruder', 'user'] * (len(order) // 2)
+    assert all(kwargs['json'] == [{'file_id': 'fictional-document'}] for _, _, _, kwargs in order[:2])
+    assert all(order[index][3] == order[index + 1][3] for index in range(0, len(order), 2))
+    assert result.controls == {route: 200}
+    assert not result.violations
+
+
+def test_platform_body_override_keeps_its_contract_without_legacy_skeleton_fields(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'POST /api/v1/chats/new'
+    body = {'agent': 'soev_react', 'input': {'text': 'Fictional conversation.'}}
+    parameters = seeds.Resolved(fields={route: {'json': body}})
+    assert crossuser._benign(route, parameters, seeds.SPEC)['json'] == body
+    assert parameters.fields[route]['json'] == body
 
 
 def test_mailbox_control_uses_the_saved_address_and_the_matching_owner(monkeypatch):
@@ -823,3 +895,123 @@ def test_retired_product_routes_have_no_remaining_authorization_targets():
     retired = set(seeds.SURFACE['retired_product']['routes'])
     routes, admins = crossuser.targets()
     assert not retired & (set(routes) | set(admins) | set(crossuser.expected_refusals()))
+
+
+def test_upload_body_targets_another_users_skill_with_no_exemption():
+    route = 'POST /api/v1/files/'
+    routes, admins = crossuser.targets()
+    assert route in routes and route not in admins
+    assert route not in crossuser.expected_refusals() and route not in crossuser._shared()
+    parameters = seeds.Resolved(fixtures={'skill_bundle': 'owners-private-skill'})
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    import json
+
+    metadata = json.loads(request['data']['metadata'])
+    assert metadata['skill_id'] == 'owners-private-skill'
+    assert metadata['skill_path'].endswith('.pdf')
+    assert request['params'] == {'process': 'false'}
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(404, True, 'not found'),
+        plane.Outcome(200, True, '{"id":"new-file"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls[route] == 200 and not result.violations
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"id":"other-file"}'),
+        plane.Outcome(200, True, '{"id":"new-file"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.violations
+
+
+@pytest.mark.parametrize('owner_status,stranger_status,leak', [(200, 403, False), (200, 200, True), (403, 403, True)])
+def test_platform_original_variant_is_in_addition_to_svg_control(monkeypatch, owner_status, stranger_status, leak):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'GET /api/v1/files/{id}/content'
+    result = crossuser.Authorization(plane.Seeding())
+    result.controls[route] = 200  # The SVG owner control already ran.
+    identities = SimpleNamespace(admin=Mock(), user=Mock(), intruder=Mock())
+    calls = []
+
+    def request(admin, actor, actual_route, target, tally, kwargs):
+        calls.append((actor, actual_route, target))
+        return plane.Outcome(
+            owner_status if actor is identities.user else stranger_status,
+            True,
+            'private-document-marker' if actor is identities.user or stranger_status == 200 else 'forbidden',
+        )
+
+    monkeypatch.setattr(crossuser, '_request', request)
+    crossuser.drive_content_variants(
+        result,
+        identities,
+        seeds.Resolved(fixtures={'platform_document': 'platform-file'}),
+        seeds.SURFACE,
+        ('private-document-marker',),
+    )
+    assert [call[2] for call in calls] == ['/api/v1/files/platform-file/content'] * 2
+    assert bool(result.violations) is leak
+
+
+@pytest.mark.parametrize('status', [401, 403, 404])
+def test_skill_upload_requires_exact_concealment(status):
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /api/v1/files/',
+        plane.Outcome(status, True, 'refused'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert bool(result.violations) is (status != 404)
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_skill_refusal_keeps_404_while_the_owner_control_uses_an_available_upload(monkeypatch, mode):
+    import json
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    route = 'POST /api/v1/files/'
+    parameters = seeds.Resolved(fixtures={'skill_bundle': 'fictional-disabled-skill_bundle'})
+    foreign = crossuser._benign(route, parameters, seeds.SPEC)
+    assert json.loads(foreign['data']['metadata'])['skill_id'] == 'fictional-disabled-skill_bundle'
+    owner = crossuser._owner_request(route, parameters, foreign)
+    if mode == 'drive':
+        assert 'data' not in owner
+        assert owner['params'] == {'process': 'false'}
+        assert sniff_content_type(owner['files'][0][1][1].encode()).startswith('image/')
+    else:
+        assert owner == foreign
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(404, True, 'not found'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls[route] == 200 and not result.violations
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(403, True, 'Feature unavailable'),
+        plane.Outcome(200, True, '{"id":"fictional-upload"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert any('concealed as HTTP 404' in item['reason'] for item in result.violations)

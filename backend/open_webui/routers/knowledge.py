@@ -757,7 +757,11 @@ class KnowledgeFileIdForm(BaseModel):
     directory_id: Optional[str] = None
 
 
-@router.post('/{id}/file/add', response_model=KnowledgeFilesResponse | None)
+@router.post(
+    '/{id}/file/add',
+    response_model=KnowledgeFilesResponse | None,
+    description='Requires knowledge write and file read authority. A supported platform document or supplied text representation is required for indexing; local image retention alone is insufficient. Unsupported input preserves the fixed translated type refusal and HTTP 415. The response includes an admitted copy under the requested file id with its destination processing status before publication, without waiting for ingestion; the original status is preserved.',
+)
 async def add_file_to_knowledge_by_id(
     request: Request,
     id: str,
@@ -874,7 +878,11 @@ async def add_file_to_knowledge_by_id(
         )
 
 
-@router.post('/{id}/file/update', response_model=KnowledgeFilesResponse | None)
+@router.post(
+    '/{id}/file/update',
+    response_model=KnowledgeFilesResponse | None,
+    description='Requires knowledge write, owned file and existing membership. Reprocessing preserves the original identity and fingerprint; unsupported input preserves HTTP 415 and the fixed translated type refusal.',
+)
 async def update_file_from_knowledge_by_id(
     request: Request,
     id: str,
@@ -933,6 +941,8 @@ async def update_file_from_knowledge_by_id(
     except SoevNotConfigured:
         raise
     except Exception as e:
+        if isinstance(e, HTTPException) and e.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+            raise
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -963,7 +973,11 @@ async def update_file_from_knowledge_by_id(
 ############################
 
 
-@router.post('/{id}/file/remove', response_model=KnowledgeFilesResponse | None)
+@router.post(
+    '/{id}/file/remove',
+    response_model=KnowledgeFilesResponse | None,
+    description='Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.',
+)
 async def remove_file_from_knowledge_by_id(
     request: Request,
     id: str,
@@ -1251,7 +1265,11 @@ async def delete_knowledge_by_id(
 ############################
 
 
-@router.post('/{id}/reset', response_model=KnowledgeResponse | None)
+@router.post(
+    '/{id}/reset',
+    response_model=KnowledgeResponse | None,
+    description='Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.',
+)
 async def reset_knowledge_by_id(
     request: Request,
     id: str,

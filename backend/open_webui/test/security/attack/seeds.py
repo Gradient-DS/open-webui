@@ -242,7 +242,9 @@ class SeedContext:
             return
         # Local processing is synchronous; platform mutations must settle before
         # another request reuses their file, including each corpus mutation.
-        if path == '/api/v1/retrieval/process/file' and isinstance(body, dict) and body.get('job_id'):
+        if path.rstrip('/') == '/api/v1/files' and isinstance(body, dict) and (body.get('meta') or {}).get('soev_job'):
+            self.wait_for_file(body['id'], actor=actor)
+        elif path == '/api/v1/retrieval/process/file' and isinstance(body, dict) and body.get('job_id'):
             self.wait_for_file(payload['file_id'], actor=actor)
         elif re.fullmatch(r'/api/v1/knowledge/[^/]+/file/(add|update)', path):
             self.wait_for_file(payload['file_id'], actor=actor)
@@ -432,6 +434,22 @@ def seed_feedback(ctx, parameter):
     return f'attack_feedback_probe_{ctx.token}'
 
 
+def seed_platform_document(ctx, parameter):
+    label = f'Platform original {ctx.token}'
+    uploaded = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.client,
+        params={'process': False},
+        files=[('file', (f'platform-{ctx.token}.txt', label, 'text/plain'))],
+    )
+    file_id = _extract(uploaded, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    if uploaded.get('path') is not None or not (uploaded.get('meta') or {}).get('file_hash'):
+        raise RuntimeError('Platform document seed did not use the document transfer path')
+    ctx.wait_for_file(file_id, actor=ctx.client)
+    return file_id
+
+
 def seed_knowledge_file(ctx, parameter):
     # Removal and asynchronous reprocessing each need their own settled file.
     label = f'attack-{parameter["key"]}-{ctx.token}'
@@ -443,8 +461,9 @@ def seed_knowledge_file(ctx, parameter):
         files=[('file', (f'{label}.txt', label, 'text/plain'))],
     )
     file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
-    # file/add refuses a file with no extracted content.
-    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.client, json={'file_id': file_id}, timeout=120)
+    # Platform document uploads already commission ingestion, even with process=false.
+    if runtime_soev_backed() != 'drive':
+        ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.client, json={'file_id': file_id}, timeout=120)
     knowledge = ctx.request(
         'POST',
         '/api/v1/knowledge/create',
@@ -548,6 +567,7 @@ _SEEDERS = {
         seed_cloud_family,
         seed_cloud_mailbox_address,
         seed_knowledge_file,
+        seed_platform_document,
     )
 }
 

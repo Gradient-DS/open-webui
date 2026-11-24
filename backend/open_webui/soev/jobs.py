@@ -35,56 +35,38 @@ def _job_key(file: FileModel, job: dict) -> str:
     return f'ingest:{file.id}:{job["collection_key"]}:{job["sha256"]}:{job["attempt"]}'
 
 
-async def _finish(file: FileModel, job: dict, error: str | None = None) -> int:
+async def _finish(file: FileModel, job: dict, error: str | None = None, *, document=None, client=None) -> int:
+    if ingest.transfer_active(file.id):
+        return 0
     status = 'failed' if error is not None else 'completed'
-    if await Files.set_status(file.id, status, error=error) is None:
-        raise RuntimeError('File status write failed')
-    metadata = {'soev_job': None}
-    if error is None:
-        metadata['soev_collection_key'] = None
-    if await Files.update_file_metadata_by_id(file.id, metadata) is None:
-        raise RuntimeError('File metadata write failed')
-    await emit_file_status(
-        user_id=file.user_id,
-        file_id=file.id,
-        status=status,
-        error=error,
-        collection_name=job['collection_key'],
-    )
-    return 1
+    if error is not None:
+        if await ingest.abort(file, error=error, client=client):
+            status, error = 'completed', None
+    else:
+        if job.get('copy'):
+            from open_webui.soev.copy_state import record
 
+            await record(file, job['collection_key'], 'completed')
+        else:
+            if await Files.set_status(file.id, status) is None:
+                raise RuntimeError('File status write failed')
+            from open_webui.soev.originals import published
 
-async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
-    try:
-        await client.send(
-            'POST',
-            f'/v1/jobs/{quote(job["job_id"], safe="")}/commit',
-            None,
-            idempotency_key=f'{_job_key(file, job)}:commit',
-        )
-    except SoevApiError as error:
-        if error.status != 409 or error.code != 'upload_missing':
-            raise
-        if job['attempt'] >= 3:
-            return await _finish(file, job, 'upload could not be completed')
-        await ingest.cancel(file, client=client)
-        file = await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': job['collection_key']})
-        if file is None:
+            await published(file.id, job['collection_key'], document)
+        if await Files.update_file_metadata_by_id(file.id, {'soev_job': None}) is None:
             raise RuntimeError('File metadata write failed')
-        await ingest.submit(
-            file,
-            collection_key=job['collection_key'],
-            user_id=file.user_id,
-            attempt=job['attempt'] + 1,
-            client=client,
+    if not job.get('copy'):
+        await emit_file_status(
+            user_id=file.user_id, file_id=file.id, status=status, error=error, collection_name=job['collection_key']
         )
-        return 1
-    if await Files.update_file_metadata_by_id(file.id, {'soev_job': {**job, 'committed': True}}) is None:
-        raise RuntimeError('File metadata write failed')
     return 1
 
 
 async def _reference_ready(file: FileModel, job: dict, document: dict) -> int:
+    if document.get('sha256') and document.get('byte_size') is not None:
+        file = await Files.update_file_metadata_by_id(
+            file.id, {'file_hash': document['sha256'], 'size': document['byte_size']}
+        )
     if not file.meta.get('content_type'):
         ref = f'owui:user:{file.user_id}'
         if acting.requester_ref() != ref or not await acting.user_token(ref):
@@ -94,13 +76,15 @@ async def _reference_ready(file: FileModel, job: dict, document: dict) -> int:
                 raise RuntimeError('File metadata write failed')
         else:
             return 0
-    return await _finish(file, job)
+    return await _finish(file, job, document=document)
 
 
 async def _settle_file(
     client: SoevClient, file: FileModel, now: int, result: dict | None, document: dict | None
 ) -> int:
     job = file.meta['soev_job']
+    if ingest.transfer_active(file.id):
+        return 0
     if result is None:
         return await _finish(file, job, 'job disappeared')
     status = result['status']
@@ -124,11 +108,22 @@ async def _settle_file(
     )
     age = now - job['submitted_at']
     if status == 'AWAITING_UPLOAD':
-        return await _commit_upload(client, file, job) if age >= 60 else 0
+        if now >= ingest.upload_deadline(job):
+            return await _finish(file, job, 'upload_expired', client=client)
+        return 0
     if status in {'QUEUED', 'RUNNING'}:
         cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
         return await _finish(file, job, f'did not complete within {cap}s') if age > cap else 0
     if status == 'SUCCEEDED':
+        if age > config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS and (
+            document is None
+            or (
+                job.get('kind') == 'reference'
+                and not document.get('content_type')
+                and not file.meta.get('content_type')
+            )
+        ):
+            return await _finish(file, job, 'original_unavailable')
         if document is None:
             return 0
         if job.get('kind') == 'reference':
@@ -139,23 +134,48 @@ async def _settle_file(
                 'POST',
                 path + '/move',
                 {'to': job['path'] or ''},
-                as_user=f'owui:user:{file.user_id}',
+                as_user=job['as_user'],
                 idempotency_key=f'{_job_key(file, job)}:move',
             )
-        return await _finish(file, job)
+        return await _finish(file, job, document=document, client=client)
     if status in {'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED'}:
         item = next((item for item in result.get('items', []) if item.get('source_id') == file.id), {})
         return await _finish(file, job, _item_error(item, status))
+    if age > config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS:
+        return await _finish(file, job, 'job_status_unavailable')
     return 0
 
 
 async def _claim_files(
-    owner_id: str, now: int, *, max_collections: int = 15, candidates: list[FileModel] | None = None
+    owner_id: str,
+    now: int,
+    *,
+    max_collections: int = 15,
+    candidates: list[FileModel] | None = None,
+    orphaned: list[FileModel] | None = None,
 ) -> tuple[list[FileModel], dict[str, list[str]]]:
     candidates = sorted(
         await Files.get_files_with_soev_jobs(user_id=owner_id) if candidates is None else candidates,
         key=lambda file: (file.meta.get('soev_job_polled_at', 0), file.id),
     )
+    active = []
+    candidates += await Files.get_orphaned_file_jobs(owner_id) if orphaned is None else orphaned
+    for file in candidates:
+        job = file.meta['soev_job']
+        if job.get('as_user') != f'owui:user:{owner_id}' or ingest.transfer_active(file.id):
+            continue
+        if job.get('cancel_pending'):
+            try:
+                await ingest.cancel(file, now=now)
+            except Exception:
+                pass
+            continue
+        if not job.get('job_id'):
+            if now >= ingest.upload_deadline(job):
+                await ingest.abort(file, error='upload_interrupted')
+            continue
+        active.append(file)
+    candidates = active
     if not candidates:
         return [], {}
     anchor = min(candidates, key=lambda file: file.id)
@@ -206,15 +226,28 @@ def _status_reads(claimed: list[FileModel], collections: dict[str, list[str]]) -
     return reads
 
 
+async def _expire_after_read_failure(claimed: list[FileModel], now: int) -> int:
+    touched = 0
+    cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
+    for file in claimed:
+        job = file.meta['soev_job']
+        if not ingest.transfer_active(file.id) and now > (
+            ingest.upload_deadline(job) if not job.get('committed') else job['submitted_at'] + cap
+        ):
+            touched += await _finish(file, job, f'did not complete within {cap}s')
+    return touched
+
+
 async def poll_once(client: SoevClient, *, now: int) -> int:
     ref = acting.requester_ref()
     if client.is_service or ref is None:
         return 0
     owner_id = ref.removeprefix('owui:user:')
     candidates = await Files.get_files_with_soev_jobs(user_id=owner_id)
-    if not candidates or not await acting.user_token(ref):
+    orphaned = await Files.get_orphaned_file_jobs(owner_id)
+    if (not candidates and not orphaned) or not await acting.user_token(ref):
         return 0
-    claimed, collections = await _claim_files(owner_id, now, candidates=candidates)
+    claimed, collections = await _claim_files(owner_id, now, candidates=candidates, orphaned=orphaned)
     if not claimed:
         return 0
     reads = _status_reads(claimed, collections)
@@ -224,7 +257,7 @@ async def poll_once(client: SoevClient, *, now: int) -> int:
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job batch failed (%s)', code)
-        return 0
+        return await _expire_after_read_failure(claimed, now)
 
 
 async def _settle_batch(
@@ -249,7 +282,7 @@ async def _settle_batch(
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('soev job batch failed (%s)', code)
-        return 0
+        return await _expire_after_read_failure(claimed, now)
     touched = 0
     for file in claimed:
         try:
@@ -280,7 +313,11 @@ def defer_owner_jobs(owner_id: str):
         if not claimed:
             return await fetch(reads)
         statuses = _status_reads(claimed, collections)
-        results = await fetch(reads + statuses)
+        try:
+            results = await fetch(reads + statuses)
+        except Exception:
+            await _expire_after_read_failure(claimed, now)
+            raise
         try:
             pages = SoevClient.batch_values(results[len(reads) :])
             await _settle_batch(identity.build_client(), claimed, collections, statuses, pages, now)

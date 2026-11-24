@@ -332,7 +332,12 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
             id=str(index),
             user_id='alice',
             meta={
-                'soev_job': {'job_id': f'job-{index}', 'collection_key': f'kb-{index % 3}', 'submitted_at': 1},
+                'soev_job': {
+                    'as_user': 'owui:user:alice',
+                    'job_id': f'job-{index}',
+                    'collection_key': f'kb-{index % 3}',
+                    'submitted_at': 1,
+                },
             },
         )
         for index in range(150)
@@ -340,6 +345,7 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
     table = SimpleNamespace(
         set_status=AsyncMock(),
         get_files_with_soev_jobs=AsyncMock(return_value=files),
+        get_orphaned_file_jobs=AsyncMock(return_value=[]),
         claim_soev_job_poll=AsyncMock(
             side_effect=lambda identifier, *args, **kwargs: next(file for file in files if file.id == identifier)
         ),
@@ -353,6 +359,8 @@ async def test_owner_poll_claims_many_jobs_but_sends_one_bundle(owner, monkeypat
     }
     for name, module in stubs.items():
         stub_module(monkeypatch, name, module)
+    stubs['open_webui.soev.ingest'].transfer_active = lambda file_id: False
+    stubs['open_webui.soev.ingest'].upload_deadline = lambda job: job['submitted_at'] + 900
     jobs = isolated_module(monkeypatch, 'jobs')
     api = SimpleNamespace(
         is_service=False,

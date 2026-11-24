@@ -3,7 +3,7 @@ tenant:
   name: v2
   domain: v2.soev.ai
 soevApi:
-  url: http://soev-api:8000
+  url: https://api.tenant.example.invalid
   servicePrincipal: open-webui
 liveDocuments:
   enabled: true

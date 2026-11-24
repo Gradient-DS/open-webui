@@ -119,6 +119,18 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
     from open_webui.soev.client import SoevApiError
 
     file = await live_documents.register_attachment('alice', attachment())
+    import hashlib
+
+    digest = hashlib.sha256(b'original bytes').hexdigest()
+    file = await env.files.Files.update_file_metadata_by_id(
+        file.id,
+        {
+            'file_hash': digest,
+            'size': len(b'original bytes'),
+            'soev_read_collection': 'owui-attachments-alice',
+            'status': 'completed',
+        },
+    )
     calls, closed = [], []
 
     @asynccontextmanager
@@ -133,7 +145,19 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
         finally:
             closed.append(True)
 
-    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream_response=stream))
+    monkeypatch.setattr(
+        live_documents.identity,
+        'build_client',
+        lambda: SimpleNamespace(
+            stream_response=stream,
+            get=AsyncMock(
+                return_value={
+                    'sha256': digest,
+                    'byte_size': len(b'original bytes'),
+                }
+            ),
+        ),
+    )
     storage = Mock(side_effect=AssertionError('Reference originals must not use OWUI storage'))
     monkeypatch.setattr(files.Storage, 'get_file', storage)
     user = SimpleNamespace(id='alice', role='user')

@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -18,6 +19,8 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from open_webui.test.soev.fake_api import person_ref
+from open_webui.soev.client import SoevApiError
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 FILE_BYTES = b'%PDF-1.7 stored file content'
@@ -30,8 +33,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     identity, _ = identity_config
     module = importlib.import_module('open_webui.soev.ingest')
     files = importlib.import_module('open_webui.models.files')
-    storage = importlib.import_module('open_webui.storage.provider')
-    monkeypatch.setattr(module, 'Storage', storage.LocalStorageProvider())
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
@@ -42,6 +43,8 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:
         await connection.run_sync(files.File.__table__.create)
+        await connection.run_sync(files.FileJob.__table__.create)
+        await connection.execute(sql_text('CREATE TABLE knowledge_file (file_id TEXT, knowledge_id TEXT)'))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
@@ -65,8 +68,20 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
         idempotency_key='collection:kb',
     )
     fake_api.requests.clear()
-    yield SimpleNamespace(module=module, files=files, api=fake_api, client=client, identity=identity, tmp_path=tmp_path)
+    from open_webui.soev import acting
+
+    requester = acting._requester_ref.set('owui:user:alice')
+    try:
+        yield SimpleNamespace(
+            module=module, files=files, api=fake_api, client=client, identity=identity, tmp_path=tmp_path
+        )
+    finally:
+        acting._requester_ref.reset(requester)
     await engine.dispose()
+
+
+def files_context(env):
+    return env.files.get_async_db_context()
 
 
 async def new_file(env, **meta):
@@ -80,44 +95,40 @@ async def new_file(env, **meta):
             filename='original.pdf',
             path=str(path),
             hash='client-checksum',
-            data={'status': 'pending', 'content': 'preserved content'},
-            meta={'status': 'pending', **meta},
+            data={'status': meta.get('status', 'pending'), 'content': 'preserved content'},
+            meta={
+                'status': 'pending',
+                'size': len(FILE_BYTES),
+                'file_hash': hashlib.sha256(FILE_BYTES).hexdigest(),
+                **meta,
+            },
         ),
     )
     assert row is not None
+    async with files_context(env) as session:
+        await session.execute(
+            sql_text('INSERT INTO knowledge_file VALUES (:file_id, :key)'), {'file_id': row.id, 'key': 'kb'}
+        )
+        await session.commit()
     return row
 
 
 async def submit(env, file, **kwargs):
-    return await env.module.submit(file, collection_key='kb', user_id='alice', client=env.client, **kwargs)
+    return await env.module.submit(
+        file, collection_key='kb', user_id='alice', source=BytesIO(FILE_BYTES), client=env.client, **kwargs
+    )
 
 
 @pytest.mark.asyncio
 async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, monkeypatch):
-    """A file declaration streams through the authenticated API before commit."""
+    """A document declaration relays bytes directly to the store before commit."""
     file = await new_file(env, name='Report.pdf', content_type='application/pdf')
-    loop_thread = threading.get_ident()
-    storage_threads, read_threads = [], []
-    get_file, file_info = env.module.Storage.get_file, env.module._file_info
-
-    def resolve(path):
-        storage_threads.append(threading.get_ident())
-        return get_file(path)
-
-    def read(path):
-        read_threads.append(threading.get_ident())
-        return file_info(path)
-
-    monkeypatch.setattr(env.module.Storage, 'get_file', resolve)
-    monkeypatch.setattr(env.module, '_file_info', read)
     job_id = await submit(env, file)
-    assert len(storage_threads) == 1 and storage_threads == read_threads
-    assert storage_threads[0] != loop_thread
     create, upload, commit = env.api.requests
     digest = hashlib.sha256(FILE_BYTES).hexdigest()
     assert [(r.method, r.url.path) for r in env.api.requests] == [
         ('POST', '/v1/jobs'),
-        ('PUT', f'/v1/jobs/{job_id}/uploads/{file.id}'),
+        ('PUT', f'/{job_id}/{file.id}'),
         ('POST', f'/v1/jobs/{job_id}/commit'),
     ]
     assert json.loads(create.content) == {
@@ -134,11 +145,12 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
             }
         ],
     }
-    assert str(upload.url) == f'https://soev.invalid/v1/jobs/{job_id}/uploads/{file.id}'
+    assert upload.url.host == 'store.invalid'
     assert upload.headers['Content-Length'] == str(len(FILE_BYTES))
-    assert upload.headers['Content-Type'] == 'application/pdf'
-    assert upload.headers['Authorization'] == create.headers['Authorization']
-    assert 'x-amz-checksum-sha256' not in upload.headers
+    assert 'content-type' not in upload.headers
+    assert 'authorization' not in upload.headers
+    assert upload.headers['if-none-match'] == '*'
+    assert 'x-amz-checksum-sha256' in upload.headers
     assert upload.content == FILE_BYTES and env.api.uploads[job_id, file.id] == FILE_BYTES
     assert create.headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{digest}:1'
     assert commit.headers['Idempotency-Key'] == create.headers['Idempotency-Key'] + ':commit'
@@ -159,7 +171,7 @@ async def test_submit_replays_an_existing_job_without_uploading_again(env, monke
     file = await env.files.Files.get_file_by_id(file.id)
     env.api.requests.clear()
 
-    assert await submit(env, file, text=text) == job_id
+    assert await submit(env, file, text=text, attempt=1) == job_id
 
     assert [(request.method, request.url.path) for request in env.api.requests] == [
         ('POST', '/v1/jobs'),
@@ -186,7 +198,7 @@ async def test_submit_forwards_derived_content_type(env, declared):
 
 @pytest.mark.asyncio
 async def test_submit_computes_sha256_from_the_stored_bytes_not_the_row(env):
-    """The byte digest replaces a client checksum in the declaration, replay key, and persisted job."""
+    """The server-computed byte digest drives the declaration, replay key, and persisted job."""
     file = await new_file(env)
     job_id = await submit(env, file, attempt=3)
     digest = hashlib.sha256(FILE_BYTES).hexdigest()
@@ -266,9 +278,9 @@ async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
         return build_client()
 
     monkeypatch.setattr(env.identity, 'build_client', build)
-    await env.module.submit(file, collection_key='kb', user_id='alice')
+    await env.module.submit(file, collection_key='kb', user_id='alice', source=BytesIO(FILE_BYTES))
     create, upload, commit = env.api.requests
-    for request in (create, upload, commit):
+    for request in (create, commit):
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
         assert 'X-Soev-' + 'Subject' not in request.headers
         assert request.headers['Authorization'] == create.headers['Authorization']
@@ -279,7 +291,7 @@ async def test_submit_runs_under_the_users_assertion(env, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [None, 'PUT', 'commit'])
 async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monkeypatch, failure):
-    """The job is discoverable and uncommitted before upload and stays recoverable if PUT or commit fails."""
+    """The job is durable before transfer; only an interrupted commit remains recoverable."""
     file = await new_file(env, relative_path='a/report.pdf')
     handle = env.api.handle
     snapshots = []
@@ -304,7 +316,13 @@ async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monke
         job_id = await submit(env, file)
     row = await env.files.Files.get_file_by_id(file.id)
     job = row.meta['soev_job']
+    if failure:
+        assert job is None
+        assert row.meta['status'] == row.data['status'] == 'failed'
+        assert await env.files.Files.get_files_with_soev_jobs() == []
+        return
     assert job == {
+        'as_user': 'owui:user:alice',
         'job_id': job_id,
         'collection_key': 'kb',
         'path': 'a',
@@ -312,6 +330,8 @@ async def test_submit_records_the_job_on_the_row_and_marks_processing(env, monke
         'attempt': 1,
         'submitted_at': job['submitted_at'],
         'committed': failure is None,
+        'copy': False,
+        'expires_at': job['expires_at'],
     }
     assert isinstance(job['submitted_at'], int) and before <= job['submitted_at'] <= int(time.time())
     for saved in [*snapshots, row]:
@@ -343,8 +363,9 @@ async def test_a_refused_job_leaves_the_row_untouched(env):
     with pytest.raises(env.module.SoevApiError) as error:
         await submit(env, file)
     assert error.value.status == 403 and error.value.code == 'scope_insufficient'
-    assert await env.files.Files.get_file_by_id(file.id) == file
-    assert 'soev_job' not in file.meta
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['status'] == 'failed'
+    assert row.meta['soev_job'] is None
     assert [(r.method, r.url.path) for r in env.api.requests] == [('POST', '/v1/jobs')]
     assert not env.api.jobs
 
@@ -520,14 +541,17 @@ async def test_cancel_clears_the_row_even_when_terminal(env, status):
     env.api.requests.clear()
     await env.module.cancel(file, client=env.client)
     row = await env.files.Files.get_file_by_id(file.id)
-    assert row.meta['soev_job'] is None and row.meta['soev_collection_key'] is None
-    assert row.meta['status'] == row.data['status'] == 'processing'
+    assert row.meta['soev_job'] is None
+    assert row.meta['soev_collection_key'] == ('kb' if status == 'SUCCEEDED' else None)
+    assert row.meta['status'] == row.data['status'] == ('completed' if status == 'SUCCEEDED' else 'processing')
     assert row.data['content'] == 'preserved content'
-    assert [(r.method, r.url.path) for r in env.api.requests] == [('POST', f'/v1/jobs/{job_id}/cancel')]
+    assert (env.api.requests[0].method, env.api.requests[0].url.path) == ('POST', f'/v1/jobs/{job_id}/cancel')
     assert await env.files.Files.get_files_with_soev_jobs() == []
     assert await env.files.Files.get_unlanded_files_for_collection('kb') == []
     await env.module.cancel(row, client=env.client)
-    assert len(env.api.requests) == 1
+    assert len(env.api.requests) == (
+        3 if status == 'SUCCEEDED' else 2 if status in ('FAILED', 'CANCELLED', 'EXPIRED') else 1
+    )
 
 
 @pytest.mark.asyncio
@@ -756,90 +780,428 @@ async def test_rendition_without_soev_uses_only_stored_content(env, monkeypatch,
     assert not env.api.requests
 
 
-class _ChunkReader:
-    def __init__(self, source, limit, loop_thread):
-        self.source = source
-        self.limit = limit
-        self.loop_thread = loop_thread
-        self.reads = 0
-        self.closed = False
+@pytest.mark.asyncio
+async def test_large_upload_reads_bounded_chunks_only_as_the_transport_pulls(env, monkeypatch):
+    data = b'a' * (2 * 1024 * 1024)
+    file = await new_file(env, size=len(data), file_hash=hashlib.sha256(data).hexdigest())
+    reads = []
+    loop_thread = threading.get_ident()
 
-    def read(self, limit):
-        assert 0 < limit <= self.limit
-        assert threading.get_ident() != self.loop_thread
-        self.reads += 1
-        return self.source.read(limit)
+    class Source(BytesIO):
+        def read(self, size):
+            assert threading.get_ident() != loop_thread
+            assert size == env.module.UPLOAD_CHUNK_BYTES
+            reads.append(size)
+            return super().read(size)
 
-    def close(self):
-        self.closed = True
-        self.source.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
+    source = Source(data)
+    job_id = await env.module.submit(file, collection_key='kb', user_id='alice', source=source, client=env.client)
+    assert env.api.jobs[job_id]['status'] == 'QUEUED'
+    assert env.api.uploads[job_id, file.id] == data
+    assert len(reads) > 1
+    assert not source.closed
 
 
 @pytest.mark.asyncio
-async def test_large_upload_reads_bounded_chunks_only_as_the_transport_pulls(env, monkeypatch):
-    from open_webui.soev.client import close_client
-
+@pytest.mark.parametrize('first', [403, 'expired'])
+async def test_transfer_refresh_reuses_the_exact_declaration_and_key(env, monkeypatch, first):
     file = await new_file(env)
-    size = 100 * 1024 * 1024
-    path = Path(file.path)
-    with path.open('wb') as target:
-        target.truncate(size)
-    original_open = Path.open
-    readers = []
-    loop_thread = threading.get_ident()
+    handle, creates, stores = env.api.handle, [], []
 
-    def opened(target, *args, **kwargs):
-        source = original_open(target, *args, **kwargs)
-        if target == path:
-            reader = _ChunkReader(source, env.module.UPLOAD_CHUNK_BYTES, loop_thread)
-            readers.append(reader)
-            return reader
-        return source
+    def respond(request):
+        if request.method == 'POST' and request.url.path == '/v1/jobs':
+            creates.append(request)
+            response = handle(request)
+            if first == 'expired' and len(creates) == 1:
+                body = response.json()
+                body['uploads'][0]['expires_at'] = '2000-01-01T00:00:00Z'
+                return httpx.Response(201, json=body)
+            return response
+        if request.url.host == 'store.invalid':
+            stores.append(request)
+            if first == 403 and len(stores) == 1:
+                return httpx.Response(403, text='private signature')
+        return handle(request)
 
-    class Transport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            if request.method != 'PUT':
-                return env.api.handle(request)
-            env.api.requests.append(request)
-            assert len(readers) == 1 and readers[0].closed
-            digest, received, chunks = hashlib.sha256(), 0, 0
-            async for chunk in request.stream:
-                assert len(readers) == 2
-                assert readers[1].reads == chunks + 1
-                assert not readers[1].closed
-                assert 0 < len(chunk) <= env.module.UPLOAD_CHUNK_BYTES
-                received += len(chunk)
-                chunks += 1
-                digest.update(chunk)
-                await asyncio.sleep(0)
-                assert readers[1].reads == chunks
-            job = next(iter(env.api.jobs.values()))
-            document = job['documents'][0]
-            assert received == document['size'] == size
-            assert digest.hexdigest() == document['sha256']
-            assert chunks > 1
-            with pytest.raises(httpx.RequestNotRead):
-                _ = request.content
-            env.api.uploads[job['job_id'], file.id] = b'counted by streaming transport'
-            return httpx.Response(204)
+    monkeypatch.setattr(env.api, 'handle', respond)
+    await submit(env, file)
+    assert len(creates) == 2
+    assert creates[0].content == creates[1].content
+    assert creates[0].headers['Idempotency-Key'] == creates[1].headers['Idempotency-Key']
+    assert len(stores) == (2 if first == 403 else 1)
+    assert all(r.content == FILE_BYTES for r in stores)
+    saved = await env.files.Files.get_file_by_id(file.id)
+    assert 'store.invalid' not in saved.model_dump_json() and 'signature' not in saved.model_dump_json()
 
-    await close_client()
-    original_client = AsyncClient
-    monkeypatch.setattr(
-        'open_webui.soev.client.httpx.AsyncClient',
-        lambda **kwargs: original_client(
-            transport=Transport(),
-            **kwargs,
-        ),
+
+@pytest.mark.asyncio
+async def test_repeated_store_refusal_is_bounded_and_never_commits(env, monkeypatch):
+    handle, calls = env.api.handle, []
+
+    def respond(request):
+        calls.append(request)
+        if request.url.host == 'store.invalid':
+            return httpx.Response(403)
+        return handle(request)
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    with pytest.raises(env.module.SoevApiError) as caught:
+        await submit(env, await new_file(env))
+    assert caught.value.code == 'upload_rejected'
+    assert len([r for r in calls if r.url.path == '/v1/jobs']) == 2
+    assert len([r for r in calls if r.url.host == 'store.invalid']) == 2
+    assert not any(r.url.path.endswith('/commit') for r in calls)
+
+
+@pytest.mark.asyncio
+async def test_resubmission_streams_the_platform_original_without_local_disk(env, monkeypatch):
+    file = await new_file(env, soev_collection_key='legacy-untrusted')
+    env.api.add_document('kb', file.id, byte_size=len(FILE_BYTES), sha256=hashlib.sha256(FILE_BYTES).hexdigest())
+    Path(file.path).unlink()
+    originals = []
+
+    @asynccontextmanager
+    async def stream(path, *, as_user):
+        originals.append((path, as_user))
+        yield httpx.Response(200, content=FILE_BYTES)
+
+    monkeypatch.setattr(env.client, 'stream_response', stream)
+    await env.module.submit(file, collection_key='kb', user_id='alice', client=env.client)
+    assert originals == [(f'/v1/collections/kb/documents/{file.id}/original', 'owui:user:alice')]
+    store = next(r for r in env.api.requests if r.url.host == 'store.invalid')
+    assert store.content == FILE_BYTES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('named', [False, True])
+@pytest.mark.parametrize('denied', [False, True])
+async def test_document_routes_redeem_public_download_links_and_preserve_denial(env, monkeypatch, named, denied):
+    from fastapi import HTTPException
+    from open_webui.routers import files
+
+    file = await new_file(env, soev_read_collection='kb', content_type='application/pdf')
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        assert request.url.host == 'soev.invalid'
+        assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
+        if request.url.path == f'/v1/collections/kb/documents/{file.id}':
+            return httpx.Response(
+                200, json={'byte_size': len(FILE_BYTES), 'sha256': hashlib.sha256(FILE_BYTES).hexdigest()}
+            )
+        if request.url.path.endswith('/original'):
+            if denied:
+                return httpx.Response(403)
+            return httpx.Response(303, headers={'Location': 'https://soev.invalid/v1/downloads/single-use'})
+        assert request.url.path == '/v1/downloads/single-use'
+        return httpx.Response(200, content=FILE_BYTES)
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    monkeypatch.setattr(files.Storage, 'get_file', Mock(return_value=file.path))
+    user = SimpleNamespace(id='alice', role='user')
+    response = (
+        files.get_file_content_by_id(file.id, 'original.pdf', user=user, db=None)
+        if named
+        else files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
     )
-    monkeypatch.setattr(Path, 'open', opened)
-    monkeypatch.setattr(Path, 'read_bytes', Mock(side_effect=AssertionError('Whole-file read')))
-    job_id = await submit(env, file)
-    assert env.api.jobs[job_id]['status'] == 'QUEUED'
-    assert len(readers) == 2 and all(reader.closed for reader in readers)
+    if denied:
+        with pytest.raises(HTTPException) as caught:
+            await response
+        assert caught.value.status_code == 403
+        assert len(calls) == 2
+    else:
+        result = await response
+        assert b''.join([chunk async for chunk in result.body_iterator]) == FILE_BYTES
+        assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('named', [False, True])
+@pytest.mark.parametrize('content_type', ['application/pdf', 'audio/mpeg'])
+async def test_unknown_legacy_document_keeps_disk_access(env, monkeypatch, named, content_type):
+    from fastapi.responses import FileResponse
+    from open_webui.routers import files
+
+    file = await new_file(env, content_type=content_type, status='completed')
+    monkeypatch.setattr(files.Storage, 'get_file', Mock(return_value=file.path))
+    user = SimpleNamespace(id='alice', role='user')
+    result = await (
+        files.get_file_content_by_id(file.id, 'original.pdf', user=user, db=None)
+        if named
+        else files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
+    )
+    assert isinstance(result, FileResponse)
+    assert str(result.path) == file.path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('process', [False, True])
+async def test_interactive_document_is_spooled_hashed_and_committed_without_storage(env, monkeypatch, process):
+    from fastapi import UploadFile
+    from open_webui.routers import files
+
+    values = {'rag.file.allowed_extensions': ['pdf'], 'rag.file.max_size': 1}
+    monkeypatch.setattr(files.Config, 'get', AsyncMock(side_effect=lambda key: values.get(key)))
+    monkeypatch.setattr(files.Storage, 'upload_file', Mock(side_effect=AssertionError('No document storage write')))
+    monkeypatch.setattr(files, 'emit_file_status', AsyncMock())
+    spools = []
+    original_submit = env.module.submit
+
+    async def observed(*args, **kwargs):
+        spool = kwargs['source']
+        assert not spool.closed
+        spools.append(spool)
+        return await original_submit(*args, **kwargs)
+
+    monkeypatch.setattr(env.module, 'submit', observed)
+    result = await files.upload_file_handler(
+        SimpleNamespace(),
+        UploadFile(file=BytesIO(FILE_BYTES), filename='original.pdf', headers={'content-type': 'application/pdf'}),
+        metadata={'file_hash': 'untrusted-client-checksum'},
+        process=process,
+        process_in_background=True,
+        user=SimpleNamespace(id='alice', email='alice@example.invalid', name='Alice', role='user'),
+        db=None,
+        background_tasks=SimpleNamespace(add_task=Mock(side_effect=AssertionError('No detached source'))),
+    )
+    assert result['path'] is None
+    assert result['meta']['file_hash'] == hashlib.sha256(FILE_BYTES).hexdigest()
+    assert result['meta']['size'] == len(FILE_BYTES)
+    assert result['meta']['soev_job']['committed']
+    assert len(spools) == 1 and spools[0].closed
+
+
+@pytest.mark.asyncio
+async def test_skill_upload_without_a_path_is_rejected_before_storage(env, monkeypatch):
+    from fastapi import HTTPException, UploadFile
+    from open_webui.routers import files
+
+    monkeypatch.setattr(files.Config, 'get', AsyncMock(return_value=None))
+    write = Mock(side_effect=AssertionError('Unlinked uploads must not exist'))
+    monkeypatch.setattr(files.Storage, 'upload_file', write)
+    with pytest.raises(HTTPException) as caught:
+        await files.upload_file_handler(
+            SimpleNamespace(),
+            UploadFile(file=BytesIO(FILE_BYTES), filename='skill.pdf'),
+            metadata={'skill_id': 'skill'},
+            process=False,
+            user=SimpleNamespace(id='alice', email='alice@invalid', name='Alice', role='user'),
+            db=None,
+        )
+    assert caught.value.status_code == 400
+    write.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,commits,puts', [(412, 1, 1), (400, 0, 1), (503, 0, 3)])
+async def test_store_status_table_controls_commit(env, monkeypatch, status, commits, puts):
+    handle, calls = env.api.handle, []
+
+    def respond(request):
+        calls.append(request)
+        if request.url.host == 'store.invalid':
+            if status == 412:
+                handle(request)
+            return httpx.Response(status)
+        return handle(request)
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    file = await new_file(env)
+    if commits:
+        await submit(env, file)
+    else:
+        with pytest.raises(env.module.SoevApiError) as caught:
+            await submit(env, file)
+        assert caught.value.code == 'upload_rejected'
+        saved = await env.files.Files.get_file_by_id(file.id)
+        assert saved.meta['soev_job'] is None
+        assert saved.meta['status'] == 'failed'
+        assert await env.files.Files.get_files_with_soev_jobs() == []
+    assert sum(r.url.host == 'store.invalid' for r in calls) == puts
+    assert sum(r.url.path.endswith('/commit') for r in calls) == commits
+
+
+@pytest.mark.asyncio
+async def test_document_download_denies_an_unshared_other_user_before_platform_access(env, monkeypatch):
+    from fastapi import HTTPException
+    from open_webui.routers import files
+
+    file = await new_file(env, soev_collection_key='kb')
+    monkeypatch.setattr(files, 'has_access_to_file', AsyncMock(return_value=False))
+    with pytest.raises(HTTPException) as caught:
+        await files.get_file_content_by_id_inline(file.id, user=SimpleNamespace(id='bob', role='user'), db=None)
+    assert caught.value.status_code == 404
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+async def test_unpublished_uploaded_original_uses_the_existing_preview_retry(env, monkeypatch):
+    from fastapi import HTTPException
+    from open_webui.routers import files
+
+    file = await new_file(env, soev_collection_key='kb', status='processing')
+    with pytest.raises(HTTPException) as caught:
+        await files.get_file_content_by_id_inline(file.id, user=SimpleNamespace(id='alice', role='user'), db=None)
+    assert (caught.value.status_code, caught.value.detail) == (409, 'original_processing')
+
+
+@pytest.mark.asyncio
+async def test_unsupported_image_processing_preserves_retained_storage_and_refuses_415(env, monkeypatch):
+    from fastapi import HTTPException, UploadFile
+    from open_webui.routers import files
+
+    image = __import__('base64').b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    )
+    values = {'rag.content_extraction_engine': 'external'}
+    monkeypatch.setattr(files.Config, 'get', AsyncMock(side_effect=lambda key: values.get(key)))
+    monkeypatch.setattr(files, '_is_text_file', lambda path: False)
+    monkeypatch.setattr(files, 'emit_file_status', AsyncMock())
+    write = Mock(return_value=(image, '/uploads/retained-image.png'))
+    monkeypatch.setattr(files.Storage, 'upload_file', write)
+    file = UploadFile(file=BytesIO(image), filename='image.png', headers={'content-type': 'image/png'})
+
+    async def upload():
+        return await files.upload_file_handler(
+            SimpleNamespace(),
+            file,
+            metadata=None,
+            process=True,
+            process_in_background=True,
+            user=SimpleNamespace(id='alice', email='alice@example.invalid', name='Alice', role='user'),
+            background_tasks=SimpleNamespace(add_task=Mock(side_effect=AssertionError('No detached image source'))),
+            db=None,
+        )
+
+    with pytest.raises(HTTPException) as caught:
+        await upload()
+    assert (caught.value.status_code, caught.value.detail) == (415, 'Unsupported file type.')
+    write.assert_called_once()
+    (saved,) = await env.files.Files.get_files_by_user_id('alice')
+    assert saved.path == '/uploads/retained-image.png'
+    assert saved.meta['status'] == 'failed' and not saved.meta.get('soev_job')
+    assert saved.meta['file_hash'] == hashlib.sha256(image).hexdigest()
+    assert not env.api.jobs and not env.api.uploads
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        'https://foreign.invalid/file',
+        'https://127.0.0.1/file',
+        'https://store.invalid@foreign.invalid/file',
+        'https://foreign.invalid@store.invalid/file',
+        'https://store.invalid:8443/file',
+        'https://store.invalid:0/file',
+        'http://store.invalid/file',
+    ],
+)
+def test_transfer_destination_is_exactly_configured(url):
+    from open_webui.soev.transfers import validate
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+    upload = {
+        'method': 'PUT',
+        'url': url,
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    with pytest.raises(SoevApiError, match='Invalid upload declaration'):
+        validate(upload, size=len(FILE_BYTES), sha256=digest, store_host='store.invalid')
+
+
+@pytest.mark.parametrize(
+    'configured,url,allowed',
+    [
+        ('', 'https://store.invalid/file', False),
+        ('store.invalid:0', 'https://store.invalid/file', False),
+        ('127.0.0.1', 'https://127.0.0.1/file', True),
+        ('store.invalid:8443', 'https://store.invalid:8443/file', True),
+        ('http://s3:9000', 'http://s3:9000/file', True),
+        ('http://s3:9000', 'http://other:9000/file', False),
+    ],
+)
+def test_transfer_origin_setting_is_independent_of_platform(configured, url, allowed):
+    from open_webui.soev.transfers import validate
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+    upload = {
+        'method': 'PUT',
+        'url': url,
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    if allowed:
+        validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
+    else:
+        with pytest.raises(SoevApiError, match='Invalid upload declaration'):
+            validate(upload, size=len(FILE_BYTES), sha256=digest, store_host=configured)
+
+
+@pytest.mark.asyncio
+async def test_transfer_redirect_never_sends_bytes_to_redirect_target(env, monkeypatch):
+    requests = []
+    original = AsyncClient
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(307, headers={'Location': 'https://foreign.invalid/original'})
+
+    monkeypatch.setattr(
+        'open_webui.soev.transfers.httpx.AsyncClient',
+        lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+    )
+    from open_webui.soev.transfers import put
+    from open_webui.soev.client import StoreTransferError
+    import base64
+
+    digest = hashlib.sha256(FILE_BYTES).hexdigest()
+
+    async def chunks():
+        yield FILE_BYTES
+
+    upload = {
+        'method': 'PUT',
+        'url': 'https://store.invalid/original',
+        'headers': {
+            'Content-Length': str(len(FILE_BYTES)),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(digest)).decode(),
+            'If-None-Match': '*',
+        },
+    }
+    with pytest.raises(StoreTransferError):
+        await put(upload, chunks, size=len(FILE_BYTES), sha256=digest, timeout=5, store_host='store.invalid')
+    assert len(requests) == 1 and requests[0].url.host == 'store.invalid'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['submit', 'successful', 'cancel', 'abort', 'rendition'])
+async def test_file_jobs_refuse_service_authority(env, operation):
+    file = await new_file(env)
+    await submit(env, file)
+    file = await env.files.Files.get_file_by_id(file.id)
+    before = file.model_dump()
+    env.api.requests.clear()
+    client = env.client.as_service()
+    with pytest.raises(PermissionError, match='user authority'):
+        if operation == 'submit':
+            fresh = await new_file(env)
+            await env.module._submit(fresh, collection_key='kb', user_id='alice', client=client)
+        elif operation == 'successful':
+            await env.module.successful(file, file.meta['soev_job'], client=client)
+        elif operation == 'rendition':
+            file.data = {}
+            await env.module.rendition_of(file, 'alice', client=client)
+        else:
+            await getattr(env.module, operation)(file, client=client)
+    assert not env.api.requests
+    assert (await env.files.Files.get_file_by_id(file.id)).model_dump() == before

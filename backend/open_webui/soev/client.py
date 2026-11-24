@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, DefaultCookiePolicy
@@ -143,6 +143,10 @@ class SoevApiError(Exception):
         # [Gradient] The failing call, without query, body or credentials; set where _request raises.
         self.method: str | None = None
         self.path: str | None = None
+
+
+class StoreTransferError(SoevApiError):
+    """A rejection by the capability store, independent of the original source."""
 
 
 def _response_error(response: httpx.Response) -> SoevApiError:
@@ -560,22 +564,15 @@ class SoevClient:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             raise SoevApiError(status, 'upstream_error', 'Original download failed') from None
 
-    async def upload_document(
-        self,
-        job_id: str,
-        source_id: str,
-        chunks: AsyncGenerator[bytes, None],
-        *,
-        size: int,
-        content_type: str,
-        as_user: str | None = None,
+    async def put_transfer(
+        self, upload: dict, chunks: Callable[[], AsyncIterator[bytes]], *, size: int, sha256: str
     ) -> None:
-        """Stream a declared file to its authenticated API route without retrying."""
-        path = f'/v1/jobs/{quote(job_id, safe="")}/uploads/{quote(source_id, safe="")}'
-        async with aclosing(chunks):
-            await self._request(
-                'PUT', path, content=chunks, as_user=as_user, content_type=content_type, content_length=size
-            )
+        from open_webui import config
+        from open_webui.soev.transfers import put
+
+        await put(
+            upload, chunks, size=size, sha256=sha256, timeout=self._timeout, store_host=config.SOEV_TRANSFER_STORE_HOST
+        )
 
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items with fresh admission for every cursor request."""

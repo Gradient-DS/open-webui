@@ -528,6 +528,11 @@ openWebui:
 # In a shared soev-<client> namespace, set networkPolicy.scope: release and
 # secretStoreRef to the platform's existing SecretStore/ClusterSecretStore.
 soevApi:
+  # Required with strict egress and a configured platform URL: presigned upload store hostname, without scheme/path.
+  # Exact upload destination. Bare host[:port] requires HTTPS; an explicit http:// origin is for internal stores.
+  transferStoreHost: ""
+  # Required public platform base URL when enabled, e.g. https://api.<tenant>.soev.ai.
+  # No in-cluster service default; all backend platform traffic uses this host.
   url: ""
   servicePrincipal: ""
 liveDocuments:

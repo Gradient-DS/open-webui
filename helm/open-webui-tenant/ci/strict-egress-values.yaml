@@ -3,7 +3,8 @@ tenant:
   name: strict
   domain: strict.soev.ai
 soevApi:
-  url: http://soev-api:8020
+  url: https://api.tenant.example.invalid
+  transferStoreHost: transfers.example.invalid
 agentApi:
   runtime: v2
 openWebui:
@@ -37,10 +38,6 @@ networkPolicy:
     strict: true
     publicPorts: [443]
     allow:
-      - name: soev-api
-        namespace: ""
-        podLabels: {app.kubernetes.io/name: soev-platform, app.kubernetes.io/component: api}
-        ports: [8020]
       - name: pg-strict
         namespace: database-strict
         podLabels: {cnpg.io/cluster: pg-strict}

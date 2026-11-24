@@ -1,3 +1,10 @@
+# Unsupported raw media is a strict 415 type refusal; live processing/knowledge positives select the genuine settled text/plain transfer. Separate SVG retention/authorization controls and all required routes remain.
+# Transfer completion: upload seeds poll completed status and cleared job; retained media can be processed later from trusted storage. Original reads bind missing catalog size to authenticated download length. No route exemption.
+# Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
+# File upload skill body seed requires exact foreign-target 404 concealment.
+# Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
+# Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.
+# Owner controls and cross-user refusals remain required; noncreator writers record durable pending cancellation.
 # Seeding order only: what must exist before an id-taking route can run.
 # RUN-TAG: owui-phase6-seeding-order
 #
@@ -189,7 +196,7 @@ backed_by = "soev-solutions"
 key = "knowledge_reset"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/reset"
-description = "knowledge/{id}/reset is destructive and runs after the DELETE group, which has deleted the shared knowledge fixture by then: the owner's reset answered 404. Reset gets a knowledge base nothing else touches."
+description = "knowledge/{id}/reset is destructive and runs after the DELETE group, which has deleted the shared knowledge fixture by then: the owner's reset answered 404. Reset gets a knowledge base nothing else touches. Noncreator writers leave in-flight cancellation pending for the creator; admins have ordinary user rights."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "attack-reset-{token}", "description" = "Attack knowledge for reset" }
 extract = "id"
@@ -211,10 +218,10 @@ actor = "user"
 key = "file"
 name = "id"
 prefix = "/api/v1/files/{id}"
-description = "routers/files.py:upload_file/upload_file_handler stores bytes and inserts File.id. process=false avoids an asynchronous ingestion race. Admin avoids the cumulative rag.file.max_count_per_user quota on repeated passes. Tiny genuine text still passes size and sniff guards."
+description = "routers/files.py authenticates the upload owner. Genuine SVG bytes remain local even with platform mode; documents relay and commit in the request, then finish asynchronously through owner-authenticated status polling. Skill retention requires write authority and an atomic skill_file link. No process=false document bypass."
 via = "POST /api/v1/files/"
 extract = "id"
-files = [{ "field" = "file", "filename" = "attack-{token}.txt", "content" = "Attack file {token}", "content_type" = "text/plain" }]
+files = [{ "field" = "file", "filename" = "attack-{token}.svg", "content" = "<svg xmlns='http://www.w3.org/2000/svg'><text>Attack file {token}</text></svg>", "content_type" = "image/svg+xml" }]
 query = { "process" = false }
 actor = "user"
 
@@ -222,7 +229,7 @@ actor = "user"
 key = "filename"
 name = "file_name"
 prefix = "/api/v1/files/{id}/content/{file_name}"
-description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the ordinary file owner."
+description = "Both content routes retain local owner/chat/knowledge access checks. Documents resolve the first published collection or source id with the requesting person’s token and redeem same-origin download links; a platform 403 never falls back to disk. Unknown legacy originals remain local. Images, videos and skill files keep local reads. Use the actual filename for the named route."
 via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
@@ -309,7 +316,7 @@ key = "skill_bundle"
 v2_refused_value = "fictional-disabled-skill_bundle-{token}"
 name = "id"
 prefix = "/api/v1/skills/id/{id}/files"
-description = "Seed a private skill with separate inline text files for read/edit, move and removal. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
+description = "Seed a private skill with separate inline text files for read/edit, move and removal. Replacing a bundle file and deleting its skill also remove unreferenced backing File rows and bytes after verified commit. Product configuration must entitle and enable skills and skill_files; no OWUI config writes enable them."
 seeded_by = "seed_skill_bundle"
 depends_on = []
 actor = "user"
@@ -415,7 +422,7 @@ backed_by = "soev-solutions"
 key = "removable_knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/file/remove"
-description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads, processes and adds a file of its own and provides its id as {removable_file}."
+description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads a file of its own, observes completed status and cleared job, then adds it and provides its id as {removable_file}. Upload cancellation is made only in the recorded creator request; other authorized writers retain durable pending cancellation without sign-in redirection."
 seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["removable_file"]
@@ -762,22 +769,28 @@ json = { "folder_id" = "{folder}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
-description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
+description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. The live positive uses the settled text/plain platform_document transfer, adds it to the KB, then waits for the destination copy. The separate SVG remains a retained-image security control, never a document-parser positive."
 json = { "file_id" = "{file}" }
 setup = [
     { via = "POST /api/v1/retrieval/process/file", body = { "file_id" = "{file}" } },
     { via = "POST /api/v1/knowledge/{knowledge}/file/add", body = { "file_id" = "{file}" } },
 ]
 
+v2 = { json = { file_id = "{platform_document}" }, setup = [{ via = "POST /api/v1/knowledge/{knowledge}/file/add", body = { file_id = "{platform_document}" } }] }
+
 [[field]]
 route = "POST /api/v1/retrieval/process/file"
-description = "routers/retrieval.py:process_file looks the file up by file_id and answers 404 for an unknown one."
+description = "routers/retrieval.py:process_file requires the file owner and answers 404 for missing or foreign files. Processing failures preserve original fingerprints; unsupported document input retains the specific 415 type refusal. Live processing positives use the settled text/plain platform_document, keeping the SVG image seed unchanged."
 json = { "file_id" = "{file}" }
+
+v2 = { json = { "file_id" = "{platform_document}" } }
 
 [[field]]
 route = "POST /api/v1/retrieval/process/files/batch"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Each file must also exist."
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Every file requires current ownership; missing and foreign files return the same result. Upstream detail never reaches the batch response."
 json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
+
+v2 = { json = { collection_name = "{knowledge}", "files[].id" = "{platform_document}" } }
 
 [[field]]
 route = "GET /api/v1/models/model/profile/image"
@@ -810,8 +823,10 @@ json = { "version_id" = "{prompt_history}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/add"
-description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
+description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB. Platform copies must appear in the response under the requested file id while processing, before catalog publication. removable_knowledge and update_knowledge keep the membership assertion and wait for the existing completion signal."
 json = { "file_id" = "{file}" }
+
+v2 = { json = { "file_id" = "{platform_document}" } }
 
 [[field]]
 backed_by = "soev-solutions"
@@ -831,10 +846,13 @@ route = "POST /api/v1/knowledge/{id}/files/batch/add"
 description = "Each batch entry must name a real, processed file; the file/move setup processes the seeded one."
 json = { "[].file_id" = "{file}" }
 
+v2 = { json = { "[].file_id" = "{platform_document}" } }
+
 [[field]]
 route = "POST /api/v1/files/"
-description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
-files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
+description = "A genuine SVG upload exercises authenticated image admission without a platform service. The crossuser body target separately tests another owner’s skill, with an atomic link as positive control."
+files = [{ field = "file", filename = "attack-{token}.svg", content = "<svg xmlns='http://www.w3.org/2000/svg'><text>Attack upload {token}</text></svg>", content_type = "image/svg+xml" }]
+params = { process = false }
 
 [[field]]
 route = "POST /api/v1/audio/speech"
@@ -1683,3 +1701,29 @@ routes = [
   "PUT /api/v1/notifications/targets/{target_id}",
   "PUT /api/v1/notifications/targets/{target_id}/default",
 ]
+
+
+[[body_target]]
+route = "POST /api/v1/files/"
+owner = "skill_bundle"
+description = "Retain bytes only for a caller-writable skill and an atomic link; another owner and an administrator without write access receive exactly the same 404 as a missing skill, before storage. Skill lookup and write authority precede plan disclosure. The sealed platform uses a missing skill refusal seed; its owner route control uploads genuine SVG without skill metadata. Entitled skill owner/writer admission is proved in test_skill_uploads. No exemption."
+params = { process = false }
+form = { metadata = '{"skill_id":"{skill_bundle}","skill_path":"attack-upload-{token}.pdf"}' }
+v2_owner_control = { params = { process = false }, files = [{ field = "file", filename = "attack-owner-{token}.svg", content = "<svg xmlns='http://www.w3.org/2000/svg'><text>Fictional owner upload {token}</text></svg>", content_type = "image/svg+xml" }] }
+files = [{ field = "file", filename = "attack-{token}.pdf", content = "%PDF-1.7 attack skill {token}", content_type = "application/pdf" }]
+
+
+[[fixture]]
+key = "platform_document"
+backed_by = "soev-solutions"
+description = "A genuine text original uploaded through the platform transfer path and settled by owner-authenticated polling. Requires a real platform in private drive mode; the sealed OWUI CI has no platform service. The SVG file seed remains for the local path."
+seeded_by = "seed_platform_document"
+depends_on = []
+actor = "user"
+
+[[crossuser_variant]]
+route = "GET /api/v1/files/{id}/content"
+fixture = "platform_document"
+backed_by = "soev-solutions"
+name = "platform-original"
+description = "Owner must download the platform original, stranger must not read it. This supplements the local SVG control; it never provisions a fake platform in OWUI CI."

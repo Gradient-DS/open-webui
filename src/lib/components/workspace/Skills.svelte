@@ -18,7 +18,6 @@
 		getSkillItems,
 		exportSkills,
 		createNewSkill,
-		createSkillFile,
 		createSkillFileInline,
 		getSkillFileList,
 		getSkillFileContentBlob,
@@ -33,10 +32,8 @@
 		isTextPath,
 		findMissingSkillFiles
 	} from '$lib/utils/skills/bundle';
-	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
-	import ConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
 	import GarbageBin from '../icons/GarbageBin.svelte';
@@ -211,7 +208,7 @@
 		let parsed;
 		try {
 			parsed = await parseSkillBundle(file);
-		} catch (e) {
+		} catch {
 			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
 			return;
 		}
@@ -258,18 +255,14 @@
 					});
 				} else {
 					const filename = bf.path.split('/').pop() || bf.path;
-					const uploaded = await uploadFile(
+					await uploadFile(
 						localStorage.token,
 						new File([bf.blob], filename),
-						null,
+						{ skill_id: created.id, skill_path: bf.path },
 						false
 					);
-					await createSkillFile(localStorage.token, created.id, {
-						path: bf.path,
-						file_id: uploaded.id
-					});
 				}
-			} catch (e) {
+			} catch {
 				toast.error($i18n.t('Failed to import file: {{path}}', { path: bf.path }));
 			}
 		}
@@ -307,7 +300,7 @@
 			try {
 				const blob = await getSkillFileContentBlob(localStorage.token, _skill.id, item.path);
 				bundleFiles.push({ path: item.path, blob });
-			} catch (e) {
+			} catch {
 				toast.error($i18n.t('Failed to export file: {{path}}', { path: item.path }));
 			}
 		}
@@ -412,7 +405,7 @@
 							page = 1;
 							loadSkillItems();
 							_skills.set(await getSkills(localStorage.token));
-						} catch (e) {
+						} catch {
 							toast.error($i18n.t('Invalid JSON file'));
 						}
 					};

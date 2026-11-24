@@ -11,7 +11,7 @@ Set `AGENT_API_ENABLED=true` and configure:
 
 | Environment variable | Chart value | Purpose |
 | --- | --- | --- |
-| `SOEV_API_URL` | `soevApi.url` | Platform base URL |
+| `SOEV_API_URL` | `soevApi.url` | Public platform base URL (e.g. `https://api.<tenant>.soev.ai`); no in-cluster default |
 | `SOEV_API_KEY` | `secrets.soevApiKey` | Platform caller credential |
 | `SOEV_API_SERVICE_PRINCIPAL` | `soevApi.servicePrincipal` | Declared Open WebUI service principal |
 
@@ -370,3 +370,35 @@ expires.
 The application database role can forge mirror evidence. This is an accepted
 residual risk: the same role can already write access grants directly. A separate
 publisher role is not part of this design.
+
+All backend platform clients, including speech, chat threads, service workers and
+single-use download redemption, use `SOEV_API_URL` (`soevApi.url` in the chart).
+Configure the tenant's public soev-api HTTPRoute host. Do not use a Kubernetes
+Service name. Local development uses its public `http://api.<slug>.soev.localhost`
+route. The chart and compose have no platform host default.
+
+Document uploads declare `/v1/jobs`, relay bytes directly to the returned store
+capability without platform credentials, and commit `/v1/jobs/{id}/commit`.
+Store 403 or an expired capability triggers one replay with the identical create
+body and idempotency key; 5xx/transport failures get two retries. Originals and
+resubmissions use the platform original route and same-origin `/v1/downloads/{code}`
+redemption with the requesting person's login token. The public gateway must allow
+long upload/download streams and the OWUI pod must reach the signed store host.
+
+Transfer PUT destinations require deployment setting `SOEV_TRANSFER_STORE_HOST`
+(chart `soevApi.transferStoreHost`). Set the exact store hostname, optionally with
+a port; HTTPS and port 443 are the defaults. IP literals require that exact literal
+in this setting. No redirects are followed. Unset or invalid settings refuse upload.
+An explicit store origin can select HTTP for an internal development store; this
+does not depend on the API URL. The full-stack CI ACL signs against
+`http://s3:9000` (`SOEV_ACL_OBJECT_STORE_ENDPOINT`); the fork's `docker-compose.ci.yaml` sets
+`SOEV_TRANSFER_STORE_HOST=http://s3:9000`, inherited by that stack's existing overlay. Configure the local stack's signed store
+origin the same way. The sibling stack checkout is maintained separately.
+
+Upload job creators are retained in `soev_file_job.creator_user_id`, independently
+of File ownership or deletion. Only that creator's authenticated request may
+cancel. Other authorized writers remove membership or the local File while
+leaving a durable pending cancel. Creator requests retry with a database claim
+and exponential backoff from 30 seconds to one hour; the platform expires abandoned
+awaiting-upload jobs. Historical jobs without creator evidence are never cancelled
+by inferring an identity from the File owner. Admins receive ordinary user rights.

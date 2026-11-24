@@ -15953,6 +15953,7 @@
         ]
       },
       "post": {
+        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415. A platform document-format rejection also returns the fixed translated unsupported-type refusal with 415; retained-image bytes are never relabelled for indexing.",
         "operationId": "upload_file_api_v1_files__post",
         "parameters": [
           {
@@ -16195,6 +16196,7 @@
     },
     "/api/v1/files/{id}": {
       "delete": {
+        "description": "Requires ownership or current write access. Upload cancellation uses only the recorded creator in their own request; other writers retain a durable pending cancel after local deletion. Admin roles confer no additional file rights.",
         "operationId": "delete_file_by_id_api_v1_files__id__delete",
         "parameters": [
           {
@@ -16293,6 +16295,7 @@
     },
     "/api/v1/files/{id}/content": {
       "get": {
+        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. When catalog byte_size is null, the authenticated download Content-Length or Content-Range total must equal the recorded size before any bytes are relayed. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content_get",
         "parameters": [
           {
@@ -16346,6 +16349,7 @@
         ]
       },
       "head": {
+        "description": "Requires existing owner/chat/knowledge file access. Document originals resolve only from database-derived owner attachments/knowledge/assistant/folder collections and matching recorded SHA-256 and byte size. When catalog byte_size is null, the authenticated download Content-Length or Content-Range total must equal the recorded size before any bytes are relayed. A reader 404 cannot overwrite the read pin. Missing recorded hash cannot resolve a platform original; existing local bytes remain available. Local images/videos are classified from sniffed bytes.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
         "parameters": [
           {
@@ -16401,6 +16405,7 @@
     },
     "/api/v1/files/{id}/content/{file_name}": {
       "get": {
+        "description": "Apply the same document recovery, platform readership and local-media rules as the inline content route, including authenticated download size verification when catalog size is null. Filename does not grant access.",
         "operationId": "get_file_content_by_id_api_v1_files__id__content__file_name__get",
         "parameters": [
           {
@@ -16500,6 +16505,7 @@
     },
     "/api/v1/files/{id}/data/content/update": {
       "post": {
+        "description": "Requires existing file write authority. Platform document extracted text is immutable: 409 with translated original_immutable message, preserving its only original. Local media is classified from sniffed bytes; local media and local-only files retain content update behaviour.",
         "operationId": "update_file_data_content_by_id_api_v1_files__id__data_content_update_post",
         "parameters": [
           {
@@ -18089,6 +18095,7 @@
     },
     "/api/v1/knowledge/{id}/file/add": {
       "post": {
+        "description": "Requires knowledge write and file read authority. A supported platform document or supplied text representation is required for indexing; local image retention alone is insufficient. Unsupported input preserves the fixed translated type refusal and HTTP 415. The response includes an admitted copy under the requested file id with its destination processing status before publication, without waiting for ingestion; the original status is preserved.",
         "operationId": "add_file_to_knowledge_by_id_api_v1_knowledge__id__file_add_post",
         "parameters": [
           {
@@ -18209,6 +18216,7 @@
     },
     "/api/v1/knowledge/{id}/file/remove": {
       "post": {
+        "description": "Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.",
         "operationId": "remove_file_from_knowledge_by_id_api_v1_knowledge__id__file_remove_post",
         "parameters": [
           {
@@ -18284,6 +18292,7 @@
     },
     "/api/v1/knowledge/{id}/file/update": {
       "post": {
+        "description": "Requires knowledge write, owned file and existing membership. Reprocessing preserves the original identity and fingerprint; unsupported input preserves HTTP 415 and the fixed translated type refusal.",
         "operationId": "update_file_from_knowledge_by_id_api_v1_knowledge__id__file_update_post",
         "parameters": [
           {
@@ -18665,6 +18674,7 @@
     },
     "/api/v1/knowledge/{id}/reset": {
       "post": {
+        "description": "Requires current knowledge write access. In-flight upload cancellation is deferred to the recorded creator when another writer removes membership; their login is never substituted.",
         "operationId": "reset_knowledge_by_id_api_v1_knowledge__id__reset_post",
         "parameters": [
           {
@@ -21950,6 +21960,7 @@
     },
     "/api/v1/retrieval/process/file": {
       "post": {
+        "description": "Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the platform read authority of the requesting user. Raw unsupported media returns the specific translated type refusal and 415; actual supplied text indexes under the same file identity. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.",
         "operationId": "process_file_api_v1_retrieval_process_file_post",
         "requestBody": {
           "content": {
@@ -21994,6 +22005,7 @@
     },
     "/api/v1/retrieval/process/files/batch": {
       "post": {
+        "description": "Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned. Unsupported document formats remain per-file failures with a fixed translated type refusal.",
         "operationId": "process_files_batch_api_v1_retrieval_process_files_batch_post",
         "parameters": [
           {
