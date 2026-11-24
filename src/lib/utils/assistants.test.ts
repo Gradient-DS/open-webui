@@ -10,7 +10,8 @@ import {
 	pickableLLMId,
 	pickableLLMs,
 	resolveAssistant,
-	splitSelection
+	splitSelection,
+	urlChoosesLLM
 } from './assistants';
 
 const llm = {
@@ -326,5 +327,17 @@ describe('assistant default LLM', () => {
 		expect(
 			assistantDefaultLLMId([], helper({ defaultModelId: 'capable' }), initial)
 		).toBeUndefined();
+	});
+});
+
+describe('urlChoosesLLM', () => {
+	it.each([
+		['', false],
+		['model=helper', false],
+		['model=gpu', true],
+		['models=helper,gpu', true],
+		['model=deleted', false]
+	])('%s -> %s', (query, expected) => {
+		expect(urlChoosesLLM(new URLSearchParams(query), models)).toBe(expected);
 	});
 });
