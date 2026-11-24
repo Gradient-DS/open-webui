@@ -277,7 +277,7 @@ async def process_uploaded_file(
 @router.post(
     '/',
     response_model=FileModelResponse,
-    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses. Transfers require the explicitly configured store origin.',
+    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415.',
 )
 async def upload_file(
     request: Request,
@@ -342,9 +342,9 @@ async def upload_file(
 async def upload_file_handler(
     request: Request,
     file: UploadFile = File(...),
-    metadata: Optional[dict | str] = Form(None),
-    process: bool = Query(True),
-    process_in_background: bool = Query(True),
+    metadata: Optional[dict | str] = None,
+    process: bool = True,
+    process_in_background: bool = True,
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,

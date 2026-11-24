@@ -1,3 +1,4 @@
+# Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
 # File upload skill body seed requires exact foreign-target 404 concealment.
 # Retrieval process/file and process/files/batch keep file and knowledge seeds; failures contain no upstream detail.
 # Upload cancellation: files/{id} deletion and knowledge file/remove and reset keep their existing file/knowledge seeds.

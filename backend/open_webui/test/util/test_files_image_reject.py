@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, status
@@ -21,6 +21,15 @@ from fastapi import UploadFile
 
 from open_webui.routers import files as files_router
 from open_webui.routers.files import upload_file_handler
+
+
+@pytest.fixture(autouse=True)
+def isolate_post_guard_storage(monkeypatch):
+    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda source, *args: (source.read(), '/fictional/upload'))
+    monkeypatch.setattr(files_router.Storage, 'delete_file', MagicMock())
+    monkeypatch.setattr(
+        files_router.Files, 'insert_new_file', AsyncMock(side_effect=RuntimeError('post-guard boundary'))
+    )
 
 
 def _patch_config(monkeypatch, *, engine: str, allowed: list | None = None) -> None:
@@ -50,7 +59,15 @@ def _request() -> MagicMock:
 
 
 def _upload_file(filename: str, content_type: str) -> UploadFile:
-    return UploadFile(filename=filename, file=BytesIO(b'fake'), headers={'content-type': content_type})
+    if content_type == 'image/png':
+        from PIL import Image
+
+        buffer = BytesIO()
+        Image.new('RGB', (1, 1), 'white').save(buffer, format='PNG')
+        data = buffer.getvalue()
+    else:
+        data = b'\x00\x00\x00\x18ftypmp42' + bytes(64) if content_type == 'video/mp4' else b'fictional audio'
+    return UploadFile(filename=filename, file=BytesIO(data), headers={'content-type': content_type})
 
 
 def _user() -> SimpleNamespace:
@@ -86,9 +103,7 @@ async def test_video_upload_rejected_when_engine_does_not_support(monkeypatch):
 @pytest.mark.asyncio
 async def test_image_upload_passes_415_check_for_image_capable_engines(engine, monkeypatch):
     """The 415 guard returns control to the rest of the handler for engines
-    that DO process images. The handler then fails downstream because we
-    haven't mocked Storage/DB — that's fine; this test only asserts the
-    415 didn't fire."""
+    that DO process images. The handler reaches the deliberately failing insert after the guards."""
     _patch_config(monkeypatch, engine=engine)
     request = _request()
     file = _upload_file('photo.png', 'image/png')
@@ -97,6 +112,7 @@ async def test_image_upload_passes_415_check_for_image_capable_engines(engine, m
         await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -113,6 +129,7 @@ async def test_audio_upload_passes_415_check_for_ordinary_ingestion(monkeypatch)
         await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -127,6 +144,7 @@ async def test_unsupported_content_type_with_process_false_skips_check(monkeypat
         await upload_file_handler(request, file=file, process=False, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    files_router.Files.insert_new_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -148,7 +166,7 @@ async def test_empty_extension_passes_allowlist(monkeypatch):
     """A genuinely extension-less document (unknown content type → no derived
     extension) must NOT be rejected by the allow-list — legit no-extension docs
     (e.g. exported pages) have to be ingestable. It fails downstream here
-    (Storage/DB unmocked); we only assert the allow-list 400 did not fire."""
+    (the insert deliberately fails); insertion proves the allow-list admitted it."""
     _patch_config(monkeypatch, engine='external', allowed=['pdf'])
     request = _request()
     file = _upload_file('Demo - Microsoft Entra admin center', 'application/x-unknowntype')
@@ -157,3 +175,4 @@ async def test_empty_extension_passes_allowlist(monkeypatch):
         await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert 'is not allowed' not in str(exc_info.value.detail)
+    files_router.Files.insert_new_file.assert_awaited_once()
