@@ -22,7 +22,7 @@ def _run_args(*, file_status, collection_name=None):
         )
     )
     file = SimpleNamespace(filename='report.pdf', content_type='application/pdf')
-    file_item = SimpleNamespace(id='file-1')
+    file_item = SimpleNamespace(id='file-1', meta={})
     user = SimpleNamespace(id='user-1')
     meta: dict = {}
     if file_status is not None:

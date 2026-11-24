@@ -1,5 +1,6 @@
 """Catalog download authorization and original byte streaming through both file routes."""
 
+import hashlib
 from types import SimpleNamespace
 
 import httpx
@@ -190,11 +191,25 @@ async def test_file_previews_relay_ranges_and_status(
                 id='cloud',
                 filename='Fictional.pdf',
                 path='',
-                meta={'collection_name': 'kb', 'source': {'provider': 'onedrive'}, 'content_type': 'application/pdf'},
+                meta={
+                    'collection_name': 'kb',
+                    'source': {'provider': 'onedrive'},
+                    'content_type': 'application/pdf',
+                    'file_hash': hashlib.sha256(b'0123456789').hexdigest(),
+                    'size': 10,
+                    'soev_read_collection': 'kb',
+                    'soev_kb_links': ['kb'],
+                },
             ),
         )
-    else:
-        env.api.add_document('kb', 'cloud', filename='Fictional.pdf', content_type='application/pdf')
+    env.api.add_document(
+        'kb',
+        'cloud',
+        filename='Fictional.pdf',
+        content_type='application/pdf',
+        sha256=hashlib.sha256(b'0123456789').hexdigest(),
+        byte_size=10,
+    )
     requests = []
 
     def handle(request):

@@ -2,6 +2,9 @@
 
 import json
 
+import httpx
+import pytest
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -53,30 +56,89 @@ def enable_sharing(seeded):
     seeded.run(apply)
 
 
-def test_file_routes_never_return_the_storage_path(seeded):
-    headers = seeded.headers('owner')
-    response = seeded.client.post(
-        '/api/v1/files/?process=false',
-        files={'file': ('notes.txt', b'hello', 'text/plain')},
-        headers=headers,
-    )
-    assert response.status_code == 200, response.text
-    file_id = response.json()['id']
-    assert 'path' not in response.json()
+@pytest.mark.parametrize('platform_document', [False, True])
+def test_file_routes_never_return_the_storage_path(seeded, monkeypatch, platform_document):
+    from open_webui import config
+    from open_webui.models.files import File
+    from open_webui.models.users import User
+    from open_webui.soev import acting, client
+    from open_webui.test.soev.fake_api import FakeSoevApi, person_ref
 
-    responses = [
-        seeded.client.get(f'/api/v1/files/{file_id}', headers=headers),
-        seeded.client.post(f'/api/v1/files/{file_id}/rename', json={'filename': 'renamed.txt'}, headers=headers),
-        seeded.client.get('/api/v1/files/', headers=headers),
-        seeded.client.get('/api/v1/files/search?filename=*.txt', headers=headers),
-    ]
-    for listed in responses:
-        assert listed.status_code == 200, listed.text
-        assert '"path"' not in listed.text
-    # The row keeps its path; content is served by id.
-    content = seeded.client.get(f'/api/v1/files/{file_id}/content', headers=headers)
-    assert content.status_code == 200, content.text
-    assert content.content == b'hello'
+    fake = FakeSoevApi()
+    monkeypatch.setattr(config, 'SOEV_API_KEY', 'soev_test_cred-runtime_test-secret')
+    monkeypatch.setattr(config, 'SOEV_API_SERVICE_PRINCIPAL', 'owui:service:webui')
+    monkeypatch.setattr(config, 'SOEV_TRANSFER_STORE_HOST', 'store.invalid')
+    with Session(seeded.engine) as db:
+        db.get(User, 'owner').person_id = person_ref('owner')
+        db.commit()
+
+    def resolver(request, user, auth_token):
+        async def token(**kwargs):
+            return f'fictional-login:owui:user:{user.id}'
+
+        return token
+
+    monkeypatch.setattr(acting, 'oidc_token_resolver', resolver)
+    payload = b'hello' if platform_document else b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+    suffix, mime = ('txt', 'text/plain') if platform_document else ('svg', 'image/svg+xml')
+
+    def handle(request):
+        if request.url.path.endswith('/original'):
+            # Authenticate and authorize the original using the real fake's document read.
+            checked = fake.handle(
+                httpx.Request('GET', str(request.url).removesuffix('/original'), headers=request.headers)
+            )
+            if checked.status_code != 200:
+                return checked
+            return httpx.Response(200, content=payload)
+        return fake.handle(request)
+
+    original_client = httpx.AsyncClient
+    remote = original_client(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(client, '_shared_client', lambda: remote)
+
+    def transport_client(**kwargs):
+        kwargs.setdefault('transport', httpx.MockTransport(handle))
+        return original_client(**kwargs)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', transport_client)
+    headers = seeded.headers('owner')
+    try:
+        response = seeded.client.post(
+            '/api/v1/files/?process=false',
+            files={'file': (f'notes.{suffix}', payload, mime)},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        file_id = response.json()['id']
+        assert 'path' not in response.json()
+        with Session(seeded.engine) as db:
+            row = db.get(File, file_id)
+            if platform_document:
+                assert row.path is None
+                assert list(fake.uploads.values()) == [payload]
+                for job_id in fake.jobs:
+                    fake.advance(job_id, 'SUCCEEDED')
+            else:
+                assert row.path
+
+        responses = [
+            seeded.client.get(f'/api/v1/files/{file_id}', headers=headers),
+            seeded.client.post(
+                f'/api/v1/files/{file_id}/rename', json={'filename': f'renamed.{suffix}'}, headers=headers
+            ),
+            seeded.client.get('/api/v1/files/', headers=headers),
+            seeded.client.get(f'/api/v1/files/search?filename=*.{suffix}', headers=headers),
+        ]
+        for listed in responses:
+            assert listed.status_code == 200, listed.text
+            assert '"path"' not in listed.text
+        # Both local media and platform originals are served by id without exposing storage paths.
+        content = seeded.client.get(f'/api/v1/files/{file_id}/content', headers=headers)
+        assert content.status_code == 200, content.text
+        assert content.content == payload
+    finally:
+        seeded.run(remote.aclose)
 
 
 def test_chat_writes_reads_shares_and_exports_drop_embedded_paths(seeded):

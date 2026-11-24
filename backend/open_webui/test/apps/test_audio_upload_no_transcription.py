@@ -27,7 +27,7 @@ async def test_audio_upload_uses_file_ingestion_without_transcription(monkeypatc
         SimpleNamespace(),
         SimpleNamespace(filename='fictional-recording.mp3', content_type='audio/mpeg'),
         '/fictional/recording.mp3',
-        SimpleNamespace(id='fictional-audio'),
+        SimpleNamespace(id='fictional-audio', meta={}),
         {},
         SimpleNamespace(id='fern'),
         db=SimpleNamespace(),
