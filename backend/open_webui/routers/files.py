@@ -259,6 +259,8 @@ async def process_uploaded_file(
                 status='failed',
                 error=error_msg,
             )
+            if isinstance(e, HTTPException) and e.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+                raise
 
     try:
         if db:
@@ -277,7 +279,7 @@ async def process_uploaded_file(
 @router.post(
     '/',
     response_model=FileModelResponse,
-    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415.',
+    description='Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415. A platform document-format rejection also returns the fixed translated unsupported-type refusal with 415; retained-image bytes are never relabelled for indexing.',
 )
 async def upload_file(
     request: Request,

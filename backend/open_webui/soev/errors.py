@@ -3,6 +3,7 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('content_type_rejected', None): ('Unsupported file type.', 'Niet-ondersteund bestandstype.'),
     ('original_immutable', None): (
         'The extracted text of a platform document cannot be edited.',
         'De geëxtraheerde tekst van een platformdocument kan niet worden bewerkt.',

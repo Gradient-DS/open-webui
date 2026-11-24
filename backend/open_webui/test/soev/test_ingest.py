@@ -1047,8 +1047,8 @@ async def test_unpublished_uploaded_original_uses_the_existing_preview_retry(env
 
 
 @pytest.mark.asyncio
-async def test_processed_image_keeps_storage_and_uses_its_live_request_source(env, monkeypatch):
-    from fastapi import UploadFile
+async def test_unsupported_image_processing_preserves_retained_storage_and_refuses_415(env, monkeypatch):
+    from fastapi import HTTPException, UploadFile
     from open_webui.routers import files
 
     image = __import__('base64').b64decode(
@@ -1061,21 +1061,28 @@ async def test_processed_image_keeps_storage_and_uses_its_live_request_source(en
     write = Mock(return_value=(image, '/uploads/retained-image.png'))
     monkeypatch.setattr(files.Storage, 'upload_file', write)
     file = UploadFile(file=BytesIO(image), filename='image.png', headers={'content-type': 'image/png'})
-    result = await files.upload_file_handler(
-        SimpleNamespace(),
-        file,
-        metadata=None,
-        process=True,
-        process_in_background=True,
-        user=SimpleNamespace(id='alice', email='alice@example.invalid', name='Alice', role='user'),
-        background_tasks=SimpleNamespace(add_task=Mock(side_effect=AssertionError('No detached image source'))),
-        db=None,
-    )
+
+    async def upload():
+        return await files.upload_file_handler(
+            SimpleNamespace(),
+            file,
+            metadata=None,
+            process=True,
+            process_in_background=True,
+            user=SimpleNamespace(id='alice', email='alice@example.invalid', name='Alice', role='user'),
+            background_tasks=SimpleNamespace(add_task=Mock(side_effect=AssertionError('No detached image source'))),
+            db=None,
+        )
+
+    with pytest.raises(HTTPException) as caught:
+        await upload()
+    assert (caught.value.status_code, caught.value.detail) == (415, 'Unsupported file type.')
     write.assert_called_once()
-    saved = await env.files.Files.get_file_by_id(result['id'])
+    (saved,) = await env.files.Files.get_files_by_user_id('alice')
     assert saved.path == '/uploads/retained-image.png'
-    assert saved.meta['soev_job']['committed']
-    assert env.api.uploads[saved.meta['soev_job']['job_id'], saved.id] == image
+    assert saved.meta['status'] == 'failed' and not saved.meta.get('soev_job')
+    assert saved.meta['file_hash'] == hashlib.sha256(image).hexdigest()
+    assert not env.api.jobs and not env.api.uploads
 
 
 @pytest.mark.parametrize(

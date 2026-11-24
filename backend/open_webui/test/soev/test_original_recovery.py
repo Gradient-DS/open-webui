@@ -258,20 +258,31 @@ async def test_processed_media_keeps_its_original_local_display(env, monkeypatch
     monkeypatch.setattr(files.Storage, 'upload_file', write)
     monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
     user = SimpleNamespace(id='alice', role='user', email='alice@invalid', name='Alice')
-    result = await files.upload_file_handler(
-        SimpleNamespace(),
-        UploadFile(file=BytesIO(data), filename='media.' + ext, headers={'content-type': mime}),
-        metadata={},
-        process=True,
-        user=user,
-        db=None,
-    )
-    row = await env.files.Files.get_file_by_id(result['id'])
+
+    async def upload():
+        return await files.upload_file_handler(
+            SimpleNamespace(),
+            UploadFile(file=BytesIO(data), filename='media.' + ext, headers={'content-type': mime}),
+            metadata={},
+            process=True,
+            user=user,
+            db=None,
+        )
+
+    if kind == 'image':
+        with pytest.raises(HTTPException) as caught:
+            await upload()
+        assert (caught.value.status_code, caught.value.detail) == (415, 'Unsupported file type.')
+        (row,) = await env.files.Files.get_files_by_user_id('alice')
+    else:
+        result = await upload()
+        row = await env.files.Files.get_file_by_id(result['id'])
     assert row.path == str(path)
     if kind == 'video':
         assert row.meta['status'] == 'completed' and not row.meta.get('soev_job')
     else:
-        assert row.meta['soev_job']['committed']
+        assert row.meta['status'] == 'failed' and not row.meta.get('soev_job')
+        assert not env.api.jobs and not env.api.uploads
     env.api.requests.clear()
     response = await files.get_file_content_by_id_inline(row.id, user=user, attachment=False, db=None)
     assert str(response.path) == str(path)
@@ -374,7 +385,9 @@ async def test_original_read_rejects_missing_or_changed_digest_and_known_size(en
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('destination', ['kb', 'attachments'])
-async def test_retained_media_can_be_processed_after_its_upload_request_ends(env, monkeypatch, destination):
+async def test_retained_media_generated_text_can_be_processed_after_its_upload_request_ends(
+    env, monkeypatch, destination
+):
     from open_webui.routers import files, retrieval
     from open_webui.soev import jobs
 
@@ -402,10 +415,17 @@ async def test_retained_media_can_be_processed_after_its_upload_request_ends(env
         db=None,
     )
     assert result.path == str(path)
-    form = retrieval.ProcessFileForm(file_id=result.id, collection_name='kb' if destination == 'kb' else None)
+    generated = 'Fictional extracted media description'
+    form = retrieval.ProcessFileForm(
+        file_id=result.id, content=generated, collection_name='kb' if destination == 'kb' else None
+    )
     reply = await retrieval.process_file(SimpleNamespace(), form, user=user, db=None)
     assert reply['status'] and reply['job_id']
-    assert env.api.uploads[reply['job_id'], result.id] == data
+    document = env.api.jobs[reply['job_id']]['documents'][0]
+    assert document['source_id'] == result.id
+    assert document['filename'] == 'fictional.svg'
+    assert document['text'] == generated and document['content_type'] == 'text/plain'
+    assert not env.api.uploads
     assert env.api.jobs[reply['job_id']]['status'] == 'QUEUED'
     assert not any(r.url.path.endswith('/original') for r in env.api.requests)
     # Retry while pending still refuses; callers must observe terminal completion.
@@ -423,31 +443,45 @@ async def test_retained_media_can_be_processed_after_its_upload_request_ends(env
 
 
 @pytest.mark.asyncio
-async def test_settled_uploaded_media_can_be_added_to_knowledge(env, monkeypatch):
+async def test_settled_uploaded_document_can_be_added_to_knowledge(env, monkeypatch):
     from open_webui.routers import knowledge, retrieval, files
     from open_webui.models.knowledge import KnowledgeModel
     from open_webui.soev import jobs
     from open_webui.test.soev.test_jobs import owner_login
 
-    data = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Fictional KB media</text></svg>'
-    path = env.tmp_path / 'knowledge.svg'
-    path.write_bytes(data)
-    monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
+    data = b'Fictional knowledge document'
+    monkeypatch.setattr(files.Storage, 'get_file', Mock(side_effect=AssertionError('No local document copy')))
     file = await env.files.Files.insert_new_file(
         'alice',
         env.files.FileForm(
-            id='fictional-image',
-            filename='knowledge.svg',
-            path=str(path),
+            id='fictional-document',
+            filename='knowledge.txt',
+            path=None,
             data={'status': 'completed'},
             meta={
                 'status': 'completed',
-                'content_type': 'image/svg+xml',
+                'content_type': 'text/plain',
                 'size': len(data),
                 'file_hash': hashlib.sha256(data).hexdigest(),
             },
         ),
     )
+    env.api.add_document(
+        'kb',
+        file.id,
+        filename='knowledge.txt',
+        content_type='text/plain',
+        byte_size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+
+    @asynccontextmanager
+    async def original(path, **kwargs):
+        assert kwargs['as_user'] == 'owui:user:alice'
+        yield httpx.Response(200, content=data)
+
+    monkeypatch.setattr(env.client, 'stream_response', original)
+    monkeypatch.setattr(env.identity, 'build_client', lambda: env.client)
     kb = KnowledgeModel(
         id='kb', user_id='alice', type='local', name='Fictional KB', description='', meta={}, created_at=1, updated_at=1
     )
@@ -482,4 +516,78 @@ async def test_settled_uploaded_media_can_be_added_to_knowledge(env, monkeypatch
     row = await env.files.Files.get_file_by_id(file.id)
     assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
     assert row.meta['soev_copies']['kb']['status'] == 'completed'
+    assert row.path is None
+    assert row.meta['file_hash'] == hashlib.sha256(data).hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('route', ['process', 'add', 'update'])
+@pytest.mark.parametrize(
+    'language,detail', [('en-US', 'Unsupported file type.'), ('nl-NL', 'Niet-ondersteund bestandstype.')]
+)
+async def test_unsupported_retained_svg_keeps_specific_415_without_a_job(
+    env, monkeypatch, route, language, detail, caplog
+):
+    from open_webui.models.knowledge import KnowledgeModel
+    from open_webui.routers import knowledge, retrieval, files
+
+    data = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Fictional retained image</text></svg>'
+    path = env.tmp_path / 'unsupported.svg'
+    path.write_bytes(data)
+    monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
+    file = await env.files.Files.insert_new_file(
+        'alice',
+        env.files.FileForm(
+            id='fictional-svg',
+            filename='unsupported.svg',
+            path=str(path),
+            data={'status': 'completed'},
+            meta={
+                'status': 'completed',
+                'content_type': 'image/svg+xml',
+                'size': len(data),
+                'file_hash': hashlib.sha256(data).hexdigest(),
+            },
+        ),
+    )
+    kb = KnowledgeModel(
+        id='kb', user_id='alice', type='local', name='Fictional KB', description='', meta={}, created_at=1, updated_at=1
+    )
+    monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
+    monkeypatch.setattr(knowledge.Knowledges, 'has_file', AsyncMock(return_value=True))
+    monkeypatch.setattr(knowledge.ASYNC_VECTOR_DB_CLIENT, 'delete', AsyncMock())
+    monkeypatch.setattr(retrieval, '_validate_collection_access', AsyncMock())
+    monkeypatch.setattr(retrieval, 'publish_event', AsyncMock())
+    user = SimpleNamespace(id='alice', role='user')
+    request = SimpleNamespace(headers={'accept-language': language})
+    # The server must use its fixed translated refusal, never the platform's private detail.
+    handle = env.api.handle
+
+    def respond(request):
+        response = handle(request)
+        if response.status_code == 415:
+            return httpx.Response(
+                415,
+                json={'code': 'content_type_rejected', 'detail': 'fictional-private-upstream-detail'},
+                headers={'Content-Type': 'application/problem+json'},
+            )
+        return response
+
+    monkeypatch.setattr(env.api, 'handle', respond)
+    with pytest.raises(HTTPException) as caught:
+        if route == 'process':
+            await retrieval.process_file(request, retrieval.ProcessFileForm(file_id=file.id), user=user, db=None)
+        else:
+            handler = (
+                knowledge.add_file_to_knowledge_by_id if route == 'add' else knowledge.update_file_from_knowledge_by_id
+            )
+            await handler(request, 'kb', knowledge.KnowledgeFileIdForm(file_id=file.id), user=user, db=None)
+    assert (caught.value.status_code, caught.value.detail) == (415, detail)
+    assert 'fictional-private-upstream-detail' not in caplog.text
+    saved = await env.files.Files.get_file_by_id(file.id)
+    assert saved.meta['file_hash'] == hashlib.sha256(data).hexdigest()
+    assert saved.meta['content_type'] == 'image/svg+xml' and saved.filename == 'unsupported.svg'
+    assert saved.meta['status'] == 'completed' and not saved.meta.get('soev_job')
     assert path.read_bytes() == data
+    assert not env.api.jobs and not env.api.uploads
+    assert not any(request.url.host == 'store.invalid' for request in env.api.requests)

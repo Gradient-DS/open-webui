@@ -619,6 +619,37 @@ class FakeSoevApi:
         self._require(credential, 'ingest')
         if subject:
             self._collection(body['collection_key'], credential, subject, write=True)
+        self._validate_formats(body['documents'])
+
+    def _validate_formats(self, documents):
+        # Mirror the platform parser boundary; local image retention is not document ingestion.
+        from open_webui.utils.content_types import EXTENSION_MIME
+
+        extensions = set(EXTENSION_MIME) | {'wav', 'mp3', 'm4a', 'webm', 'ogg', 'flac', 'mp4'}
+        mimes = set(EXTENSION_MIME.values()) | {
+            'audio/wav',
+            'audio/x-wav',
+            'audio/wave',
+            'audio/vnd.wave',
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/mp4',
+            'audio/m4a',
+            'audio/x-m4a',
+            'audio/webm',
+            'audio/ogg',
+            'audio/flac',
+            'audio/x-flac',
+            'text/rtf',
+            'text/x-markdown',
+            'application/xhtml+xml',
+            'text/xml',
+        }
+        for document in documents:
+            mime = (document.get('content_type') or '').split(';', 1)[0].strip().lower()
+            extension = Path(document['filename']).suffix.lower().removeprefix('.')
+            if mime not in mimes and extension not in extensions:
+                raise Problem(415, 'content_type_rejected')
 
     def _validate_document(self, document):
         common = {

@@ -471,7 +471,7 @@ class ProcessFileForm(BaseModel):
 
 @router.post(
     '/process/file',
-    description='Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the requesting user platform read authority. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
+    description='Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the platform read authority of the requesting user. Raw unsupported media returns the specific translated type refusal and 415; actual supplied text indexes under the same file identity. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
 )
 async def process_file(
     request: Request,
@@ -513,6 +513,9 @@ async def process_file(
                 from open_webui.soev.errors import problem_message
 
                 language = getattr(request, 'headers', {}).get('accept-language', 'en-US')
+                if e.status == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+                    refusal = SoevApiError(415, 'content_type_rejected', '')
+                    raise HTTPException(415, detail=problem_message(refusal, language)) from e
                 raise ValueError(problem_message(e, language)) from e
             return {
                 'status': True,
@@ -528,11 +531,12 @@ async def process_file(
             raise
         except Exception as e:
             log.warning('File processing failed (%s)', type(e).__name__)
+            error_message = e.detail if isinstance(e, HTTPException) else str(e)
             # Fresh session for error status update.
             # [Gradient] A failed destination copy never changes the original's status.
             if not ingest.copying(file, text=form_data.content, source=ingest.source_for(file.id)):
                 async with get_async_db() as session:
-                    await Files.set_status(file.id, 'failed', error=str(e), db=session)
+                    await Files.set_status(file.id, 'failed', error=error_message, db=session)
 
             await publish_event(
                 request,
@@ -543,10 +547,12 @@ async def process_file(
                 data={
                     'collection_name': collection_name,
                     'filename': file.filename,
-                    'message': f'{file.filename}: {e}',
+                    'message': f'{file.filename}: {error_message}',
                 },
             )
 
+            if isinstance(e, HTTPException) and e.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE:
+                raise
             if 'No pandoc was found' in str(e):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1373,7 +1379,7 @@ class BatchProcessFilesResponse(BaseModel):
 
 @router.post(
     '/process/files/batch',
-    description='Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned.',
+    description='Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned. Unsupported document formats remain per-file failures with a fixed translated type refusal.',
 )
 async def process_files_batch(
     request: Request,

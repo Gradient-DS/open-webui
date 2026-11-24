@@ -15953,7 +15953,7 @@
         ]
       },
       "post": {
-        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415.",
+        "description": "Authenticated upload. Documents relay directly to the platform. Image retention requires sniffed image bytes. Skill retention requires metadata.skill_id, metadata.skill_path, process=false, current write authority and an atomic skill_file link; metadata.skill_replace=true replaces that path. Missing and foreign skill targets return identical 404 responses before plan feature checks. Transfers require the explicitly configured store origin. Rejected file types retain the specific MIME refusal; unsupported image/video processing returns 415. A platform document-format rejection also returns the fixed translated unsupported-type refusal with 415; retained-image bytes are never relabelled for indexing.",
         "operationId": "upload_file_api_v1_files__post",
         "parameters": [
           {
@@ -18095,6 +18095,7 @@
     },
     "/api/v1/knowledge/{id}/file/add": {
       "post": {
+        "description": "Requires knowledge write and file read authority. A supported platform document or supplied text representation is required for indexing; local image retention alone is insufficient. Unsupported input preserves the fixed translated type refusal and HTTP 415.",
         "operationId": "add_file_to_knowledge_by_id_api_v1_knowledge__id__file_add_post",
         "parameters": [
           {
@@ -18291,6 +18292,7 @@
     },
     "/api/v1/knowledge/{id}/file/update": {
       "post": {
+        "description": "Requires knowledge write, owned file and existing membership. Reprocessing preserves the original identity and fingerprint; unsupported input preserves HTTP 415 and the fixed translated type refusal.",
         "operationId": "update_file_from_knowledge_by_id_api_v1_knowledge__id__file_update_post",
         "parameters": [
           {
@@ -21958,7 +21960,7 @@
     },
     "/api/v1/retrieval/process/file": {
       "post": {
-        "description": "Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the requesting user platform read authority. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.",
+        "description": "Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the platform read authority of the requesting user. Raw unsupported media returns the specific translated type refusal and 415; actual supplied text indexes under the same file identity. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.",
         "operationId": "process_file_api_v1_retrieval_process_file_post",
         "requestBody": {
           "content": {
@@ -22003,7 +22005,7 @@
     },
     "/api/v1/retrieval/process/files/batch": {
       "post": {
-        "description": "Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned.",
+        "description": "Owner-only batch processing with current collection write access. Missing and foreign files have the same failure; upstream problem details are never returned. Unsupported document formats remain per-file failures with a fixed translated type refusal.",
         "operationId": "process_files_batch_api_v1_retrieval_process_files_batch_post",
         "parameters": [
           {

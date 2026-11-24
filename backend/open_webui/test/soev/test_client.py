@@ -859,6 +859,7 @@ async def test_interrupted_upload_closes_its_source_without_reading_ahead(monkey
     [
         ('upload_declaration_invalid', None, 'Invalid upload declaration', 'Ongeldige uploadgegevens'),
         ('upload_rejected', None, 'Upload rejected', 'Upload geweigerd'),
+        ('content_type_rejected', None, 'Unsupported file type.', 'Niet-ondersteund bestandstype.'),
         ('file_not_found', 'upload:original', 'Original unavailable', 'Origineel niet beschikbaar'),
     ],
 )

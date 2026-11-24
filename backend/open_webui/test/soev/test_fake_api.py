@@ -810,3 +810,18 @@ def test_the_fake_never_advances_a_job_on_its_own(api):
             assert response.status_code == 200 and response.json()['status'] == 'QUEUED'
             assert send(client, 'GET', f'/v1/jobs/{job["job_id"]}').json()['status'] == 'QUEUED'
     assert not fake.documents
+
+
+@pytest.mark.parametrize('filename,mime', [('fictional.svg', 'image/svg+xml'), ('fictional.png', 'image/png')])
+def test_retained_image_is_not_a_supported_document_and_is_not_relabelled(api, filename, mime):
+    fake, client = api
+    seed(client)
+    response = ingest(client, file_document(filename=filename, content_type=mime))
+    assert response.status_code == 415 and response.json()['code'] == 'content_type_rejected'
+    assert not fake.jobs and not fake.uploads and not fake.transfer_signatures
+    # Actual generated/extracted text is a supported representation with the same identity.
+    response = ingest(client, inline_document('file', filename=filename, content_type='text/plain'))
+    assert response.status_code == 201
+    document = fake.jobs[response.json()['job_id']]['documents'][0]
+    assert document['source_id'] == 'file' and document['text'] == 'hello'
+    assert document['content_type'] == 'text/plain'
