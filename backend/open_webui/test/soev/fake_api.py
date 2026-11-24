@@ -67,6 +67,7 @@ class FakeSoevApi:
         self.schedules, self.schedule_owners = {}, {}
         self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
+        self.transfer_signatures = {}
         self.images = {}
         self.groups, self.replays, self.creation_bodies = {}, {}, {}
         self.requests, self.failures = [], []
@@ -92,7 +93,7 @@ class FakeSoevApi:
 
     def _handle(self, request):
         if request.url.host == 'store.invalid':
-            assert 'authorization' not in request.headers and 'cookie' not in request.headers
+            assert not {'authorization', 'cookie', 'x-soev-user-token'} & request.headers.keys()
             return self._upload(request)
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
@@ -199,6 +200,11 @@ class FakeSoevApi:
 
     def _upload(self, request):
         _, job_id, source_id = request.url.path.split('/', 2)
+        signature = self.transfer_signatures.get((job_id, source_id))
+        if signature is None or request.url.params.get('signature') != signature:
+            raise Problem(403, 'access_denied')
+        if request.method != 'PUT':
+            raise Problem(405, 'method_not_allowed')
         job = self.jobs.get(job_id)
         if job is None or job['status'] != 'AWAITING_UPLOAD':
             raise Problem(404, 'not_found')
@@ -209,6 +215,15 @@ class FakeSoevApi:
         document = next((doc for doc in job.get('documents', []) if doc['source_id'] == source_id), None)
         if document is None or 'size' not in document:
             raise Problem(404, 'not_found')
+        expected = {
+            'content-length': str(document['size']),
+            'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
+            'if-none-match': '*',
+        }
+        if any(request.headers.get(key) != value for key, value in expected.items()):
+            raise Problem(400, 'upload_missing')
+        if (job_id, source_id) in self.uploads:
+            return httpx.Response(412)
         if len(request.content) != document['size']:
             raise Problem(400, 'upload_missing')
         if hashlib.sha256(request.content).hexdigest() != document['sha256']:
@@ -662,11 +677,17 @@ class FakeSoevApi:
         job['progress'].update(total=len(documents), pending=len(documents))
         job['expires_at'] = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=15)).isoformat().replace('+00:00', 'Z')
         expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=60)).isoformat().replace('+00:00', 'Z')
+        for document in documents:
+            if 'size' in document:
+                self.transfer_signatures[job['job_id'], document['source_id']] = uuid4().hex
         uploads = [
             {
                 'source_id': document['source_id'],
                 'method': 'PUT',
-                'url': f'https://store.invalid/{job["job_id"]}/{quote(document["source_id"], safe="")}?signature=secret',
+                'url': (
+                    f'https://store.invalid/{job["job_id"]}/{quote(document["source_id"], safe="")}'
+                    f'?signature={self.transfer_signatures[job["job_id"], document["source_id"]]}'
+                ),
                 'headers': {
                     'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
                     'Content-Length': str(document['size']),

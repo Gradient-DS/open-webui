@@ -20,6 +20,9 @@ from open_webui.soev.task_turns import TaskTurnRequest
 @pytest_asyncio.fixture
 async def recorded_http(monkeypatch, login_tokens):
     """Record requests without opening a network connection."""
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'SOEV_TRANSFER_STORE_HOST', 'store.invalid')
     requests = []
     responses = []
     clients = []
@@ -123,6 +126,9 @@ async def test_transfer_statuses_credentials_and_secret_logs(recorded_http, capl
         {'method': 'POST'},
         {'url': '/relative'},
         {'url': 'ftp://store.invalid/a'},
+        {'url': 'https://foreign.invalid/a'},
+        {'url': 'https://127.0.0.1/a'},
+        {'url': 'https://store.invalid:8443/a'},
         {'url': 'https://user:password@store.invalid/a'},
         {'url': 'https://store.invalid/a#fragment'},
         {'headers': {'Content-Length': '6'}},
@@ -816,6 +822,7 @@ async def test_markdown_redemption_keeps_the_same_admission(recorded_http, locat
 @pytest.mark.asyncio
 @pytest.mark.parametrize('cancelled', [False, True])
 async def test_interrupted_upload_closes_its_source_without_reading_ahead(monkeypatch, cancelled):
+    monkeypatch.setattr('open_webui.config.SOEV_TRANSFER_STORE_HOST', 'store.invalid')
     delivered, closed = [], []
 
     async def chunks():
@@ -882,15 +889,23 @@ async def test_transfer_transport_errors_never_expose_the_capability(recorded_ht
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'base,store,allowed',
+    'base,configured,store,allowed',
     [
-        ('https://public.invalid', 'http://store.invalid/object', False),
-        ('https://public.invalid', 'https://store.invalid/object', True),
-        ('http://api.stack.localhost', 'http://store.stack.localhost/object', True),
-        ('http://api.stack.localhost', 'https://store.invalid/object', True),
+        ('https://public.invalid', 'store.invalid', 'http://store.invalid/object', False),
+        ('https://public.invalid', 'store.invalid', 'https://store.invalid/object', True),
+        ('http://api.stack.localhost', 'http://store.stack.localhost', 'http://store.stack.localhost/object', True),
+        ('http://api.stack.localhost', 'store.invalid', 'https://store.invalid/object', True),
+        ('https://public.invalid', 'http://store.stack.localhost', 'http://store.stack.localhost/object', True),
+        ('http://api.stack.localhost', 'store.invalid', 'http://store.invalid/object', False),
+        ('https://public.invalid', '', 'https://store.invalid/object', False),
     ],
 )
-async def test_transfer_http_is_only_allowed_with_http_platform(recorded_http, base, store, allowed):
+async def test_transfer_scheme_comes_only_from_the_store_setting(
+    recorded_http, monkeypatch, base, configured, store, allowed
+):
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'SOEV_TRANSFER_STORE_HOST', configured)
     requests, responses = recorded_http
     responses.append(httpx.Response(200))
     client = SoevClient(base, 'fictional-key')
