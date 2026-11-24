@@ -43,6 +43,7 @@ preserve_configuration = true
 # Required owner controls for sweep12's previously unentered operations.
 # Retired image-prompt execution has no route or positive-control declaration.
 required_drive_routes = [
+  "GET /api/v1/tool-sources",
   "GET /api/v1/chats/",
   "GET /api/v1/chats/list",
   "GET /api/v1/chats/{id}",
@@ -1727,3 +1728,11 @@ fixture = "platform_document"
 backed_by = "soev-solutions"
 name = "platform-original"
 description = "Owner must download the platform original, stranger must not read it. This supplements the local SVG control; it never provisions a fake platform in OWUI CI."
+
+
+# [Gradient] ts-select-owui: no connection id seed is needed to discover a caller's list.
+[[field]]
+route = "GET /api/v1/tool-sources"
+params = {}
+backed_by = "soev-solutions"
+description = "Caller-scoped discovery of consented external connections for the deployment picker agent. A valid empty data list is a successful owner control; another caller must never receive the owner's private connection markers. Agent query validation prevents path injection. No body or caller-selected identity."

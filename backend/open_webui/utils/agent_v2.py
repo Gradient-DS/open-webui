@@ -49,6 +49,7 @@ from open_webui.utils.access_control import can_bypass_access_control, has_permi
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
+from open_webui.utils.tool_sources import selected_tool_sources  # [Gradient]
 from open_webui.utils.features import feature_enabled
 from open_webui.utils.feedback_report import get_current_trace_id
 from open_webui.utils.mail_status import mail_search_status
@@ -2284,6 +2285,10 @@ async def _regenerated_input(
         tools.update(search_live_documents='off', list_live_folder='off', attach_live_document='off')
     if not await _live_mail_allowed():
         tools.update(search_mail='off', read_mail='off')
+    # [Gradient] Revalidate the saved selection; consent remains the platform's live decision.
+    selection = selected_tool_sources(value.pop('tool_source_ids', None))
+    if selection:
+        value['tool_source_ids'] = selection
     value['tools'] = tools
     if not await _documents_allowed(user.id):
         value['documents'] = 'off'
@@ -2370,6 +2375,10 @@ async def _sent(
             'documents': documents,
         }
     }
+    # [Gradient] Never forward malformed browser selections. Empty means no external tools.
+    selection = selected_tool_sources((metadata.get('features') or {}).get('tool_source_ids'))
+    if selection:
+        body['input']['tool_source_ids'] = selection
     for key, value in (('images', images), ('texts', texts), ('chats', chats)):
         if value:
             body['input'][key] = value

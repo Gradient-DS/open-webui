@@ -1015,3 +1015,36 @@ def test_skill_refusal_keeps_404_while_the_owner_control_uses_an_available_uploa
         control=True,
     )
     assert any('concealed as HTTP 404' in item['reason'] for item in result.violations)
+
+
+# [Gradient] ts-select-owui: discovery remains a caller-scoped cross-user target.
+def test_tool_source_discovery_has_an_owner_control_and_no_sharing_exception(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    route = 'GET /api/v1/tool-sources'
+    routes, admins = crossuser.targets()
+    assert route in routes and route in platform_operations()
+    assert route not in admins and route not in crossuser._shared()
+    assert route not in crossuser.expected_refusals() and not seeds.route_waived(route)
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"data": []}'),
+        plane.Outcome(200, True, '{"data": [{"name":"owner-private-marker"}]}'),
+        ['owner-private-marker'],
+        admin_only=False,
+        control=False,
+        subject_scoped=True,
+    )
+    assert not result.violations
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(200, True, '{"data": [{"name":"owner-private-marker"}]}'),
+        plane.Outcome(200, True, '{"data": [{"name":"owner-private-marker"}]}'),
+        ['owner-private-marker'],
+        admin_only=False,
+        control=False,
+        subject_scoped=True,
+    )
+    assert any('seeded owner marker' in item['reason'] for item in result.violations)

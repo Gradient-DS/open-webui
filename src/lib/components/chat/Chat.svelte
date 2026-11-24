@@ -2,6 +2,7 @@
 	import { turnErrorDetails } from '$lib/utils/turnError';
 	import {
 		composerPreferences,
+		composerUserDefaults, // [Gradient] Per-chat selections never seed new chats.
 		composerFeatures,
 		composerFromFeatures,
 		type ComposerPreferences
@@ -384,6 +385,8 @@
 	$: embeddedHeaderTitle = embeddedTitle || $chatTitle || $i18n.t('Chat');
 
 	let selectedToolIds: string[] = [];
+	// [Gradient] External connections are selected per chat.
+	let selectedToolSourceIds: string[] = [];
 	let selectedSkillIds: string[] = [];
 	let selectedFilterIds: string[] = [];
 	let pendingOAuthTools = [];
@@ -433,7 +436,9 @@
 	let documentWriterEnabled = true;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
-	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
+	const rememberComposerPreferences = (snapshot: ComposerPreferences) => {
+		// [Gradient] Never carry external connections into another chat.
+		const preferences = composerUserDefaults(snapshot);
 		if (equal($settings.composerTools, preferences)) return;
 		settings.update((value) => ({ ...value, composerTools: preferences }));
 		composerSettingsSave = composerSettingsSave.then(async () => {
@@ -450,6 +455,7 @@
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		selectedToolIds,
+		selectedToolSourceIds, // [Gradient]
 		selectedSkillIds,
 		selectedFilterIds
 	});
@@ -464,6 +470,7 @@
 			codeInterpreterEnabled,
 			documentWriterEnabled,
 			selectedToolIds,
+			selectedToolSourceIds, // [Gradient]
 			selectedSkillIds,
 			selectedFilterIds
 		} = value);
@@ -1080,7 +1087,7 @@
 		chatFiles = [];
 		files = [];
 		composerInitialized = false;
-		restoreComposerPreferences(composerPreferences($settings.composerTools));
+		restoreComposerPreferences(composerPreferences(composerUserDefaults($settings.composerTools)));
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -1119,6 +1126,7 @@
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		selectedToolIds,
+		selectedToolSourceIds, // [Gradient]
 		selectedSkillIds,
 		selectedFilterIds
 	});
@@ -1196,7 +1204,9 @@
 	const setDefaults = async (newChat = false) => {
 		if (settingDefaults || composerInitialized || (chatIdProp && !newChat)) return;
 		if ($settings.composerTools) {
-			restoreComposerPreferences(composerPreferences($settings.composerTools));
+			restoreComposerPreferences(
+				composerPreferences(composerUserDefaults($settings.composerTools))
+			);
 			return;
 		}
 		settingDefaults = true;
@@ -1340,7 +1350,10 @@
 		} finally {
 			if (!composerInitialized) {
 				restoreComposerPreferences(
-					composerPreferences($settings.composerTools, currentComposerPreferences())
+					composerPreferences(
+						composerUserDefaults($settings.composerTools),
+						currentComposerPreferences()
+					)
 				);
 			}
 			liveDefaultWait = liveWaiting.length
@@ -2809,7 +2822,10 @@
 				? { id: targetId, features: preferences.features }
 				: null;
 			restoreComposerPreferences(
-				composerFromFeatures(preferences?.features, composerPreferences($settings.composerTools))
+				composerFromFeatures(
+					preferences?.features,
+					composerPreferences(composerUserDefaults($settings.composerTools))
+				)
 			);
 			lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 			tags = threadPage!.tags.map((name) => ({ name }));
@@ -2898,7 +2914,10 @@
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
 				restoreComposerPreferences(
-					composerFromFeatures(chatContent?.features, composerPreferences($settings.composerTools))
+					composerFromFeatures(
+						chatContent?.features,
+						composerPreferences(composerUserDefaults($settings.composerTools))
+					)
 				);
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 
@@ -4088,10 +4107,12 @@
 		);
 
 	const getFeatures = () => {
-		let features = {};
+		// [Gradient] This chat's external connection selection accompanies each fresh input.
+		let features: Record<string, unknown> = { tool_source_ids: selectedToolSourceIds };
 
 		if ($config?.features)
 			features = {
+				...features,
 				voice: $showCallOverlay,
 				image_generation:
 					supportsComposerFeature('image_generation') &&
@@ -5431,6 +5452,7 @@
 									id={embedded ? messageInputDropzoneId : undefined}
 									class=" pb-2 {dragged ? 'z-0' : 'z-10'}"
 								>
+									<!-- [Gradient] Bind this chat's external connection selection. -->
 									<MessageInput
 										bind:this={messageInput}
 										{composerSession}
@@ -5442,6 +5464,7 @@
 										bind:prompt
 										bind:autoScroll
 										bind:selectedToolIds
+										bind:selectedToolSourceIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
@@ -5528,6 +5551,7 @@
 									</div>
 								{/if}
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
+									<!-- [Gradient] Bind this chat's external connection selection. -->
 									<MessageInput
 										bind:this={messageInput}
 										{composerSession}
@@ -5538,6 +5562,7 @@
 										bind:prompt
 										bind:autoScroll
 										bind:selectedToolIds
+										bind:selectedToolSourceIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
@@ -5593,6 +5618,7 @@
 							</div>
 						{:else}
 							<div class="relative flex items-center h-full">
+								<!-- [Gradient] Bind this chat's external connection selection. -->
 								<Placeholder
 									{history}
 									bind:selectedModels
@@ -5601,6 +5627,7 @@
 									bind:prompt
 									bind:autoScroll
 									bind:selectedToolIds
+									bind:selectedToolSourceIds
 									bind:selectedSkillIds
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled

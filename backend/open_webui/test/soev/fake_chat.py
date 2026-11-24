@@ -201,6 +201,7 @@ class FakeChatApi:
                 'documents',
                 'chats',
                 'images',
+                'tool_source_ids',  # [Gradient] Consented per-input external connections.
             }
             or not isinstance(turn.get('text'), str)
             or turn.get('documents', 'off') not in ('off', 'auto', 'required')

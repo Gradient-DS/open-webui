@@ -191,6 +191,7 @@ from open_webui.routers import (
     invites,
     knowledge,
     meetings,
+    tool_sources,  # [Gradient] External connection discovery.
     memories,
     models,
     notes,
@@ -988,6 +989,7 @@ app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
 
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
+app.include_router(tool_sources.router, prefix='/api/v1/tool-sources', tags=['tool-sources'])  # [Gradient]
 app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
 
 # [Gradient] Download a v2 agent thread's trace file from soev-api, as the caller.

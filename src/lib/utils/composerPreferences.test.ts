@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parse } from 'svelte/compiler';
-import { composerPreferences, composerFeatures, composerFromFeatures } from './composerPreferences';
+import {
+	composerPreferences,
+	composerFeatures,
+	composerFromFeatures,
+	composerUserDefaults
+} from './composerPreferences';
 
 const chosen = composerPreferences({
 	webSearchEnabled: true,
@@ -11,6 +16,7 @@ const chosen = composerPreferences({
 	codeInterpreterEnabled: true,
 	documentWriterEnabled: true,
 	selectedToolIds: ['tool'],
+	selectedToolSourceIds: ['00000000-0000-4000-8000-000000000001'],
 	selectedSkillIds: ['skill'],
 	selectedFilterIds: ['filter']
 });
@@ -88,12 +94,26 @@ describe('composer preferences', () => {
 });
 
 it('existing chats inherit user choices only for features the chat has not saved', () => {
-	expect(composerFromFeatures(undefined, chosen)).toEqual(chosen);
-	expect(composerFromFeatures(null, chosen)).toEqual(chosen);
-	expect(composerFromFeatures({}, chosen)).toEqual(chosen);
+	expect(composerFromFeatures(undefined, chosen)).toEqual({ ...chosen, selectedToolSourceIds: [] });
+	expect(composerFromFeatures(null, chosen)).toEqual({ ...chosen, selectedToolSourceIds: [] });
+	expect(composerFromFeatures({}, chosen)).toEqual({ ...chosen, selectedToolSourceIds: [] });
 	expect(composerFromFeatures({ web_search: false, tool_ids: [] }, chosen)).toEqual({
 		...chosen,
 		webSearchEnabled: false,
-		selectedToolIds: []
+		selectedToolIds: [],
+		selectedToolSourceIds: []
 	});
+});
+
+it('external connections stay per chat and never become user defaults', () => {
+	const defaults = composerUserDefaults(chosen);
+	expect(defaults).not.toHaveProperty('selectedToolSourceIds');
+	expect(composerPreferences(defaults).selectedToolSourceIds).toEqual([]);
+	expect(composerPreferences({}, chosen).selectedToolSourceIds).toEqual([]);
+	expect(composerFromFeatures(composerFeatures(chosen), defaults).selectedToolSourceIds).toEqual(
+		chosen.selectedToolSourceIds
+	);
+	const restored = composerFromFeatures(composerFeatures(chosen));
+	restored.selectedToolSourceIds.push('another');
+	expect(chosen.selectedToolSourceIds).toHaveLength(1);
 });

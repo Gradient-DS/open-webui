@@ -24049,6 +24049,59 @@
         "summary": "Authorize"
       }
     },
+    "/api/v1/tool-sources": {
+      "get": {
+        "operationId": "list_tool_sources_api_v1_tool_sources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z0-9_-]{1,256}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tool Sources",
+        "tags": [
+          "tool-sources"
+        ]
+      }
+    },
     "/api/v1/users/groups": {
       "get": {
         "operationId": "get_user_groups_api_v1_users_groups_get",

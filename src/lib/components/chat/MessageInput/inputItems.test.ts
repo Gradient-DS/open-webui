@@ -91,3 +91,18 @@ describe('pin set', () => {
 		expect(normalizePins('a')).toEqual([]);
 	});
 });
+
+it('external connections can be pinned, shown while selected and hidden when unavailable', () => {
+	const order = inputItemOrder();
+	expect(INPUT_ITEMS.find(({ id }) => id === 'external_connections')).toEqual({
+		id: 'external_connections',
+		section: 'tools',
+		pinnable: true
+	});
+	expect(barItemIds({ order, pinned: [], states: { external_connections: itemState(2) } })).toEqual(
+		['external_connections']
+	);
+	expect(
+		barItemIds({ order, pinned: ['external_connections'], states: {}, allowed: () => false })
+	).toEqual([]);
+});

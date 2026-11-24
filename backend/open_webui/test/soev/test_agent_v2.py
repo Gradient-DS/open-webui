@@ -4470,3 +4470,135 @@ async def test_failure_diagnostics_use_the_logging_trace_context(
     assert record.trace_id == expected.get('trace_id')
     assert private not in json.dumps(payload) and private not in caplog.text
     assert 'untrusted-metadata' not in json.dumps(payload)
+
+
+# [Gradient] The selection belongs to one input; the platform checks consent live.
+TOOL_SOURCE = '00000000-0000-4000-8000-000000000001'
+
+
+@pytest.mark.asyncio
+async def test_tool_source_selection_on_open_and_later_inputs(chat: Chat) -> None:
+    for index, selection in enumerate(([TOOL_SOURCE], [str(uuid4())], []), 1):
+        chunks = await chat.turn(
+            'question', f'a{index}', f'a{index - 1}' if index > 1 else None, features={'tool_source_ids': selection}
+        )
+        assert not any('error' in chunk for chunk in chunks)
+        path, body = chat.mutations()[-1]
+        assert path == ('/v1/chat/threads' if index == 1 else '/v1/chat/threads/thr-1/inputs')
+        assert body['input'].get('tool_source_ids', []) == selection
+        assert ('tool_source_ids' in body['input']) == bool(selection)
+        assert 'messages' not in body and body['input']['text'] == 'question'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'selection',
+    [
+        None,
+        [],
+        'bad',
+        {},
+        [1],
+        [None],
+        ['bad'],
+        [TOOL_SOURCE, 'bad'],
+        [TOOL_SOURCE, TOOL_SOURCE],
+        [str(uuid4()) for _ in range(9)],
+    ],
+)
+async def test_invalid_or_empty_tool_source_selection_is_dropped(chat: Chat, selection) -> None:
+    chunks = await chat.turn('question', 'a1', features={'tool_source_ids': selection})
+    assert not any('error' in chunk for chunk in chunks)
+    assert 'tool_source_ids' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('selection', [[TOOL_SOURCE], [], ['bad'], [TOOL_SOURCE] * 2])
+@pytest.mark.parametrize('operation', ['regenerate_from', 'edit_from'])
+async def test_regenerated_input_resends_only_valid_saved_tool_sources(monkeypatch, selection, operation):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='fictional-user')))
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2, '_documents_allowed', AsyncMock(return_value=False))
+    saved = {'text': 'saved text', 'tool_source_ids': selection, 'tools': {'web_search': 'auto'}}
+    events = AsyncMock(return_value=[{'position': 2, 'type': 'input', 'stream': 'root', 'payload': {'payload': saved}}])
+    source = {'thread_id': 'fictional-thread', 'position': 2}
+    metadata = {
+        'user_id': 'fictional-user',
+        'user_message': {operation: source},
+        'features': {'tool_source_ids': [str(uuid4())]},
+    }
+    turn = SimpleNamespace(
+        client=SimpleNamespace(chat_events=events), metadata=metadata, as_user='owui:user:fictional-user', run=Mock()
+    )
+    await agent_v2._sent(turn, 'edited text', metadata, agent='soev_react', model='llm')
+    body = turn.run.call_args.args[0]
+    assert body['input'].get('tool_source_ids') == ([TOOL_SOURCE] if selection == [TOOL_SOURCE] else None)
+    assert body['input']['text'] == ('edited text' if operation == 'edit_from' else 'saved text')
+    assert body['input']['tools']['web_search'] == 'off'
+    assert body['input']['documents'] == 'off'
+    assert saved['tool_source_ids'] == selection
+    events.assert_awaited_once_with('fictional-thread', as_user='owui:user:fictional-user', after=1, through=2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_withdrawn_tool_source_consent_is_a_safe_translated_refusal(chat, monkeypatch, caplog, language):
+    fail_turns(
+        chat,
+        monkeypatch,
+        httpx.Response(
+            404, json={'code': 'not_found', 'detail': TOOL_SOURCE}, headers={'Content-Type': 'application/problem+json'}
+        ),
+    )
+    chunks = await chat.turn('question', 'a1', user_language=language, features={'tool_source_ids': [TOOL_SOURCE]})
+    assert chat.status == 404
+    assert chunks[-1] == agent_v2._error(
+        'not_found', language=language, diagnostics={'status': 404, 'upstream_status': 404}
+    )
+    assert TOOL_SOURCE not in caplog.text and TOOL_SOURCE not in str(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_regenerate_with_withdrawn_consent_surfaces_platform_404(chat, monkeypatch, language):
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='fictional-user')))
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=True))
+    saved = {'text': 'saved question', 'tool_source_ids': [TOOL_SOURCE]}
+    monkeypatch.setattr(
+        SoevClient,
+        'chat_events',
+        AsyncMock(return_value=[{'position': 2, 'type': 'input', 'stream': 'root', 'payload': {'payload': saved}}]),
+    )
+    fail_turns(
+        chat,
+        monkeypatch,
+        httpx.Response(
+            404, json={'code': 'not_found', 'detail': TOOL_SOURCE}, headers={'Content-Type': 'application/problem+json'}
+        ),
+    )
+    response = await agent_v2.call_agent_v2(
+        {'stream': False},
+        {
+            'user_id': 'fictional-user',
+            'user_language': language,
+            'chat_id': 'fictional-chat',
+            'new_thread': True,
+            'user_message': {
+                'content': 'browser question',
+                'regenerate_from': {'thread_id': 'fictional-source', 'position': 2},
+            },
+            'features': {'tool_source_ids': []},
+        },
+        agent='test',
+        organizations=SimpleNamespace(list=AsyncMock(return_value=[]), put=AsyncMock()),
+    )
+    assert isinstance(response, JSONResponse) and response.status_code == 404
+    assert json.loads(response.body) == agent_v2._error(
+        'not_found', language=language, diagnostics={'status': 404, 'upstream_status': 404}
+    )
+    assert chat.mutations()[-1][1]['input']['tool_source_ids'] == [TOOL_SOURCE]

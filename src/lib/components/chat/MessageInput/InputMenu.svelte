@@ -63,6 +63,9 @@
 	import Meetings from './InputMenu/Meetings.svelte';
 	import Mic from '$lib/components/icons/Mic.svelte';
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
+	// [Gradient] Connection rows and their selection share the chat's composer state.
+	import type { ToolSource } from '$lib/apis/toolSources';
+	import ExternalConnections from './InputMenu/ExternalConnections.svelte';
 	import Knowledge from './InputMenu/Knowledge.svelte';
 	import MenuItem from './InputMenu/MenuItem.svelte';
 	import SearchInput from './InputMenu/SearchInput.svelte';
@@ -118,6 +121,12 @@
 
 	// Tools section state (two-way bound by MessageInput).
 	export let selectedToolIds: string[] = [];
+	export let selectedToolSourceIds: string[] = [];
+	export let externalConnections: ToolSource[] = [];
+	export let onRefreshExternalConnections = async () => {};
+	$: showExternalConnections =
+		itemAllowed('external_connections') && externalConnections.length > 0;
+	$: if (show) void onRefreshExternalConnections();
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
 	export let toggleFilters: ToggleFilter[] = [];
@@ -323,6 +332,7 @@
 		showOneDrive;
 	$: anyKnowledge = showKnowledge || showReferenceChats;
 	$: anyTools =
+		showExternalConnections ||
 		showLiveMail ||
 		showLiveDocuments ||
 		showTools ||
@@ -850,6 +860,20 @@
 						<div class={sectionHeaderClass}>{$i18n.t('Attach tools')}</div>
 					{/if}
 
+					<!-- [Gradient] Hide discovery entirely when unavailable or empty. -->
+					{#if showExternalConnections}
+						<MenuItem
+							label={$i18n.t('External connections')}
+							pinId="external_connections"
+							submenu
+							onClick={() => {
+								tab = 'external_connections';
+							}}
+						>
+							<Link slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
 					{#if showLiveMail}
 						<MenuItem
 							label={$i18n.t('Mail search')}
@@ -1189,7 +1213,9 @@
 
 							<div class="flex items-center w-full justify-between">
 								<div>
-									{#if tab === 'knowledge'}
+									{#if tab === 'external_connections'}
+										{$i18n.t('External connections')}
+									{:else if tab === 'knowledge'}
 										{$i18n.t('Knowledge database')}
 									{:else if tab === 'notes'}
 										{$i18n.t('Notes')}
@@ -1213,7 +1239,9 @@
 						</button>
 					{/if}
 
-					{#if tab === 'knowledge'}
+					{#if tab === 'external_connections'}
+						<ExternalConnections sources={externalConnections} bind:selectedToolSourceIds />
+					{:else if tab === 'knowledge'}
 						<Knowledge {onSelect} />
 					{:else if tab === 'notes'}
 						<Notes {onSelect} />

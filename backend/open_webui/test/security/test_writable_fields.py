@@ -10,7 +10,7 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# The product exposes 300 five-method operations and 303 across all HTTP methods.
+# The product exposes 301 five-method operations and 304 across all HTTP methods.
 # Derive all methods; GET/HEAD/OPTIONS bodies are deliberately excluded from string writes.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
 OPENAPI_METHODS = FIVE_METHODS | {'head', 'options', 'trace'}
@@ -31,8 +31,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (300, 303), (
-        f'Expected 300 five-method operations / 303 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (301, 304), (
+        f'Expected 301 five-method operations / 304 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -75,8 +75,8 @@ def test_derived_counts(surface):
         'threads[].thread_id',
         'threads[].versions[]',
     ]
-    assert query_counts == (35, 77), (
-        f'Expected 35 routes / 77 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+    assert query_counts == (36, 78), (
+        f'Expected 36 routes / 78 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
     )
 
 
@@ -225,3 +225,13 @@ def test_platform_text_edit_refusal_is_explicit_without_a_field_exemption(surfac
     route = 'POST /api/v1/files/{id}/data/content/update'
     assert '409' in operations[route]['description']
     assert 'content' in fields[route]
+
+
+# [Gradient] The discovery route accepts an agent hint, never an identity or request body.
+def test_tool_sources_only_accept_the_agent_query(surface):
+    operations, fields, queries = surface
+    route = 'GET /api/v1/tool-sources'
+    assert 'requestBody' not in operations[route]
+    assert not fields.get(route)
+    assert queries[route] == ['agent']
+    assert operations[route]['security'] == [{'HTTPBearer': []}]
