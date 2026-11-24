@@ -216,16 +216,18 @@
 
 	const _scrollContainerTo = (
 		target: HTMLElement,
-		align: 'center' | 'top' = 'center',
+		align: 'center' | 'top' | 'start' = 'center',
 		behavior: ScrollBehavior = 'auto'
 	) => {
 		if (!outerContainer) return;
 		const containerRect = outerContainer.getBoundingClientRect();
 		const targetRect = target.getBoundingClientRect();
 		const margin =
-			align === 'top'
-				? Math.min(56, outerContainer.clientHeight * 0.12)
-				: (outerContainer.clientHeight - targetRect.height) / 2;
+			align === 'start'
+				? 0
+				: align === 'top'
+					? Math.min(56, outerContainer.clientHeight * 0.12)
+					: (outerContainer.clientHeight - targetRect.height) / 2;
 		const delta = targetRect.top - containerRect.top - margin;
 		outerContainer.scrollTo({
 			top: outerContainer.scrollTop + delta,
@@ -374,6 +376,14 @@
 				bounds: true,
 				boundsPadding: 0.1,
 				zoomSpeed: 0.065,
+				// [Gradient] At 1x the arrow keys scroll the pages. panzoom would move the scene
+				// instead, leaving the pages shifted with no scrollbar to bring them back.
+				// (panzoom's typings omit the arguments it passes.)
+				filterKey: ((_e: KeyboardEvent, x: number, y: number) => {
+					if (!x && !y) return false;
+					const transform = pzInstance?.getTransform();
+					return !transform || Math.abs(transform.scale - 1) < 0.01;
+				}) as () => boolean,
 				beforeWheel: (e) => {
 					// Only zoom on pinch (ctrlKey / metaKey); let normal scroll pass through
 					if (!e.ctrlKey && !e.metaKey) {
@@ -464,7 +474,10 @@
 		const pageWrapper = sceneElement.querySelectorAll('.pdf-page-wrapper')[page - 1] as
 			| HTMLElement
 			| undefined;
-		pageWrapper?.scrollIntoView({ block: 'start', behavior: scrollBehavior(behavior) });
+		// [Gradient] scrollIntoView also scrolls every ancestor, overflow-hidden ones included. When
+		// the viewer cannot bring the page to its top (short landscape pages, the last page) it
+		// shifts the panel or the app instead, and nothing can scroll those back.
+		if (pageWrapper) _scrollContainerTo(pageWrapper, 'start', behavior);
 		activePage = page;
 		onPageChange?.(page);
 	};
@@ -548,7 +561,7 @@
 			if (token !== renderToken) return;
 			const viewport = page.getViewport({ scale: 1 });
 			const cssScale = getCssScale(viewport, width);
-			const renderScale = cssScale * forZoom * dpr;
+			const renderScale = capRenderScale(viewport, cssScale * forZoom * dpr);
 			const scaledViewport = page.getViewport({ scale: renderScale });
 			const cssViewport = page.getViewport({ scale: cssScale });
 
@@ -603,6 +616,18 @@
 		}
 		return true;
 	};
+
+	// [Gradient] Browsers refuse or crash on oversized canvases, which very long or very large
+	// pages reach at fit-to-width. Past the cap the canvas is stretched to its CSS size instead.
+	const MAX_CANVAS_PIXELS = 2 ** 24;
+	const MAX_CANVAS_SIDE = 16384;
+
+	const capRenderScale = (viewport: { width: number; height: number }, scale: number) =>
+		Math.min(
+			scale,
+			Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)),
+			MAX_CANVAS_SIDE / Math.max(viewport.width, viewport.height)
+		);
 
 	const getCssScale = (viewport: { width: number; height: number }, width: number) => {
 		if (!singlePage) return (width || 800) / viewport.width;
@@ -683,7 +708,7 @@
 
 			// Scale to fit container width
 			const cssScale = getCssScale(viewport, width);
-			const renderScale = cssScale * dpr;
+			const renderScale = capRenderScale(viewport, cssScale * dpr);
 			const scaledViewport = page.getViewport({ scale: renderScale });
 			const cssViewport = page.getViewport({ scale: cssScale });
 
@@ -1112,6 +1137,32 @@
 
 	:global(.textLayer .markedContent) {
 		display: contents;
+	}
+
+	/* [Gradient] Rotated pages (/Rotate 90, 180, 270: scans stored on their side). pdf.js
+	   sizes the text layer with the unrotated page box and leaves the turn to these rules from
+	   pdf_viewer.css. The size only resolves with --scale-round-* set; without them it fell
+	   back to the wrapper's box, so the text of a rotated page sat in the wrong place. */
+	:global(.textLayer) {
+		--scale-round-x: 1px;
+		--scale-round-y: 1px;
+	}
+
+	:global(.textLayer[data-main-rotation='90']) {
+		transform: rotate(90deg) translateY(-100%);
+	}
+
+	:global(.textLayer[data-main-rotation='180']) {
+		transform: rotate(180deg) translate(-100%, -100%);
+	}
+
+	:global(.textLayer[data-main-rotation='270']) {
+		transform: rotate(270deg) translateX(-100%);
+	}
+
+	/* [Gradient] Nothing a page draws may widen the viewer's scroll area. */
+	:global(.pdf-page-wrapper) {
+		overflow: hidden;
 	}
 
 	:global(.textLayer span[role='img']) {
