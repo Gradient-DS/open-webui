@@ -48,6 +48,8 @@
 	export let messageInput = null;
 
 	export let selectedToolIds = [];
+	// [Gradient] External connections are selected per chat.
+	export let selectedToolSourceIds = [];
 	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 	export let pendingOAuthTools = [];
@@ -255,6 +257,7 @@
 
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				{#if !($selectedFolder && folderReadOnly)}
+					<!-- [Gradient] Bind this chat's external connection selection. -->
 					<MessageInput
 						bind:this={messageInput}
 						agentRouted={isAgentRouted()}
@@ -264,6 +267,7 @@
 						bind:prompt
 						bind:autoScroll
 						bind:selectedToolIds
+						bind:selectedToolSourceIds
 						bind:selectedSkillIds
 						bind:selectedFilterIds
 						bind:imageGenerationEnabled

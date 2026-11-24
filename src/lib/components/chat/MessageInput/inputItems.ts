@@ -21,6 +21,7 @@ export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'onedrive', section: 'context', pinnable: true },
 	{ id: 'knowledge', section: 'knowledge', pinnable: true },
 	{ id: 'reference_chats', section: 'knowledge', pinnable: true },
+	{ id: 'external_connections', section: 'tools', pinnable: true },
 	{ id: 'live_mail', section: 'tools', pinnable: true },
 	{ id: 'live_documents', section: 'tools', pinnable: true },
 	{ id: 'web_search', section: 'tools', pinnable: true },

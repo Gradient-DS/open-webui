@@ -1,3 +1,4 @@
+// [Gradient] Chat feature snapshots and user defaults have separate connection scope.
 import { liveDocumentState } from './toolState';
 
 const featureKeys = {
@@ -7,6 +8,7 @@ const featureKeys = {
 	codeInterpreterEnabled: 'code_interpreter',
 	documentWriterEnabled: 'document_writer',
 	selectedToolIds: 'tool_ids',
+	selectedToolSourceIds: 'tool_source_ids',
 	selectedSkillIds: 'skill_ids',
 	selectedFilterIds: 'filter_ids'
 } as const;
@@ -19,6 +21,7 @@ export type ComposerPreferences = {
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
 	selectedToolIds: string[];
+	selectedToolSourceIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
 };
@@ -36,6 +39,7 @@ export function composerPreferences(
 		codeInterpreterEnabled: values.codeInterpreterEnabled ?? false,
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
+		selectedToolSourceIds: [...(saved.selectedToolSourceIds ?? [])],
 		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
 		selectedFilterIds: [...(values.selectedFilterIds ?? [])]
 	};
@@ -62,4 +66,13 @@ export function composerFromFeatures(
 		),
 		defaults
 	);
+}
+
+// Connection consent is a per-chat choice, never a new-chat default.
+export function composerUserDefaults(
+	preferences: Partial<ComposerPreferences> = {}
+): Omit<Partial<ComposerPreferences>, 'selectedToolSourceIds'> {
+	const defaults = { ...preferences };
+	delete defaults.selectedToolSourceIds;
+	return defaults;
 }

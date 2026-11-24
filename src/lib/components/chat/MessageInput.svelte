@@ -105,6 +105,8 @@
 
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
+	// [Gradient] Refresh connection availability per chat and when the menu opens.
+	import { getToolSources, availableToolSourceIds, type ToolSource } from '$lib/apis/toolSources';
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import ModelSelector from './ModelSelector.svelte';
@@ -244,6 +246,33 @@
 	export let files: ChatAttachment[] = [];
 
 	export let selectedToolIds: string[] = [];
+	// [Gradient] External connections are selected per chat.
+	export let selectedToolSourceIds: string[] = [];
+	let externalConnections: ToolSource[] = [];
+	let externalConnectionsLoaded = false;
+	let externalConnectionsRequest = 0;
+	let connectionsMounted = false;
+	async function refreshExternalConnections() {
+		const request = ++externalConnectionsRequest;
+		externalConnectionsLoaded = false;
+		const sources = agentRouted ? await getToolSources(localStorage.token).catch(() => []) : [];
+		if (request !== externalConnectionsRequest) return;
+		externalConnections = sources;
+		externalConnectionsLoaded = true;
+	}
+	onMount(() => {
+		connectionsMounted = true;
+	});
+	$: if (connectionsMounted) {
+		composerSession;
+		agentRouted;
+		void refreshExternalConnections();
+	}
+	$: if (externalConnectionsLoaded) {
+		const available = availableToolSourceIds(selectedToolSourceIds, externalConnections);
+		if (available.join() !== selectedToolSourceIds.join()) selectedToolSourceIds = available;
+	}
+
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
 
@@ -958,13 +987,15 @@
 		(inputMenuRestrictTo === null ||
 			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
 			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
-		!dataSeparationBlockedItems.has(id);
+		!dataSeparationBlockedItems.has(id) &&
+		(id !== 'external_connections' || externalConnections.length > 0);
 	// [Gradient] A live family is on only with a grant; without one its pinned button connects.
 	$: liveMailGranted = liveGranted($liveGrants, 'mail') === true;
 	$: liveDocumentsGranted = liveGranted($liveGrants, 'live_documents') === true;
 	$: liveMailOn = liveMailGranted && liveMailState !== 'off';
 	$: liveDocumentsOn = liveDocumentsGranted && liveDocumentsState !== 'off';
 	$: inputItemStates = {
+		external_connections: itemState(selectedToolSourceIds.length),
 		live_mail: itemState(liveMailOn),
 		live_documents: itemState(liveDocumentsOn),
 		web_search: itemState(webSearchEnabled),
@@ -2518,6 +2549,7 @@
 								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
 									<!-- [Gradient] One "+" menu holds context, knowledge and tools. -->
 									{#if isFeatureEnabled('input_menu')}
+										<!-- [Gradient] Bind this chat's external connection selection. -->
 										<InputMenu
 											bind:this={inputMenuRef}
 											bind:liveDocumentsState
@@ -2545,6 +2577,9 @@
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
 											bind:selectedToolIds
+											{externalConnections}
+											onRefreshExternalConnections={refreshExternalConnections}
+											bind:selectedToolSourceIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
@@ -2858,6 +2893,21 @@
 															class={pinnedToggleClass(documentWriterEnabled)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'external_connections' && externalConnections.length > 0}
+													<Tooltip content={$i18n.t('External connections')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('External connections')}
+															on:click|preventDefault={() =>
+																inputMenuRef?.openTab('external_connections')}
+															class={pinnedToggleClass((selectedToolSourceIds ?? []).length > 0)}
+														>
+															<Link className="size-4" strokeWidth="1.75" />
+															{#if (selectedToolSourceIds ?? []).length > 0}
+																<span class="text-sm">{selectedToolSourceIds.length}</span>
+															{/if}
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}
