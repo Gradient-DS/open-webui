@@ -84,6 +84,8 @@
 	let toggles: AssistantToggles = togglesFromMeta({});
 	let accessGrants: any[] = [];
 	let skillFiles: AssistantSkillFile[] = [];
+	// Skill files picked before the assistant exists: they are sent with its first save.
+	let pendingSkillFiles: SkillBundleFile[] = [];
 	let skillBusy = false;
 	let addFilesInput: HTMLInputElement;
 	let importSkillInput: HTMLInputElement;
@@ -276,7 +278,10 @@
 		info.meta = applyToggles(info.meta, toggles);
 		info.access_grants = accessGrants;
 
-		if ((await onSubmit(info, options)) === false) {
+		// With skill files waiting, stay here until they are sent; the route would navigate away first.
+		const waiting = pendingSkillFiles;
+		const submitOptions = waiting.length ? { ...options, skipNavigate: true } : options;
+		if ((await onSubmit(info, submitOptions)) === false) {
 			loading = false;
 			return false;
 		}
@@ -285,6 +290,16 @@
 		savedSnapshot = _snapshot();
 		hasBeenSaved = true;
 		mergeBase = info;
+		if (waiting.length) {
+			pendingSkillFiles = [];
+			try {
+				await sendSkillFiles(waiting);
+			} catch (error) {
+				skillError(error);
+			}
+			await refreshSkillFiles();
+			if (!options.skipNavigate) await goto(`/workspace/models/edit?id=${encodeURIComponent(id)}`);
+		}
 		loading = false;
 		return true;
 	};
@@ -312,6 +327,7 @@
 
 	const uploadSkillFiles = async (files: SkillBundleFile[]) => {
 		const replaced = new Set(files.map((file) => file.path));
+		const kept = pendingSkillFiles.filter((file) => !replaced.has(file.path));
 		validateAssistantSkillFiles([
 			...skillFiles
 				.filter((file) => !replaced.has(file.path))
@@ -319,9 +335,19 @@
 					path: file.path,
 					blob: { size: file.size } as Blob
 				})),
+			...kept,
 			...files
 		]);
-		if (!hasBeenSaved && !(await submitHandler({ skipNavigate: true }))) return;
+		if (!hasBeenSaved) {
+			// The files belong to the saved assistant: without a name yet they wait for the first save.
+			pendingSkillFiles = [...kept, ...files];
+			if (name.trim() !== '') await submitHandler({ skipNavigate: true });
+			return;
+		}
+		await sendSkillFiles(files);
+	};
+
+	const sendSkillFiles = async (files: SkillBundleFile[]) => {
 		for (const file of files) {
 			const uploaded = await uploadFile(
 				localStorage.token,
@@ -752,6 +778,27 @@
 							>
 						</div>
 					{/each}
+					{#each pendingSkillFiles as file (file.path)}
+						<div
+							class="flex items-center gap-2 bg-gray-50 dark:bg-gray-850 rounded-lg px-3 py-2 text-xs"
+						>
+							<span class="font-mono break-all flex-1">{file.path}</span>
+							<span class="text-gray-500 whitespace-nowrap">{formatFileSize(file.blob.size)}</span>
+							<button
+								type="button"
+								disabled={skillBusy || loading}
+								aria-label={$i18n.t('Remove {{path}}', { path: file.path })}
+								on:click={() => {
+									pendingSkillFiles = pendingSkillFiles.filter((item) => item.path !== file.path);
+								}}>{$i18n.t('Remove')}</button
+							>
+						</div>
+					{/each}
+					{#if pendingSkillFiles.length}
+						<p class="text-xs text-gray-500">
+							{$i18n.t('These files are uploaded when you save the assistant.')}
+						</p>
+					{/if}
 					<div class="flex gap-2 text-xs">
 						<button
 							type="button"

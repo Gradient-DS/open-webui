@@ -3593,6 +3593,7 @@
   "Theme": "Thema",
   "There was a problem generating a response.": "Er is een probleem opgetreden bij het genereren van het antwoord.",
   "There was an error syncing your stats. Please try again.": "Er is een fout opgetreden bij het synchroniseren van je statistieken. Probeer het opnieuw.",
+  "These files are uploaded when you save the assistant.": "Deze bestanden worden geüpload zodra je de assistent opslaat.",
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "Deze bestanden staan in {{provider}} maar zijn hier niet doorzoekbaar. Beweeg over een reden om te zien wat je eraan kunt doen. De volgende synchronisatie probeert alles opnieuw wat niet definitief is overgeslagen.",
   "These items stay private:": "Deze items blijven privé:",
   "These settings are read from environment variables and cannot be edited here while {{ENV_VAR}} is disabled.": "",
