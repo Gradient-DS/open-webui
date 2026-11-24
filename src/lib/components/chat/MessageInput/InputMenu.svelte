@@ -188,6 +188,9 @@
 	export let workspaceEnabled = false;
 	// Whether this chat already ran something in the workspace: turning it off then asks first.
 	export let workspaceUsed = false;
+	// The active assistant has Workspace on: it stays on, or the row says why it cannot run.
+	export let workspaceRequired = false;
+	export let workspaceBlockedReason = '';
 	let showWorkspaceOffConfirm = false;
 	export let documentWriterEnabled = true;
 	export let councilEnabled = false;
@@ -325,7 +328,8 @@
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
 	$: showCouncil = itemAllowed('council') && showCouncilButton;
-	$: showWorkspace = itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled);
+	$: showWorkspace =
+		itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled || workspaceRequired);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
@@ -606,7 +610,9 @@
 		} else if (tool === 'code_interpreter') {
 			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else if (tool === 'workspace') {
-			if (workspaceEnabled && workspaceUsed) showWorkspaceOffConfirm = true;
+			if (workspaceEnabled && workspaceRequired) {
+				toast.message($i18n.t('Workspace is always on with this assistant'));
+			} else if (workspaceEnabled && workspaceUsed) showWorkspaceOffConfirm = true;
 			else workspaceEnabled = !workspaceEnabled;
 		} else if (tool === 'council') {
 			councilEnabled = !councilEnabled;
@@ -1129,10 +1135,12 @@
 							toggle={workspaceEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showWorkspaceButton
-								? $i18n.t('Unavailable')
-								: workspaceEnabled
-									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
-									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+								? `${workspaceRequired ? `${$i18n.t('This assistant needs Workspace.')} ` : ''}${$i18n.t(workspaceBlockedReason || 'Unavailable')}`
+								: workspaceRequired
+									? $i18n.t('Always on with this assistant')
+									: workspaceEnabled
+										? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
+										: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Workspace'),
 								workspaceEnabled,
