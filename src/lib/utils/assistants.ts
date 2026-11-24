@@ -37,16 +37,34 @@ export const resolveAssistant = <T extends AssistantModel>(
 	return models.find((model) => isAssistant(model) && model.name === query);
 };
 
+/**
+ * Functionalities a user switches per chat. An assistant's choice for these is the starting
+ * state of a chat with it (`defaultFeatureIds`), never a limit: only the LLM decides what can run.
+ */
+export const SWITCHABLE_CAPABILITIES = [
+	'web_search',
+	'image_generation',
+	'code_interpreter',
+	'document_writer',
+	'workspace',
+	'live_documents',
+	'live_mail'
+];
+
 export const effectiveCapabilities = (
 	llmCaps?: object | null,
 	assistantCaps?: object | null
 ): Capabilities => {
 	const base = (llmCaps ?? {}) as Capabilities;
-	const override = (assistantCaps ?? {}) as Capabilities;
+	const override = Object.fromEntries(
+		Object.entries((assistantCaps ?? {}) as Capabilities).filter(
+			([key]) => !SWITCHABLE_CAPABILITIES.includes(key)
+		)
+	);
 	return {
 		...base,
 		...override,
-		workspace: base.workspace === true && override.workspace === true,
+		workspace: base.workspace === true,
 		vision: Boolean(
 			(base.vision === undefined ? true : base.vision) &&
 			(override.vision === undefined ? true : override.vision)
