@@ -1231,3 +1231,59 @@ def test_platform_original_seed_waits_for_the_real_transfer_to_settle():
     ctx.request.return_value['path'] = '/local/bypass'
     with pytest.raises(RuntimeError, match='transfer path'):
         seeds.seed_platform_document(ctx, parameter)
+
+
+@pytest.mark.parametrize('method,path', [('POST', '/api/v1/files/'), ('POST', '/api/v1/files')])
+def test_document_upload_seed_observes_completion_before_any_next_mutation(monkeypatch, method, path):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(
+            200, {'id': 'fictional-document', 'meta': {'status': 'processing', 'soev_job': {'job_id': 'fictional-job'}}}
+        ),
+        response(200, {'meta': {'status': 'processing', 'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': None}}),
+    ]
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    ctx.request(method, path, actor=client, params={'process': False})
+    assert [call.args for call in client.request.call_args_list[1:]] == [
+        ('GET', '/api/v1/files/fictional-document')
+    ] * 3
+    assert not any('retrieval/process' in call.args[1] for call in client.request.call_args_list)
+
+
+@pytest.mark.parametrize(
+    'key,provided', [('removable_knowledge', 'removable_file'), ('update_knowledge', 'update_file')]
+)
+def test_platform_knowledge_seed_does_not_submit_an_already_uploaded_document_again(monkeypatch, key, provided):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fictional')
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'fictional-file'},
+            {'id': 'fictional-kb'},
+            {'id': 'fictional-kb', 'files': [{'id': 'fictional-file'}]},
+        ]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == key)
+    assert seeds.seed_knowledge_file(ctx, parameter) == 'fictional-kb'
+    assert ctx.values[provided] == 'fictional-file'
+    assert [call.args[1] for call in ctx.request.call_args_list] == [
+        '/api/v1/files/',
+        '/api/v1/knowledge/create',
+        '/api/v1/knowledge/fictional-kb/file/add',
+    ]
+    assert all(call.kwargs['actor'] is ctx.client for call in ctx.request.call_args_list)
+
+
+def test_document_upload_seed_surfaces_terminal_failure_before_followup():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'id': 'fictional-document', 'meta': {'soev_job': {'job_id': 'fictional-job'}}}),
+        response(200, {'meta': {'status': 'failed', 'error': 'upload_failed', 'soev_job': None}}),
+    ]
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    with pytest.raises(RuntimeError, match='upload_failed'):
+        ctx.request('POST', '/api/v1/files/', actor=client)
+    assert len(client.request.call_args_list) == 2
