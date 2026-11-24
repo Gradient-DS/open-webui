@@ -370,3 +370,116 @@ async def test_original_read_rejects_missing_or_changed_digest_and_known_size(en
             pytest.fail('Unverified original was admitted')
     assert caught.value.status == 404
     stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('destination', ['kb', 'attachments'])
+async def test_retained_media_can_be_processed_after_its_upload_request_ends(env, monkeypatch, destination):
+    from open_webui.routers import files, retrieval
+    from open_webui.soev import jobs
+
+    data = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Fictional media</text></svg>'
+    path = env.tmp_path / 'fictional.svg'
+
+    def write(source, *args):
+        path.write_bytes(source.read())
+        return data, str(path)
+
+    monkeypatch.setattr(files.Config, 'get', AsyncMock(return_value=None))
+    monkeypatch.setattr(files.Storage, 'upload_file', write)
+    monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
+    monkeypatch.setattr(files, 'emit_file_status', AsyncMock())
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    # Collection authorization is independently covered; this proof keeps real Files, transfer and job processing.
+    monkeypatch.setattr(retrieval, '_validate_collection_access', AsyncMock())
+    user = SimpleNamespace(id='alice', role='user', email='alice@invalid', name='Alice')
+    result = await files.upload_file_handler(
+        SimpleNamespace(),
+        UploadFile(file=BytesIO(data), filename='fictional.svg', headers={'content-type': 'image/svg+xml'}),
+        metadata={},
+        process=False,
+        user=user,
+        db=None,
+    )
+    assert result.path == str(path)
+    form = retrieval.ProcessFileForm(file_id=result.id, collection_name='kb' if destination == 'kb' else None)
+    reply = await retrieval.process_file(SimpleNamespace(), form, user=user, db=None)
+    assert reply['status'] and reply['job_id']
+    assert env.api.uploads[reply['job_id'], result.id] == data
+    assert env.api.jobs[reply['job_id']]['status'] == 'QUEUED'
+    assert not any(r.url.path.endswith('/original') for r in env.api.requests)
+    # Retry while pending still refuses; callers must observe terminal completion.
+    with pytest.raises(HTTPException) as busy:
+        await retrieval.process_file(SimpleNamespace(), form, user=user, db=None)
+    assert busy.value.status_code == 409
+    env.api.advance(reply['job_id'], 'SUCCEEDED')
+    from open_webui.test.soev.test_jobs import owner_login
+
+    with owner_login():
+        await jobs.reconcile_owner_jobs('alice')
+    row = await env.files.Files.get_file_by_id(result.id)
+    assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
+    assert path.read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_settled_uploaded_media_can_be_added_to_knowledge(env, monkeypatch):
+    from open_webui.routers import knowledge, retrieval, files
+    from open_webui.models.knowledge import KnowledgeModel
+    from open_webui.soev import jobs
+    from open_webui.test.soev.test_jobs import owner_login
+
+    data = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Fictional KB media</text></svg>'
+    path = env.tmp_path / 'knowledge.svg'
+    path.write_bytes(data)
+    monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
+    file = await env.files.Files.insert_new_file(
+        'alice',
+        env.files.FileForm(
+            id='fictional-image',
+            filename='knowledge.svg',
+            path=str(path),
+            data={'status': 'completed'},
+            meta={
+                'status': 'completed',
+                'content_type': 'image/svg+xml',
+                'size': len(data),
+                'file_hash': hashlib.sha256(data).hexdigest(),
+            },
+        ),
+    )
+    kb = KnowledgeModel(
+        id='kb', user_id='alice', type='local', name='Fictional KB', description='', meta={}, created_at=1, updated_at=1
+    )
+    # Keep the real own-file check, processing route, transfer and Files SQL. Only KB persistence/event I/O is replaced.
+    monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
+    monkeypatch.setattr(knowledge.Knowledges, 'add_file_to_knowledge_by_id', AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        knowledge.Knowledges,
+        'get_file_metadatas_by_id',
+        AsyncMock(
+            return_value=[
+                {'id': file.id, 'meta': file.meta, 'created_at': file.created_at, 'updated_at': file.updated_at}
+            ]
+        ),
+    )
+    monkeypatch.setattr(knowledge, 'derive_relative_path_from_directory', AsyncMock())
+    monkeypatch.setattr(knowledge, 'publish_event', AsyncMock())
+    monkeypatch.setattr(retrieval, '_validate_collection_access', AsyncMock())
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    user = SimpleNamespace(id='alice', role='user')
+    reply = await knowledge.add_file_to_knowledge_by_id(
+        SimpleNamespace(), 'kb', knowledge.KnowledgeFileIdForm(file_id=file.id), user=user, db=None
+    )
+    assert reply['files'][0]['id'] == file.id
+    row = await env.files.Files.get_file_by_id(file.id)
+    job_id = row.meta['soev_job']['job_id']
+    assert env.api.uploads[job_id, file.id] == data
+    assert env.api.jobs[job_id]['status'] == 'QUEUED'
+    env.api.advance(job_id, 'SUCCEEDED')
+    with owner_login():
+        await jobs.reconcile_owner_jobs('alice')
+    row = await env.files.Files.get_file_by_id(file.id)
+    assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
+    assert row.meta['soev_copies']['kb']['status'] == 'completed'
+    assert path.read_bytes() == data

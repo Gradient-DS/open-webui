@@ -471,7 +471,7 @@ class ProcessFileForm(BaseModel):
 
 @router.post(
     '/process/file',
-    description='Owner-only processing. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
+    description='Owner-only processing. Retained media and generated files use their trusted local storage bytes; document originals use the requesting user platform read authority. Pending jobs refuse 409. Failures preserve recorded original fingerprints and return fixed platform problem messages.',
 )
 async def process_file(
     request: Request,

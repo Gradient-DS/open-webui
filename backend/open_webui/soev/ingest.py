@@ -249,7 +249,10 @@ async def _submit(
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
     ref = f'owui:user:{user_id}'
     body = {'collection_key': collection_key, 'documents': [document]}
-    if source is None and text is None and not meta.get('soev_read_collection'):
+    from open_webui.soev import originals
+
+    local = source is None and text is None and await originals.prefer_local(file)
+    if source is None and text is None and not local and not meta.get('soev_read_collection'):
         from open_webui.soev.originals import lookup, remember
 
         origin = await lookup(file, client, as_user=ref)
@@ -266,6 +269,13 @@ async def _submit(
         elif source is not None:
             async for chunk in _source_chunks(source):
                 yield chunk
+        elif local:
+            from open_webui.storage.provider import Storage
+
+            path = await asyncio.to_thread(Storage.get_file, file.path)
+            with open(path, 'rb') as stored:
+                async for chunk in _source_chunks(stored):
+                    yield chunk
         else:
             from open_webui.soev.originals import open_original
 
