@@ -4,7 +4,7 @@
 	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
-	import { effectiveModels as models } from '$lib/stores/assistant';
+	import { effectiveModels as models, activeAssistant } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
@@ -930,6 +930,12 @@
 		$config?.features?.enable_workspace &&
 		$_user?.permissions?.features?.workspace;
 	$: if (!showWorkspaceButton) workspaceEnabled = false;
+	// [Gradient] An assistant with Workspace on keeps it on in every chat with it: its skill folder
+	// only reaches the sandbox through the workspace. Other assistants only set the starting state.
+	$: assistantNeedsWorkspace = $activeAssistant?.info?.meta?.capabilities?.workspace === true;
+	$: if (showWorkspaceButton && !workspaceEnabled && assistantNeedsWorkspace) {
+		workspaceEnabled = true;
+	}
 	// [Gradient] Turning Workspace off in a chat that already used it asks first: its files stay behind.
 	$: workspaceUsed = Object.values(history?.messages ?? {}).some(
 		(message: any) =>
@@ -2608,7 +2614,7 @@
 											{showDocumentWriterButton}
 											{showCouncilButton}
 											{showWorkspaceButton}
-											{workspaceUsed}
+											workspaceUsed={workspaceUsed && !assistantNeedsWorkspace}
 											{agentRouted}
 											bind:selectedToolIds
 											bind:selectedSkillIds
