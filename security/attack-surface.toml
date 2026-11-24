@@ -1,3 +1,4 @@
+# Unsupported raw media is a strict 415 type refusal; live processing/knowledge positives select the genuine settled text/plain transfer. Separate SVG retention/authorization controls and all required routes remain.
 # Transfer completion: upload seeds poll completed status and cleared job; retained media can be processed later from trusted storage. Original reads bind missing catalog size to authenticated download length. No route exemption.
 # Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
 # File upload skill body seed requires exact foreign-target 404 concealment.
@@ -768,22 +769,28 @@ json = { "folder_id" = "{folder}" }
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
-description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. The genuine local SVG seed uploads with process=false. Setup submits its retained storage bytes for processing, waits for completed status and a cleared job, then adds it to the KB and waits for the destination copy. No duplicate process request is sent for a document transfer."
+description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. The live positive uses the settled text/plain platform_document transfer, adds it to the KB, then waits for the destination copy. The separate SVG remains a retained-image security control, never a document-parser positive."
 json = { "file_id" = "{file}" }
 setup = [
     { via = "POST /api/v1/retrieval/process/file", body = { "file_id" = "{file}" } },
     { via = "POST /api/v1/knowledge/{knowledge}/file/add", body = { "file_id" = "{file}" } },
 ]
 
+v2 = { json = { file_id = "{platform_document}" }, setup = [{ via = "POST /api/v1/knowledge/{knowledge}/file/add", body = { file_id = "{platform_document}" } }] }
+
 [[field]]
 route = "POST /api/v1/retrieval/process/file"
-description = "routers/retrieval.py:process_file requires the file owner and answers 404 for missing or foreign files. Processing failures preserve original fingerprints and expose only fixed platform problem messages."
+description = "routers/retrieval.py:process_file requires the file owner and answers 404 for missing or foreign files. Processing failures preserve original fingerprints; unsupported document input retains the specific 415 type refusal. Live processing positives use the settled text/plain platform_document, keeping the SVG image seed unchanged."
 json = { "file_id" = "{file}" }
+
+v2 = { json = { "file_id" = "{platform_document}" } }
 
 [[field]]
 route = "POST /api/v1/retrieval/process/files/batch"
 description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Every file requires current ownership; missing and foreign files return the same result. Upstream detail never reaches the batch response."
 json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
+
+v2 = { json = { collection_name = "{knowledge}", "files[].id" = "{platform_document}" } }
 
 [[field]]
 route = "GET /api/v1/models/model/profile/image"
@@ -819,6 +826,8 @@ route = "POST /api/v1/knowledge/{id}/file/add"
 description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
 json = { "file_id" = "{file}" }
 
+v2 = { json = { "file_id" = "{platform_document}" } }
+
 [[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/update"
@@ -836,6 +845,8 @@ backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/files/batch/add"
 description = "Each batch entry must name a real, processed file; the file/move setup processes the seeded one."
 json = { "[].file_id" = "{file}" }
+
+v2 = { json = { "[].file_id" = "{platform_document}" } }
 
 [[field]]
 route = "POST /api/v1/files/"

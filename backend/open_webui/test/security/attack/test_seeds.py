@@ -7,7 +7,7 @@ import sqlite3
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 import requests
@@ -1287,3 +1287,45 @@ def test_document_upload_seed_surfaces_terminal_failure_before_followup():
     with pytest.raises(RuntimeError, match='upload_failed'):
         ctx.request('POST', '/api/v1/files/', actor=client)
     assert len(client.request.call_args_list) == 2
+
+
+@pytest.mark.parametrize('mode', ['drive', 'waive'])
+def test_live_processing_positives_use_a_supported_transfer_without_changing_svg_controls(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    routes = {
+        'POST /api/v1/knowledge/{id}/file/move',
+        'POST /api/v1/knowledge/{id}/file/add',
+        'POST /api/v1/knowledge/{id}/files/batch/add',
+        'POST /api/v1/retrieval/process/file',
+        'POST /api/v1/retrieval/process/files/batch',
+    }
+    entries = [entry for entry in seeds.SURFACE['field'] if entry['route'] in routes]
+    ctx = seeds.SeedContext(
+        Mock(),
+        Mock(),
+        seeds.SURFACE,
+        token='fictional',
+        values={'file': 'retained-svg', 'platform_document': 'settled-text-document', 'knowledge': 'own-kb'},
+    )
+    ctx.request = Mock()
+    resolved = seeds.resolve_fields(ctx, entries=entries)
+    if mode == 'drive':
+        assert set(resolved) == routes
+        assert all('settled-text-document' in json.dumps(body) for body in resolved.values())
+        assert all('retained-svg' not in json.dumps(body) for body in resolved.values())
+        assert ctx.request.call_args_list == [
+            call(
+                'POST', '/api/v1/knowledge/own-kb/file/add', actor=ctx.client, json={'file_id': 'settled-text-document'}
+            )
+        ]
+    file = next(parameter for parameter in seeds.SURFACE['parameter'] if parameter['key'] == 'file')
+    upload = next(entry for entry in seeds.SURFACE['field'] if entry['route'] == 'POST /api/v1/files/')
+    from open_webui.utils.upload_guard import sniff_content_type
+
+    for declaration in (file, upload):
+        part = declaration['files'][0]
+        assert part['filename'].endswith('.svg') and part['content_type'] == 'image/svg+xml'
+        assert sniff_content_type(part['content'].encode()) == 'image/svg+xml'
+    assert file['query']['process'] is False and upload['params']['process'] is False
+    if mode == 'drive':
+        assert all(not seeds.route_waived(route) for route in routes)

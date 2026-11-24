@@ -1,3 +1,4 @@
+# Processing positives use a completed text/plain transfer in live mode; SVG upload/read and unsupported-media refusals remain. Processing, upload and knowledge mutations preserve type refusal 415; no route waived.
 # Transfer completion: existing upload/file/knowledge seeds wait for terminal status and cleared job. Content routes verify nullable catalog size at authenticated download; skill upload conceals the target before plan checks. Existing routes remain driven, with no waiver.
 # Upload refusal regression: existing file/skill seeds and guards retain specific MIME failures and synchronous 415 for unsupported media. No exemption.
 # File upload skill body seed requires exact foreign-target 404 concealment.
