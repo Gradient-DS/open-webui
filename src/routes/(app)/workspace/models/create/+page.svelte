@@ -18,6 +18,7 @@
 
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 	import { createdAssistant } from '$lib/stores/createdAssistant';
+	import { createWithFreeId } from '$lib/utils/assistantId';
 
 	const i18n = getContext('i18n');
 	// [Gradient] File imports save in place before uploading, then keep editing the same assistant.
@@ -43,7 +44,7 @@
 			const persist = (info: any) =>
 				createdId === info.id
 					? updateModelById(localStorage.token, info.id, info)
-					: createNewModel(localStorage.token, info);
+					: createWithFreeId(info, (model) => createNewModel(localStorage.token, model));
 			const res = await persist({
 				...modelInfo,
 				meta: {
@@ -65,6 +66,8 @@
 
 			if (res) {
 				createdId = res.id;
+				// The editor continues with the id the server saved.
+				modelInfo.id = res.id;
 				await models.set(
 					await getModels(
 						localStorage.token,
