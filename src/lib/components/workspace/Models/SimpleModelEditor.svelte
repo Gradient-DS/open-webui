@@ -43,6 +43,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 	import { defaultLLMId, pickableLLMs } from '$lib/utils/assistants';
+	import { uniqueSlug } from '$lib/utils/assistantId';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
@@ -145,25 +146,6 @@
 	// A chosen default model without Workspace keeps the switch off until another model is chosen.
 	$: workspaceBlocked = !toggles.workspace && !!defaultModel && !supportsWorkspace(defaultModel);
 
-	const slugify = (s: string) =>
-		s
-			.toLowerCase()
-			.trim()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '');
-
-	/**
-	 * Slugify the name and avoid colliding with an existing model id.
-	 * Appends a short random suffix only when a clean slug would clash —
-	 * keeps the URL pretty for first-of-its-kind names.
-	 */
-	const uniqueSlug = (base: string): string => {
-		const slug = slugify(base);
-		if (!slug) return slug;
-		if (!$models.find((m: any) => m?.id === slug)) return slug;
-		return `${slug}-${crypto.randomUUID().slice(0, 6)}`;
-	};
-
 	// The legacy marker distinguishes an assistant from an admin override row.
 	const computeDefaultBaseModelId = (): string =>
 		defaultLLMId(
@@ -231,8 +213,12 @@
 			toast.error($i18n.t('Name is required.'));
 			return false;
 		}
-		if (id.trim() === '') {
-			id = uniqueSlug(name);
+		// Until the first save the id follows the name, so a refused id never sticks.
+		if (!edit && !hasBeenSaved) {
+			id = uniqueSlug(
+				name,
+				$models.map((m: any) => m?.id)
+			);
 		}
 		if (knowledge.some((item) => item.status === 'uploading')) {
 			toast.error($i18n.t('Please wait until all files are uploaded.'));
@@ -285,6 +271,8 @@
 			loading = false;
 			return false;
 		}
+		// The create route saves under another id when this one was taken by a model the user cannot see.
+		id = info.id;
 		// Reset the dirty baseline to the values we just persisted, so
 		// the Save button disappears until the user makes a new edit.
 		savedSnapshot = _snapshot();
